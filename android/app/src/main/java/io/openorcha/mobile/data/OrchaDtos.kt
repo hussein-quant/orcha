@@ -41,6 +41,34 @@ object FlexibleResultSerializer : KSerializer<String?> {
     }
 }
 
+/**
+ * A task's plan decision arrives as an object — `{"decision": "approve"|"reject",
+ * "reason": ..., "actor": ..., "at": ...}` — once a plan has been approved or rejected;
+ * it's null before then. Older/edge rows may hold a bare string. Mirror
+ * [FlexibleResultSerializer]: accept all three shapes and yield the verdict string, which
+ * is all the UI's "has a decision been made?" checks need. Modelling this as a bare String
+ * (the app's first cut) made snapshot parsing throw the instant any task had a decision,
+ * which surfaced as a bogus "can't reach your laptop" connection error.
+ */
+object FlexiblePlanDecisionSerializer : KSerializer<String?> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("FlexiblePlanDecision", PrimitiveKind.STRING)
+
+    override fun deserialize(decoder: Decoder): String? {
+        val input = decoder as? JsonDecoder ?: return decoder.decodeString()
+        return when (val el = input.decodeJsonElement()) {
+            is JsonNull -> null
+            is JsonPrimitive -> el.contentOrNull
+            is JsonObject -> (el["decision"] as? JsonPrimitive)?.contentOrNull ?: el.toString()
+            else -> el.toString()
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        if (value == null) encoder.encodeNull() else encoder.encodeString(value)
+    }
+}
+
 @Serializable
 data class ContainersResponse(
     val containers: List<ContainerDto> = emptyList(),
@@ -124,7 +152,9 @@ data class TaskDto(
     @SerialName("completed_at") val completedAt: String? = null,
     @SerialName("message_summary") val messageSummary: MessageSummaryDto? = null,
     @SerialName("plan_message") val planMessage: TaskMessageDto? = null,
-    @SerialName("plan_decision") val planDecision: String? = null,
+    @SerialName("plan_decision")
+    @Serializable(with = FlexiblePlanDecisionSerializer::class)
+    val planDecision: String? = null,
     @SerialName("depends_on") val dependsOn: List<String> = emptyList(),
 )
 
