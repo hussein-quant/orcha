@@ -4354,10 +4354,23 @@ def _collect_directed_messages(cur, aid: str, delivered_ts, max_ts):
     Shared by wake_scan (ephemeral wakes) and active_conversations (ISS-74 resident inbox drain) so
     BOTH paths deliver directed messages identically — a resident drain can never mark a directed
     event delivered without its content reaching the agent. (A `task_assigned` whose task is already
-    completed/cancelled by wake time surfaces nothing but is still acked — see the branch below.)"""
+    completed/cancelled by wake time surfaces nothing but is still acked — see the branch below.)
+
+    GH #126: a `task_assigned` for a DIFFERENT task than the one this agent has a LIVE work-lane run
+    on must not be framed as "begin directly" nor win wake_task_id — otherwise the new task's work
+    gets silently recorded under the live run's task. `live_task_id` is that in-flight task, if any."""
     messages = []
     wake_task_id = None                              # ISS-56: attribute the run to its task
     ack_through_ts = max_ts                          # default: nothing truncated → ack all pending
+    cur.execute(
+        """SELECT wr.task_id FROM worker_runs wr
+           JOIN agent_wake_state ws ON ws.agent_id = wr.agent_id
+           WHERE wr.agent_id=%s AND wr.status='running' AND wr.lane='work'
+             AND ws.wake_lease_until IS NOT NULL AND ws.wake_lease_until > now()
+           ORDER BY wr.started_at DESC LIMIT 1""",
+        (aid,))
+    _live_row = cur.fetchone()
+    live_task_id = _live_row["task_id"] if _live_row else None
     cur.execute(
         """SELECT ts, event_name, payload FROM agent_events
            WHERE event_key = %s AND ts > %s
@@ -4416,6 +4429,17 @@ def _collect_directed_messages(cur, aid: str, delivered_ts, max_ts):
                 m = (f"[new task assigned to you: {title} (task {ev_task_id})] "
                      f"— it's '{tstatus}'; READ its thread (/api/tasks/{ev_task_id}/messages); "
                      f"it may be waiting on dependencies before it's ready")
+            # GH #126: this agent already has a LIVE work-lane run on a DIFFERENT task — do not let
+            # this assignment win wake_task_id (that would silently attribute Task B's work to Task
+            # A's run) nor frame it as startable now. It must NOT be surfaced-and-acked here (an
+            # acked event is gone for good) — instead defer the ack cursor to just BEFORE this event,
+            # the same mechanism the batch-overflow branch below uses, so it (and anything after it,
+            # to preserve delivery order) stays pending and is re-evaluated on every subsequent
+            # wake/drain until the live run ends, at which point it flows through normally.
+            if (m is not None and live_task_id is not None
+                    and str(live_task_id) != str(ev_task_id)):
+                ack_through_ts = included_ts
+                break
         else:
             ev_task_id = None
             m = pl.get("message")

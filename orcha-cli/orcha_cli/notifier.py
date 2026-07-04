@@ -1175,6 +1175,12 @@ def spawn_headless(cwd: str, prompt: str, flags: Optional[str], dry_run: bool,
     # sidecar must NOT set it.
     if conversation:
         env["ORCHA_CONVERSATION_WORKER"] = "1"
+    else:
+        # env is a copy of the daemon's OWN environment, which is not assumed clean: if the
+        # daemon itself was ever started from a shell/worktree with this set (e.g. inherited
+        # from a resident agent session), it would otherwise silently ride along into every
+        # work-lane worker and wrongly trip the conv-guard hook on that worker's Edit/Write.
+        env.pop("ORCHA_CONVERSATION_WORKER", None)
     env["ORCHA_AGENT_RUNTIME"] = runtime
     # ISS-21: mark this as a headless wake worker so the interactive SessionStart hooks
     # (watch/rehydrate/notifier --ensure/reachability) short-circuit to a no-op. Without
@@ -1303,6 +1309,11 @@ def spawn_resident(cwd: str, *, system_prompt: Optional[str] = None,
     # backstop that blocks inline task work while allowing dispatch.
     if conversation:
         env["ORCHA_CONVERSATION_WORKER"] = "1"
+    else:
+        # env is a copy of the daemon's OWN environment, which is not assumed clean (see
+        # spawn_headless) — clear any inherited flag so a work-lane resident is never
+        # mislabeled as a conversation embodiment.
+        env.pop("ORCHA_CONVERSATION_WORKER", None)
     env["ORCHA_HEADLESS_WORKER"] = "1"      # ISS-21: short-circuit interactive SessionStart hooks
     out = subprocess.DEVNULL
     if log_path is not None:
@@ -2447,6 +2458,26 @@ def _checkpoint_and_respawn(api_base: str, aid: str, w: dict, live_workers: dict
     diff = _capture_diff(worktree)
     _finish_run(api_base, w.get("run_id"), "exited", 0, w.get("log_path"), diff)
 
+    # GH #126: don't trust the in-memory ctx["task_id"] snapshot captured at original spawn -- if
+    # the server's record for this agent's just-finished run has since diverged (e.g. the agent was
+    # reassigned to a different task mid-run), blindly carrying ctx.task_id forward would respawn
+    # the worker still claiming the OLD task while the server's truth says otherwise. Re-fetch the
+    # just-finished run's task_id from the server and use that; fail open to ctx.get("task_id")
+    # only if the fetch itself fails OR the finished run isn't found, never on a mismatch.
+    #
+    # `/runs` is newest-run-first across BOTH lanes (work + conversation) -- NOT "the run that just
+    # finished". A conversation-lane run started after this checkpoint's work run (e.g. the human
+    # chatted with the agent mid-task) would sort first and could carry a different (often null)
+    # task_id, so we must match this checkpoint's own run_id explicitly rather than take runs[0].
+    finished_run_id = w.get("run_id")
+    _server_runs = _get_json(f"{api_base}/api/agents/{aid}/runs?limit=20")
+    respawn_task_id = ctx.get("task_id")
+    if _server_runs and _server_runs.get("runs"):
+        for _run in _server_runs["runs"]:
+            if _run.get("run_id") == finished_run_id:
+                respawn_task_id = _run.get("task_id")
+                break
+
     # GH #91/#90: the OLD process is dead — revoke its work token, then mint a FRESH work token for
     # the respawned process. Exactly one live token per live process. Revoke-old first (idempotent):
     old_tok = w.get("run_token")
@@ -2488,7 +2519,7 @@ def _checkpoint_and_respawn(api_base: str, aid: str, w: dict, live_workers: dict
     # token_id so the server binds embodiment_tokens.run_id to this run (durable EOL backstop).
     run = _post_json(f"{api_base}/api/agents/{aid}/runs",
                      {"wake_kind": "ephemeral", "wake_event": "checkpoint_respawn",
-                      "task_id": ctx.get("task_id"),
+                      "task_id": respawn_task_id,
                       "log_path": str(log_path) if log_path else None,
                       "pid": newproc.pid, "runtime": ctx.get("model_runtime"),
                       "worktree": worktree, "branch": branch, "base_cwd": base_cwd,

@@ -57,6 +57,7 @@ import io.openorcha.mobile.data.RunDto
 import io.openorcha.mobile.data.TaskDto
 import io.openorcha.mobile.data.TurnDto
 import io.openorcha.mobile.domain.MobileUx
+import io.openorcha.mobile.domain.OrchaSelectors
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.components.Avatar
 import io.openorcha.mobile.ui.components.AvatarSize
@@ -182,23 +183,44 @@ fun AgentDetailScreen(
             if (agent.kind == "ai" && !dead) {
                 item { PrimaryButton("Converse", { onConversation(agent.id) }, Modifier.fillMaxWidth()) }
             }
-            // Now (flow 09 §4): current task + live run, or the idle line
-            val liveRun = state.agentRuns.firstOrNull { it.status == "running" }
-            if (agent.currentTask?.taskId != null || liveRun != null) {
+            // Now (flow 09 §4): live run's task wins over a stale current_task claim (GH #125/#126)
+            val activeRun = agent.activeRun
+            val nowTask = OrchaSelectors.nowTaskRef(agent)
+            val nowTaskId = nowTask?.taskId
+            val nowTaskTitle = nowTask?.title
+            if (nowTaskId != null || activeRun != null) {
                 item { SectionH("Now") }
-                agent.currentTask?.taskId?.let { tid ->
+                nowTaskId?.let { tid ->
                     item {
                         OrchaCard(onClick = { onOpenTask(tid) }) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("▸", color = p.accent, fontWeight = FontWeight.W800)
-                                Text(agent.currentTask.title ?: tid, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(nowTaskTitle ?: tid, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
                 }
-                liveRun?.let { run ->
+                activeRun?.let { run ->
                     item {
-                        OrchaCard(onClick = { onOpenRun(run) }, borderColor = p.accentLine) {
+                        OrchaCard(
+                            onClick = {
+                                onOpenRun(
+                                    RunDto(
+                                        runId = run.runId,
+                                        agentId = agent.id,
+                                        agentAlias = agent.alias,
+                                        taskId = run.taskId,
+                                        taskTitle = run.taskTitle,
+                                        status = "running",
+                                        wakeKind = run.wakeKind,
+                                        wakeEvent = run.wakeEvent,
+                                        runtime = run.runtime,
+                                        startedAt = run.startedAt,
+                                    ),
+                                )
+                            },
+                            borderColor = p.accentLine,
+                        ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(run.runId.take(6), style = MonoStyle)
                                 StatusPill("running", StatusDomain.Run)
