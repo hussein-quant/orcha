@@ -241,6 +241,38 @@ svg.gl  { width: 13px; height: 13px; flex: none; }
   font-size: 12.5px; font-weight: 650; color: var(--text); }
 .attn-card a.go:hover { color: var(--accent); }
 
+/* ---- collapsible sidebar (icon rail) ---- */
+.brand-row { display: flex; align-items: flex-start; }
+.brand-row .brand { flex: 1; min-width: 0; }
+.sb-toggle { width: 26px; height: 26px; margin: 8px 0 0; flex: none; display: grid; place-items: center;
+  background: transparent; border: 1px solid transparent; border-radius: 7px; color: var(--faint);
+  cursor: pointer; padding: 0; }
+.sb-toggle:hover { background: var(--hover); color: var(--text); border-color: var(--border); }
+.sb-toggle .ico { width: 15px; height: 15px; transform: rotate(90deg); transition: transform .15s ease; }
+.attn-mini { display: none; }
+
+/* collapsed: a 64px icon rail — labels, counts, and the attn card give way to
+   icons + tooltips; the attn card shrinks to a bell+count chip that still
+   deep-links to the action queue. State lives on <html data-sidebar>. */
+html[data-sidebar="collapsed"] .app { grid-template-columns: 64px minmax(0, 1fr); }
+html[data-sidebar="collapsed"] .sidebar { padding: 18px 9px 16px; }
+html[data-sidebar="collapsed"] .brand-row { flex-direction: column; align-items: center; gap: 4px; }
+html[data-sidebar="collapsed"] .brand { padding: 4px 0 2px; }
+html[data-sidebar="collapsed"] .brand .word,
+html[data-sidebar="collapsed"] .nav .lbl,
+html[data-sidebar="collapsed"] .nav a .grow,
+html[data-sidebar="collapsed"] .nav .ncount,
+html[data-sidebar="collapsed"] .attn-card { display: none; }
+html[data-sidebar="collapsed"] .sb-toggle { margin: 0; }
+html[data-sidebar="collapsed"] .sb-toggle .ico { transform: rotate(-90deg); }
+html[data-sidebar="collapsed"] .nav { margin-top: 10px; }
+html[data-sidebar="collapsed"] .nav a { justify-content: center; padding: 9px 0; }
+html[data-sidebar="collapsed"] .attn-mini { display: flex; flex-direction: column; align-items: center;
+  gap: 3px; margin: 6px 0 8px; padding: 9px 6px; border-radius: 11px; color: var(--warn);
+  background: linear-gradient(180deg, var(--warn-soft), transparent); border: 1px solid var(--warn-line); }
+.attn-mini svg { width: 16px; height: 16px; }
+.attn-mini .n { font-size: 13px; font-weight: 760; color: var(--text); }
+
 /* ---- main column ---- */
 .main { display: flex; flex-direction: column; min-width: 0; }
 .topbar {
