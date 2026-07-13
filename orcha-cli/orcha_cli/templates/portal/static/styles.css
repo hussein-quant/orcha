@@ -270,6 +270,10 @@ html[data-sidebar="collapsed"] .nav a { justify-content: center; padding: 9px 0;
 html[data-sidebar="collapsed"] .attn-mini { display: flex; flex-direction: column; align-items: center;
   gap: 3px; margin: 6px 0 8px; padding: 9px 6px; border-radius: 11px; color: var(--warn);
   background: linear-gradient(180deg, var(--warn-soft), transparent); border: 1px solid var(--warn-line); }
+/* collapsing is an explicit ask for real estate — lift the content width cap
+   so the page actually uses the reclaimed space (inner wrappers like
+   .set-wrap / .ob keep their own caps where narrow columns are the point). */
+html[data-sidebar="collapsed"] .content { max-width: none; }
 .attn-mini svg { width: 16px; height: 16px; }
 .attn-mini .n { font-size: 13px; font-weight: 760; color: var(--text); }
 
