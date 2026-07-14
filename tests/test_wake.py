@@ -206,6 +206,44 @@ async def test_prompt_event_wakes_agent_and_carries_message(client, container, m
     assert evt["event"] == "prompt" and evt["message"] == "re-check the failing test"
 
 
+# ---------- GH #138: conversation_turn as a safety-net directed message ----------
+
+@pytest.mark.asyncio
+async def test_conversation_turn_surfaces_alongside_a_work_wake(client, container, make_agent, db):
+    """GH #138 safety net: a lingering unanswered chat message must not go unseen forever if the
+    resident's own retry never fires — when this agent wakes on the WORK lane for an unrelated
+    reason (here, a `prompt`), the chat content rides along in prompt_messages too."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    _emit_event(db, container_id=container["id"], agent_id=aid, event_name="conversation_turn",
+                ts=1000.0, payload={"conversation_id": "c1", "content": "are you still there?"})
+    r = await client.post(f"/api/agents/{aid}/prompt", json={"message": "re-check the failing test"})
+    assert r.status_code == 201, r.text
+
+    _, cand = await _scan(client, container["id"], aid)
+    assert cand["should_wake"] is True
+    assert "re-check the failing test" in cand["prompt_messages"]
+    chat = next((m for m in cand["prompt_messages"] if "are you still there?" in m), None)
+    assert chat is not None, f"conversation_turn content missing from {cand['prompt_messages']}"
+    assert "still waiting on a reply" in chat
+
+
+@pytest.mark.asyncio
+async def test_conversation_turn_alone_does_not_wake_work_lane(client, container, make_agent, db):
+    """GH #91/#90 (unchanged by #138): a bare, unanswered chat message is the CONVERSATION lane's
+    own surface — it must NOT by itself wake a WORK embodiment. The safety net only rides along
+    when the agent wakes for some OTHER reason; it never becomes a spurious wake source itself."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    _emit_event(db, container_id=container["id"], agent_id=aid, event_name="conversation_turn",
+                ts=1000.0, payload={"conversation_id": "c1", "content": "hello?"})
+
+    _, cand = await _scan(client, container["id"], aid)
+    assert cand["should_wake"] is False
+    assert cand["pending_events"] == 0
+    assert cand["prompt_messages"] == []
+
+
 @pytest.mark.asyncio
 async def test_prompt_records_sender_and_validates(client, container, make_agent):
     a = await make_agent("A")
@@ -770,6 +808,29 @@ def test_build_wake_prompt_handles_multiple_directed_messages():
     assert '(prompt 1) "first ask"' in p and '(prompt 2) "second ask"' in p
 
 
+def test_build_wake_prompt_stable_instructions_form_consistent_prefix():
+    """GH #34: the fixed operating instructions (steps 1-3) are the same text every wake for a
+    given agent/branch — only the trailing '[orcha wake] ...' summary (count/manifest/directed
+    message) is unique per wake. The instructions must render FIRST so two consecutive wakes
+    share a real string prefix, instead of the always-different manifest breaking it at byte 0."""
+    p1 = notifier.build_wake_prompt(
+        {"alias": "Forge", "pending_events": 1,
+         "notifications": [{"rank": 1, "rank_label": "request_in", "surface": "request:R-1",
+                             "actor_alias": "Kedar", "preview": "first wake's ask"}]})
+    p2 = notifier.build_wake_prompt(
+        {"alias": "Forge", "pending_events": 3,
+         "notifications": [{"rank": 1, "rank_label": "task", "surface": "task:T-9",
+                             "actor_alias": "Helm", "preview": "second wake's completely different ask"}]})
+    assert p1 != p2   # the manifests really do differ...
+    assert p1.startswith("You are a ONE-SHOT headless worker")
+    assert p2.startswith("You are a ONE-SHOT headless worker")
+    volatile_marker = "[orcha wake] Forge:"
+    stable_end = p1.index(volatile_marker)
+    assert p2.index(volatile_marker) == stable_end       # ...at the identical offset
+    assert p1[:stable_end] == p2[:stable_end]             # ...and everything before it matches
+    assert "ONE-SHOT" in p1[:stable_end] and "needs_verification" in p1[:stable_end]
+
+
 def test_sidecar_drain_prompt_surfaces_directed_messages():
     """#247 B3 Gate P1b: `prompt`/`task_message`/`task_assigned` events have NO inbox surface — the
     drain sidecar must be FED their content (else acking the cursor silently drops them). The lean
@@ -897,6 +958,46 @@ def test_format_persona_omits_audience_section_when_absent():
         {"digest": {"current_focus": "wake epic"}})
     assert "Who you're talking to" not in out
     assert "Current focus: wake epic" in out
+
+
+# ---------- GH #34 (scoped): stable-prefix ordering ----------
+
+def test_format_persona_stable_sections_form_consistent_prefix():
+    """GH #34: persona/guardrail/task-body/protocol never change between two wakes of the same
+    agent on the same task — only the digest does. So the text UP THROUGH the protocol section
+    must come out byte-identical regardless of what the digest says, i.e. it is a real shared
+    string prefix of both renders (a provider-side cache hits on a stable prefix, not the whole
+    string)."""
+    persona = {"system_prompt": "You are Tim."}
+    protocol = {"task_id": "t-1", "title": "Ship the thing", "description": "Do the work",
+                "definition_of_done": "Tests green",
+                "protocol": {"notes": "Report back when done"}}
+    out1 = notifier.format_persona(persona, {"digest": {"current_focus": "wake N"}}, protocol)
+    out2 = notifier.format_persona(persona, {"digest": {"current_focus": "wake N+1",
+                                                          "decisions": ["a brand-new decision"]}},
+                                   protocol)
+    assert out1 != out2   # the digests really do differ...
+    stable_end = out1.index("## Where you left off")
+    assert out2.index("## Where you left off") == stable_end   # ...at the identical offset
+    assert out1[:stable_end] == out2[:stable_end]               # ...and everything before it matches
+    # sanity: the shared prefix actually carries the stable sections, not just whitespace
+    assert "You are Tim." in out1[:stable_end]
+    assert "## Your task" in out1[:stable_end]
+    assert "## Standing protocol" in out1[:stable_end]
+
+
+def test_format_persona_resume_context_renders_after_protocol_grouped_with_digest():
+    """GH #34: the self-wake resume context (GH #122) is at least as volatile as the digest — a
+    fresh wait-point most times it fires — so it must render AFTER the protocol section, grouped
+    with the digest at the volatile tail, not spliced between the task body and the protocol."""
+    persona = {"system_prompt": "You are Tim."}
+    protocol = {"task_id": "t-1", "title": "Ship the thing", "description": "Do the work",
+                "protocol": {"notes": "Report back"}, "resume_context": "waiting on CI"}
+    out = notifier.format_persona(persona, {"digest": {"current_focus": "wake epic"}},
+                                  protocol, render_resume=True)
+    assert out.index("## Your task") < out.index("## Standing protocol")
+    assert out.index("## Standing protocol") < out.index("Resuming — you scheduled this wake")
+    assert out.index("Resuming — you scheduled this wake") < out.index("## Where you left off")
 
 
 def test_spawn_headless_injects_persona_and_alias(monkeypatch, tmp_path):
