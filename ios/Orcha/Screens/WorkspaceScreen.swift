@@ -36,8 +36,19 @@ struct WorkspaceScreen: View {
     }
 
     var body: some View {
+        if #available(iOS 26, *) {
+            // The Liquid Glass tab bar minimizes on scroll-down — the phone
+            // equivalent of the portal's collapsible sidebar (more content,
+            // chrome returns on scroll-up).
+            tabs.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            tabs
+        }
+    }
+
+    private var tabs: some View {
         @Bindable var model = model
-        TabView(selection: $model.selectedTab) {
+        return TabView(selection: $model.selectedTab) {
             workspaceTab { HomeTabView(showCreateTask: $showCreateTask) }
                 .tabItem { Label("Home", systemImage: "house.fill") }
                 .badge(needsYouCount)
@@ -73,15 +84,25 @@ struct WorkspaceScreen: View {
         @ViewBuilder content: @escaping () -> some View
     ) -> some View {
         NavigationStack {
-            OrchaThemed(mode: model.themeMode) {
+            OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 content()
             }
             .navigationTitle(model.selectedContainer?.displayName ?? "Orcha")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
+                    // Icon-only: the title label ("My Orchas") crowded the inline
+                    // title into truncating ("Ship Quantal…"). VoiceOver keeps the name.
                     Button("My Orchas", systemImage: "chevron.backward") { model.closeWorkspace() }
-                        .labelStyle(.titleAndIcon)
+                        .labelStyle(.iconOnly)
+                }
+                ToolbarItem(placement: .principal) {
+                    // Scale long workspace names down before truncating.
+                    Text(model.selectedContainer?.displayName ?? "Orcha")
+                        .font(.system(size: 16, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .accessibilityAddTraits(.isHeader)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     ConnChip(state: model.snapshot == nil ? (model.loading ? "probing" : "unreachable") : connState)
@@ -112,7 +133,7 @@ struct WorkspaceScreen: View {
                 }
             }
             .navigationDestination(for: WorkspaceRoute.self) { route in
-                OrchaThemed(mode: model.themeMode) {
+                OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                     switch route {
                     case let .task(id): TaskDetailScreen(taskId: id)
                     case let .thread(id): TaskThreadScreen(taskId: id)
@@ -149,11 +170,9 @@ struct ConnectionBanners: View {
                 Banner(kind: .warn, text: "Notifier paused — agents won't wake.", action: "Resume") {
                     model.showContainerControls = true
                 }
-            } else {
-                Banner(kind: .warn, text: "Live updates unavailable — checking every 30s", action: "Refresh now") {
-                    Task { await model.refresh() }
-                }
             }
+            // Healthy polling is the normal state — the toolbar ConnChip already
+            // says "polling", so no standing warn banner nagging every screen.
         }
     }
 }

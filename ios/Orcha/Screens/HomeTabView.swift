@@ -70,13 +70,16 @@ struct HomeTabView: View {
                             .foregroundStyle(p.muted)
                     }
                 }
+                // Kicker colors mirror the portal's gate spines (plan/verify = amber
+                // family, escalation = red) instead of the old arbitrary violet/green
+                // that clashed with the status pill on the same row.
                 ForEach(plans) { task in
-                    QueueCard(kicker: "PLAN APPROVAL", kickerColor: p.violet, task: task) {
+                    QueueCard(kicker: "PLAN APPROVAL", kickerColor: p.warn, task: task) {
                         planSheetTask = task
                     }
                 }
                 ForEach(verifs) { task in
-                    QueueCard(kicker: "VERIFY TASK", kickerColor: p.ok, task: task) {
+                    QueueCard(kicker: "VERIFY TASK", kickerColor: p.warn, task: task) {
                         verifySheetTask = task
                     }
                 }
@@ -205,7 +208,7 @@ private struct RequestQueueCard: View {
                 Text("REQUEST FOR YOU")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(0.8)
-                    .foregroundStyle(p.info)
+                    .foregroundStyle(p.danger)
                 Spacer()
                 StatusPill(status: request.status, domain: .request)
             }

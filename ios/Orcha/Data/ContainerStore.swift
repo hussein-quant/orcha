@@ -24,6 +24,7 @@ struct ContainerStore {
     private let defaults = UserDefaults.standard
     private static let key = "orcha_containers"
     private static let themeKey = "orcha_theme_mode"
+    private static let skinKey = "orcha_skin_mode"
 
     func load() -> [StoredContainer] {
         guard let data = defaults.data(forKey: Self.key) else { return [] }
@@ -65,5 +66,13 @@ struct ContainerStore {
 
     func saveThemeMode(_ mode: ThemeMode) {
         defaults.set(mode.rawValue, forKey: Self.themeKey)
+    }
+
+    func loadSkinMode() -> SkinMode {
+        SkinMode(rawValue: defaults.string(forKey: Self.skinKey) ?? "classic") ?? .classic
+    }
+
+    func saveSkinMode(_ skin: SkinMode) {
+        defaults.set(skin.rawValue, forKey: Self.skinKey)
     }
 }

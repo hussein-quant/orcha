@@ -37,7 +37,7 @@ struct CreateTaskSheet: View {
 
     var body: some View {
         NavigationStack {
-            OrchaThemed(mode: model.themeMode) {
+            OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         titleField

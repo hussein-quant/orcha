@@ -16,8 +16,8 @@ struct OrchaCard<Content: View>: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background(container ?? p.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(borderColor ?? p.border, lineWidth: 1))
+        .background(container ?? p.surface, in: RoundedRectangle(cornerRadius: p.radiusCard))
+        .overlay(RoundedRectangle(cornerRadius: p.radiusCard).strokeBorder(borderColor ?? p.border, lineWidth: 1))
     }
 }
 
@@ -59,7 +59,7 @@ struct MetaTag: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .overlay(
-                RoundedRectangle(cornerRadius: 5)
+                RoundedRectangle(cornerRadius: p.radiusTag)
                     .strokeBorder((tint ?? p.border2).opacity(tint == nil ? 1 : 0.4), lineWidth: 1)
             )
             .lineLimit(1)
@@ -91,29 +91,47 @@ struct KitButton: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                if let systemImage {
-                    Image(systemName: systemImage)
-                        .font(.system(size: small ? 13 : 15, weight: .semibold))
+        let label = HStack(spacing: 8) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.system(size: small ? 13 : 15, weight: .semibold))
+            }
+            Text(title)
+                .font(.system(size: small ? 13 : 15, weight: .bold))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, small ? 8 : 12)
+        .padding(.horizontal, small ? 14 : 18)
+
+        Button(action: action) { label }
+            .buttonStyle(.plain)
+            .foregroundStyle(colors.fg)
+            .modifier(KitButtonSurface(role: role, colors: colors, radius: p.radiusButton))
+            .opacity(enabled ? 1 : 0.45)
+            .disabled(!enabled)
+    }
+}
+
+/// The button surface: primary actions get interactive Liquid Glass on iOS 26
+/// (tinted with the palette accent so both skins keep their identity); tonal /
+/// neutral roles and earlier OSes keep the flat token fill with the line border.
+private struct KitButtonSurface: ViewModifier {
+    let role: KitButtonRole
+    let colors: (fill: Color, fg: Color, line: Color?)
+    let radius: CGFloat
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *), role == .primary {
+            content.glassEffect(.regular.tint(colors.fill).interactive(), in: .rect(cornerRadius: radius))
+        } else {
+            content
+                .background(colors.fill, in: RoundedRectangle(cornerRadius: radius))
+                .overlay {
+                    if let line = colors.line {
+                        RoundedRectangle(cornerRadius: radius).strokeBorder(line, lineWidth: 1)
+                    }
                 }
-                Text(title)
-                    .font(.system(size: small ? 13 : 15, weight: .bold))
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, small ? 8 : 12)
-            .padding(.horizontal, small ? 14 : 18)
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(colors.fg)
-        .background(colors.fill, in: RoundedRectangle(cornerRadius: 12))
-        .overlay {
-            if let line = colors.line {
-                RoundedRectangle(cornerRadius: 12).strokeBorder(line, lineWidth: 1)
-            }
-        }
-        .opacity(enabled ? 1 : 0.45)
-        .disabled(!enabled)
     }
 }
 

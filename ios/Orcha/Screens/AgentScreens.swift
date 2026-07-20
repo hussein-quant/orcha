@@ -427,7 +427,7 @@ struct ModelPickerSheet: View {
 
     var body: some View {
         NavigationStack {
-            OrchaThemed(mode: model.themeMode) {
+            OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("MODEL").font(.system(size: 11, weight: .bold)).tracking(0.8).foregroundStyle(p.accent)
@@ -485,7 +485,7 @@ struct AutoWakeSheet: View {
 
     var body: some View {
         NavigationStack {
-            OrchaThemed(mode: model.themeMode) {
+            OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("AUTO-WAKE").font(.system(size: 11, weight: .bold)).tracking(0.8).foregroundStyle(p.accent)

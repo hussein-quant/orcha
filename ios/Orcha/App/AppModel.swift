@@ -43,6 +43,7 @@ final class AppModel {
     var selectedContainer: StoredContainer?
     var selectedTab: WorkspaceTab = .home
     var themeMode: ThemeMode
+    var skinMode: SkinMode
 
     // workspace data
     var snapshot: ContainerSnapshot?
@@ -77,6 +78,7 @@ final class AppModel {
     init() {
         containers = store.load()
         themeMode = store.loadThemeMode()
+        skinMode = store.loadSkinMode()
         // Dev/UI-test seam: `-orchaOpenContainer <id>` opens straight into a paired
         // workspace on launch (also the shape a future deep link would take).
         if let idx = ProcessInfo.processInfo.arguments.firstIndex(of: "-orchaOpenContainer"),
@@ -100,6 +102,11 @@ final class AppModel {
     func setThemeMode(_ mode: ThemeMode) {
         themeMode = mode
         store.saveThemeMode(mode)
+    }
+
+    func setSkinMode(_ skin: SkinMode) {
+        skinMode = skin
+        store.saveSkinMode(skin)
     }
 
     func renameContainer(_ id: String, to name: String) {

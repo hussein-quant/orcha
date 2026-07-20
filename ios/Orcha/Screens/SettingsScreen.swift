@@ -9,7 +9,7 @@ struct SettingsScreen: View {
 
     var body: some View {
         NavigationStack {
-            OrchaThemed(mode: model.themeMode) {
+            OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         appearanceSection
@@ -45,6 +45,19 @@ struct SettingsScreen: View {
                     .font(.system(size: 13))
                     .foregroundStyle(p.muted)
             }
+            SectionH(title: "Design")
+            OrchaCard {
+                Picker("Design", selection: skinBinding) {
+                    ForEach(SkinMode.allCases, id: \.self) { skin in
+                        Text(skin.label).tag(skin)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text(model.skinMode.blurb)
+                    .font(.system(size: 13))
+                    .foregroundStyle(p.muted)
+                    .contentTransition(.opacity)
+            }
         }
     }
 
@@ -52,6 +65,13 @@ struct SettingsScreen: View {
         Binding(
             get: { model.themeMode },
             set: { model.setThemeMode($0) }
+        )
+    }
+
+    private var skinBinding: Binding<SkinMode> {
+        Binding(
+            get: { model.skinMode },
+            set: { model.setSkinMode($0) }
         )
     }
 
