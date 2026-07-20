@@ -98,8 +98,75 @@ struct SettingsScreen: View {
                             .font(p.uiFont(13, .semibold))
                             .foregroundStyle(p.danger)
                     }
+                    HStack(spacing: 8) {
+                        Image(systemName: "network")
+                            .font(.system(size: 12))
+                            .foregroundStyle(container.remoteBaseUrl == nil ? p.faint : p.accent)
+                        if let remote = container.remoteBaseUrl, !remote.isEmpty {
+                            Text(remote)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundStyle(p.text2)
+                                .lineLimit(1)
+                        } else {
+                            Text("Local only")
+                                .font(p.uiFont(12))
+                                .foregroundStyle(p.faint)
+                        }
+                        Spacer()
+                        Button(container.remoteBaseUrl == nil ? "Add remote…" : "Edit remote…") {
+                            remoteDraft = container.remoteBaseUrl ?? ""
+                            remoteError = nil
+                            remoteEditing = container
+                        }
+                        .font(p.uiFont(12, .semibold))
+                        .foregroundStyle(p.accent)
+                    }
                 }
             }
+            Text("Remote access is optional: install Tailscale (free for personal use) on this iPhone and on the computer, then add the computer's Tailscale address here. The app uses it automatically whenever the local address doesn't answer — leave it empty to stay local-only.")
+                .font(p.uiFont(12))
+                .foregroundStyle(p.faint)
+                .padding(.horizontal, 2)
+        }
+        .alert("Remote address (Tailscale)", isPresented: remoteAlertShown) {
+            TextField("e.g. my-mac.tailnet.ts.net:8001", text: $remoteDraft)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Save") { saveRemote() }
+            Button("Remove", role: .destructive) {
+                if let c = remoteEditing { model.setRemoteUrl(c.id, to: nil) }
+                remoteEditing = nil
+            }
+            Button("Cancel", role: .cancel) { remoteEditing = nil }
+        } message: {
+            Text("The computer's Tailscale name or IP, with the portal port. Tried automatically when the local address is unreachable.")
+        }
+    }
+
+    @State private var remoteEditing: StoredContainer?
+    @State private var remoteDraft = ""
+    @State private var remoteError: String?
+
+    private var remoteAlertShown: Binding<Bool> {
+        Binding(
+            get: { remoteEditing != nil },
+            set: { if !$0 { remoteEditing = nil } }
+        )
+    }
+
+    private func saveRemote() {
+        guard let container = remoteEditing else { return }
+        defer { remoteEditing = nil }
+        let draft = remoteDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else {
+            model.setRemoteUrl(container.id, to: nil)
+            return
+        }
+        if let normalized = try? OrchaServerAddress.parse(draft).baseUrl {
+            model.setRemoteUrl(container.id, to: normalized)
+            model.toast = "Remote address saved"
+        } else {
+            model.error = "That doesn't look like an address — try host:port, e.g. my-mac.tailnet.ts.net:8001."
         }
     }
 

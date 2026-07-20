@@ -222,7 +222,30 @@ final class AppModel {
             }
             error = nil
         } catch {
+            // Opt-in remote failover (Tailscale): if the active address didn't
+            // answer and a second one is configured, try it and swap on success —
+            // the working path stays active for every subsequent call. Symmetric,
+            // so it also swaps back to LAN when the remote path is the dead one.
+            if let remote = sel.remoteBaseUrl, !remote.isEmpty,
+               let snap = try? await api.snapshot(remote, sel.id) {
+                var swapped = sel
+                swapped.baseUrl = remote
+                swapped.remoteBaseUrl = sel.baseUrl
+                containers = store.upsert(swapped)
+                selectedContainer = swapped
+                snapshot = snap
+                self.error = nil
+                toast = "Connected via \(remote)"
+                return
+            }
             self.error = friendly(error)
+        }
+    }
+
+    func setRemoteUrl(_ id: String, to url: String?) {
+        containers = store.setRemoteUrl(id, to: url)
+        if let sel = selectedContainer, sel.id == id {
+            selectedContainer = containers.first { $0.id == id }
         }
     }
 

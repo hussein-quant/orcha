@@ -11,10 +11,14 @@ struct StoredContainer: Codable, Identifiable, Equatable {
     /// Short-lived QR pairing token (A2 device-token exchange is a backend follow-up;
     /// held now so the exchange has it once that ships). Absent for manual entry.
     var pairingToken: String?
+    /// Opt-in second address (typically the computer's Tailscale name/IP) tried
+    /// when `baseUrl` doesn't answer; on success the two swap so the working
+    /// path stays active. Nil = local-only, the default.
+    var remoteBaseUrl: String?
     var lastOpenedAt: Date = .now
 
     enum CodingKeys: String, CodingKey {
-        case id, displayName, baseUrl, humanAgentId, humanAlias, pairingToken, lastOpenedAt
+        case id, displayName, baseUrl, humanAgentId, humanAlias, pairingToken, remoteBaseUrl, lastOpenedAt
     }
 }
 
@@ -47,6 +51,15 @@ struct ContainerStore {
 
     func remove(_ id: String) -> [StoredContainer] {
         let next = load().filter { $0.id != id }
+        save(next)
+        return next
+    }
+
+    func setRemoteUrl(_ id: String, to url: String?) -> [StoredContainer] {
+        var next = load()
+        if let i = next.firstIndex(where: { $0.id == id }) {
+            next[i].remoteBaseUrl = url
+        }
         save(next)
         return next
     }

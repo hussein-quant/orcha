@@ -28,10 +28,13 @@ targets:
         UIAppFonts:
           - SpaceGrotesk.ttf
         NSCameraUsageDescription: "Orcha uses the camera only to scan the pairing QR from your portal."
-        # A2 (doc 13): LAN base URLs are runtime IPs — the clean ATS carve-out is
-        # local networking, not arbitrary loads.
+        # A2 (doc 13): LAN base URLs are runtime IPs — local networking covers the
+        # default. Arbitrary loads is needed for the OPT-IN remote path (Tailscale
+        # 100.64/10 CGNAT addresses and *.ts.net names are not "local" to ATS);
+        # the app only ever talks to addresses the user typed or scanned.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: "Orcha connects to the Orcha server running on your computer over your local network."
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
