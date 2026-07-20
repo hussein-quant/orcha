@@ -28,12 +28,14 @@ targets:
         UIAppFonts:
           - SpaceGrotesk.ttf
         NSCameraUsageDescription: "Orcha uses the camera only to scan the pairing QR from your portal."
-        # A2 (doc 13): LAN base URLs are runtime IPs — local networking covers the
-        # default. Arbitrary loads is needed for the OPT-IN remote path (Tailscale
-        # 100.64/10 CGNAT addresses and *.ts.net names are not "local" to ATS);
-        # the app only ever talks to addresses the user typed or scanned.
+        # Arbitrary loads ONLY — do not re-add NSAllowsLocalNetworking beside it:
+        # when both keys are present iOS treats ArbitraryLoads as a legacy fallback
+        # and enforces just the granular key, which silently re-blocks the opt-in
+        # remote path (Tailscale 100.64/10 + *.ts.net are not "local" to ATS).
+        # Verified live: Safari reached the portal over the tailnet while the app's
+        # URLSession got blocked with both keys set. The app only ever talks to
+        # addresses the user typed or scanned.
         NSAppTransportSecurity:
-          NSAllowsLocalNetworking: true
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: "Orcha connects to the Orcha server running on your computer over your local network."
         UISupportedInterfaceOrientations:
