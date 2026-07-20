@@ -47,6 +47,56 @@ struct WorkspaceScreen: View {
     }
 
     private var tabs: some View {
+        Group {
+            if #available(iOS 26, *) {
+                modernTabs
+            } else {
+                legacyTabs
+            }
+        }
+        .sheet(isPresented: $showCreateTask) {
+            CreateTaskSheet()
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsScreen()
+        }
+        .sheet(isPresented: Bindable(model).showContainerControls) {
+            ContainerControlsSheet()
+        }
+        .task { await model.refresh() }
+    }
+
+    /// iOS 26 Tab builder: the search tab takes the system search role, which
+    /// renders as the separated bottom-right glass circle (the Music pattern).
+    @available(iOS 26, *)
+    private var modernTabs: some View {
+        @Bindable var model = model
+        return TabView(selection: $model.selectedTab) {
+            Tab("Home", systemImage: "house.fill", value: WorkspaceTab.home) {
+                workspaceTab { HomeTabView(showCreateTask: $showCreateTask) }
+            }
+            .badge(needsYouCount)
+
+            Tab("Tasks", systemImage: "checklist", value: WorkspaceTab.tasks) {
+                workspaceTab { TasksTabView(showCreateTask: $showCreateTask) }
+            }
+
+            Tab("Requests", systemImage: "tray.full.fill", value: WorkspaceTab.requests) {
+                workspaceTab { RequestsTabView(groups: requestGroups) }
+            }
+            .badge(requestGroups.badgeCount)
+
+            Tab("Agents", systemImage: "sparkles", value: WorkspaceTab.agents) {
+                workspaceTab { AgentsTabView() }
+            }
+
+            Tab(value: WorkspaceTab.search, role: .search) {
+                workspaceTab { SearchTabView() }
+            }
+        }
+    }
+
+    private var legacyTabs: some View {
         @Bindable var model = model
         return TabView(selection: $model.selectedTab) {
             workspaceTab { HomeTabView(showCreateTask: $showCreateTask) }
@@ -66,17 +116,11 @@ struct WorkspaceScreen: View {
             workspaceTab { AgentsTabView() }
                 .tabItem { Label("Agents", systemImage: "sparkles") }
                 .tag(WorkspaceTab.agents)
+
+            workspaceTab { SearchTabView() }
+                .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tag(WorkspaceTab.search)
         }
-        .sheet(isPresented: $showCreateTask) {
-            CreateTaskSheet()
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsScreen()
-        }
-        .sheet(isPresented: $model.showContainerControls) {
-            ContainerControlsSheet()
-        }
-        .task { await model.refresh() }
     }
 
     @ViewBuilder
@@ -99,13 +143,13 @@ struct WorkspaceScreen: View {
                 ToolbarItem(placement: .principal) {
                     // Scale long workspace names down before truncating.
                     Text(model.selectedContainer?.displayName ?? "Orcha")
-                        .font(.system(size: 16, weight: .bold))
+                        .font(p.uiFont(16, .bold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .accessibilityAddTraits(.isHeader)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    ConnChip(state: model.snapshot == nil ? (model.loading ? "probing" : "unreachable") : connState)
+                    ConnChip(state: model.snapshot == nil ? (model.loading ? "probing" : "unreachable") : connState, compact: true)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     // GH #148 — entry point to the Notifier/Autonomy sheet; tinted by the
@@ -152,6 +196,7 @@ struct WorkspaceScreen: View {
     }
 }
 
+
 /// The shared connection banner row (flow 04 H8/H10): polling is the honest v1
 /// state (SSE is the listed follow-up); paused blocks agent action.
 ///
@@ -189,7 +234,7 @@ struct UnreachableState: View {
             danger: true
         ) {
             Image(systemName: "wifi.slash")
-                .font(.system(size: 30))
+                .font(p.uiFont(30))
                 .foregroundStyle(p.danger)
         } actions: {
             VStack(spacing: 12) {
@@ -198,7 +243,7 @@ struct UnreachableState: View {
                     Text("2  Is the laptop awake and Orcha running?")
                     Text("3  Firewall or VPN blocking the port?")
                 }
-                .font(.system(size: 13))
+                .font(p.uiFont(13))
                 .foregroundStyle(p.text2)
                 KitButton(title: "Try again", role: .neutral) {
                     Task { await model.refresh() }

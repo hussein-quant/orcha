@@ -46,6 +46,19 @@ struct Palette {
     var radiusTag: CGFloat = 5
     var pillMono = false
     var flatChrome = false   // Swiss: no brand radial glows behind content
+    var displayFamily: String?   // Swiss: bundled Space Grotesk; nil = SF
+
+    /// UI font for the active skin: the bundled display family when the skin
+    /// sets one (Swiss = Space Grotesk, portal parity), else the system font.
+    /// Mono call sites keep `.system(design: .monospaced)` on both skins, the
+    /// way JetBrains Mono survives the web's Swiss.
+    func uiFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        if let displayFamily {
+            Font.custom(displayFamily, size: size).weight(weight)
+        } else {
+            .system(size: size, weight: weight)
+        }
+    }
 
     static let dark = Palette(
         bg: Color(hex: 0x0A0D12),
@@ -212,6 +225,7 @@ struct Palette {
         radiusTag = 0
         pillMono = true
         flatChrome = true
+        displayFamily = "Space Grotesk"
     }
 
     /// Resolve for an explicit theme mode + skin; Auto resolves per system in

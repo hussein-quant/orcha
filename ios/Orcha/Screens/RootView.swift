@@ -28,10 +28,10 @@ private struct ToastOverlay: ViewModifier {
             if let toast = model.toast {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(p.uiFont(13, .bold))
                         .foregroundStyle(p.ok)
                     Text(toast)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(p.uiFont(13, .semibold))
                         .foregroundStyle(p.text)
                 }
                 .padding(.horizontal, 18)

@@ -20,7 +20,7 @@ struct AgentExtras {
 }
 
 enum WorkspaceTab: Hashable {
-    case home, tasks, requests, agents
+    case home, tasks, requests, agents, search
 }
 
 /// The app's single source of truth — a 1:1 port of the Android `OrchaViewModel`

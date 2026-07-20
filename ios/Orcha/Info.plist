@@ -29,6 +29,10 @@
 	<string>Orcha uses the camera only to scan the pairing QR from your portal.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Orcha connects to the Orcha server running on your computer over your local network.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>SpaceGrotesk.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

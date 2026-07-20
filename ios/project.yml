@@ -25,6 +25,8 @@ targets:
         CFBundleDisplayName: Orcha
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
+        UIAppFonts:
+          - SpaceGrotesk.ttf
         NSCameraUsageDescription: "Orcha uses the camera only to scan the pairing QR from your portal."
         # A2 (doc 13): LAN base URLs are runtime IPs — the clean ATS carve-out is
         # local networking, not arbitrary loads.

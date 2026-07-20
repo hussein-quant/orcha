@@ -30,12 +30,12 @@ struct SectionH: View {
     var body: some View {
         HStack(spacing: 8) {
             Text(title.uppercased())
-                .font(.system(size: 11, weight: .bold))
+                .font(p.uiFont(11, .bold))
                 .tracking(0.8)
                 .foregroundStyle(p.muted)
             if let count {
                 Text(count)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(p.uiFont(11, .semibold))
                     .foregroundStyle(p.faint)
             }
             Spacer()
@@ -97,7 +97,7 @@ struct KitButton: View {
                     .font(.system(size: small ? 13 : 15, weight: .semibold))
             }
             Text(title)
-                .font(.system(size: small ? 13 : 15, weight: .bold))
+                .font(p.uiFont(small ? 13 : 15, .bold))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, small ? 8 : 12)
@@ -145,7 +145,7 @@ struct AgentAvatar: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: human ? size / 2 : size * 12 / 40)
         Text(alias.prefix(1).uppercased())
-            .font(.system(size: size * 15 / 40, weight: .heavy))
+            .font(p.uiFont(size * 15 / 40, .heavy))
             .foregroundStyle(human ? p.violet : p.accent)
             .frame(width: size, height: size)
             .background(human ? p.violetSoft : p.accentSoft, in: shape)
@@ -220,10 +220,10 @@ struct StatTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value)
-                .font(.system(size: 20, weight: .heavy))
+                .font(p.uiFont(20, .heavy))
                 .foregroundStyle(tint)
             Text(label.uppercased())
-                .font(.system(size: 10.5, weight: .bold))
+                .font(p.uiFont(10.5, .bold))
                 .tracking(0.5)
                 .foregroundStyle(p.muted)
                 .lineLimit(1)
@@ -260,13 +260,13 @@ struct Banner: View {
     var body: some View {
         HStack(spacing: 10) {
             Text(text)
-                .font(.system(size: 13, weight: .semibold))
+                .font(p.uiFont(13, .semibold))
                 .foregroundStyle(tint.color)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let action, let onAction {
                 Button(action) { onAction() }
                     .buttonStyle(.plain)
-                    .font(.system(size: 13, weight: .bold))
+                    .font(p.uiFont(13, .bold))
                     .foregroundStyle(tint.color)
                     .underline()
             }
@@ -278,11 +278,14 @@ struct Banner: View {
     }
 }
 
-/// `.conn` — connection indicator: pulsing dot + word.
+/// `.conn` — connection indicator: pulsing dot + word. `compact` drops the word
+/// (toolbar use, where "polling" truncated to "p…" and squeezed the nav title);
+/// VoiceOver keeps the full state either way.
 struct ConnChip: View {
     @Environment(\.palette) private var p
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let state: String
+    var compact = false
 
     var body: some View {
         let (color, word): (Color, String) = switch state.lowercased() {
@@ -294,12 +297,15 @@ struct ConnChip: View {
         }
         HStack(spacing: 6) {
             PulseDot(color: color, animated: !reduceMotion && ["live", "active", "polling"].contains(state.lowercased()))
-            Text(word)
-                .font(.system(size: 11, weight: .bold))
-                .tracking(0.2)
-                .foregroundStyle(color)
+            if !compact {
+                Text(word)
+                    .font(p.uiFont(11, .bold))
+                    .tracking(0.2)
+                    .foregroundStyle(color)
+            }
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("Connection: \(word)")
     }
 }
 
@@ -336,11 +342,11 @@ struct StateLayout<Glyph: View, Actions: View>: View {
                 .background(danger ? p.dangerSoft : p.surface2, in: RoundedRectangle(cornerRadius: 22))
                 .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(danger ? p.dangerLine : p.border, lineWidth: 1))
             Text(title)
-                .font(.system(size: 17, weight: .bold))
+                .font(p.uiFont(17, .bold))
                 .multilineTextAlignment(.center)
             if let sub {
                 Text(sub)
-                    .font(.system(size: 13.5))
+                    .font(p.uiFont(13.5))
                     .foregroundStyle(p.muted)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 290)
@@ -362,7 +368,7 @@ struct KVRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(key)
-                .font(.system(size: 13.5))
+                .font(p.uiFont(13.5))
                 .foregroundStyle(p.muted)
             Spacer()
             Text(value)
@@ -412,7 +418,7 @@ struct FeedRow: View {
                     .foregroundStyle(tint)
                 if hasDetail {
                     Text(expanded ? "▾" : "▸")
-                        .font(.system(size: 10))
+                        .font(p.uiFont(10))
                         .foregroundStyle(p.faint)
                 }
             }

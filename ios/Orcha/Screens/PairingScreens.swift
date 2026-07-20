@@ -35,7 +35,7 @@ struct ScannerScreen: View {
                     Spacer()
                     VStack(spacing: 10) {
                         Text("Scan the QR from your Orcha portal")
-                            .font(.system(size: 15, weight: .semibold))
+                            .font(p.uiFont(15, .semibold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
@@ -44,7 +44,7 @@ struct ScannerScreen: View {
                             dismiss()
                             onManualEntry()
                         }
-                        .font(.system(size: 14, weight: .bold))
+                        .font(p.uiFont(14, .bold))
                         .foregroundStyle(p.accent)
                     }
                     .padding(.bottom, 48)
@@ -58,7 +58,7 @@ struct ScannerScreen: View {
                     danger: true
                 ) {
                     Image(systemName: "camera.slash")
-                        .font(.system(size: 30))
+                        .font(p.uiFont(30))
                         .foregroundStyle(p.danger)
                 } actions: {
                     VStack(spacing: 10) {
@@ -79,7 +79,7 @@ struct ScannerScreen: View {
             }
             Button("Close", systemImage: "xmark") { dismiss() }
                 .labelStyle(.iconOnly)
-                .font(.system(size: 17, weight: .semibold))
+                .font(p.uiFont(17, .semibold))
                 .foregroundStyle(scannerAvailable ? .white : p.text)
                 .padding(16)
         }
@@ -195,7 +195,7 @@ struct ManualConnectSheet: View {
             danger: true
         ) {
             Image(systemName: "wifi.slash")
-                .font(.system(size: 30))
+                .font(p.uiFont(30))
                 .foregroundStyle(p.danger)
         } actions: {
             VStack(spacing: 12) {
@@ -204,7 +204,7 @@ struct ManualConnectSheet: View {
                     Text("2  Is the laptop awake and Orcha running?")
                     Text("3  Firewall or VPN blocking the port?")
                 }
-                .font(.system(size: 13))
+                .font(p.uiFont(13))
                 .foregroundStyle(p.text2)
                 KitButton(title: "Try again", role: .neutral, enabled: !model.connecting) {
                     Task {
@@ -215,7 +215,7 @@ struct ManualConnectSheet: View {
                 }
                 .frame(maxWidth: 220)
                 Button("Back") { failed = false }
-                    .font(.system(size: 14, weight: .bold))
+                    .font(p.uiFont(14, .bold))
                     .foregroundStyle(p.accent)
             }
         }

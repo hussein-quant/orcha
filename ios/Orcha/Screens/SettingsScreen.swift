@@ -42,7 +42,7 @@ struct SettingsScreen: View {
                 }
                 .pickerStyle(.segmented)
                 Text("Auto follows the system setting. Changes apply instantly.")
-                    .font(.system(size: 13))
+                    .font(p.uiFont(13))
                     .foregroundStyle(p.muted)
             }
             SectionH(title: "Design")
@@ -54,7 +54,7 @@ struct SettingsScreen: View {
                 }
                 .pickerStyle(.segmented)
                 Text(model.skinMode.blurb)
-                    .font(.system(size: 13))
+                    .font(p.uiFont(13))
                     .foregroundStyle(p.muted)
                     .contentTransition(.opacity)
             }
@@ -86,7 +86,7 @@ struct SettingsScreen: View {
                         AgentAvatar(alias: container.displayName)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(container.displayName)
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(p.uiFont(14, .semibold))
                                 .foregroundStyle(p.text)
                             Text(container.baseUrl)
                                 .font(.system(size: 12, design: .monospaced))
@@ -95,7 +95,7 @@ struct SettingsScreen: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         Button("Disconnect") { model.forgetContainer(container.id) }
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(p.uiFont(13, .semibold))
                             .foregroundStyle(p.danger)
                     }
                 }
