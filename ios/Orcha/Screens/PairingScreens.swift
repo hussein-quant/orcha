@@ -211,6 +211,7 @@ struct ManualConnectSheet: View {
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(p.faint)
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             if showRemoteHelp {

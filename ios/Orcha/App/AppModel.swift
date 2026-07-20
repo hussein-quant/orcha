@@ -151,7 +151,8 @@ final class AppModel {
                 baseUrl: base,
                 humanAgentId: human?.id ?? payload.humanAgentId,
                 humanAlias: human?.alias ?? payload.humanAgentAlias,
-                pairingToken: payload.token
+                pairingToken: payload.token,
+                remoteBaseUrl: payload.remoteBaseUrl
             )
             containers = store.upsert(stored)
             selectedContainer = stored

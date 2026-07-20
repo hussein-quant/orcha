@@ -102,6 +102,10 @@ struct KitButton: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, small ? 8 : 12)
         .padding(.horizontal, small ? 14 : 18)
+        // .plain buttons hit-test only opaque content, and the fill lives outside
+        // the Button (KitButtonSurface) — without this, only the title text was
+        // tappable across the whole app.
+        .contentShape(RoundedRectangle(cornerRadius: p.radiusButton))
 
         Button(action: action) { label }
             .buttonStyle(.plain)
