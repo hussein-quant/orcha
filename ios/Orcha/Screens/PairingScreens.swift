@@ -131,6 +131,7 @@ struct ManualConnectSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
     @State private var failed = false
+    @State private var showRemoteHelp = false
 
     var body: some View {
         NavigationStack {
@@ -183,8 +184,58 @@ struct ManualConnectSheet: View {
                 if let error = model.error, !failed {
                     Banner(kind: .danger, text: error)
                 }
+                remoteHelp
             }
             .padding(16)
+        }
+    }
+
+    /// The pair-phone workflow's optional remote-access explainer: how to set up
+    /// Tailscale, and how the app hands off between the local and remote address
+    /// when you leave home Wi-Fi. Collapsed by default — local-only pairing
+    /// stays a one-field flow.
+    private var remoteHelp: some View {
+        OrchaCard {
+            Button {
+                withAnimation(.spring(duration: 0.3)) { showRemoteHelp.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "network")
+                        .font(.system(size: 14))
+                        .foregroundStyle(p.accent)
+                    Text("Want to check in from anywhere?")
+                        .font(p.uiFont(14, .semibold))
+                        .foregroundStyle(p.text)
+                    Spacer()
+                    Image(systemName: showRemoteHelp ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(p.faint)
+                }
+            }
+            .buttonStyle(.plain)
+            if showRemoteHelp {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Out of the box, Orcha is local-only: the phone talks directly to your computer on your Wi-Fi, and nothing goes through any cloud. To supervise your agents from anywhere, add Tailscale — a free (for personal use) encrypted tunnel between your own devices. Nothing gets exposed to the internet.")
+                    step(1, "Install Tailscale on this iPhone (App Store) and on your computer (tailscale.com), and sign both into the same account.")
+                    step(2, "Find the computer's Tailscale address: run “tailscale ip -4” on it, or use its name from the Tailscale menu, e.g. my-mac.tailnet.ts.net.")
+                    step(3, "Pair here on Wi-Fi as usual, then open Settings → Containers → “Add remote…” and enter that address with the portal port, e.g. 100.x.y.z:8001.")
+                    Text("From then on the switch is automatic: the app uses whichever address answers. Leave home Wi-Fi and the local address goes quiet, so the next refresh fails over to the Tailscale address — and back again the same way. You'll see a “Connected via …” note when it hands off. The only requirement while you're out: the computer must be awake.")
+                }
+                .font(p.uiFont(13))
+                .foregroundStyle(p.text2)
+            }
+        }
+    }
+
+    private func step(_ n: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Text("\(n)")
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(p.accent)
+                .frame(width: 18, height: 18)
+                .background(p.accentSoft, in: RoundedRectangle(cornerRadius: p.radiusTag + 4))
+            Text(text)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
