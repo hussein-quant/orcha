@@ -169,22 +169,32 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         }
     }
 
-    /// The in-app "Needs you" badge already covers the foreground — suppress
-    /// banners while the app is open.
+    /// The in-app "Needs you" badge already covers the foreground for REAL
+    /// alerts — but the test alert must present in-foreground, or the button
+    /// depends on backgrounding the app within 3s and reads as broken when the
+    /// race is lost (the notification is discarded without a trace).
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        []
+        notification.request.identifier == "orcha-test" ? [.banner, .sound] : []
     }
 
     // MARK: test hook (Settings → "Send test notification")
 
     /// Posts a real notification 3s out, targeting the first live needs-you item
-    /// so the tap exercises the exact deep-link path end-to-end.
-    func sendTest(model: AppModel) async {
-        guard let sel = model.selectedContainer, let snap = model.snapshot else { return }
-        let target = Self.needsYou(snap, container: sel).first
+    /// so the tap exercises the exact deep-link path end-to-end. Every outcome
+    /// is reported back — a silent no-op here is indistinguishable from broken.
+    func sendTest(model: AppModel) async -> String {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized else {
+            return "iOS has notifications blocked for Orcha — allow them in Settings → Apps → Orcha → Notifications, then retry."
+        }
+        var target: Item?
+        if let sel = model.selectedContainer, let snap = model.snapshot {
+            target = Self.needsYou(snap, container: sel).first
+        }
         let content = UNMutableNotificationContent()
         content.title = target?.title ?? "Orcha — test"
         content.body = target?.body ?? "Notifications are working. Nothing needs you right now."
@@ -195,8 +205,15 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
             ]
         }
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 3, repeats: false)
-        try? await UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: "orcha-test", content: content, trigger: trigger)
-        )
+        do {
+            try await center.add(
+                UNNotificationRequest(identifier: "orcha-test", content: content, trigger: trigger)
+            )
+            return target == nil
+                ? "Arriving in 3 seconds — it shows even while the app is open."
+                : "Arriving in 3 seconds — tap it to jump straight to that item. It shows even while the app is open."
+        } catch {
+            return "Couldn't schedule the alert: \(error.localizedDescription)"
+        }
     }
 }

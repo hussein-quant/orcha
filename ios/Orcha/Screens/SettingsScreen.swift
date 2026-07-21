@@ -78,6 +78,8 @@ struct SettingsScreen: View {
 
     // MARK: notifications
 
+    @State private var testStatus: String?
+
     private var notificationsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             SectionH(title: "Notifications")
@@ -94,8 +96,13 @@ struct SettingsScreen: View {
                 }
                 .tint(p.accent)
                 if model.notificationsEnabled {
-                    KitButton(title: "Send test alert (3s — background the app)", role: .neutral, small: true) {
-                        Task { await NotificationCoordinator.shared.sendTest(model: model) }
+                    KitButton(title: "Send test alert (arrives in 3s)", role: .neutral, small: true) {
+                        Task { testStatus = await NotificationCoordinator.shared.sendTest(model: model) }
+                    }
+                    if let testStatus {
+                        Text(testStatus)
+                            .font(p.uiFont(12))
+                            .foregroundStyle(p.muted)
                     }
                 }
             }
