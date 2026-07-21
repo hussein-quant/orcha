@@ -21,7 +21,7 @@ enum DecisionAssist {
         var tldr: String
         @Guide(description: "The plan's steps in order, at most 6.")
         var steps: [Step]
-        @Guide(description: "Approval/ordering dependencies the plan states — who or what must sign off before which step proceeds, e.g. \"Nothing builds until the human approves the design spec\". Empty if none.")
+        @Guide(description: "Approval/ordering dependencies the plan states — who or what must sign off before which step proceeds, e.g. \"Nothing builds until the human approves the design spec\". Each gate must add a fact NOT already stated in the steps. Empty if none.")
         var gates: [String]
         @Guide(description: "Destructive or irreversible actions only (production deploys, migrations, deletions, force-pushes). Empty if none.")
         var risks: [String]
@@ -86,8 +86,65 @@ enum DecisionAssist {
             to: "Summarize this plan:\n\n\(clip(text))",
             generating: PlanBrief.self
         )
-        planCache[key] = response.content
-        return response.content
+        let clean = sanitize(response.content)
+        planCache[key] = clean
+        return clean
+    }
+
+    /// Deterministic cleanup — small models repeat facts across array fields,
+    /// and the owner often reappears inside the step text the UI already
+    /// prefixes with the owner. Code fixes what prompts only discourage.
+    static func sanitize(_ brief: PlanBrief) -> PlanBrief {
+        var out = brief
+        // Strip a leading owner echo: "Muse — Muse delivers…" → "delivers…"
+        out.steps = brief.steps.map { step in
+            var step = step
+            let owner = step.owner.trimmingCharacters(in: .whitespaces)
+            if !owner.isEmpty {
+                let lowered = step.what.lowercased()
+                for prefix in [owner.lowercased() + ": ", owner.lowercased() + " — ", owner.lowercased() + " - ", owner.lowercased() + " "] where lowered.hasPrefix(prefix) {
+                    step.what = String(step.what.dropFirst(prefix.count))
+                    break
+                }
+            }
+            return step
+        }
+        // Drop near-duplicate steps, then gates/risks that restate a step,
+        // the tldr, or each other.
+        var seen: [String] = [out.tldr]
+        out.steps = out.steps.filter { step in
+            let text = step.owner + " " + step.what
+            if seen.contains(where: { similar($0, text) }) { return false }
+            seen.append(text)
+            return true
+        }
+        out.gates = out.gates.filter { gate in
+            if seen.contains(where: { similar($0, gate) }) { return false }
+            seen.append(gate)
+            return true
+        }
+        out.risks = out.risks.filter { risk in
+            if seen.contains(where: { similar($0, risk) }) { return false }
+            seen.append(risk)
+            return true
+        }
+        return out
+    }
+
+    /// Token-overlap similarity — cheap, deterministic, order-insensitive.
+    static func similar(_ a: String, _ b: String) -> Bool {
+        let ta = tokens(a), tb = tokens(b)
+        guard !ta.isEmpty, !tb.isEmpty else { return false }
+        let overlap = Double(ta.intersection(tb).count)
+        return overlap / Double(min(ta.count, tb.count)) >= 0.75
+    }
+
+    private static func tokens(_ s: String) -> Set<String> {
+        Set(
+            s.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count > 2 }
+        )
     }
 
     @MainActor
@@ -109,8 +166,15 @@ enum DecisionAssist {
             to: "Digest this worker run log:\n\n\(clip(meaningful))",
             generating: RunDigest.self
         )
-        runCache[key] = response.content
-        return response.content
+        var clean = response.content
+        var seen: [String] = [clean.outcome]
+        clean.didPoints = clean.didPoints.filter { point in
+            if seen.contains(where: { similar($0, point) }) { return false }
+            seen.append(point)
+            return true
+        }
+        runCache[key] = clean
+        return clean
     }
 
     @MainActor private static var catchUpCache: [Int: CatchUp] = [:]
@@ -144,8 +208,15 @@ enum DecisionAssist {
             """,
             generating: CatchUp.self
         )
-        catchUpCache[key] = response.content
-        return response.content
+        var clean = response.content
+        var seen: [String] = [clean.headline]
+        clean.changes = clean.changes.filter { change in
+            if seen.contains(where: { similar($0, change) }) { return false }
+            seen.append(change)
+            return true
+        }
+        catchUpCache[key] = clean
+        return clean
     }
 
     /// Cap model input; when over budget keep the head and tail — openings
