@@ -10,6 +10,8 @@ struct OrchaWidgetBundle: WidgetBundle {
     var body: some Widget {
         NeedsYouWidget()
         WorkspaceGlanceWidget()
+        WorkspaceBoardWidget()
+        FleetWidget()
     }
 }
 
@@ -17,24 +19,29 @@ struct OrchaWidgetBundle: WidgetBundle {
 
 struct OrchaEntry: TimelineEntry {
     let date: Date
-    let workspace: WidgetWorkspace?
-    let othersNeedYou: Int
+    let all: [WidgetWorkspace]
+
+    var workspace: WidgetWorkspace? { all.first }
+    var othersNeedYou: Int { all.dropFirst().reduce(0) { $0 + $1.needsYou } }
 }
 
 struct OrchaProvider: TimelineProvider {
     func placeholder(in context: Context) -> OrchaEntry {
         OrchaEntry(
             date: .now,
-            workspace: WidgetWorkspace(
+            all: [WidgetWorkspace(
                 id: "placeholder", name: "Quantal EHR", verify: 2, plans: 1, escalations: 0,
                 agents: [
                     WidgetAgent(alias: "Forge", status: "working"),
                     WidgetAgent(alias: "Muse", status: "idle"),
                 ],
                 headline: "Forge reports the deploy workflow drafted.",
-                updatedAt: .now
-            ),
-            othersNeedYou: 0
+                updatedAt: .now,
+                items: [
+                    WidgetItem(id: "t1", kind: "plan", title: "Harden payments module"),
+                    WidgetItem(id: "t2", kind: "verify", title: "Deploy workflow draft"),
+                ]
+            )]
         )
     }
 
@@ -49,10 +56,85 @@ struct OrchaProvider: TimelineProvider {
     }
 
     private func entry() -> OrchaEntry {
-        let all = WidgetStore.load()
-        let primary = all.first
-        let others = all.dropFirst().reduce(0) { $0 + $1.needsYou }
-        return OrchaEntry(date: .now, workspace: primary, othersNeedYou: others)
+        OrchaEntry(date: .now, all: WidgetStore.load())
+    }
+}
+
+// MARK: - shared bits
+
+private func deepLink(_ workspace: WidgetWorkspace?) -> URL? {
+    guard let id = workspace?.id else { return URL(string: "orcha://open") }
+    return URL(string: "orcha://needs/\(id)")
+}
+
+private func itemLink(_ item: WidgetItem, in workspace: WidgetWorkspace) -> URL {
+    let host = item.kind == "request" ? "request" : "task"
+    return URL(string: "orcha://\(host)/\(workspace.id)/\(item.id)")
+        ?? URL(string: "orcha://needs/\(workspace.id)")!
+}
+
+private func kindSymbol(_ kind: String) -> String {
+    switch kind {
+    case "plan": "signature"
+    case "verify": "checkmark.seal"
+    default: "hand.raised"
+    }
+}
+
+private func kindColor(_ kind: String) -> Color {
+    switch kind {
+    case "plan": .indigo
+    case "verify": .orange
+    default: .red
+    }
+}
+
+private func agentColor(_ status: String) -> Color {
+    switch status {
+    case "working", "in_progress": .teal
+    case "blocked", "failed", "terminated": .red
+    case "awaiting_human", "needs_verification": .orange
+    default: .gray
+    }
+}
+
+private struct ItemRow: View {
+    let item: WidgetItem
+    var size: CGFloat = 11.5
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: kindSymbol(item.kind))
+                .font(.system(size: size - 2, weight: .semibold))
+                .foregroundStyle(kindColor(item.kind))
+                .frame(width: size)
+            Text(item.title)
+                .font(.system(size: size, weight: .medium))
+                .lineLimit(1)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct AgentDots: View {
+    let agents: [WidgetAgent]
+    var limit = 4
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ForEach(agents.prefix(limit), id: \.alias) { agent in
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(agentColor(agent.status))
+                        .frame(width: 6, height: 6)
+                    Text(agent.alias)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                }
+            }
+        }
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -63,17 +145,12 @@ struct NeedsYouWidget: Widget {
         StaticConfiguration(kind: "OrchaNeedsYou", provider: OrchaProvider()) { entry in
             NeedsYouView(entry: entry)
                 .containerBackground(.background, for: .widget)
-                .widgetURL(deepLink(entry))
+                .widgetURL(deepLink(entry.workspace))
         }
         .configurationDisplayName("Needs you")
         .description("How much waits on your decision, at a glance.")
-        .supportedFamilies([.systemSmall, .accessoryCircular, .accessoryInline])
+        .supportedFamilies([.systemSmall, .accessoryCircular, .accessoryInline, .accessoryRectangular])
     }
-}
-
-private func deepLink(_ entry: OrchaEntry) -> URL? {
-    guard let id = entry.workspace?.id else { return URL(string: "orcha://open") }
-    return URL(string: "orcha://needs/\(id)")
 }
 
 struct NeedsYouView: View {
@@ -96,13 +173,33 @@ struct NeedsYouView: View {
         case .accessoryInline:
             let count = entry.workspace?.needsYou ?? 0
             Text(count == 0 ? "Orcha: all clear" : "Orcha: \(count) need you")
+        case .accessoryRectangular:
+            rectangularView
         default:
             smallView
         }
     }
 
+    private var rectangularView: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(entry.workspace?.name ?? "Orcha")
+                .font(.system(size: 12, weight: .bold))
+                .lineLimit(1)
+            let count = entry.workspace?.needsYou ?? 0
+            Text(count == 0 ? "All clear" : "\(count) need you")
+                .font(.system(size: 12, weight: .semibold))
+            if let top = entry.workspace?.topItems.first {
+                Text(top.title)
+                    .font(.system(size: 11))
+                    .opacity(0.75)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var smallView: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 5) {
                 Image(systemName: "bell.fill")
                     .font(.system(size: 11, weight: .semibold))
@@ -112,16 +209,29 @@ struct NeedsYouView: View {
                     .lineLimit(1)
                     .foregroundStyle(.secondary)
             }
-            Spacer(minLength: 0)
             Text("\(entry.workspace?.needsYou ?? 0)")
-                .font(.system(size: 44, weight: .heavy, design: .rounded))
+                .font(.system(size: 40, weight: .heavy, design: .rounded))
                 .foregroundStyle((entry.workspace?.needsYou ?? 0) > 0 ? .primary : .secondary)
-            Text(breakdown)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .padding(.vertical, -2)
+            Spacer(minLength: 0)
+            if let w = entry.workspace, w.needsYou > 0 {
+                VStack(alignment: .leading, spacing: 3) {
+                    if w.plans > 0 { countRow(w.plans, "to approve", "plan") }
+                    if w.verify > 0 { countRow(w.verify, "to verify", "verify") }
+                    if w.escalations > 0 { countRow(w.escalations, w.escalations == 1 ? "escalation" : "escalations", "request") }
+                }
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.green)
+                    Text(entry.workspace == nil ? "open the app to pair" : "all clear")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+            }
             if entry.othersNeedYou > 0 {
-                Text("+\(entry.othersNeedYou) in other workspaces")
+                Text("+\(entry.othersNeedYou) elsewhere")
                     .font(.system(size: 9.5))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -130,14 +240,16 @@ struct NeedsYouView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
-    private var breakdown: String {
-        guard let w = entry.workspace else { return "open the app to pair" }
-        if w.needsYou == 0 { return "all clear" }
-        var parts: [String] = []
-        if w.verify > 0 { parts.append("\(w.verify) verify") }
-        if w.plans > 0 { parts.append("\(w.plans) plan\(w.plans == 1 ? "" : "s")") }
-        if w.escalations > 0 { parts.append("\(w.escalations) esc") }
-        return parts.joined(separator: " · ")
+    private func countRow(_ count: Int, _ label: String, _ kind: String) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(kindColor(kind))
+                .frame(width: 6, height: 6)
+            Text("\(count) \(label)")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
     }
 }
 
@@ -148,7 +260,7 @@ struct WorkspaceGlanceWidget: Widget {
         StaticConfiguration(kind: "OrchaGlance", provider: OrchaProvider()) { entry in
             GlanceView(entry: entry)
                 .containerBackground(.background, for: .widget)
-                .widgetURL(deepLink(entry))
+                .widgetURL(deepLink(entry.workspace))
         }
         .configurationDisplayName("Workspace glance")
         .description("Agents, what waits on you, and the on-device headline.")
@@ -161,7 +273,7 @@ struct GlanceView: View {
 
     var body: some View {
         if let w = entry.workspace {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Text(w.name)
                         .font(.system(size: 13, weight: .bold))
@@ -177,19 +289,10 @@ struct GlanceView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                HStack(spacing: 10) {
-                    ForEach(w.agents.prefix(4), id: \.alias) { agent in
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(color(for: agent.status))
-                                .frame(width: 6, height: 6)
-                            Text(agent.alias)
-                                .font(.system(size: 11, weight: .medium))
-                                .lineLimit(1)
-                        }
-                    }
+                AgentDots(agents: w.agents)
+                ForEach(w.topItems.prefix(2)) { item in
+                    ItemRow(item: item)
                 }
-                .foregroundStyle(.secondary)
                 if let headline = w.headline, !headline.isEmpty {
                     HStack(alignment: .top, spacing: 5) {
                         Image(systemName: "sparkles")
@@ -197,9 +300,9 @@ struct GlanceView: View {
                             .foregroundStyle(.tint)
                             .padding(.top, 2)
                         Text(headline)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(w.topItems.isEmpty ? 3 : 1)
                     }
                 }
                 Spacer(minLength: 0)
@@ -209,24 +312,158 @@ struct GlanceView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
-            VStack(spacing: 4) {
-                Image(systemName: "waveform.path")
-                    .font(.system(size: 18))
-                    .foregroundStyle(.secondary)
-                Text("Open Orcha and pair a workspace")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            PairHint()
         }
     }
+}
 
-    private func color(for status: String) -> Color {
-        switch status {
-        case "working", "in_progress": .teal
-        case "blocked", "failed", "terminated": .red
-        case "awaiting_human", "needs_verification": .orange
-        default: .gray
+// MARK: - workspace board (large)
+
+struct WorkspaceBoardWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "OrchaBoard", provider: OrchaProvider()) { entry in
+            BoardView(entry: entry)
+                .containerBackground(.background, for: .widget)
+                .widgetURL(deepLink(entry.workspace))
         }
+        .configurationDisplayName("Workspace board")
+        .description("The full needs-you queue with agents and the headline.")
+        .supportedFamilies([.systemLarge])
+    }
+}
+
+struct BoardView: View {
+    let entry: OrchaEntry
+
+    var body: some View {
+        if let w = entry.workspace {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Text(w.name)
+                        .font(.system(size: 15, weight: .bold))
+                        .lineLimit(1)
+                    Spacer()
+                    if w.needsYou > 0 {
+                        Text("\(w.needsYou) need you")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text("all clear")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let headline = w.headline, !headline.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.tint)
+                            .padding(.top, 2)
+                        Text(headline)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                if w.topItems.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.green)
+                        Text("Nothing waits on you")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(w.topItems.prefix(5)) { item in
+                            Link(destination: itemLink(item, in: w)) {
+                                ItemRow(item: item, size: 12.5)
+                            }
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+                AgentDots(agents: w.agents, limit: 6)
+                Text("updated \(w.updatedAt, style: .relative) ago")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            PairHint()
+        }
+    }
+}
+
+// MARK: - fleet (medium, all workspaces)
+
+struct FleetWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "OrchaFleet", provider: OrchaProvider()) { entry in
+            FleetView(entry: entry)
+                .containerBackground(.background, for: .widget)
+        }
+        .configurationDisplayName("All workspaces")
+        .description("Every paired workspace with what waits on you in each.")
+        .supportedFamilies([.systemMedium])
+    }
+}
+
+struct FleetView: View {
+    let entry: OrchaEntry
+
+    var body: some View {
+        if entry.all.isEmpty {
+            PairHint()
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(entry.all.prefix(3)) { w in
+                    Link(destination: URL(string: "orcha://needs/\(w.id)")!) {
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(w.name)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .lineLimit(1)
+                                AgentDots(agents: w.agents, limit: 3)
+                            }
+                            Spacer(minLength: 4)
+                            if w.needsYou > 0 {
+                                Text("\(w.needsYou)")
+                                    .font(.system(size: 14, weight: .heavy, design: .rounded))
+                                    .foregroundStyle(.orange)
+                            } else {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
+                }
+                if entry.all.count == 1 {
+                    Text("Pair more workspaces in the app to fill this widget.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+// MARK: - empty state
+
+private struct PairHint: View {
+    var body: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "waveform.path")
+                .font(.system(size: 18))
+                .foregroundStyle(.secondary)
+            Text("Open Orcha and pair a workspace")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

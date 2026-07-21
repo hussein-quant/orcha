@@ -9,6 +9,14 @@ struct WidgetAgent: Codable, Hashable {
     let status: String
 }
 
+/// One concrete thing waiting on the human, enough to render a row and
+/// deep-link to the exact screen (orcha://task|request/<cid>/<id>).
+struct WidgetItem: Codable, Hashable, Identifiable {
+    let id: String
+    let kind: String       // "plan" | "verify" | "request"
+    let title: String
+}
+
 struct WidgetWorkspace: Codable, Identifiable, Hashable {
     let id: String
     let name: String
@@ -21,8 +29,12 @@ struct WidgetWorkspace: Codable, Identifiable, Hashable {
     /// Intelligence is off or generation failed.
     let headline: String?
     let updatedAt: Date
+    /// Top needs-you items, most urgent first. Optional so state written by
+    /// older app builds still decodes.
+    var items: [WidgetItem]? = nil
 
     var needsYou: Int { verify + plans + escalations }
+    var topItems: [WidgetItem] { items ?? [] }
 }
 
 enum WidgetStore {

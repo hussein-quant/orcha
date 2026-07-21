@@ -22,6 +22,16 @@ enum WidgetPublisher {
         let agents = snap.agents
             .filter { $0.kind == "ai" }
             .map { WidgetAgent(alias: $0.alias, status: $0.status ?? "idle") }
+        var items: [WidgetItem] = []
+        for t in snap.tasks where t.status == "in_progress" && t.planMessage != nil && t.planDecision == nil {
+            items.append(WidgetItem(id: t.id, kind: "plan", title: t.title))
+        }
+        for t in snap.tasks where t.status == "needs_verification" {
+            items.append(WidgetItem(id: t.id, kind: "verify", title: t.title))
+        }
+        for r in snap.requests where r.status == "open" && (r.targetId == container.humanAgentId || r.targetId == nil) {
+            items.append(WidgetItem(id: r.id, kind: "request", title: String(r.payload.prefix(80))))
+        }
         let previous = WidgetStore.load().first { $0.id == container.id }
         let next = WidgetWorkspace(
             id: container.id,
@@ -31,7 +41,8 @@ enum WidgetPublisher {
             escalations: escalations,
             agents: agents,
             headline: headline ?? previous?.headline,
-            updatedAt: previous?.updatedAt ?? .now
+            updatedAt: previous?.updatedAt ?? .now,
+            items: Array(items.prefix(6))
         )
         // The foreground poll fires every few seconds; only touch the store and
         // the WidgetKit reload budget when something the widget shows changed.
@@ -39,7 +50,7 @@ enum WidgetPublisher {
         WidgetStore.update(WidgetWorkspace(
             id: next.id, name: next.name, verify: next.verify, plans: next.plans,
             escalations: next.escalations, agents: next.agents,
-            headline: next.headline, updatedAt: .now
+            headline: next.headline, updatedAt: .now, items: next.items
         ))
         WidgetCenter.shared.reloadAllTimelines()
     }

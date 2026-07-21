@@ -25,11 +25,21 @@ struct OrchaApp: App {
                     }
                 }
                 .onOpenURL { url in
-                    // Widget taps: orcha://needs/<containerId> → that workspace's
-                    // Home (the needs-you queue).
+                    // Widget taps. orcha://needs/<cid> → that workspace's Home
+                    // (the needs-you queue); orcha://task/<cid>/<id> and
+                    // orcha://request/<cid>/<id> → the exact item screen.
                     guard url.scheme == "orcha" else { return }
-                    if url.host == "needs", let cid = url.pathComponents.dropFirst().first {
-                        model.openContainer(cid)
+                    let parts = url.pathComponents.dropFirst()
+                    switch url.host {
+                    case "needs":
+                        if let cid = parts.first { model.openContainer(cid) }
+                    case "task", "request":
+                        guard let cid = parts.first, parts.count >= 2 else { return }
+                        let id = parts[parts.index(parts.startIndex, offsetBy: 1)]
+                        let route: WorkspaceRoute = url.host == "request" ? .request(id) : .task(id)
+                        model.openFromNotification(containerId: cid, route: route)
+                    default:
+                        break
                     }
                 }
         }
