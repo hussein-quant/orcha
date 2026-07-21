@@ -218,6 +218,7 @@ final class AppModel {
             catchUp = (seen.digest, Self.gapLabel(since: seen.at))
         }
         store.saveLastSeen(digest, for: container.id)
+        WidgetPublisher.publish(snap, container: container)
     }
 
     private static func gapLabel(since date: Date) -> String {

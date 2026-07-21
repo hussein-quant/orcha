@@ -72,11 +72,21 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         guard ContainerStore().loadNotificationsEnabled() else { return }
         let api = OrchaApiClient()
         var items: [Item] = []
+        var first = true
         for stored in ContainerStore().load() {
             guard !Task.isCancelled else { return }
             let snap = await Self.fetchSnapshot(api, stored)
             guard let snap else { continue }
             items.append(contentsOf: Self.needsYou(snap, container: stored))
+            // Keep the widget fresh from the same sweep. The on-device headline
+            // is generated for the primary (most recent) workspace only — the
+            // background window is ~30s and inference isn't free.
+            var headline: String?
+            if first, #available(iOS 26, *), DecisionAssist.isAvailable {
+                headline = try? await DecisionAssist.statusBrief(for: WorkspaceDigest.make(snap)).headline
+            }
+            first = false
+            WidgetPublisher.publish(snap, container: stored, headline: headline)
         }
         let seen = Set(UserDefaults.standard.stringArray(forKey: Self.seenKey) ?? [])
         let fresh = items.filter { !seen.contains($0.key) }
