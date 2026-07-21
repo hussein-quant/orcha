@@ -73,7 +73,7 @@ struct WorkspaceScreen: View {
         @Bindable var model = model
         return TabView(selection: $model.selectedTab) {
             Tab("Home", systemImage: "house.fill", value: WorkspaceTab.home) {
-                workspaceTab { HomeTabView(showCreateTask: $showCreateTask) }
+                workspaceTab(path: $model.homePath) { HomeTabView(showCreateTask: $showCreateTask) }
             }
             .badge(needsYouCount)
 
@@ -99,7 +99,7 @@ struct WorkspaceScreen: View {
     private var legacyTabs: some View {
         @Bindable var model = model
         return TabView(selection: $model.selectedTab) {
-            workspaceTab { HomeTabView(showCreateTask: $showCreateTask) }
+            workspaceTab(path: $model.homePath) { HomeTabView(showCreateTask: $showCreateTask) }
                 .tabItem { Label("Home", systemImage: "house.fill") }
                 .badge(needsYouCount)
                 .tag(WorkspaceTab.home)
@@ -125,10 +125,20 @@ struct WorkspaceScreen: View {
 
     @ViewBuilder
     private func workspaceTab(
+        path: Binding<[WorkspaceRoute]>? = nil,
         @ViewBuilder content: @escaping () -> some View
     ) -> some View {
-        NavigationStack {
-            OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
+        // Home gets a bound path so notification taps can push the exact
+        // task/request screen programmatically; other tabs keep local state.
+        if let path {
+            NavigationStack(path: path) { tabRoot(content) }
+        } else {
+            NavigationStack { tabRoot(content) }
+        }
+    }
+
+    private func tabRoot(@ViewBuilder _ content: @escaping () -> some View) -> some View {
+        OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 content()
             }
             .navigationTitle(model.selectedContainer?.displayName ?? "Orcha")
@@ -188,7 +198,6 @@ struct WorkspaceScreen: View {
                     }
                 }
             }
-        }
     }
 
     private var connState: String {

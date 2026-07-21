@@ -85,6 +85,14 @@ struct ContainerStore {
         SkinMode(rawValue: defaults.string(forKey: Self.skinKey) ?? "classic") ?? .classic
     }
 
+    func loadNotificationsEnabled() -> Bool {
+        defaults.bool(forKey: "orcha_notifications_enabled")
+    }
+
+    func saveNotificationsEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: "orcha_notifications_enabled")
+    }
+
     func saveSkinMode(_ skin: SkinMode) {
         defaults.set(skin.rawValue, forKey: Self.skinKey)
     }

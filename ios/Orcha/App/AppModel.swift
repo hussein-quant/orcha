@@ -44,6 +44,10 @@ final class AppModel {
     var selectedTab: WorkspaceTab = .home
     var themeMode: ThemeMode
     var skinMode: SkinMode
+    var notificationsEnabled: Bool = false
+    /// Home tab's navigation path — bound so notification taps can push the
+    /// exact task/request screen programmatically.
+    var homePath: [WorkspaceRoute] = []
 
     // workspace data
     var snapshot: ContainerSnapshot?
@@ -79,6 +83,7 @@ final class AppModel {
         containers = store.load()
         themeMode = store.loadThemeMode()
         skinMode = store.loadSkinMode()
+        notificationsEnabled = store.loadNotificationsEnabled()
         // Dev/UI-test seam: `-orchaOpenContainer <id>` opens straight into a paired
         // workspace on launch (also the shape a future deep link would take).
         if let idx = ProcessInfo.processInfo.arguments.firstIndex(of: "-orchaOpenContainer"),
@@ -107,6 +112,23 @@ final class AppModel {
     func setSkinMode(_ skin: SkinMode) {
         skinMode = skin
         store.saveSkinMode(skin)
+    }
+
+    func setNotificationsEnabled(_ enabled: Bool) {
+        notificationsEnabled = enabled
+        store.saveNotificationsEnabled(enabled)
+        if enabled { NotificationCoordinator.scheduleAppRefresh() }
+    }
+
+    /// Notification tap → the exact linked screen: open the right container,
+    /// land on Home, and push the task/request detail.
+    func openFromNotification(containerId: String, route: WorkspaceRoute) {
+        if selectedContainer?.id != containerId {
+            guard containers.contains(where: { $0.id == containerId }) else { return }
+            openContainer(containerId)
+        }
+        selectedTab = .home
+        homePath = [route]
     }
 
     func renameContainer(_ id: String, to name: String) {
@@ -222,6 +244,9 @@ final class AppModel {
                 selectedContainer = upgraded
             }
             error = nil
+            // Anything visible in the open app counts as seen — it must never
+            // fire later as a background needs-you notification.
+            NotificationCoordinator.shared.markSeen(snap, container: selectedContainer ?? sel)
         } catch {
             // Opt-in remote failover (Tailscale): if the active address didn't
             // answer and a second one is configured, try it and swap on success —

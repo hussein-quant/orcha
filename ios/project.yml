@@ -38,6 +38,10 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
         NSLocalNetworkUsageDescription: "Orcha connects to the Orcha server running on your computer over your local network."
+        UIBackgroundModes:
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - io.openorcha.mobile.refresh
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     settings:

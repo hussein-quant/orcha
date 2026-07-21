@@ -13,6 +13,7 @@ struct SettingsScreen: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         appearanceSection
+                        notificationsSection
                         containersSection
                         aboutSection
                     }
@@ -72,6 +73,51 @@ struct SettingsScreen: View {
         Binding(
             get: { model.skinMode },
             set: { model.setSkinMode($0) }
+        )
+    }
+
+    // MARK: notifications
+
+    private var notificationsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SectionH(title: "Notifications")
+            OrchaCard {
+                Toggle(isOn: notificationsBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Needs-you alerts")
+                            .font(p.uiFont(14, .semibold))
+                            .foregroundStyle(p.text)
+                        Text("Background checks post an alert when a plan, verification, or request starts waiting on you — tapping opens that exact screen. iOS times the checks: expect minutes to an hour, not instant.")
+                            .font(p.uiFont(12))
+                            .foregroundStyle(p.muted)
+                    }
+                }
+                .tint(p.accent)
+                if model.notificationsEnabled {
+                    KitButton(title: "Send test alert (3s — background the app)", role: .neutral, small: true) {
+                        Task { await NotificationCoordinator.shared.sendTest(model: model) }
+                    }
+                }
+            }
+        }
+    }
+
+    private var notificationsBinding: Binding<Bool> {
+        Binding(
+            get: { model.notificationsEnabled },
+            set: { on in
+                if on {
+                    Task {
+                        let granted = await NotificationCoordinator.shared.requestPermission()
+                        model.setNotificationsEnabled(granted)
+                        if !granted {
+                            model.error = "Notifications are blocked for Orcha — enable them in iOS Settings, then flip this back on."
+                        }
+                    }
+                } else {
+                    model.setNotificationsEnabled(false)
+                }
+            }
         )
     }
 
