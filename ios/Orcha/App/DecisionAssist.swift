@@ -17,20 +17,20 @@ enum DecisionAssist {
     /// the approval decision: who does what concretely, and what gates what.
     @Generable
     struct PlanBrief: Equatable {
-        @Guide(description: "One sentence, max 24 words: who proposes what, and the plan's overall shape — e.g. \"Atlas proposes a 5-step gated pipeline: design spec approval first, then build, test, deploy\".")
+        @Guide(description: "One sentence, max 24 words: who proposes what, and the plan's overall shape, in the plan's own terms.")
         var tldr: String
-        @Guide(description: "The plan's steps in order, at most 6.")
+        @Guide(description: "The plan's steps in order, at most 6. ONLY steps the text actually states — if it states none, return an empty list; empty is correct, never pad.")
         var steps: [Step]
-        @Guide(description: "Approval/ordering dependencies the plan states — who or what must sign off before which step proceeds, e.g. \"Nothing builds until the human approves the design spec\". Each gate must add a fact NOT already stated in the steps. Empty if none.")
+        @Guide(description: "Approval/ordering dependencies the plan itself states, in the plan's own words — who or what must sign off before which step proceeds. Each gate must add a fact NOT already stated in the steps. Empty if the text states none.")
         var gates: [String]
-        @Guide(description: "Destructive or irreversible actions only (production deploys, migrations, deletions, force-pushes). Empty if none.")
+        @Guide(description: "Destructive or irreversible actions the text actually contains (production deploys, migrations, deletions, force-pushes). Empty if none.")
         var risks: [String]
 
         @Generable
         struct Step: Equatable {
-            @Guide(description: "The agent or person the plan assigns this step to, exactly as named (e.g. \"Muse\"). Empty string when the plan names nobody.")
+            @Guide(description: "The agent or person this step is assigned to, copied exactly from the plan text. Empty string when the plan names nobody — never invent a name.")
             var owner: String
-            @Guide(description: "What this step concretely does, 6–14 words using the plan's own specific nouns — NEVER a bare category label like \"Build\" or \"Tests\".")
+            @Guide(description: "What this step concretely does, 6–14 words using the plan's own specific nouns — never a bare category label.")
             var what: String
         }
     }
@@ -63,6 +63,15 @@ enum DecisionAssist {
         return false
     }
 
+    /// A brief needs something to compress. One-line status notes ("work saved
+    /// on branch …") have nothing — running the model on them produces pure
+    /// confabulation to satisfy the schema, so the card simply doesn't render.
+    static func isSubstantial(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = trimmed.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return trimmed.count >= 240 || lines.count >= 4
+    }
+
     // Small session-lifetime caches: re-opening the same sheet must not re-run
     // the model.
     @MainActor private static var planCache: [Int: PlanBrief] = [:]
@@ -76,11 +85,13 @@ enum DecisionAssist {
             You brief a human supervisor deciding whether to APPROVE this plan. \
             Write so they can reconstruct the plan's shape without reading it: \
             keep the plan's concrete nouns, name the acting agent for each step \
-            when the plan names one, and surface what gates what — approval \
-            dependencies are the most decision-relevant facts. Be faithful: \
-            never invent steps, never advise whether to approve. The plan is \
-            the AGENT'S OWN account: attribute assertions ("claims", "reports", \
-            "proposes") — the human has verified nothing yet.
+            ONLY when the plan text itself names one, and surface what gates \
+            what — approval dependencies are the most decision-relevant facts. \
+            Report ONLY what the text contains: if it states no steps, gates, \
+            or risks, return them empty — empty is correct, padding is failure. \
+            Never advise whether to approve. The plan is the AGENT'S OWN \
+            account: attribute assertions ("claims", "reports", "proposes") — \
+            the human has verified nothing yet.
             """)
         let response = try await session.respond(
             to: "Summarize this plan:\n\n\(clip(text))",
