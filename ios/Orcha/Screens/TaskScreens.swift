@@ -531,6 +531,9 @@ struct RunDetailScreen: View {
             }
             switch pane {
             case .log:
+                if run.status != "running" {
+                    RunDigestCard(feed: model.runFeed)
+                }
                 logCard
                 if let error = model.error {
                     Banner(kind: .danger, text: error, action: "Retry") {
