@@ -684,6 +684,7 @@ struct ConversationScreen: View {
                 .padding(.vertical, 9)
                 .background(p.surface2, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.border2, lineWidth: 1))
+            DictationMicButton(text: $draft)
             Button {
                 let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
                 draft = ""
