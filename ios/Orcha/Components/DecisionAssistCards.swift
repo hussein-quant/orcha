@@ -38,9 +38,21 @@ private struct PlanBriefCore: View {
                                 .foregroundStyle(p.accent)
                                 .frame(width: 18, height: 18)
                                 .background(p.accentSoft, in: RoundedRectangle(cornerRadius: 6))
-                            Text(step)
+                            (stepOwnerPrefix(step) + Text(step.what))
                                 .font(.system(size: 13))
                                 .foregroundStyle(p.text2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    ForEach(brief.gates, id: \.self) { gate in
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 11))
+                                .foregroundStyle(p.info)
+                                .frame(width: 18, height: 18)
+                            Text(gate)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(p.info)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
@@ -63,6 +75,12 @@ private struct PlanBriefCore: View {
                 do { brief = try await DecisionAssist.planBrief(for: text) } catch { failed = true }
             }
         }
+    }
+
+    private func stepOwnerPrefix(_ step: DecisionAssist.PlanBrief.Step) -> Text {
+        let owner = step.owner.trimmingCharacters(in: .whitespaces)
+        guard !owner.isEmpty else { return Text("") }
+        return Text("\(owner) — ").fontWeight(.semibold)
     }
 }
 
