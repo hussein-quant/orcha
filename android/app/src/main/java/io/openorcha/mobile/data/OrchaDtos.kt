@@ -244,6 +244,8 @@ data class RunDto(
     @SerialName("started_at") val startedAt: String? = null,
     @SerialName("ended_at") val endedAt: String? = null,
     @SerialName("exit_code") val exitCode: Int? = null,
+    /** Unified git diff of the run's net change (the portal's "Runs & diffs"). */
+    val diff: String? = null,
 )
 
 @Serializable

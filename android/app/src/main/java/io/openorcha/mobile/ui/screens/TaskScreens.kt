@@ -1,6 +1,10 @@
 package io.openorcha.mobile.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -61,7 +65,10 @@ import io.openorcha.mobile.ui.components.Banner
 import io.openorcha.mobile.ui.components.BannerKind
 import io.openorcha.mobile.ui.components.Bubble
 import io.openorcha.mobile.ui.components.BubbleKind
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.style.TextAlign
 import io.openorcha.mobile.ui.components.DangerTonalButton
+import io.openorcha.mobile.ui.components.DiffViewer
 import io.openorcha.mobile.ui.components.FeedRow
 import io.openorcha.mobile.ui.components.MetaTag
 import io.openorcha.mobile.ui.components.OrchaCard
@@ -489,7 +496,44 @@ fun RunDetailScreen(
                 }
             }
             state.runStreamNote?.let { Banner(BannerKind.Info, it) }
-            OrchaCard(Modifier.weight(1f)) {
+            // GitHub-style Log | Changes switch — Changes renders the run's net
+            // unified diff through the shared DiffViewer.
+            var pane by remember { mutableStateOf("log") }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(p.surface2),
+            ) {
+                listOf("log" to "Log", "changes" to "Changes").forEach { (key, label) ->
+                    val on = pane == key
+                    Text(
+                        label,
+                        color = if (on) p.accent else p.muted,
+                        fontWeight = if (on) FontWeight.W700 else FontWeight.W500,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (on) p.accentSoft else Color.Transparent)
+                            .clickable { pane = key }
+                            .padding(vertical = 8.dp),
+                    )
+                }
+            }
+            if (pane == "changes") {
+                val diffText = run?.diff?.trim().orEmpty()
+                when {
+                    diffText.isNotEmpty() ->
+                        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                            DiffViewer(diffText)
+                        }
+                    run?.status == "running" -> OrchaCard {
+                        Text("The diff lands when the worker finishes — watch the log meanwhile.", color = p.muted)
+                    }
+                    else -> OrchaCard { Text("No diff captured for this run.", color = p.muted) }
+                }
+            } else OrchaCard(Modifier.weight(1f)) {
                 if (state.runFeed.isEmpty()) {
                     Text(
                         when {
