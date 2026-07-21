@@ -49,6 +49,56 @@ enum DecisionAssist {
         var needsYou: String
     }
 
+    /// On-demand current-state brief: what every agent is on, right now, in
+    /// prose a human scans in five seconds.
+    @Generable
+    struct StatusBrief: Equatable {
+        @Guide(description: "One sentence, max 22 words: the workspace's overall state right now, in the digest's own terms.")
+        var headline: String
+        @Guide(description: "One line per AI agent that appears in the digest (at most 6): what that agent is doing right now or did most recently, 8–14 words, concrete task nouns, attributed as reported. Only agents the digest names — never invent one.")
+        var agents: [AgentLine]
+        @Guide(description: "What currently waits on the human per the digest, one sentence, most important first. Empty string if nothing waits.")
+        var needsYou: String
+
+        @Generable
+        struct AgentLine: Equatable {
+            @Guide(description: "The agent's alias copied exactly from the digest.")
+            var name: String
+            @Guide(description: "What they're doing or last did, per the digest.")
+            var line: String
+        }
+    }
+
+    @MainActor private static var statusCache: [Int: StatusBrief] = [:]
+
+    @MainActor
+    static func statusBrief(for digest: String) async throws -> StatusBrief {
+        let key = digest.hashValue
+        if let hit = statusCache[key] { return hit }
+        let session = LanguageModelSession(instructions: """
+            You brief a human supervisor on their AI-agent workspace in five \
+            seconds of reading. Fuse the digest into plain prose: what each \
+            agent is on, and what waits on the human. Report ONLY what the \
+            digest contains — empty is correct when it says nothing. No \
+            filler, no advice. Everything agents report is their own account — \
+            attribute, don't assert.
+            """)
+        let response = try await session.respond(
+            to: "Brief me on this workspace:\n\n\(clip(digest))",
+            generating: StatusBrief.self
+        )
+        var clean = response.content
+        var seen: [String] = [clean.headline]
+        clean.agents = clean.agents.filter { line in
+            let text = line.name + " " + line.line
+            if seen.contains(where: { similar($0, text) }) { return false }
+            seen.append(text)
+            return true
+        }
+        statusCache[key] = clean
+        return clean
+    }
+
     /// Structured read of a finished worker run's log.
     @Generable
     struct RunDigest: Equatable {

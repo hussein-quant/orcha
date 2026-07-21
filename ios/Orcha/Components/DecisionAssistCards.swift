@@ -84,6 +84,92 @@ private struct PlanBriefCore: View {
     }
 }
 
+/// Always-available "what are my agents doing" — collapsed to one tappable
+/// row on Home; expanding generates the on-device current-state brief.
+struct WorkspaceBriefCard: View {
+    let digest: String
+
+    var body: some View {
+        if #available(iOS 26, *) {
+            WorkspaceBriefCore(digest: digest)
+        }
+    }
+}
+
+@available(iOS 26, *)
+private struct WorkspaceBriefCore: View {
+    @Environment(\.palette) private var p
+    let digest: String
+    @State private var expanded = false
+    @State private var brief: DecisionAssist.StatusBrief?
+    @State private var failed = false
+
+    var body: some View {
+        if DecisionAssist.isAvailable, !failed, !digest.isEmpty {
+            OrchaCard(borderColor: expanded ? p.accentLine : nil) {
+                Button {
+                    withAnimation(.spring(duration: 0.25)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(p.accent)
+                        Text("WORKSPACE BRIEF · ON-DEVICE")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundStyle(p.accent)
+                        Spacer()
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(p.faint)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if expanded {
+                    if let brief {
+                        Text(brief.headline)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(p.text)
+                        ForEach(Array(brief.agents.enumerated()), id: \.offset) { _, line in
+                            HStack(alignment: .top, spacing: 8) {
+                                AgentAvatar(alias: line.name, size: 22)
+                                (Text("\(line.name) ").fontWeight(.semibold) + Text(line.line))
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(p.text2)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        if !brief.needsYou.trimmingCharacters(in: .whitespaces).isEmpty {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "bell.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(p.warn)
+                                    .frame(width: 18, height: 18)
+                                Text(brief.needsYou)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(p.warn)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                        AssistFootnote(text: "Made on this iPhone from workspace state — attributed, not verified.")
+                    } else {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Reading the workspace…")
+                                .font(.system(size: 13))
+                                .foregroundStyle(p.muted)
+                        }
+                        .task(id: digest) {
+                            do { brief = try await DecisionAssist.statusBrief(for: digest) } catch { failed = true }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// "While you were away" — the delta brief on the Home tab: only what CHANGED
 /// since the human's last look, narrated on-device. Dismissable; absent below
 /// iOS 26 or when Apple Intelligence is off.
