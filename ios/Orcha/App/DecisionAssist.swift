@@ -16,7 +16,7 @@ enum DecisionAssist {
     /// fills a schema instead of free-writing prose.
     @Generable
     struct PlanBrief: Equatable {
-        @Guide(description: "One neutral sentence (max 20 words) saying what the plan does overall.")
+        @Guide(description: "One neutral sentence (max 20 words) saying what the plan proposes or claims overall, attributed to the agent (e.g. \"reports\", \"proposes\", \"claims\").")
         var tldr: String
         @Guide(description: "The plan's concrete steps, each a short phrase of at most 10 words, in order. At most 6.")
         var steps: [String]
@@ -50,7 +50,9 @@ enum DecisionAssist {
         let session = LanguageModelSession(instructions: """
             You summarize software work plans for a human supervisor. Be concrete, \
             neutral, and faithful to the text — never invent steps, never advise \
-            whether to approve.
+            whether to approve. The plan is the AGENT'S OWN account: attribute its \
+            assertions ("claims", "reports", "proposes") instead of stating them \
+            as established fact — the human has not verified anything yet.
             """)
         let response = try await session.respond(
             to: "Summarize this plan:\n\n\(clip(text))",
