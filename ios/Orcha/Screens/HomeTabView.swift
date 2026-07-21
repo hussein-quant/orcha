@@ -63,6 +63,14 @@ struct HomeTabView: View {
         return ScrollView {
             VStack(spacing: 10) {
                 ConnectionBanners()
+                if let cu = model.catchUp {
+                    CatchUpCard(
+                        previous: cu.previous,
+                        current: WorkspaceDigest.make(snapshot),
+                        gap: cu.gapLabel,
+                        onDismiss: { model.catchUp = nil }
+                    )
+                }
                 SectionH(title: "Needs you", count: "\(plans.count + verifs.count + reqs.count)")
                 if plans.isEmpty && verifs.isEmpty && reqs.isEmpty {
                     OrchaCard {
