@@ -13,15 +13,26 @@ import FoundationModels
 enum DecisionAssist {
 
     /// Structured read of a proposed plan — guided generation, so the model
-    /// fills a schema instead of free-writing prose.
+    /// fills a schema instead of free-writing prose. The schema is shaped for
+    /// the approval decision: who does what concretely, and what gates what.
     @Generable
     struct PlanBrief: Equatable {
-        @Guide(description: "One neutral sentence (max 20 words) saying what the plan proposes or claims overall, attributed to the agent (e.g. \"reports\", \"proposes\", \"claims\").")
+        @Guide(description: "One sentence, max 24 words: who proposes what, and the plan's overall shape — e.g. \"Atlas proposes a 5-step gated pipeline: design spec approval first, then build, test, deploy\".")
         var tldr: String
-        @Guide(description: "The plan's concrete steps, each a short phrase of at most 10 words, in order. At most 6.")
-        var steps: [String]
-        @Guide(description: "Risky, destructive, or irreversible actions the plan contains (deploys, migrations, deletions, force-pushes). Empty if none.")
+        @Guide(description: "The plan's steps in order, at most 6.")
+        var steps: [Step]
+        @Guide(description: "Approval/ordering dependencies the plan states — who or what must sign off before which step proceeds, e.g. \"Nothing builds until the human approves the design spec\". Empty if none.")
+        var gates: [String]
+        @Guide(description: "Destructive or irreversible actions only (production deploys, migrations, deletions, force-pushes). Empty if none.")
         var risks: [String]
+
+        @Generable
+        struct Step: Equatable {
+            @Guide(description: "The agent or person the plan assigns this step to, exactly as named (e.g. \"Muse\"). Empty string when the plan names nobody.")
+            var owner: String
+            @Guide(description: "What this step concretely does, 6–14 words using the plan's own specific nouns — NEVER a bare category label like \"Build\" or \"Tests\".")
+            var what: String
+        }
     }
 
     /// Structured read of a finished worker run's log.
@@ -48,11 +59,14 @@ enum DecisionAssist {
         let key = text.hashValue
         if let hit = planCache[key] { return hit }
         let session = LanguageModelSession(instructions: """
-            You summarize software work plans for a human supervisor. Be concrete, \
-            neutral, and faithful to the text — never invent steps, never advise \
-            whether to approve. The plan is the AGENT'S OWN account: attribute its \
-            assertions ("claims", "reports", "proposes") instead of stating them \
-            as established fact — the human has not verified anything yet.
+            You brief a human supervisor deciding whether to APPROVE this plan. \
+            Write so they can reconstruct the plan's shape without reading it: \
+            keep the plan's concrete nouns, name the acting agent for each step \
+            when the plan names one, and surface what gates what — approval \
+            dependencies are the most decision-relevant facts. Be faithful: \
+            never invent steps, never advise whether to approve. The plan is \
+            the AGENT'S OWN account: attribute assertions ("claims", "reports", \
+            "proposes") — the human has verified nothing yet.
             """)
         let response = try await session.respond(
             to: "Summarize this plan:\n\n\(clip(text))",
