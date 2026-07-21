@@ -427,8 +427,10 @@ struct FeedRow: View {
                 }
             }
             if !row.text.isEmpty {
+                // Narration is prose → the skin's display face (Space Grotesk on
+                // Swiss); everything else stays mono like the portal's log.
                 Text(row.text)
-                    .font(row.type == "narrate" ? .system(size: 14) : .system(size: 11.5, design: .monospaced))
+                    .font(row.type == "narrate" ? p.uiFont(14) : .system(size: 11.5, design: .monospaced))
                     .foregroundStyle(row.type == "narrate" ? p.text : tint)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
