@@ -510,20 +510,35 @@ struct RunDetailScreen: View {
     @State private var confirmStop = false
     @State private var pinned = true
 
+    private enum RunPane: String, CaseIterable {
+        case log = "Log", changes = "Changes"
+    }
+
+    @State private var pane: RunPane = .log
+
     var body: some View {
         VStack(spacing: 10) {
             header
+            Picker("View", selection: $pane) {
+                ForEach(RunPane.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
             if run.status != "running" {
                 terminalBanner
             }
             if let note = model.runStreamNote {
                 Banner(kind: .info, text: note)
             }
-            logCard
-            if let error = model.error {
-                Banner(kind: .danger, text: error, action: "Retry") {
-                    model.startRunLog(run)
+            switch pane {
+            case .log:
+                logCard
+                if let error = model.error {
+                    Banner(kind: .danger, text: error, action: "Retry") {
+                        model.startRunLog(run)
+                    }
                 }
+            case .changes:
+                changesPane
             }
         }
         .padding(16)
@@ -566,6 +581,32 @@ struct RunDetailScreen: View {
         let kind: BannerKind = ["killed", "failed", "error"].contains(run.status) ? .danger : .info
         let ago = MobileUx.agoLabel(run.endedAt).map { " · \($0)" } ?? ""
         return Banner(kind: kind, text: "Run \(MobileUx.statusCopy(run.status))\(ago)")
+    }
+
+    /// GitHub-style "Changes" pane — the run's net unified diff, parsed and
+    /// rendered per file with hunks, line numbers, and add/del row tints.
+    @ViewBuilder
+    private var changesPane: some View {
+        if let diff = run.diff, !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            ScrollView {
+                DiffViewer(diff: diff)
+                    .padding(.bottom, 12)
+            }
+        } else if run.status == "running" {
+            OrchaCard {
+                Text("The diff lands when the worker finishes — watch the log meanwhile.")
+                    .font(p.uiFont(13))
+                    .foregroundStyle(p.muted)
+            }
+            Spacer()
+        } else {
+            OrchaCard {
+                Text("No diff captured for this run.")
+                    .font(p.uiFont(13))
+                    .foregroundStyle(p.muted)
+            }
+            Spacer()
+        }
     }
 
     private var logCard: some View {
