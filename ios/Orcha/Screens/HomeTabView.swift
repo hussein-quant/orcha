@@ -71,6 +71,7 @@ struct HomeTabView: View {
                         onDismiss: { model.catchUp = nil }
                     )
                 }
+                WorkspaceBriefCard(digest: WorkspaceDigest.make(snapshot))
                 SectionH(title: "Needs you", count: "\(plans.count + verifs.count + reqs.count)")
                 if plans.isEmpty && verifs.isEmpty && reqs.isEmpty {
                     OrchaCard {

@@ -52,7 +52,6 @@ final class AppModel {
     /// captured once per workspace session when the gap is meaningful. The
     /// Home card narrates the delta against the live snapshot, on-device.
     var catchUp: (previous: String, gapLabel: String)?
-    private var catchUpCaptured = false
 
     // workspace data
     var snapshot: ContainerSnapshot?
@@ -201,23 +200,22 @@ final class AppModel {
         selectedTab = .home
         error = nil
         catchUp = nil
-        catchUpCaptured = false
         Task { await refresh() }
         startPolling()
     }
 
-    /// "Catch me up" bookkeeping: on the first snapshot of a workspace
-    /// session, offer a delta brief when the human was away ≥30 minutes and
-    /// something actually changed; then keep last-seen tracking the live view.
+    /// "Catch me up" bookkeeping — GAP-based, not session-based: last-seen
+    /// saves continuously while the human is looking, so any refresh that
+    /// finds the last save ≥30 minutes old means they were away (backgrounded
+    /// counts — iOS keeps the app alive for hours, and returning never re-runs
+    /// openContainer). Arms the delta card whenever the state also changed.
     private func noteSeen(_ snap: ContainerSnapshot, container: StoredContainer) {
         let digest = WorkspaceDigest.make(snap)
-        if !catchUpCaptured {
-            catchUpCaptured = true
-            if let seen = store.lastSeen(for: container.id),
-               seen.digest != digest,
-               Date.now.timeIntervalSince(seen.at) > 30 * 60 {
-                catchUp = (seen.digest, Self.gapLabel(since: seen.at))
-            }
+        if catchUp == nil,
+           let seen = store.lastSeen(for: container.id),
+           seen.digest != digest,
+           Date.now.timeIntervalSince(seen.at) > 30 * 60 {
+            catchUp = (seen.digest, Self.gapLabel(since: seen.at))
         }
         store.saveLastSeen(digest, for: container.id)
     }
