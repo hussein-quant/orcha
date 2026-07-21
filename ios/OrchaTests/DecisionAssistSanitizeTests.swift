@@ -65,3 +65,13 @@ struct DecisionAssistSanitizeTests {
         #expect(b.risks.count == 1)
     }
 }
+
+extension DecisionAssistSanitizeTests {
+    @Test func thinInputIsNotSummarizable() {
+        guard #available(iOS 26, *) else { return }
+        #expect(!DecisionAssist.isSubstantial("work saved on branch orcha/task-Forge-36a97391-752 (uncommitted, preserved)"))
+        #expect(!DecisionAssist.isSubstantial("  \n"))
+        let real = Array(repeating: "1. Muse delivers the design spec with tokens and nav redesign.", count: 5).joined(separator: "\n")
+        #expect(DecisionAssist.isSubstantial(real))
+    }
+}

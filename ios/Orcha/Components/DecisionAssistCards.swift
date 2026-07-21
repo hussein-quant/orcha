@@ -24,7 +24,7 @@ private struct PlanBriefCore: View {
     @State private var failed = false
 
     var body: some View {
-        if DecisionAssist.isAvailable, !failed {
+        if DecisionAssist.isAvailable, !failed, DecisionAssist.isSubstantial(text) {
             OrchaCard(borderColor: p.accentLine) {
                 AssistHeader(loading: brief == nil)
                 if let brief {
