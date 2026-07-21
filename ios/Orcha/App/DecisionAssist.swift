@@ -35,6 +35,20 @@ enum DecisionAssist {
         }
     }
 
+    /// "Catch me up" — the delta brief. The supervisor's real question on
+    /// returning isn't "what is the state?" but "what CHANGED while I was
+    /// away?" — the model narrates the difference between two workspace
+    /// digests, never the whole state.
+    @Generable
+    struct CatchUp: Equatable {
+        @Guide(description: "One sentence, max 22 words: the most important changes since the human last looked, attributed to the agents.")
+        var headline: String
+        @Guide(description: "The changes since the BEFORE digest, most important first, at most 5 bullets of 8–16 words each with concrete task nouns, attributed (\"finished\", \"reports\", \"posted\"). Only actual differences — never mention unchanged things.")
+        var changes: [String]
+        @Guide(description: "What now waits on the human, one sentence, most important item first. Empty string if nothing waits.")
+        var needsYou: String
+    }
+
     /// Structured read of a finished worker run's log.
     @Generable
     struct RunDigest: Equatable {
@@ -99,6 +113,41 @@ enum DecisionAssist {
         return response.content
     }
 
+    @MainActor private static var catchUpCache: [Int: CatchUp] = [:]
+
+    @MainActor
+    static func catchUp(previous: String, current: String, gap: String) async throws -> CatchUp {
+        var hasher = Hasher()
+        hasher.combine(previous)
+        hasher.combine(current)
+        let key = hasher.finalize()
+        if let hit = catchUpCache[key] { return hit }
+        let session = LanguageModelSession(instructions: """
+            You brief a human supervisor returning to their AI-agent workspace \
+            after being away. Compare BEFORE and NOW and report ONLY what \
+            changed — completions, new plans, new requests, failures, status \
+            moves. Never mention unchanged items. Concrete task nouns, no \
+            filler, no advice. Everything agents report is their own account — \
+            attribute ("finished", "reports", "posted"), don't assert.
+            """)
+        let response = try await session.respond(
+            to: """
+            The human was away for \(gap).
+
+            BEFORE (when they last looked):
+            \(clip(previous, budget: 3000))
+
+            NOW:
+            \(clip(current, budget: 3000))
+
+            What changed?
+            """,
+            generating: CatchUp.self
+        )
+        catchUpCache[key] = response.content
+        return response.content
+    }
+
     /// Cap model input; when over budget keep the head and tail — openings
     /// state intent, endings state outcomes, the middle is usually detail.
     private static func clip(_ text: String, budget: Int = 6000) -> String {
@@ -106,5 +155,60 @@ enum DecisionAssist {
         let head = text.prefix(budget * 2 / 3)
         let tail = text.suffix(budget / 3)
         return head + "\n[…]\n" + tail
+    }
+}
+
+/// Deterministic, compact text digest of a workspace snapshot — what the
+/// catch-up model reads (never raw JSON), and what the app persists as
+/// "last seen". NOT iOS-26-gated: every OS records last-seen so the brief is
+/// ready the day the phone upgrades. Stable ordering keeps comparisons and
+/// cache keys meaningful.
+enum WorkspaceDigest {
+    static func make(_ snap: ContainerSnapshot) -> String {
+        var lines: [String] = []
+        let agents = snap.agents.filter { $0.kind == "ai" }.sorted { $0.alias < $1.alias }
+        for agent in agents {
+            let status = agent.status ?? "idle"
+            let role = agent.role ?? "agent"
+            var line = "AGENT \(agent.alias) (\(role)) status=\(status)"
+            if let run = agent.activeRun {
+                let doing = run.taskTitle ?? run.wakeEvent ?? "a wake"
+                line += " · actively running: \(doing)"
+            } else if let task = agent.currentTask?.title {
+                line += " · current task: \(task)"
+            }
+            lines.append(line)
+        }
+        let tasks = snap.tasks.sorted { $0.id < $1.id }
+        for task in tasks {
+            let assignee = task.assignees.first ?? "unassigned"
+            switch task.status {
+            case "needs_verification":
+                lines.append("AWAITING HUMAN VERIFICATION: \(task.title)")
+            case "in_progress" where task.planMessage != nil && task.planDecision == nil:
+                lines.append("PLAN AWAITING HUMAN APPROVAL: \(task.title)")
+            case "in_progress":
+                lines.append("IN PROGRESS: \(task.title) (\(assignee))")
+            case "blocked", "failed":
+                lines.append("BLOCKED: \(task.title)")
+            case "completed":
+                lines.append("COMPLETED: \(task.title)")
+            default:
+                break
+            }
+            if let last = task.messageSummary?.last {
+                let author = last.authorAlias ?? "system"
+                let body = String(last.body.prefix(160))
+                let title = String(task.title.prefix(40))
+                lines.append("  last update on \"\(title)\" by \(author): \(body)")
+            }
+        }
+        let openRequests = snap.requests.filter { $0.status == "open" }.sorted { $0.id < $1.id }
+        for req in openRequests {
+            let from = req.requesterAlias ?? "agent"
+            let payload = String(req.payload.prefix(120))
+            lines.append("OPEN REQUEST from \(from): \(payload)")
+        }
+        return lines.joined(separator: "\n")
     }
 }

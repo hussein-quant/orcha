@@ -84,6 +84,87 @@ private struct PlanBriefCore: View {
     }
 }
 
+/// "While you were away" — the delta brief on the Home tab: only what CHANGED
+/// since the human's last look, narrated on-device. Dismissable; absent below
+/// iOS 26 or when Apple Intelligence is off.
+struct CatchUpCard: View {
+    let previous: String
+    let current: String
+    let gap: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        if #available(iOS 26, *) {
+            CatchUpCore(previous: previous, current: current, gap: gap, onDismiss: onDismiss)
+        }
+    }
+}
+
+@available(iOS 26, *)
+private struct CatchUpCore: View {
+    @Environment(\.palette) private var p
+    let previous: String
+    let current: String
+    let gap: String
+    let onDismiss: () -> Void
+    @State private var brief: DecisionAssist.CatchUp?
+    @State private var failed = false
+
+    var body: some View {
+        if DecisionAssist.isAvailable, !failed {
+            OrchaCard(borderColor: p.accentLine) {
+                HStack(spacing: 6) {
+                    AssistHeader(loading: brief == nil, title: "WHILE YOU WERE AWAY · \(gap.uppercased())")
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(p.faint)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss catch-up")
+                }
+                if let brief {
+                    Text(brief.headline)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(p.text)
+                    ForEach(brief.changes, id: \.self) { change in
+                        HStack(alignment: .top, spacing: 8) {
+                            Circle()
+                                .fill(p.accent)
+                                .frame(width: 5, height: 5)
+                                .padding(.top, 6)
+                            Text(change)
+                                .font(.system(size: 13))
+                                .foregroundStyle(p.text2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    if !brief.needsYou.trimmingCharacters(in: .whitespaces).isEmpty {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "bell.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(p.warn)
+                                .frame(width: 18, height: 18)
+                            Text(brief.needsYou)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(p.warn)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    AssistFootnote(text: "Made on this iPhone from workspace state — the queue below is the record.")
+                }
+            }
+            .task(id: current) {
+                do { brief = try await DecisionAssist.catchUp(previous: previous, current: current, gap: gap) } catch { failed = true }
+            }
+        }
+    }
+}
+
 /// Digest above a finished run's log (what it did, how it ended).
 struct RunDigestCard: View {
     let feed: [RunFeedRow]
@@ -137,6 +218,7 @@ private struct RunDigestCore: View {
 private struct AssistHeader: View {
     @Environment(\.palette) private var p
     let loading: Bool
+    var title = "DECISION ASSIST · ON-DEVICE"
     @State private var pulse = false
 
     var body: some View {
@@ -147,7 +229,7 @@ private struct AssistHeader: View {
                 .opacity(loading && pulse ? 0.35 : 1)
                 .animation(loading ? .easeInOut(duration: 0.7).repeatForever(autoreverses: true) : nil, value: pulse)
                 .onAppear { pulse = true }
-            Text(loading ? "READING…" : "DECISION ASSIST · ON-DEVICE")
+            Text(loading ? "READING…" : title)
                 .font(.system(size: 10, weight: .bold))
                 .tracking(0.8)
                 .foregroundStyle(p.accent)
