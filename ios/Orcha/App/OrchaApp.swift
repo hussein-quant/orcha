@@ -33,9 +33,10 @@ struct OrchaApp: App {
                     switch url.host {
                     case "needs":
                         if let cid = parts.first { model.openContainer(cid) }
-                    case "task", "request":
+                    case "task", "request", "plan":
                         guard let cid = parts.first, parts.count >= 2 else { return }
                         let id = parts[parts.index(parts.startIndex, offsetBy: 1)]
+                        if url.host == "plan" { model.pendingPlanReview = id }
                         let route: WorkspaceRoute = url.host == "request" ? .request(id) : .task(id)
                         model.openFromNotification(containerId: cid, route: route)
                     default:

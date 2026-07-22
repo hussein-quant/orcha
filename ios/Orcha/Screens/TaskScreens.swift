@@ -29,6 +29,17 @@ struct TaskDetailScreen: View {
         return !task.isRoot && task.status != "completed" && task.status != "cancelled"
     }
 
+    /// Widget plan taps arrive with pendingPlanReview set; auto-present the
+    /// read-first plan sheet once the task is in the snapshot. Cleared even
+    /// when the plan is already decided so a stale tap doesn't re-arm.
+    private func presentPendingPlanIfNeeded() {
+        guard let task, model.pendingPlanReview == task.id else { return }
+        model.pendingPlanReview = nil
+        if task.planMessage != nil, task.planDecision == nil, task.status == "in_progress" {
+            planSheetTask = task
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(spacing: 10) {
@@ -82,6 +93,8 @@ struct TaskDetailScreen: View {
         }
         .sheet(item: $verifySheetTask) { VerifySheet(task: $0) }
         .sheet(item: $planSheetTask) { PlanApprovalSheet(task: $0) }
+        .onAppear { presentPendingPlanIfNeeded() }
+        .onChange(of: task?.id) { presentPendingPlanIfNeeded() }
         .task { await model.loadTaskDetail(taskId) }
         .refreshable {
             await model.refresh()

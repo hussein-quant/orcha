@@ -48,6 +48,9 @@ final class AppModel {
     /// Home tab's navigation path — bound so notification taps can push the
     /// exact task/request screen programmatically.
     var homePath: [WorkspaceRoute] = []
+    /// Widget plan taps (orcha://plan/…) land on the task screen with the
+    /// read-first plan sheet auto-presented; the screen clears this once shown.
+    var pendingPlanReview: String?
     /// "Catch me up": the digest from the human's LAST look + how long ago,
     /// captured once per workspace session when the gap is meaningful. The
     /// Home card narrates the delta against the live snapshot, on-device.

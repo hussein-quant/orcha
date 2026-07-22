@@ -68,7 +68,13 @@ private func deepLink(_ workspace: WidgetWorkspace?) -> URL? {
 }
 
 private func itemLink(_ item: WidgetItem, in workspace: WidgetWorkspace) -> URL {
-    let host = item.kind == "request" ? "request" : "task"
+    // Plans get their own host: the app auto-presents the read-first plan
+    // sheet, so a tap means "show me the plan", never "approve it".
+    let host = switch item.kind {
+    case "request": "request"
+    case "plan": "plan"
+    default: "task"
+    }
     return URL(string: "orcha://\(host)/\(workspace.id)/\(item.id)")
         ?? URL(string: "orcha://needs/\(workspace.id)")!
 }
@@ -291,7 +297,9 @@ struct GlanceView: View {
                 }
                 AgentDots(agents: w.agents)
                 ForEach(w.topItems.prefix(2)) { item in
-                    ItemRow(item: item)
+                    Link(destination: itemLink(item, in: w)) {
+                        ItemRow(item: item)
+                    }
                 }
                 if let headline = w.headline, !headline.isEmpty {
                     HStack(alignment: .top, spacing: 5) {
