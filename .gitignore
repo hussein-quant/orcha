@@ -257,3 +257,5 @@ docs/_local/*
 tools/efficiency/baselines/*.json
 tools/efficiency/baselines/**/*.json
 ios/project.local.yml
+ios/dd/
+ios/dd-sim/
