@@ -491,6 +491,33 @@ class OrchaViewModel(application: Application) : AndroidViewModel(application) {
             }.onFailure { err ->
                 _uiState.update { it.copy(loading = false, error = friendlyConnectionError(err)) }
             }
+            // a run opened while running carries no diff on its stale row — Refresh
+            // must also re-pull the row, not just the buffered stream text
+            if (run.diff == null) refreshRunRow(selected.baseUrl, agentId, run)
+        }
+    }
+
+    /**
+     * Re-fetch a finished run's row (task runs when the run belongs to a task, agent
+     * runs otherwise) and swap it into selectedRun + both run lists — the diff and
+     * final exit metadata only exist server-side after the worker exits.
+     */
+    private suspend fun refreshRunRow(baseUrl: String, agentId: String, run: RunDto) {
+        val fresh = runCatching {
+            val fromTask = run.taskId?.let { tid ->
+                api.getTaskRuns(baseUrl, tid).runs.firstOrNull { it.runId == run.runId }
+            }
+            fromTask
+                ?: api.getAgentRuns(baseUrl, agentId).runs.firstOrNull { it.runId == run.runId }
+                ?: runCatching { api.getResidentRuns(baseUrl, agentId).runs }.getOrDefault(emptyList())
+                    .firstOrNull { it.runId == run.runId }
+        }.getOrNull() ?: return
+        _uiState.update { st ->
+            st.copy(
+                selectedRun = if (st.selectedRun?.runId == run.runId) fresh else st.selectedRun,
+                taskRuns = st.taskRuns.map { if (it.runId == fresh.runId) fresh else it },
+                agentRuns = st.agentRuns.map { if (it.runId == fresh.runId) fresh else it },
+            )
         }
     }
 
@@ -538,6 +565,9 @@ class OrchaViewModel(application: Application) : AndroidViewModel(application) {
                             runStreamNote = null,
                         )
                     }
+                    // the server saves the run's diff only at exit — re-pull the row so the
+                    // Changes pane fills in without leaving and reopening the screen
+                    refreshRunRow(baseUrl, agentId, run)
                     return
                 }
                 else -> { // connection dropped (or errored) without a terminal frame

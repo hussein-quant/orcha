@@ -64,6 +64,10 @@ object DiffParser {
 
             if (!inHunk) {
                 when {
+                    // "\ No newline at end of file" after the hunk's LAST counted line
+                    // arrives with both counts exhausted — it still belongs to the hunk.
+                    line.startsWith("\\") && hunkLines != null ->
+                        hunkLines!!.add(DiffLine(DiffLine.Kind.Meta, null, null, line))
                     line.startsWith("diff --git") -> {
                         closeFile()
                         current = FileBuilder(gitPath(line))

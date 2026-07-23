@@ -76,6 +76,22 @@ class DiffParserTest {
     }
 
     @Test
+    fun trailingNoNewlineMarkerStaysInHunk() {
+        val diff = """
+            diff --git a/x b/x
+            --- a/x
+            +++ b/x
+            @@ -1,1 +1,1 @@
+            -old
+            +new
+            \ No newline at end of file
+        """.trimIndent()
+        val lines = DiffParser.parse(diff)[0].hunks[0].lines
+        assertEquals(DiffLine.Kind.Meta, lines.last().kind)
+        assertEquals("\\ No newline at end of file", lines.last().text)
+    }
+
+    @Test
     fun emptyAndBinaryDiffs() {
         assertTrue(DiffParser.parse("").isEmpty())
         val bin = DiffParser.parse(
