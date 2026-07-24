@@ -21,13 +21,14 @@ private struct PlanBriefCore: View {
     @Environment(\.palette) private var p
     let text: String
     @State private var brief: DecisionAssist.PlanBrief?
-    @State private var failed = false
+    @State private var loadedText = ""
+    @State private var failedText: String?
 
     var body: some View {
-        if DecisionAssist.isAvailable, !failed, DecisionAssist.isSubstantial(text) {
+        if DecisionAssist.isAvailable, failedText != text, DecisionAssist.isSubstantial(text) {
             OrchaCard(borderColor: p.accentLine) {
-                AssistHeader(loading: brief == nil)
-                if let brief {
+                AssistHeader(loading: loadedText != text)
+                if let brief, loadedText == text {
                     Text(brief.tldr)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(p.text)
@@ -72,7 +73,7 @@ private struct PlanBriefCore: View {
                 }
             }
             .task(id: text) {
-                do { brief = try await DecisionAssist.planBrief(for: text) } catch { failed = true }
+                await loadBrief(for: text)
             }
         }
     }
@@ -81,6 +82,21 @@ private struct PlanBriefCore: View {
         let owner = step.owner.trimmingCharacters(in: .whitespaces)
         guard !owner.isEmpty else { return Text("") }
         return Text("\(owner) — ").fontWeight(.semibold)
+    }
+
+    private func loadBrief(for input: String) async {
+        guard loadedText != input else { return }
+        brief = nil
+        failedText = nil
+        do {
+            let generated = try await DecisionAssist.planBrief(for: input)
+            guard text == input else { return }
+            brief = generated
+            loadedText = input
+        } catch {
+            guard text == input else { return }
+            failedText = input
+        }
     }
 }
 
@@ -102,10 +118,11 @@ private struct WorkspaceBriefCore: View {
     let digest: String
     @State private var expanded = false
     @State private var brief: DecisionAssist.StatusBrief?
-    @State private var failed = false
+    @State private var loadedDigest = ""
+    @State private var failedDigest: String?
 
     var body: some View {
-        if DecisionAssist.isAvailable, !failed, !digest.isEmpty {
+        if DecisionAssist.isAvailable, failedDigest != digest, !digest.isEmpty {
             OrchaCard(borderColor: expanded ? p.accentLine : nil) {
                 Button {
                     withAnimation(.spring(duration: 0.25)) { expanded.toggle() }
@@ -127,7 +144,7 @@ private struct WorkspaceBriefCore: View {
                 }
                 .buttonStyle(.plain)
                 if expanded {
-                    if let brief {
+                    if let brief, loadedDigest == digest {
                         Text(brief.headline)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(p.text)
@@ -161,11 +178,26 @@ private struct WorkspaceBriefCore: View {
                                 .foregroundStyle(p.muted)
                         }
                         .task(id: digest) {
-                            do { brief = try await DecisionAssist.statusBrief(for: digest) } catch { failed = true }
+                            await loadBrief(for: digest)
                         }
                     }
                 }
             }
+        }
+    }
+
+    private func loadBrief(for input: String) async {
+        guard loadedDigest != input else { return }
+        brief = nil
+        failedDigest = nil
+        do {
+            let generated = try await DecisionAssist.statusBrief(for: input)
+            guard digest == input else { return }
+            brief = generated
+            loadedDigest = input
+        } catch {
+            guard digest == input else { return }
+            failedDigest = input
         }
     }
 }
@@ -194,13 +226,18 @@ private struct CatchUpCore: View {
     let gap: String
     let onDismiss: () -> Void
     @State private var brief: DecisionAssist.CatchUp?
-    @State private var failed = false
+    @State private var loadedKey = ""
+    @State private var failedKey: String?
+
+    private var inputKey: String {
+        previous + "\n---\n" + current + "\n---\n" + gap
+    }
 
     var body: some View {
-        if DecisionAssist.isAvailable, !failed {
+        if DecisionAssist.isAvailable, failedKey != inputKey {
             OrchaCard(borderColor: p.accentLine) {
                 HStack(spacing: 6) {
-                    AssistHeader(loading: brief == nil, title: "WHILE YOU WERE AWAY · \(gap.uppercased())")
+                    AssistHeader(loading: loadedKey != inputKey, title: "WHILE YOU WERE AWAY · \(gap.uppercased())")
                     Button {
                         onDismiss()
                     } label: {
@@ -213,7 +250,7 @@ private struct CatchUpCore: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("Dismiss catch-up")
                 }
-                if let brief {
+                if let brief, loadedKey == inputKey {
                     Text(brief.headline)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(p.text)
@@ -244,9 +281,24 @@ private struct CatchUpCore: View {
                     AssistFootnote(text: "Made on this iPhone from workspace state — the queue below is the record.")
                 }
             }
-            .task(id: current) {
-                do { brief = try await DecisionAssist.catchUp(previous: previous, current: current, gap: gap) } catch { failed = true }
+            .task(id: inputKey) {
+                await loadBrief(for: inputKey, previous: previous, current: current, gap: gap)
             }
+        }
+    }
+
+    private func loadBrief(for key: String, previous: String, current: String, gap: String) async {
+        guard loadedKey != key else { return }
+        brief = nil
+        failedKey = nil
+        do {
+            let generated = try await DecisionAssist.catchUp(previous: previous, current: current, gap: gap)
+            guard inputKey == key else { return }
+            brief = generated
+            loadedKey = key
+        } catch {
+            guard inputKey == key else { return }
+            failedKey = key
         }
     }
 }
@@ -267,13 +319,20 @@ private struct RunDigestCore: View {
     @Environment(\.palette) private var p
     let feed: [RunFeedRow]
     @State private var digest: DecisionAssist.RunDigest?
-    @State private var failed = false
+    @State private var loadedFeedKey = ""
+    @State private var failedFeedKey: String?
+
+    private var feedKey: String {
+        feed.map { row in
+            [row.type, row.label, row.text, row.detail ?? ""].joined(separator: "\u{1F}")
+        }.joined(separator: "\u{1E}")
+    }
 
     var body: some View {
-        if DecisionAssist.isAvailable, !failed, !feed.isEmpty {
+        if DecisionAssist.isAvailable, failedFeedKey != feedKey, !feed.isEmpty {
             OrchaCard(borderColor: p.accentLine) {
-                AssistHeader(loading: digest == nil)
-                if let digest {
+                AssistHeader(loading: loadedFeedKey != feedKey)
+                if let digest, loadedFeedKey == feedKey {
                     ForEach(digest.didPoints, id: \.self) { point in
                         HStack(alignment: .top, spacing: 8) {
                             Circle()
@@ -292,9 +351,24 @@ private struct RunDigestCore: View {
                     AssistFootnote(text: "Made on this iPhone from the run log — the log below is the record.")
                 }
             }
-            .task(id: feed.count) {
-                do { digest = try await DecisionAssist.runDigest(for: feed) } catch { failed = true }
+            .task(id: feedKey) {
+                await loadDigest(for: feed, key: feedKey)
             }
+        }
+    }
+
+    private func loadDigest(for inputFeed: [RunFeedRow], key: String) async {
+        guard loadedFeedKey != key else { return }
+        digest = nil
+        failedFeedKey = nil
+        do {
+            let generated = try await DecisionAssist.runDigest(for: inputFeed)
+            guard feedKey == key else { return }
+            digest = generated
+            loadedFeedKey = key
+        } catch {
+            guard feedKey == key else { return }
+            failedFeedKey = key
         }
     }
 }
