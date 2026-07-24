@@ -16,6 +16,18 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
 
     /// Assigned by the app root so notification taps can drive navigation.
     weak var model: AppModel?
+    /// A tap that arrived before the app root attached the model (cold launch
+    /// delivers the notification response before any view's `.task` runs).
+    private var pendingRoute: (containerId: String, route: WorkspaceRoute)?
+
+    /// App-root handshake: attach the model, then replay a tap that raced it.
+    func attach(_ model: AppModel) {
+        self.model = model
+        if let pending = pendingRoute {
+            pendingRoute = nil
+            model.openFromNotification(containerId: pending.containerId, route: pending.route)
+        }
+    }
 
     // MARK: permission
 
@@ -71,11 +83,14 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
     func sweepAndNotify() async {
         guard ContainerStore().loadNotificationsEnabled() else { return }
         let api = OrchaApiClient()
+        let paired = ContainerStore().load()
         var items: [Item] = []
-        for stored in ContainerStore().load() {
+        var fetched = Set<String>()      // container ids whose snapshot answered
+        for stored in paired {
             guard !Task.isCancelled else { return }
             let snap = await Self.fetchSnapshot(api, stored)
             guard let snap else { continue }
+            fetched.insert(stored.id)
             items.append(contentsOf: Self.needsYou(snap, container: stored))
         }
         let seen = Set(UserDefaults.standard.stringArray(forKey: Self.seenKey) ?? [])
@@ -92,10 +107,19 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
             ]
             try? await center.add(UNNotificationRequest(identifier: item.key, content: content, trigger: nil))
         }
-        // Seen = everything currently pending (bounded by live items, so it can't
-        // grow without limit; resolved items fall out and may re-notify if they
-        // ever come back — which is the correct behavior for a re-opened gate).
-        UserDefaults.standard.set(items.map(\.key), forKey: Self.seenKey)
+        // Seen = everything currently pending, pruned per container and only for
+        // containers that actually answered this sweep (bounded by live items, so
+        // it can't grow without limit; resolved items fall out and may re-notify
+        // if they ever come back — which is the correct behavior for a re-opened
+        // gate). An unreachable container keeps its prior keys, or its already-
+        // seen items would re-alert on the next successful fetch; keys for
+        // since-forgotten containers are dropped.
+        let pairedIds = Set(paired.map(\.id))
+        let kept = seen.filter { key in
+            let cid = String(key.prefix(while: { $0 != "|" }))
+            return pairedIds.contains(cid) && !fetched.contains(cid)
+        }
+        UserDefaults.standard.set(Array(kept) + items.map(\.key), forKey: Self.seenKey)
         try? await center.setBadgeCount(items.count)
     }
 
@@ -165,7 +189,11 @@ final class NotificationCoordinator: NSObject, UNUserNotificationCenterDelegate 
         else { return }
         await MainActor.run {
             let route: WorkspaceRoute = kind == "request" ? .request(id) : .task(id)
-            self.model?.openFromNotification(containerId: cid, route: route)
+            if let model = self.model {
+                model.openFromNotification(containerId: cid, route: route)
+            } else {
+                self.pendingRoute = (cid, route)   // cold launch — replayed by attach()
+            }
         }
     }
 

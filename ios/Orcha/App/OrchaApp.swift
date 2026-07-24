@@ -18,7 +18,7 @@ struct OrchaApp: App {
                 .environment(model)
                 .preferredColorScheme(model.themeMode.colorScheme)
                 .tint(Palette.current(model.themeMode, skin: model.skinMode).accent)
-                .task { NotificationCoordinator.shared.model = model }
+                .task { NotificationCoordinator.shared.attach(model) }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background, model.notificationsEnabled {
                         NotificationCoordinator.scheduleAppRefresh()

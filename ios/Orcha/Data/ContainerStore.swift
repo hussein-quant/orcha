@@ -12,8 +12,9 @@ struct StoredContainer: Codable, Identifiable, Equatable {
     /// held now so the exchange has it once that ships). Absent for manual entry.
     var pairingToken: String?
     /// Opt-in second address (typically the computer's Tailscale name/IP) tried
-    /// when `baseUrl` doesn't answer; on success the two swap so the working
-    /// path stays active. Nil = local-only, the default.
+    /// when `baseUrl` doesn't answer; on success the working path stays active
+    /// for the session (in memory only — the configured addresses here never
+    /// change). Nil = local-only, the default.
     var remoteBaseUrl: String?
     var lastOpenedAt: Date = .now
 
