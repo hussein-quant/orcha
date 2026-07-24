@@ -111,6 +111,9 @@ def test_agents_model_control_posts_ids_not_labels():
     # the curated list is the source of truth + a real curated id is present (not just labels)
     assert "/api/models" in html, "doesn't fetch the canonical model list"
     assert "claude-opus-4-8" in html, "no curated model id (would 400 on every click)"
+    assert 'id: "gpt-5.6-terra", name: "GPT-5.6 Terra"' in html
+    assert 'id: "gpt-5.6", name: "GPT-5.6"' not in html
+    assert "gpt-5.6-tera" not in html
 
 
 def test_agents_model_control_filters_by_provider_runtime():
