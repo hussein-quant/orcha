@@ -45,9 +45,12 @@ final class AppModel {
     /// it differs from the configured `baseUrl` (i.e. the Tailscale remote took
     /// over). Session-only and never written back to the store, so Settings
     /// keeps showing the configured local/remote addresses truthfully. Nil =
-    /// use `baseUrl`. Reset on open/close so every workspace entry retries the
-    /// local address first (the natural switch-back to LAN).
+    /// use `baseUrl`. Reset on open/close, and while remote is active every
+    /// successful refresh re-probes the local address in the background
+    /// (`probeLocalSwitchback`), so coming home to Wi-Fi switches back even
+    /// though the Tailscale path never stopped answering.
     private var activeBaseUrl: String?
+    private var switchbackProbe: Task<Void, Never>?
     var selectedTab: WorkspaceTab = .home
     var themeMode: ThemeMode
     var skinMode: SkinMode
@@ -209,6 +212,7 @@ final class AppModel {
 
     func closeWorkspace() {
         pollTask?.cancel()
+        switchbackProbe?.cancel()
         selectedContainer = nil
         snapshot = nil
         activeBaseUrl = nil
@@ -255,12 +259,13 @@ final class AppModel {
         do {
             let snap = try await api.snapshot(apiBase(sel), sel.id)
             applyRefresh(snap, sel: sel)
+            probeLocalSwitchback(sel)
         } catch {
             // Opt-in remote failover (Tailscale): if the active address didn't
             // answer and the other configured one exists, try it and keep the
-            // working path active for every subsequent call — in memory only,
-            // never rewriting the stored addresses. Symmetric, so it also falls
-            // back to LAN when the remote path is the dead one.
+            // working path active until the local address answers again — in
+            // memory only, never rewriting the stored addresses. Symmetric, so
+            // it also falls back to LAN when the remote path is the dead one.
             let current = apiBase(sel)
             let alternate = [sel.baseUrl, sel.remoteBaseUrl ?? ""]
                 .first { !$0.isEmpty && $0 != current }
@@ -271,6 +276,25 @@ final class AppModel {
                 return
             }
             self.error = friendly(error)
+        }
+    }
+
+    /// The switch-back half of the failover promise ("…and back again the same
+    /// way"): while the remote path is active it keeps answering even at home,
+    /// so waiting for it to fail would leave the app remote forever. Instead,
+    /// each successful remote refresh re-probes the configured local address
+    /// concurrently — off the refresh the user is waiting on, since away from
+    /// home the probe just burns its 10s timeout — and the moment it answers,
+    /// the local path becomes active again.
+    private func probeLocalSwitchback(_ sel: StoredContainer) {
+        guard activeBaseUrl != nil, switchbackProbe == nil else { return }
+        switchbackProbe = Task {
+            defer { switchbackProbe = nil }
+            guard (try? await api.snapshot(sel.baseUrl, sel.id)) != nil else { return }
+            // Only flip if this workspace is still open and still failed over.
+            guard selectedContainer?.id == sel.id, activeBaseUrl != nil else { return }
+            activeBaseUrl = nil
+            toast = "Connected via \(sel.baseUrl)"
         }
     }
 
