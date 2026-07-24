@@ -122,13 +122,19 @@ final class DictationEngine {
             try audioEngine.start()
             try await analyzer.start(inputSequence: inputSequence)
             guard gen == generation else {
-                // A stop()/cancel() while the analyzer was starting already
-                // released the shared refs; finish this orphaned pipeline too.
+                // A cancel()/reset() while the analyzer was starting already
+                // released the shared refs and bumped generation; finish this
+                // orphaned pipeline too.
                 teardownAudio()
                 inputBuilder.finish()
                 Task { try? await analyzer.cancelAndFinishNow() }
                 return
             }
+            // stop() called during .preparing flips state to .finishing but does
+            // NOT bump generation (it owns teardown of this exact pipeline and is
+            // awaiting final results). Resuming here must not resurrect it to
+            // .recording — let stop() finish undisturbed.
+            guard state == .preparing else { return }
             state = .recording
         } catch {
             guard gen == generation else { return }

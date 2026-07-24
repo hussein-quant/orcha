@@ -7,10 +7,14 @@ import SwiftUI
 /// SpeechAnalyzer stack) — earlier OSes simply don't show the mic.
 struct DictationMicButton: View {
     @Binding var text: String
+    /// True while the mic pipeline is live (preparing/recording/finishing). Lifted
+    /// so the composer can block send until dictation stops — otherwise a send
+    /// clears the draft while the engine keeps writing joined(base, live) back in.
+    @Binding var isActive: Bool
 
     var body: some View {
         if #available(iOS 26, *) {
-            DictationMicCore(text: $text)
+            DictationMicCore(text: $text, isActive: $isActive)
         }
     }
 }
@@ -19,6 +23,7 @@ struct DictationMicButton: View {
 private struct DictationMicCore: View {
     @Environment(\.palette) private var p
     @Binding var text: String
+    @Binding var isActive: Bool
     @State private var engine = DictationEngine()
     /// The field's content when dictation started — live results replace
     /// everything after it, and cancel restores it.
@@ -57,6 +62,9 @@ private struct DictationMicCore: View {
         .onChange(of: engine.liveText) { _, live in
             // Words appear in the field as you speak.
             if engine.isActive { text = joined(base, live) }
+        }
+        .onChange(of: engine.isActive, initial: true) { _, active in
+            isActive = active
         }
         .onChange(of: engine.state.failureMessage) { _, message in
             showError = message != nil
