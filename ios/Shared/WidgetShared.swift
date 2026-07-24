@@ -28,6 +28,9 @@ struct WidgetWorkspace: Codable, Identifiable, Hashable {
     /// widget process — widgets can't afford inference); nil when Apple
     /// Intelligence is off or generation failed.
     let headline: String?
+    /// WorkspaceDigest.make(snapshot) for the input that produced `headline`.
+    /// Nil for older state or when there is no current headline.
+    var headlineDigest: String? = nil
     let updatedAt: Date
     /// Top needs-you items, most urgent first. Optional so state written by
     /// older app builds still decodes.

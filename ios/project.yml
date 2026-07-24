@@ -2,20 +2,18 @@
 # docs/design/mobile). Generate with `xcodegen generate`; no Xcode GUI needed.
 #
 # Device runs: signing is OFF by default so CI and cert-less contributors can
-# build. To run on hardware (CLI or Xcode ⌘R), create ios/project.local.yml
-# (gitignored) with your team — target-level settings override the project-level
-# defaults below:
+# build. To run on hardware (CLI or Xcode Command-R), create ios/project.local.yml
+# (gitignored) as a wrapper spec that includes this file and overrides the
+# target-level signing settings:
+#   include:
+#     - project.yml
 #   targets:
 #     Orcha:
 #       settings: {base: {DEVELOPMENT_TEAM: YOURTEAMID, CODE_SIGNING_ALLOWED: "YES"}}
 #     OrchaWidgetsExt:
 #       settings: {base: {DEVELOPMENT_TEAM: YOURTEAMID, CODE_SIGNING_ALLOWED: "YES"}}
-# then re-run `xcodegen generate`.
+# then run `xcodegen generate --spec project.local.yml`.
 name: Orcha
-include:
-  - path: project.local.yml
-    enable: true
-    optional: true
 options:
   bundleIdPrefix: io.openorcha
   deploymentTarget:
