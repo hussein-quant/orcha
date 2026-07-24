@@ -60,6 +60,60 @@ struct DiffParserTests {
         #expect(files[0].hunks[0].lines.last?.text == "+++x")
     }
 
+    @Test func trailingNoNewlineMarkerIsKeptAsMeta() {
+        // The "\ No newline at end of file" marker after the hunk's LAST counted
+        // line arrives with both counts exhausted — it still belongs to the hunk.
+        let diff = """
+        diff --git a/x b/x
+        --- a/x
+        +++ b/x
+        @@ -1,1 +1,1 @@
+        -old
+        +new
+        \\ No newline at end of file
+        """
+        let lines = DiffParser.parse(diff)[0].hunks[0].lines
+        #expect(lines.last?.kind == .meta)
+        #expect(lines.last?.text == "\\ No newline at end of file")
+    }
+
+    @Test func truncationMarkerAfterCompletedHunkIsKeptAsMeta() {
+        let diff = """
+        diff --git a/x b/x
+        --- a/x
+        +++ b/x
+        @@ -1,1 +1,1 @@
+        -old
+        +new
+        ...[diff truncated]...
+        """
+        let files = DiffParser.parse(diff)
+        #expect(files.count == 1)
+        let last = files[0].hunks[0].lines.last
+        #expect(last?.kind == .meta)
+        #expect(last?.text == "...[diff truncated]...")
+    }
+
+    @Test func truncationMarkerMidHunkIsKeptVerbatimAsMeta() {
+        // Cap landed inside the hunk: declared counts are not yet exhausted when
+        // the marker arrives — it must not become a context line with fake numbers.
+        let diff = """
+        diff --git a/x b/x
+        --- a/x
+        +++ b/x
+        @@ -1,3 +1,3 @@
+         keep
+        -old
+        ...[diff truncated]...
+        """
+        let lines = DiffParser.parse(diff)[0].hunks[0].lines
+        let last = lines.last
+        #expect(last?.kind == .meta)
+        #expect(last?.text == "...[diff truncated]...")
+        #expect(last?.oldNo == nil && last?.newNo == nil)
+        #expect(lines.filter { $0.kind == .meta }.count == 1)
+    }
+
     @Test func emptyAndBinaryDiffs() {
         #expect(DiffParser.parse("").isEmpty)
         let bin = DiffParser.parse("""

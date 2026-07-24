@@ -34,6 +34,10 @@ struct DiffLine: Identifiable {
 }
 
 enum DiffParser {
+    // The backend caps captured run diffs and appends this on its own final line
+    // (notifier._capture_diff); it must survive parsing wherever the cap lands.
+    private static let truncationMarker = "...[diff truncated]..."
+
     /// Parse a unified git diff. Hunk content is consumed by the declared
     /// old/new line counts, so content lines that happen to start with
     /// "---"/"+++" are never mistaken for file headers.
@@ -59,6 +63,27 @@ enum DiffParser {
             let inHunk = hunk != nil && (oldRemain > 0 || newRemain > 0)
 
             if !inHunk {
+                // "\ No newline at end of file" after the hunk's LAST counted line
+                // arrives with both counts exhausted — it still belongs to the hunk.
+                if line.hasPrefix("\\"), hunk != nil {
+                    lineId += 1
+                    hunk!.lines.append(DiffLine(id: lineId, kind: .meta, oldNo: nil, newNo: nil, text: line))
+                    continue
+                }
+                // Truncation cap landed after a completed hunk (or between files) —
+                // keep the warning visible instead of dropping it as prose.
+                if line == truncationMarker {
+                    lineId += 1
+                    let meta = DiffLine(id: lineId, kind: .meta, oldNo: nil, newNo: nil, text: line)
+                    if hunk != nil {
+                        hunk!.lines.append(meta)
+                    } else {
+                        if current == nil { current = DiffFile(id: files.count, path: "changes") }
+                        current!.hunks.append(DiffHunk(id: hunkId, header: "", lines: [meta]))
+                        hunkId += 1
+                    }
+                    continue
+                }
                 if line.hasPrefix("diff --git") {
                     closeFile()
                     current = DiffFile(id: files.count, path: gitPath(line))
@@ -93,7 +118,11 @@ enum DiffParser {
 
             // inside a hunk — classify by prefix, count down the declared sizes
             lineId += 1
-            if line.hasPrefix("+") {
+            if line == truncationMarker {
+                // Truncation cap landed mid-hunk: keep the marker verbatim as meta —
+                // the context fallback would eat its first "." and fake line numbers.
+                hunk!.lines.append(DiffLine(id: lineId, kind: .meta, oldNo: nil, newNo: nil, text: line))
+            } else if line.hasPrefix("+") {
                 newRemain -= 1
                 current!.adds += 1
                 hunk!.lines.append(DiffLine(id: lineId, kind: .add, oldNo: nil, newNo: newNo, text: String(line.dropFirst())))
