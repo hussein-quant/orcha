@@ -30,7 +30,7 @@ struct OrchaProvider: TimelineProvider {
         OrchaEntry(
             date: .now,
             all: [WidgetWorkspace(
-                id: "placeholder", name: "Quantal EHR", verify: 2, plans: 1, escalations: 0,
+                id: "placeholder", name: "Orcha Release", verify: 2, plans: 1, escalations: 0,
                 agents: [
                     WidgetAgent(alias: "Forge", status: "working"),
                     WidgetAgent(alias: "Muse", status: "idle"),
