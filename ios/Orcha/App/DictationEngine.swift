@@ -31,6 +31,11 @@ final class DictationEngine {
     private var inputBuilder: AsyncStream<AnalyzerInput>.Continuation?
     private var resultsTask: Task<Void, Never>?
     private var levelThrottle = 0
+    /// Bumped every time the pipeline is torn down. A suspended start() (or a
+    /// lingering results reader) compares its captured value against this after
+    /// every await: an explicit stop/cancel while it slept means it must bail
+    /// instead of resurrecting the mic.
+    private var generation = 0
 
     var isActive: Bool {
         state == .preparing || state == .recording || state == .finishing
@@ -43,16 +48,20 @@ final class DictationEngine {
 
     func start() async {
         guard state == .idle || state.isFailure else { return }
+        let gen = generation
         state = .preparing
         finalized = ""
         volatile = ""
 
         guard await AVAudioApplication.requestRecordPermission() else {
+            guard gen == generation else { return }
             state = .failed("Microphone access is off for Orcha — enable it in iOS Settings.")
             return
         }
+        guard gen == generation else { return }
         do {
             let locale = await Self.usableLocale()
+            guard gen == generation else { return }
             let transcriber = SpeechTranscriber(
                 locale: locale,
                 transcriptionOptions: [],
@@ -64,12 +73,15 @@ final class DictationEngine {
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
                 try await request.downloadAndInstall()
             }
+            guard gen == generation else { return }
             let analyzer = SpeechAnalyzer(modules: [transcriber])
             self.analyzer = analyzer
             guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
-                state = .failed("On-device dictation isn't available for this language yet.")
+                guard gen == generation else { return }
+                tearDownPipeline(endingIn: .failed("On-device dictation isn't available for this language yet."))
                 return
             }
+            guard gen == generation else { return }
 
             let (inputSequence, inputBuilder) = AsyncStream.makeStream(of: AnalyzerInput.self)
             self.inputBuilder = inputBuilder
@@ -77,7 +89,7 @@ final class DictationEngine {
             resultsTask = Task { [weak self] in
                 do {
                     for try await result in transcriber.results {
-                        guard let self else { return }
+                        guard let self, self.generation == gen else { return }
                         let text = String(result.text.characters)
                         if result.isFinal {
                             self.finalized += text
@@ -87,7 +99,8 @@ final class DictationEngine {
                         }
                     }
                 } catch {
-                    self?.state = .failed("Dictation stopped: \(error.localizedDescription)")
+                    guard let self, self.generation == gen else { return }
+                    self.state = .failed("Dictation stopped: \(error.localizedDescription)")
                 }
             }
 
@@ -108,10 +121,18 @@ final class DictationEngine {
             audioEngine.prepare()
             try audioEngine.start()
             try await analyzer.start(inputSequence: inputSequence)
+            guard gen == generation else {
+                // A stop()/cancel() while the analyzer was starting already
+                // released the shared refs; finish this orphaned pipeline too.
+                teardownAudio()
+                inputBuilder.finish()
+                Task { try? await analyzer.cancelAndFinishNow() }
+                return
+            }
             state = .recording
         } catch {
-            teardownAudio()
-            state = .failed("Couldn't start dictation: \(error.localizedDescription)")
+            guard gen == generation else { return }
+            tearDownPipeline(endingIn: .failed("Couldn't start dictation: \(error.localizedDescription)"))
         }
     }
 
@@ -130,16 +151,15 @@ final class DictationEngine {
     }
 
     func cancel() {
-        teardownAudio()
-        inputBuilder?.finish()
-        resultsTask?.cancel()
-        Task { [analyzer] in try? await analyzer?.cancelAndFinishNow() }
-        reset()
+        tearDownPipeline(endingIn: .idle)
+        finalized = ""
+        volatile = ""
     }
 
     // MARK: internals
 
     private func reset() {
+        generation += 1
         analyzer = nil
         transcriber = nil
         inputBuilder = nil
@@ -148,6 +168,25 @@ final class DictationEngine {
         volatile = ""
         level = 0
         state = .idle
+    }
+
+    /// Full pipeline teardown for every non-graceful exit: stops the audio tap,
+    /// finishes the input stream, cancels the results reader, finishes the
+    /// analyzer, clears the refs, and bumps `generation` so anything still
+    /// suspended on this pipeline bails. `end` preserves a visible failure
+    /// (or `.idle` for cancel).
+    private func tearDownPipeline(endingIn end: State) {
+        generation += 1
+        teardownAudio()
+        inputBuilder?.finish()
+        resultsTask?.cancel()
+        Task { [analyzer] in try? await analyzer?.cancelAndFinishNow() }
+        analyzer = nil
+        transcriber = nil
+        inputBuilder = nil
+        resultsTask = nil
+        level = 0
+        state = end
     }
 
     private func teardownAudio() {
