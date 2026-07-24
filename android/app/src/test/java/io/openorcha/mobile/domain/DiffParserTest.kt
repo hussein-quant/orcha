@@ -92,6 +92,46 @@ class DiffParserTest {
     }
 
     @Test
+    fun truncationMarkerAfterCompletedHunkIsKeptAsMeta() {
+        val diff = """
+            diff --git a/x b/x
+            --- a/x
+            +++ b/x
+            @@ -1,1 +1,1 @@
+            -old
+            +new
+            ...[diff truncated]...
+        """.trimIndent()
+        val files = DiffParser.parse(diff)
+        assertEquals(1, files.size)
+        val last = files[0].hunks[0].lines.last()
+        assertEquals(DiffLine.Kind.Meta, last.kind)
+        assertEquals("...[diff truncated]...", last.text)
+    }
+
+    @Test
+    fun truncationMarkerMidHunkIsKeptVerbatimAsMeta() {
+        // Cap landed inside the hunk: declared counts are not yet exhausted when
+        // the marker arrives — it must not become a Context line with fake numbers.
+        val diff = """
+            diff --git a/x b/x
+            --- a/x
+            +++ b/x
+            @@ -1,3 +1,3 @@
+             keep
+            -old
+            ...[diff truncated]...
+        """.trimIndent()
+        val lines = DiffParser.parse(diff)[0].hunks[0].lines
+        val last = lines.last()
+        assertEquals(DiffLine.Kind.Meta, last.kind)
+        assertEquals("...[diff truncated]...", last.text)
+        assertEquals(null, last.oldNo)
+        assertEquals(null, last.newNo)
+        assertEquals(1, lines.count { it.kind == DiffLine.Kind.Meta })
+    }
+
+    @Test
     fun emptyAndBinaryDiffs() {
         assertTrue(DiffParser.parse("").isEmpty())
         val bin = DiffParser.parse(

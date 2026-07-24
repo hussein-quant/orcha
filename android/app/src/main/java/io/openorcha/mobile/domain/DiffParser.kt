@@ -29,6 +29,10 @@ data class DiffFile(
 
 object DiffParser {
 
+    // The backend caps captured run diffs and appends this on its own final line
+    // (notifier._capture_diff); it must survive parsing wherever the cap lands.
+    private const val TRUNCATION_MARKER = "...[diff truncated]..."
+
     private class FileBuilder(var path: String) {
         var isBinary = false
         var adds = 0
@@ -68,6 +72,18 @@ object DiffParser {
                     // arrives with both counts exhausted — it still belongs to the hunk.
                     line.startsWith("\\") && hunkLines != null ->
                         hunkLines!!.add(DiffLine(DiffLine.Kind.Meta, null, null, line))
+                    // Truncation cap landed after a completed hunk (or between files) —
+                    // keep the warning visible instead of dropping it as prose.
+                    line == TRUNCATION_MARKER -> {
+                        val meta = DiffLine(DiffLine.Kind.Meta, null, null, line)
+                        when {
+                            hunkLines != null -> hunkLines!!.add(meta)
+                            else -> {
+                                if (current == null) current = FileBuilder("changes")
+                                current!!.hunks.add(DiffHunk("", listOf(meta)))
+                            }
+                        }
+                    }
                     line.startsWith("diff --git") -> {
                         closeFile()
                         current = FileBuilder(gitPath(line))
@@ -100,6 +116,10 @@ object DiffParser {
             // inside a hunk — classify by prefix, count down the declared sizes
             val lines = hunkLines!!
             when {
+                // Truncation cap landed mid-hunk: keep the marker verbatim as Meta —
+                // the Context fallback would eat its first "." and fake line numbers.
+                line == TRUNCATION_MARKER ->
+                    lines.add(DiffLine(DiffLine.Kind.Meta, null, null, line))
                 line.startsWith("+") -> {
                     newRemain -= 1
                     current!!.adds += 1
