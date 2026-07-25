@@ -12,12 +12,26 @@ const repoRoot = path.resolve(desktopRoot, '..')
 const src = path.join(repoRoot, 'orcha-cli', 'orcha_cli', 'templates')
 const dst = path.join(desktopRoot, 'resources', 'orcha-templates')
 
-// The portal container imports three shared modules (secret_box/llm_util/digest_curate)
+// The portal container imports shared service modules
 // that sit next to main.py. They live OUTSIDE templates/ in the CLI (orcha_cli/<mod>.py),
 // so bundle them into resources/orcha-templates/portal-shared/; the init engine merges them
 // into the deployed .orcha/portal/ (mirrors the CLI's _install_llm_util). Missing these →
 // portal crashes ModuleNotFoundError on startup.
-const PORTAL_SHARED_MODULES = ['llm_util.py', 'secret_box.py', 'digest_curate.py']
+const PORTAL_SHARED_MODULES = [
+  'llm_util.py',
+  'llm_catalog.py',
+  'llm_decisions.py',
+  'llm_formats.py',
+  'llm_http.py',
+  'llm_observability.py',
+  'llm_providers.py',
+  'llm_stream.py',
+  'llm_vision.py',
+  'secret_box.py',
+  'digest_curate.py',
+  'digest_recalibrate.py',
+  'digest_summary.py'
+]
 const cliPkg = path.join(repoRoot, 'orcha-cli', 'orcha_cli')
 
 if (!existsSync(src)) {
