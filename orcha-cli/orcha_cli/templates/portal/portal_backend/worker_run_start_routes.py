@@ -163,9 +163,17 @@ def list_container_running_runs(cid: str):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (_, cur):
         require_container(cur, cid)
+        # Remote-runner Task 5: `sandbox_container_id` marks a row whose liveness is the
+        # CONTAINER's (docker inspect), not the host pid's — the docker-run client pid dies
+        # with a daemon restart while the detached container keeps working (adoption, §3.3c).
+        # `worktree`/`base_cwd` let the sweep load that run's SandboxConfig for its
+        # max-runtime deadline and reap its per-run api-config file. `log_path` lets the
+        # sweep's finish CAPTURE the adopted run's stream-json output (the run wrote it to
+        # the workspace all along) — without it a re-adopted run finishes output=NULL.
         cur.execute(
             """SELECT wr.run_id, wr.agent_id, wr.pid, wr.wake_kind, wr.wake_event, wr.lane,
-                      wr.started_at
+                      wr.started_at, wr.sandbox_container_id, wr.worktree, wr.base_cwd,
+                      wr.log_path
                  FROM worker_runs wr JOIN agents a ON a.id = wr.agent_id
                 WHERE a.container_id = %s AND wr.status = 'running'
                   AND a.terminated_at IS NULL
@@ -183,6 +191,10 @@ def list_container_running_runs(cid: str):
                 "wake_kind": row["wake_kind"],
                 "wake_event": row["wake_event"],
                 "lane": row["lane"],
+                "sandbox_container_id": row["sandbox_container_id"],
+                "worktree": row["worktree"],
+                "base_cwd": row["base_cwd"],
+                "log_path": row["log_path"],
                 "started_at": (
                     row["started_at"].isoformat() if row["started_at"] else None
                 ),

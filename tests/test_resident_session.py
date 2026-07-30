@@ -1623,6 +1623,38 @@ def test_service_residents_reaps_finished_sidecar_acks_handled(monkeypatch, tmp_
     assert not any(u.endswith("/runs") for u, _ in posts)        # nothing to finish (no run)
 
 
+def test_service_residents_reaps_finished_sidecars_sandbox_container(monkeypatch, tmp_path):
+    """I4 (Task-5 review): a SANDBOX-mode drain sidecar has NO run row (Kedar-locked) and its
+    container is label-EXEMPT from the reaper's orphan pass — so the completion path here is the
+    ONLY place its container + per-run api-config can ever be reclaimed. On sidecar exit the
+    handle's stashed sandbox_container_id must be removed (host-mode sidecars carry None → no-op)."""
+    conv = {"conversation_id": "C1", "agent_id": "A1", "agent_alias": "Vox",
+            "session_id": "sess-9", "pending_human": False, "last_turn_seq": 2,
+            "pending_inbox": 0, "inbox_ack_ts": 30.0}
+    _wire_drain(monkeypatch, active=[conv])
+    removed, removed_cfg = [], []
+    monkeypatch.setattr(notifier._sandbox, "remove",
+                        lambda n, force=False: removed.append((n, force)))
+    monkeypatch.setattr(notifier._sandbox, "remove_api_config",
+                        lambda cwd, n: removed_cfg.append((str(cwd), n)))
+    dead_sidecar = ResidentProc(pid=9999, alive=False)               # exited cleanly
+    live = {"C1": _idle_resident(tmp_path, proc=ResidentProc(),
+                                 sidecar={"proc": dead_sidecar, "log_path": tmp_path / "d.log",
+                                          "hard_deadline": time.time() + 1000, "ack_ts": 30.0,
+                                          "ackable_ids": [],
+                                          "sandbox_container_id": "orcha-run-side1",
+                                          "base_cwd": str(tmp_path)})}
+
+    notifier.service_residents("http://x", "cid", live, base_cwd=str(tmp_path))
+
+    assert live["C1"]["sidecar"] is None                          # handle cleared as before
+    # FORCE-removed (pre-dogfood fix 2): a hard-cap-killed sidecar's container can
+    # still be RUNNING (client SIGKILL doesn't reach it) — plain rm would fail and,
+    # being row-less + orphan-exempt, the container would be immortal.
+    assert removed == [("orcha-run-side1", True)]
+    assert removed_cfg == [(str(tmp_path), "orcha-run-side1")]    # api-config reaped too
+
+
 def test_service_residents_kills_wedged_sidecar_keeps_resident(monkeypatch, tmp_path):
     """#247 B3 §8/§3 + Gate P1a tooth 3: a WEDGED drain sidecar (still alive PAST its own hard deadline)
     is graceful-killed so it can never pin the resident lease open — but the warm resident + its lease are
