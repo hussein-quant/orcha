@@ -10,6 +10,13 @@ missing.
 
 ## [Unreleased]
 
+### Added
+- Sandbox wake mode (opt-in via `orcha sandbox on`): agent wakes run inside
+  isolated, resource-capped Docker containers instead of directly on the host,
+  and survive daemon restarts instead of being orphaned by them. Per-run
+  metering rides the existing `worker_runs` table. New `orcha sandbox`
+  CLI (`on` / `off` / `status` / `build-image`); see `docs/sandbox-mode.md`.
+
 ## [0.5.0] - 2026-07-20
 
 ### Added
