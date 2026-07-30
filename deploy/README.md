@@ -42,6 +42,21 @@ Then `orcha up`.
 
 ## 3. Auth perimeter
 
+**Easy path (recommended)** — on your LAPTOP, one command + one GitHub click:
+
+```bash
+python3 deploy/setup-github.py \
+  --domain orcha.<yourdomain> --acme-email you@example.com \
+  --users <github-usernames> --stack-network orcha-<project>_default
+scp deploy/auth/.env <box>:/opt/orcha-cloud/deploy/auth/.env
+```
+
+This creates a GitHub App via the manifest flow (sign-in now; repo access
+credentials banked for later) and writes a complete .env — no manual OAuth-app
+clicking, no secret copy-pasting.
+
+**Manual path**:
+
 ```bash
 cd orcha-cloud/deploy/auth
 cp .env.example .env && $EDITOR .env          # domain, OAuth app, roster, tokens
