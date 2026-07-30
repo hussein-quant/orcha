@@ -30,7 +30,7 @@ services:
       OAUTH2_PROXY_PROVIDER: github
       OAUTH2_PROXY_CLIENT_ID: ${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID in .env}
       OAUTH2_PROXY_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?set GITHUB_CLIENT_SECRET in .env}
-      OAUTH2_PROXY_COOKIE_SECRET: ${COOKIE_SECRET:?generate: python3 -c "import secrets;print(secrets.token_urlsafe(32))"}
+      OAUTH2_PROXY_COOKIE_SECRET: "${COOKIE_SECRET:?missing COOKIE_SECRET in .env}"
       # The team roster: comma-separated GitHub usernames.
       OAUTH2_PROXY_GITHUB_USERS: ${ALLOWED_GITHUB_USERS:?set ALLOWED_GITHUB_USERS in .env}
       OAUTH2_PROXY_EMAIL_DOMAINS: "*"
