@@ -59,8 +59,8 @@ def start_worker_run(aid: str, body: WorkerRunStart):
             """INSERT INTO worker_runs
                     (agent_id, task_id, wake_kind, wake_event, log_path, pid, runtime,
                      conversation_id, conversation_ack_ts, last_message_path,
-                     worktree, branch, base_cwd, lane, status)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'running')
+                     worktree, branch, base_cwd, lane, sandbox_container_id, status)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'running')
                RETURNING *""",
             (
                 aid,
@@ -77,6 +77,7 @@ def start_worker_run(aid: str, body: WorkerRunStart):
                 body.branch,
                 body.base_cwd,
                 body.lane,
+                body.sandbox_container_id,
             ),
         )
         row = cur.fetchone()
