@@ -74,6 +74,7 @@ from .notifier_worktree_facade import (
     _provision_task_worktree,
     _provision_worktree,
     _reap_dead_pid_resident_runs,
+    _reap_sandbox_artifacts,
     _retire_headless,
     _retire_resident,
     _revoke_embodiment_token,

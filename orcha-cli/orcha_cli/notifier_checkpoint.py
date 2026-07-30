@@ -22,14 +22,16 @@ def checkpoint_and_respawn(
 
     services._kill_worker(process, graceful=True)
     diff = services._capture_diff(worktree)
-    services._finish_run(
+    if services._finish_run(
         api_base,
         worker.get("run_id"),
         "exited",
         0,
         worker.get("log_path"),
         diff,
-    )
+    ):
+        # I4: the OLD wake's container, once stamped
+        services._reap_sandbox_artifacts(worker)
     task_id = _current_task_id(api_base, agent_id, worker, context, services)
 
     services._revoke_or_defer(api_base, worker.get("run_token"))

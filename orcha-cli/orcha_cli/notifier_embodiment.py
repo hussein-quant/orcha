@@ -56,11 +56,15 @@ def finish_run(
     usage_from_log,
     diff=None,
     kill_reason=None,
-) -> None:
-    """Persist a run's terminal output, diff, diagnostic, and token usage."""
+) -> bool:
+    """Persist a run's terminal output, diff, diagnostic, and token usage.
+
+    Returns True iff the finish POST actually landed (I5: the sandbox reaper must
+    only `docker rm` a container AFTER its stamp is durably recorded — a failed
+    POST keeps the exited container as evidence and retries next sweep)."""
     if not run_id:
-        return
-    post_json(
+        return False
+    res = post_json(
         f"{api_base}/api/runs/{run_id}/finish",
         {
             "status": status,
@@ -71,6 +75,35 @@ def finish_run(
             **usage_from_log(log_path),
         },
     )
+    return res is not None
+
+
+def reap_sandbox_artifacts(rec: dict, *, sandbox_mod) -> None:
+    """I4 (Task-5 review): a COMPLETED sandbox wake's container is NOT auto-removed
+    (`docker run` without --rm by design — the reaper owns removal AFTER stamping),
+    so every Popen-completion path must reap the container + its per-run api-config
+    or each finished wake leaks an exited container. `rec` is any in-memory record
+    that carries sandbox_container_id (+ worktree/base_cwd): a live_workers entry,
+    a Codex conversation resident, or a drain-sidecar handle. No-op for host wakes;
+    never raises. Call ONLY after the run's stamp landed (or when there is no run
+    row at all, e.g. the sidecar) — see finish_run's return contract."""
+    sbx = rec.get("sandbox_container_id")
+    if not sbx:
+        return
+    try:
+        # force=True (`docker rm -f`, never -v — volumes are durable state): the
+        # kill paths reach here with a container that may still be RUNNING (the
+        # SIGKILL escalation kills only the docker CLIENT). For a hard-capped
+        # drain sidecar that is fatal with plain rm: row-less + orphan-exempt,
+        # so nothing else would EVER stop it — an immortal running container.
+        # Every caller is post-stamp (or row-less by design), so nothing worth
+        # preserving lives in the container itself.
+        sandbox_mod.remove(sbx, force=True)
+        cwd = rec.get("worktree") or rec.get("base_cwd")
+        if cwd:
+            sandbox_mod.remove_api_config(cwd, sbx)
+    except Exception:
+        pass                                   # cleanup must never take down a reap path
 
 
 def run_pid_alive(pid) -> bool:

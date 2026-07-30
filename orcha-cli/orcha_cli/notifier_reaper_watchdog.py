@@ -63,14 +63,15 @@ def handle_terminal_result(
         )
         return True
     exit_code = 0 if status == "success" else proc.returncode
-    services._finish_run(
+    if services._finish_run(
         api_base,
         worker.get("run_id"),
         drain_status,
         exit_code,
         worker.get("log_path"),
         diff,
-    )
+    ):
+        services._reap_sandbox_artifacts(worker)  # I4: completed (lingering) — reap once stamped
     if worker.get("task_worktree"):
         _save_task_result(api_base, aid, worker, diff, failed_drains, services)
     else:
@@ -130,7 +131,7 @@ def kill_stalled(
     }
     services._kill_worker(proc, graceful=True)
     diff = services._capture_diff(worker.get("worktree"))
-    services._finish_run(
+    if services._finish_run(
         api_base,
         worker.get("run_id"),
         "killed",
@@ -138,7 +139,9 @@ def kill_stalled(
         log_path,
         diff,
         kill_reason=json.dumps(diag),
-    )
+    ):
+        # I4 (force-rm: takes a still-stopping container down with it, post-stamp)
+        services._reap_sandbox_artifacts(worker)
     disposition = services._safe_teardown_worktree(
         worker.get("base_cwd"), worker.get("worktree"), worker.get("branch")
     )
