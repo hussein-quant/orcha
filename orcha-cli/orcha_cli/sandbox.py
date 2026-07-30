@@ -44,6 +44,9 @@ ENV_PASSTHROUGH = (
     "ORCHA_ALIAS", "ORCHA_RUN_TOKEN", "ORCHA_AGENT_RUNTIME",
     "ORCHA_HEADLESS_WORKER", "ORCHA_CONVERSATION_WORKER",
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ORCHA_LLM_API_KEY",
+    # Subscription (BYOC) auth: a `claude setup-token` long-lived OAuth token
+    # reaches the container exactly like an API key does.
+    "CLAUDE_CODE_OAUTH_TOKEN",
 )
 
 

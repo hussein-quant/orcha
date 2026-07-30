@@ -68,20 +68,28 @@ def sandbox_command(args: argparse.Namespace, *, pkg_templates) -> None:
         print(f"pids_limit:       {cfg.pids_limit}")
         print(f"max_runtime_secs: {cfg.max_runtime_secs}")
         print(f"network:          {cfg.network or '(derived from compose)'}")
-        # Pre-dogfood review item 3: the runner container receives provider keys
+        # Pre-dogfood review item 3: the runner container receives provider creds
         # ONLY via spawn's `-e` env passthrough from the DAEMON's environment
-        # (ANTHROPIC_API_KEY / OPENAI_API_KEY / ORCHA_LLM_API_KEY). Host OAuth
-        # login state (claude login / codex login) does NOT reach the container.
-        # A soft warning here, NOT a preflight failure — keys may legitimately
-        # arrive later (e.g. exported by the unit file that starts the daemon).
+        # (ANTHROPIC_API_KEY / OPENAI_API_KEY / ORCHA_LLM_API_KEY, or a
+        # subscription `claude setup-token` CLAUDE_CODE_OAUTH_TOKEN). Interactive
+        # host OAuth login state (claude login / codex login) does NOT reach the
+        # container. A soft warning here, NOT a preflight failure — keys may
+        # legitimately arrive later (e.g. exported by the unit file that starts
+        # the daemon).
         if cfg.enabled and not any(
             os.environ.get(k)
-            for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ORCHA_LLM_API_KEY")
+            for k in (
+                "ANTHROPIC_API_KEY",
+                "OPENAI_API_KEY",
+                "ORCHA_LLM_API_KEY",
+                "CLAUDE_CODE_OAUTH_TOKEN",
+            )
         ):
             print(
                 "WARNING: no provider API key in the daemon environment — "
                 "sandbox wakes will fail auth (export ANTHROPIC_API_KEY / "
-                "OPENAI_API_KEY / ORCHA_LLM_API_KEY where the notifier starts)"
+                "OPENAI_API_KEY / ORCHA_LLM_API_KEY / CLAUDE_CODE_OAUTH_TOKEN "
+                "where the notifier starts)"
             )
         return
 

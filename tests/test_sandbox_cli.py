@@ -94,7 +94,8 @@ def test_sandbox_status_prints_effective_config(tmp_path, monkeypatch, capsys):
     assert str(sandbox.DEFAULT_MAX_RUNTIME_SECS) in out
 
 
-_KEY_VARS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ORCHA_LLM_API_KEY")
+_KEY_VARS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ORCHA_LLM_API_KEY",
+             "CLAUDE_CODE_OAUTH_TOKEN")
 
 
 def _clear_key_env(monkeypatch):
@@ -122,6 +123,20 @@ def test_sandbox_status_no_warning_when_any_provider_key_set(tmp_path, monkeypat
     _make_project(tmp_path, {"sandbox": {"enabled": True}})
     _clear_key_env(monkeypatch)
     monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
+
+    cli.cmd_sandbox(_ns("status"))
+
+    assert "no provider API key" not in capsys.readouterr().out
+
+
+def test_sandbox_status_no_warning_when_subscription_token_set(tmp_path, monkeypatch, capsys):
+    """Subscription (BYOC) auth: a `claude setup-token` CLAUDE_CODE_OAUTH_TOKEN in
+    the daemon env reaches the container via the same `-e` passthrough as an API
+    key — it must silence the creds warning just like one."""
+    monkeypatch.chdir(tmp_path)
+    _make_project(tmp_path, {"sandbox": {"enabled": True}})
+    _clear_key_env(monkeypatch)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
 
     cli.cmd_sandbox(_ns("status"))
 
