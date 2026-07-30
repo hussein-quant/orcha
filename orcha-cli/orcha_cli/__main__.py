@@ -83,6 +83,7 @@ def build_parser() -> argparse.ArgumentParser:
         "enable-hook": cmd_enable_hook,
         "notifier": cmd_notifier,
         "terminal-bridge": cmd_terminal_bridge,
+        "sandbox": cmd_sandbox,
         "pause": cmd_pause,
         "resume": cmd_resume,
         "stop": cmd_stop,
