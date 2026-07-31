@@ -11,6 +11,14 @@ missing.
 ## [Unreleased]
 
 ### Added
+- Metrics page (`/metrics`, in the portal nav): usage and estimated spend per
+  agent — stat cards (est. cost with an honest "estimated, N of M runs reported
+  cost" caption, runs, humanized sandbox compute, tasks completed/verified), a
+  per-agent cost table with a pure-CSS proportion bar, and a daily activity
+  sparkline over a 7/30-day window. Backed by one aggregate endpoint,
+  `GET /api/containers/{cid}/metrics?days=`, which prefers daemon-recorded run
+  usage and falls back to parsing each run's captured stream-json tail
+  (`docs/metrics.md`).
 - Per-device bearer tokens for Orcha Cloud: the iOS app pairs via GitHub OAuth in a
   browser sheet (`/auth/device` mints a token tied to the signed-in member and hands
   it over through the `orcha://` URL scheme), and the perimeter's new wildcard bearer
