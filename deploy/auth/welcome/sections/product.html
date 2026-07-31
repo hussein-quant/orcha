@@ -1,8 +1,8 @@
 <section id="product" class="mk-section pr-root" aria-labelledby="pr-title">
   <div class="pr-wrap">
     <header class="pr-head">
-      <div class="pr-eyebrow">Built for teams</div>
-      <h2 class="pr-title" id="pr-title">Everything you need to run agents you can trust.</h2>
+      <div class="pr-eyebrow">— 02 / Built for teams</div>
+      <h2 class="pr-title" id="pr-title">Everything you need to run agents you can <span class="pr-title-em">trust</span>.</h2>
       <p class="pr-sub">Persistent Claude agents work in your repos — sandboxed, attributable,
       and never merged without a human. The guardrails come standard.</p>
     </header>
@@ -91,8 +91,9 @@
 
   .pr-head { max-width: 720px; margin: 0 auto 48px; text-align: center; }
   .pr-eyebrow {
-    font-size: 12px; font-weight: 700; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--accent-strong);
+    font-family: var(--font-mono);
+    font-size: 12px; font-weight: 500; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent-text);
   }
   .pr-title {
     margin: 14px 0 14px;
@@ -101,6 +102,7 @@
     letter-spacing: -.015em; color: var(--text-primary);
     text-wrap: balance;
   }
+  .pr-title-em { font-style: italic; color: var(--accent-text); }
   .pr-sub {
     font-size: 16px; line-height: 1.55; color: var(--text-secondary);
     max-width: 600px; margin: 0 auto;
@@ -126,7 +128,7 @@
   .pr-glyph {
     display: inline-grid; place-items: center;
     width: 44px; height: 44px; border-radius: var(--radius-xl);
-    background: var(--navy-soft); color: var(--accent-strong);
+    background: var(--gold-soft); color: var(--accent-strong);
     margin-bottom: 18px;
   }
   .pr-glyph svg { width: 22px; height: 22px; }

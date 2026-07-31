@@ -2,6 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- Pre-paint theme resolver — MUST run first, before any CSS, so the correct
+     token set is stamped on <html> with no flash of the wrong theme.
+     Order: URL hint (#light/#dark or ?theme=…) → localStorage 'mk-theme' →
+     prefers-color-scheme (light → light; else dark, the default brand look). -->
+<script>
+(function () {
+  try {
+    var t = null;
+    var h = (location.hash || "").toLowerCase();
+    var q = new URLSearchParams(location.search).get("theme");
+    if (h === "#light" || q === "light") t = "light";
+    else if (h === "#dark" || q === "dark") t = "dark";
+    if (!t) { try { t = localStorage.getItem("mk-theme"); } catch (e) {} }
+    if (t !== "light" && t !== "dark") {
+      t = (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+    }
+    var r = document.documentElement;
+    r.setAttribute("data-theme", t);
+    r.style.colorScheme = t;
+  } catch (e) {
+    document.documentElement.setAttribute("data-theme", "dark");
+  }
+})();
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orcha — AI agents that ship. Humans who decide.</title>
 <meta name="description" content="Open-source multi-agent orchestration. Persistent Claude agents work in your repos, open pull requests as a bot, and stop at needs-verification — a human always makes the merge call. Self-host, bring your own cloud, or Orcha Cloud.">
@@ -11,7 +35,7 @@
 <meta property="og:site_name" content="Orcha">
 <meta property="og:title" content="Orcha — AI agents that ship. Humans who decide.">
 <meta property="og:description" content="Open-source multi-agent orchestration. Sandboxed agents open bot-authored pull requests; a human holds the merge gate. Runs anywhere Docker runs.">
-<meta property="og:url" content="https://orcha.nursoftai.com/welcome">
+<meta property="og:url" content="https://app.orcha.cloud/welcome">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Orcha — AI agents that ship. Humans who decide.">
 <meta name="twitter:description" content="Open-source multi-agent orchestration. Sandboxed agents, bot-authored PRs, and a human merge gate.">
@@ -36,6 +60,16 @@
   font-display: swap;
   src: url("/welcome/fonts/fraunces-var.woff2") format("woff2");
 }
+/* Fraunces ITALIC (ital axis) — real italic for the display-heading accent
+   words. If this file ever fails to load, the browser falls back to a synthetic
+   italic of the normal face, which still reads correctly — never breaks. */
+@font-face {
+  font-family: "Fraunces";
+  font-style: italic;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/welcome/fonts/fraunces-italic-var.woff2") format("woff2");
+}
 @font-face {
   font-family: "Hanken Grotesk";
   font-style: normal;
@@ -51,22 +85,56 @@
   src: url("/welcome/fonts/geistmono-var.woff2") format("woff2");
 }
 
-/* ---- design tokens (exact — every fragment reads these via var()) --------- */
+/* ==========================================================================
+   DESIGN TOKENS — every fragment reads these via var(). Two complete sets:
+   :root carries the DARK set (dark is the default brand look — a warm near-black
+   editorial page with champagne-gold accents); html[data-theme="light"] flips
+   every value to the cream/ink light set. The token NAMES are identical across
+   both modes, so fragments never branch on theme — they just consume tokens.
+   The pre-paint <script> at the top of <head> stamps data-theme before paint.
+   ========================================================================== */
+
+/* ---- DARK set (default) --------------------------------------------------- */
 :root {
-  --ink:#1A1414; --paper:#F4EEE6; --canvas:#F7F4EE;
-  --surface:#FFFFFF; --surface-subtle:#F8F9FA;
-  --navy:#1D4ED8; --navy-press:#1E40AF; --navy-soft:rgba(29,78,216,.10);
-  --accent-strong:#1D4ED8; --accent-strong-press:#1E40AF; --on-accent-strong:#FFFFFF;
-  --success:#10b981; --success-text:#047857; --warning-text:#B45309;
-  --danger:#ef4444;
-  --text-primary:#1A1414; --text-secondary:#4A5568; --text-tertiary:#5F6B7C;
-  --border:#E2E8F0; --border-strong:#CBD5E0;
+  --canvas:#171310; --surface:#1F1A15; --surface-subtle:#241E18; --paper:#26201A;
+  --ink:#F1E9DB;
+  --text-primary:#F1E9DB; --text-secondary:#B3A896; --text-tertiary:#877C6B;
+  --border:#362E24; --border-strong:#4A4033;
+  /* champagne gold — the brand accent (renamed from --navy*) */
+  --gold:#E7C368; --gold-press:#D4AF4F; --gold-soft:rgba(231,195,104,.12);
+  --accent-strong:#E7C368; --accent-strong-press:#D4AF4F; --on-accent-strong:#221B10;
+  /* gold buttons carry INK text (--on-accent-strong), never white. --accent-text
+     is the gold used as TEXT (eyebrows, links, prompts) — legible per mode. */
+  --accent-text:#E7C368;
+  /* semantic status — AA-legible on the dark surfaces */
+  --success:#34D399; --success-text:#4ADE80; --warning-text:#FBBF24;
+  --danger:#FF6B6B;
   --font-serif:"Fraunces","Newsreader",Georgia,serif;
   --font-sans:"Hanken Grotesk",system-ui,-apple-system,sans-serif;
   --font-mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
-  --shadow-card:0 1px 2px rgb(26 20 20 / .05), 0 8px 24px -12px rgb(26 20 20 / .12);
-  --shadow-float:0 24px 60px -24px rgb(26 20 20 / .25);
+  --shadow-card:0 1px 2px rgb(0 0 0 / .32), 0 10px 28px -14px rgb(0 0 0 / .60);
+  --shadow-float:0 30px 70px -28px rgb(0 0 0 / .72);
   --radius-xl:.875rem; --radius-2xl:1.25rem; --radius-3xl:1.75rem;
+  color-scheme: dark;
+}
+
+/* ---- LIGHT set (override) ------------------------------------------------- */
+html[data-theme="light"] {
+  --canvas:#F6F1E7; --surface:#FFFFFF; --surface-subtle:#FAF6ED; --paper:#F0E9DB;
+  --ink:#201A12;
+  --text-primary:#201A12; --text-secondary:#5C5346; --text-tertiary:#6F6656;
+  --border:#E4DCCB; --border-strong:#CFC5AE;
+  /* --gold here is decorative (dots, rules, glyph fills); --accent-strong stays
+     the bright champagne for BUTTON fills (ink text keeps AA); --accent-text is
+     a darkened gold so accent-COLORED text clears AA on cream/paper/white. */
+  --gold:#B8891F; --gold-press:#96700F; --gold-soft:rgba(184,137,31,.12);
+  --accent-strong:#E7C368; --accent-strong-press:#D4AF4F; --on-accent-strong:#221B10;
+  --accent-text:#7A5E12;
+  --success:#10B981; --success-text:#0F7A4A; --warning-text:#8A5A00;
+  --danger:#C43C3C;
+  --shadow-card:0 1px 2px rgb(32 26 18 / .05), 0 8px 24px -12px rgb(32 26 18 / .12);
+  --shadow-float:0 24px 60px -24px rgb(32 26 18 / .22);
+  color-scheme: light;
 }
 
 /* ---- reset / base --------------------------------------------------------- */
@@ -87,7 +155,7 @@ body {
 img, svg { display: block; max-width: 100%; }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; color: inherit; }
-::selection { background: var(--navy); color: var(--paper); }
+::selection { background: var(--gold); color: var(--on-accent-strong); }
 
 /* content column */
 .mk-wrap { width: 100%; max-width: 1120px; margin-inline: auto; padding-inline: 24px; }
@@ -95,14 +163,17 @@ button { font: inherit; color: inherit; }
 /* typography defaults */
 .mk-serif { font-family: var(--font-serif); font-weight: 400; letter-spacing: -.02em; line-height: 1.05; }
 .mk-mono  { font-family: var(--font-mono); }
+/* italic serif flourish — the accent word in a display heading (gold + italic) */
+.mk-italic { font-family: var(--font-serif); font-style: italic; color: var(--accent-text); }
+/* eyebrow labels — small mono uppercase, wide tracking, champagne accent text */
 .mk-eyebrow {
-  display: inline-flex; align-items: center; gap: 9px;
-  font-family: var(--font-sans);
-  font-size: 12px; font-weight: 700; line-height: 1;
-  letter-spacing: .08em; text-transform: uppercase;
-  color: var(--accent-strong);
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px; font-weight: 500; line-height: 1;
+  letter-spacing: .12em; text-transform: uppercase;
+  color: var(--accent-text);
 }
-.mk-eyebrow .mk-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--navy); flex: none; }
+.mk-eyebrow .mk-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); flex: none; }
 
 /* section rhythm — fragments carry .mk-section; shell sets the vertical rhythm */
 .mk-section { padding-block: 96px; scroll-margin-top: 72px; position: relative; }
@@ -112,25 +183,29 @@ button { font: inherit; color: inherit; }
 .mk-btn, .mk-btn-ghost {
   display: inline-flex; align-items: center; justify-content: center; gap: 9px;
   font-family: var(--font-sans); font-size: 15px; font-weight: 600; line-height: 1;
-  padding: 13px 20px; border-radius: 10px;
+  letter-spacing: .01em;
+  padding: 13px 24px; border-radius: 999px;   /* PILL */
   border: 1px solid transparent; cursor: pointer; white-space: nowrap;
   transition: transform .06s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, color .16s ease;
 }
+/* primary — champagne-gold pill with ink text, slight letterspacing */
 .mk-btn {
   background: var(--accent-strong); color: var(--on-accent-strong);
-  box-shadow: 0 1px 2px rgb(26 20 20 / .12);
+  letter-spacing: .02em;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .28);
 }
 .mk-btn:hover { background: var(--accent-strong-press); transform: translateY(-1px); box-shadow: var(--shadow-card); }
 .mk-btn:active { transform: translateY(0); }
+/* ghost — warm thin border, quiet fill */
 .mk-btn-ghost {
   background: var(--surface); color: var(--text-primary);
   border-color: var(--border-strong);
 }
-.mk-btn-ghost:hover { border-color: var(--text-tertiary); transform: translateY(-1px); box-shadow: var(--shadow-card); }
+.mk-btn-ghost:hover { border-color: var(--accent-text); color: var(--text-primary); transform: translateY(-1px); box-shadow: var(--shadow-card); }
 .mk-btn-ghost:active { transform: translateY(0); }
 .mk-btn svg, .mk-btn-ghost svg { width: 18px; height: 18px; }
 
-/* focus-visible rings — consistent 2px navy everywhere */
+/* focus-visible rings — consistent 2px gold everywhere */
 a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--accent-strong); outline-offset: 2px; border-radius: 6px;
 }
@@ -164,7 +239,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   letter-spacing: -.02em; color: var(--text-primary);
   flex: none;
 }
-.mk-wordmark .mk-brand-dot { color: var(--navy); }
+.mk-wordmark .mk-brand-dot { color: var(--gold); }
 
 /* tabs */
 .mk-tabs {
@@ -186,19 +261,37 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-tab.is-active { color: var(--text-primary); }
 .mk-tab.is-active::after {
   content: ""; position: absolute; left: 12px; right: 12px; bottom: 3px;
-  height: 2px; border-radius: 2px; background: var(--navy);
+  height: 2px; border-radius: 2px; background: var(--gold);
 }
 
-.mk-nav-right { flex: none; display: flex; align-items: center; gap: 10px; }
-/* sign-in is deliberately de-emphasized — ghost, quiet */
+.mk-nav-right { flex: none; display: flex; align-items: center; gap: 8px; }
+/* sign-in is deliberately de-emphasized — ghost, quiet, pill */
 .mk-signin {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 15px; border-radius: 9px;
+  padding: 8px 15px; border-radius: 999px;
   font-size: 14px; font-weight: 600; color: var(--text-secondary);
   border: 1px solid var(--border-strong); background: transparent;
   transition: color .16s ease, border-color .16s ease, background .16s ease;
 }
-.mk-signin:hover { color: var(--text-primary); border-color: var(--text-tertiary); background: var(--surface); }
+.mk-signin:hover { color: var(--text-primary); border-color: var(--accent-text); background: var(--surface); }
+
+/* theme toggle — sun/moon swap, warm hairline pill; sits right of sign-in */
+.mk-theme-toggle {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: none;
+  width: 36px; height: 36px; border-radius: 999px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-strong); background: transparent;
+  transition: color .16s ease, border-color .16s ease, background .16s ease;
+}
+.mk-theme-toggle:hover { color: var(--accent-text); border-color: var(--accent-text); background: var(--surface); }
+.mk-theme-toggle:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
+.mk-theme-toggle svg { width: 17px; height: 17px; }
+/* show the moon (switch-to-dark) in light mode, the sun (switch-to-light) in dark */
+.mk-theme-toggle .mk-ic-sun { display: block; }
+.mk-theme-toggle .mk-ic-moon { display: none; }
+html[data-theme="light"] .mk-theme-toggle .mk-ic-sun { display: none; }
+html[data-theme="light"] .mk-theme-toggle .mk-ic-moon { display: block; }
 
 /* ==========================================================================
    HERO — compact; the demo below is the star
@@ -209,13 +302,13 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-hero-bg::before {
   content: ""; position: absolute; inset: 0;
   background:
-    radial-gradient(760px 460px at 82% -12%, var(--navy-soft), transparent 60%),
-    radial-gradient(680px 560px at -8% 108%, rgb(26 20 20 / .05), transparent 55%),
-    linear-gradient(180deg, #F9F6F0 0%, var(--canvas) 62%);
+    radial-gradient(760px 460px at 82% -12%, var(--gold-soft), transparent 60%),
+    radial-gradient(680px 560px at -8% 108%, color-mix(in srgb, var(--paper) 70%, transparent), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-subtle) 55%, var(--canvas)) 0%, var(--canvas) 62%);
 }
 .mk-hero-bg::after {
   content: ""; position: absolute; inset: 0;
-  background-image: radial-gradient(rgb(26 20 20 / .05) 1px, transparent 1px);
+  background-image: radial-gradient(color-mix(in srgb, var(--border-strong) 60%, transparent) 1px, transparent 1px);
   background-size: 26px 26px;
   -webkit-mask-image: radial-gradient(680px 480px at 50% 34%, #000 0%, transparent 78%);
   mask-image: radial-gradient(680px 480px at 50% 34%, #000 0%, transparent 78%);
@@ -229,10 +322,9 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   margin-top: 20px;
   text-wrap: balance;
 }
-.mk-hero h1 .mk-hero-accent { position: relative; white-space: nowrap; }
-.mk-hero h1 .mk-hero-accent::after {
-  content: ""; position: absolute; left: 0; right: 0; bottom: .06em; height: .09em;
-  background: var(--navy); border-radius: 2px;
+/* the accent word — real Fraunces italic in champagne gold (editorial flourish) */
+.mk-hero h1 .mk-hero-accent {
+  font-style: italic; color: var(--accent-text); white-space: nowrap;
 }
 .mk-hero-sub {
   margin-top: 22px; max-width: 620px;
@@ -248,44 +340,48 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-hero-ticker .mk-tick { display: inline-flex; align-items: center; gap: 8px; }
 .mk-hero-ticker .mk-tick::before {
   content: ""; width: 5px; height: 5px; border-radius: 50%;
-  background: var(--navy); flex: none;
+  background: var(--gold); flex: none;
 }
 .mk-hero-ticker .mk-tick-sep { color: var(--border-strong); }
 
 /* ==========================================================================
    FOOTER
    ========================================================================== */
+/* The footer is a deep warm-ink band in BOTH modes (an editorial anchor); it
+   uses fixed near-black-brown values rather than tokens so it never inverts
+   when the page flips to light. Champagne gold picks out the wordmark dot. */
 .mk-footer {
-  background: var(--ink); color: var(--paper);
+  background: #14100C; color: #F1E9DB;
   padding-block: 68px 40px;
 }
-.mk-footer a { color: rgb(244 238 230 / .78); transition: color .16s ease; }
-.mk-footer a:hover { color: var(--paper); }
+.mk-footer a { color: rgb(241 233 219 / .78); transition: color .16s ease; }
+.mk-footer a:hover { color: #F1E9DB; }
 .mk-footer-cols {
   display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 40px 32px;
-  padding-bottom: 44px; border-bottom: 1px solid rgb(244 238 230 / .12);
+  padding-bottom: 44px; border-bottom: 1px solid rgb(241 233 219 / .12);
 }
-.mk-footer-brand .mk-wordmark { color: var(--paper); font-size: 24px; }
-.mk-footer-brand .mk-brand-dot { color: var(--navy); }
+.mk-footer-brand .mk-wordmark { color: #F1E9DB; font-size: 24px; }
+.mk-footer-brand .mk-brand-dot { color: var(--gold); }
 .mk-footer-tagline {
   margin-top: 14px; max-width: 320px;
-  font-size: 14px; line-height: 1.55; color: rgb(244 238 230 / .62);
+  font-size: 14px; line-height: 1.55; color: rgb(241 233 219 / .62);
 }
 .mk-footer-col h4 {
-  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
-  color: rgb(244 238 230 / .5); margin-bottom: 16px;
+  font-family: var(--font-mono);
+  font-size: 12px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--gold); margin-bottom: 16px;
 }
 .mk-footer-col ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 11px; }
 .mk-footer-col a { font-size: 14.5px; }
 .mk-footer-signin {
   display: inline-flex; align-items: center; gap: 8px;
-  font-size: 14.5px; font-weight: 600; color: var(--paper) !important;
+  font-size: 14.5px; font-weight: 600; color: #F1E9DB !important;
 }
 .mk-footer-signin svg { width: 16px; height: 16px; }
 .mk-footer-bottom {
   padding-top: 24px;
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
-  font-size: 13px; color: rgb(244 238 230 / .5);
+  font-size: 13px; color: rgb(241 233 219 / .5);
 }
 .mk-footer-bottom .mk-mono { font-family: var(--font-mono); font-size: 12px; }
 
@@ -338,6 +434,11 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
         <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
         <span class="mk-signin-label">Sign in</span>
       </a>
+      <button class="mk-theme-toggle" id="mk-theme-toggle" type="button" aria-label="Switch to light theme">
+        <!-- sun = shown in DARK (click → go light); moon = shown in LIGHT (click → go dark) -->
+        <svg class="mk-ic-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="mk-ic-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.5 6.5 0 0 0 9.8 9.8z"/></svg>
+      </button>
     </div>
   </div>
 </nav>
@@ -380,8 +481,8 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 <!-- ================= SECTION FRAGMENTS (assembled by build.py) ================= -->
 <section id="demo" class="mk-section dm-root" aria-labelledby="dm-title">
   <header class="dm-head">
-    <div class="dm-eyebrow">Product demo</div>
-    <h2 class="dm-title" id="dm-title">One task, end to end.</h2>
+    <div class="dm-eyebrow">— 01 / Product demo</div>
+    <h2 class="dm-title" id="dm-title">One task, <span class="dm-title-em">end to end</span>.</h2>
     <p class="dm-sub">Dispatch from anywhere, watch it run in a sandbox, read the diff,
     bring in a reviewer, and merge — a human holds the pen on every decision that matters.</p>
   </header>
@@ -392,7 +493,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
       <span class="dm-dot3"></span><span class="dm-dot3"></span><span class="dm-dot3"></span>
       <span class="dm-url">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M8 1.5 13.5 4v4c0 3.2-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.2 2.5 8V4L8 1.5z"/></svg>
-        orcha.nursoftai.com
+        app.orcha.cloud
       </span>
     </div>
 
@@ -646,20 +747,22 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 
   <style>
   /* =========================================================================
-     PRODUCT DEMO CINEMATIC (dm-) — a light-theme port of the portal cinematic.
-     Mechanics from the existing welcome/index.html scene engine; restyled to
-     the warm paper design system with the navy interactive accent. Tokens only (var()), no raw hex.
+     PRODUCT DEMO CINEMATIC (dm-) — the portal cinematic on the editorial system.
+     Mechanics from the existing welcome/index.html scene engine; restyled to the
+     warm-ink / champagne-gold design system, theme-aware via var() tokens (both
+     the dark default and the light override). Status softs use color-mix so they
+     track the surface in both modes; --dm-crm text uses --accent-text (AA-safe).
      ========================================================================= */
   .dm-root {
     /* local status semantics mapped onto contract tokens */
     --dm-ok: var(--success-text);
-    --dm-ok-soft: rgba(16,185,129,.10);
+    --dm-ok-soft: color-mix(in srgb, var(--success) 14%, transparent);
     --dm-warn: var(--warning-text);
-    --dm-warn-soft: rgba(245,158,11,.13);
-    --dm-vio: #7B54D6;            /* PR "merged" purple — GitHub convention, decorative */
-    --dm-vio-soft: rgba(123,84,214,.11);
-    --dm-crm: var(--accent-strong);
-    --dm-crm-soft: var(--navy-soft);
+    --dm-warn-soft: color-mix(in srgb, var(--warning-text) 15%, transparent);
+    --dm-vio: #9B78E6;           /* PR "merged" purple — GitHub convention, decorative */
+    --dm-vio-soft: color-mix(in srgb, #9B78E6 16%, transparent);
+    --dm-crm: var(--accent-text);
+    --dm-crm-soft: var(--gold-soft);
     padding: 96px 24px;
     background: var(--canvas);
     color: var(--text-primary);
@@ -668,8 +771,9 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 
   .dm-head { max-width: 720px; margin: 0 auto 44px; text-align: center; }
   .dm-eyebrow {
-    font-size: 12px; font-weight: 700; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--accent-strong);
+    font-family: var(--font-mono);
+    font-size: 12px; font-weight: 500; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent-text);
   }
   .dm-title {
     margin: 14px 0 14px;
@@ -677,6 +781,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     font-size: clamp(30px, 4vw, 46px); line-height: 1.08;
     letter-spacing: -.015em; color: var(--text-primary);
   }
+  .dm-title-em { font-style: italic; color: var(--accent-text); }
   .dm-sub {
     font-size: 16px; line-height: 1.55; color: var(--text-secondary);
     max-width: 620px; margin: 0 auto;
@@ -722,7 +827,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     position: relative; overflow: hidden;
     min-height: 452px;
     background:
-      radial-gradient(560px 300px at 84% -10%, var(--navy-soft), transparent 60%),
+      radial-gradient(560px 300px at 84% -10%, var(--gold-soft), transparent 60%),
       var(--surface);
   }
   .dm-scene {
@@ -761,7 +866,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-cbtn:hover { color: var(--text-primary); border-color: var(--accent-strong); }
   .dm-cbtn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
   .dm-cbtn svg { width: 14px; height: 14px; }
-  .dm-cbtn.dm-play-t[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--navy-soft); }
+  .dm-cbtn.dm-play-t[aria-pressed="true"] { color: var(--accent-text); border-color: var(--accent-strong); background: var(--gold-soft); }
   .dm-cbtn .dm-ic-pause { display: none; }
   .dm-cbtn.dm-play-t[aria-pressed="true"] .dm-ic-pause { display: block; }
   .dm-cbtn.dm-play-t[aria-pressed="true"] .dm-ic-play { display: none; }
@@ -826,11 +931,11 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     white-space: nowrap;
   }
   .dm-pill .dm-pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .dm-p-crm  { color: var(--dm-crm);  background: var(--dm-crm-soft);  border-color: rgba(195,43,56,.28); }
+  .dm-p-crm  { color: var(--dm-crm);  background: var(--dm-crm-soft);  border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
   .dm-p-crm .dm-pdot { animation: dm-pulse 2s infinite; }
-  .dm-p-ok   { color: var(--dm-ok);   background: var(--dm-ok-soft);   border-color: rgba(16,185,129,.30); }
-  .dm-p-warn { color: var(--dm-warn); background: var(--dm-warn-soft); border-color: rgba(245,158,11,.34); }
-  .dm-p-vio  { color: var(--dm-vio);  background: var(--dm-vio-soft);  border-color: rgba(123,84,214,.30); }
+  .dm-p-ok   { color: var(--dm-ok);   background: var(--dm-ok-soft);   border-color: color-mix(in srgb, var(--success) 34%, transparent); }
+  .dm-p-warn { color: var(--dm-warn); background: var(--dm-warn-soft); border-color: color-mix(in srgb, var(--warning-text) 40%, transparent); }
+  .dm-p-vio  { color: var(--dm-vio);  background: var(--dm-vio-soft);  border-color: color-mix(in srgb, var(--dm-vio) 40%, transparent); }
   .dm-p-idle { color: var(--text-tertiary); background: var(--surface-subtle); border-color: var(--border-strong); }
   @keyframes dm-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
@@ -846,7 +951,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     width: 26px; height: 26px; border-radius: 50%; flex: none;
     display: grid; place-items: center;
     font-size: 11px; font-weight: 800; color: var(--on-accent-strong);
-    background: linear-gradient(135deg, var(--navy), var(--accent-strong));
+    background: linear-gradient(135deg, var(--gold), var(--accent-strong));
   }
   .dm-av-you { background: linear-gradient(135deg, var(--text-secondary), var(--text-primary)); }
   .dm-av-sm { width: 18px; height: 18px; font-size: 9px; }
@@ -887,7 +992,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-chat { align-self: center; }
   .dm-chatbody { padding: 12px 12px 12px; }
   .dm-bubble {
-    background: var(--navy-soft); border: 1px solid rgba(195,43,56,.24);
+    background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 32%, transparent);
     color: var(--text-primary); border-radius: 12px 12px 4px 12px;
     padding: 9px 11px; font-size: 12px; line-height: 1.4;
     margin-left: 24px; overflow: hidden;
@@ -917,7 +1022,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-sc-task .dm-comet .dm-cdot {
     position: absolute; top: 50%; left: 0; margin-top: -4px;
     width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent-strong); box-shadow: 0 0 12px var(--navy);
+    background: var(--accent-strong); box-shadow: 0 0 12px var(--gold);
     opacity: 0;
   }
   .dm-scene.dm-play .dm-sc-task .dm-comet .dm-cdot { animation: dm-comet 1s ease-in-out 2.9s forwards; }
@@ -931,7 +1036,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-trow:last-child { border-bottom: 0; }
   .dm-tid { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
   .dm-tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dm-trow.dm-new { background: var(--navy-soft); }
+  .dm-trow.dm-new { background: var(--gold-soft); }
   .dm-trow.dm-new .dm-tt { color: var(--text-primary); font-weight: 600; }
 
   /* ---- scene 2 · sandbox -------------------------------------------------- */
@@ -947,7 +1052,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-sbx .dm-sbx-t {
     position: absolute; top: -9px; left: 20px;
     background: var(--surface); padding: 0 8px;
-    font-family: var(--font-mono); font-size: 11px; color: var(--accent-strong);
+    font-family: var(--font-mono); font-size: 11px; color: var(--accent-text);
   }
   .dm-sbx .dm-clone {
     font-family: var(--font-mono); font-size: 11.5px; line-height: 1.95;
@@ -963,20 +1068,21 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-sbx .dm-iso svg { width: 14px; height: 14px; color: var(--accent-strong); flex: none; }
 
   /* ---- scene 3 · terminal ------------------------------------------------- */
-  /* A terminal stays a terminal in daylight: it sits on --ink (a dark surface),
-     so its foregrounds use the design system's OWN dark-theme token values —
-     light-mode tokens would be illegible here. These mirror .dark's
-     --text-secondary / --text-tertiary / navy / success-text / warning-text. */
+  /* A terminal is a literal terminal: it renders on a fixed warm near-black in
+     BOTH page themes (its foregrounds are hardcoded to read on that dark chrome).
+     --dm-t-crm is the champagne accent (matches the page's gold), the rest are
+     the terminal's own warm greys/greens/ambers. */
   .dm-term {
-    --dm-t-fg:  #C9C0B4;  /* = .dark --text-secondary */
-    --dm-t-mut: #A39A8E;  /* = .dark --text-tertiary */
-    --dm-t-crm: #FF5A66;  /* = .dark --navy */
-    --dm-t-ok:  #4ADE80;  /* = .dark --success-text */
-    --dm-t-warn:#FBBF24;  /* = .dark --warning-text */
+    --dm-t-bg:  #17130E;  /* fixed dark terminal chrome (both modes) */
+    --dm-t-fg:  #D8CFBE;  /* warm terminal foreground */
+    --dm-t-mut: #9C9284;  /* muted */
+    --dm-t-crm: #E7C368;  /* champagne accent (= page --gold) */
+    --dm-t-ok:  #4ADE80;  /* success green */
+    --dm-t-warn:#FBBF24;  /* warning amber */
   }
   .dm-sc-term { height: 100%; padding-bottom: 40px; display: grid; align-items: center; }
   .dm-term {
-    background: var(--ink); border: 1px solid var(--border-strong); border-radius: var(--radius-xl);
+    background: var(--dm-t-bg); border: 1px solid #3A3226; border-radius: var(--radius-xl);
     padding: 16px 18px; overflow: hidden; box-shadow: var(--shadow-card);
     font-family: var(--font-mono); font-size: 11.5px; line-height: 1.95; color: var(--dm-t-fg);
   }
@@ -1012,13 +1118,13 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-ln.dm-e { color: transparent; }
   .dm-dsign { flex: none; width: 16px; text-align: center; color: var(--text-tertiary); }
   .dm-dcode { flex: 1; min-width: 0; padding-right: 12px; color: var(--text-primary); white-space: pre; overflow-x: auto; }
-  .dm-dl.dm-del { background: rgba(239,68,68,.09); }
+  .dm-dl.dm-del { background: color-mix(in srgb, var(--danger) 12%, transparent); }
   .dm-dl.dm-del .dm-dsign { color: var(--danger); }
-  .dm-dl.dm-add { background: rgba(16,185,129,.11); }
+  .dm-dl.dm-add { background: color-mix(in srgb, var(--success) 14%, transparent); }
   .dm-dl.dm-add .dm-dsign { color: var(--dm-ok); }
   .dm-dl.dm-ctx { background: transparent; }
   .dm-kw  { color: var(--dm-vio); }
-  .dm-num { color: var(--accent-strong); }
+  .dm-num { color: var(--accent-text); }
   .dm-cmt { color: var(--text-tertiary); font-style: italic; }
 
   /* ---- scene 5 · members -------------------------------------------------- */
@@ -1053,8 +1159,8 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-pr-h { align-items: flex-start; }
   .dm-pr-ic { width: 26px; height: 26px; border-radius: 7px; flex: none; display: grid; place-items: center; margin-top: 1px; }
   .dm-pr-ic svg { width: 15px; height: 15px; }
-  .dm-pr-ic.dm-open   { background: var(--dm-ok-soft);  color: var(--dm-ok);  border: 1px solid rgba(16,185,129,.30); }
-  .dm-pr-ic.dm-merged { background: var(--dm-vio-soft); color: var(--dm-vio); border: 1px solid rgba(123,84,214,.30); }
+  .dm-pr-ic.dm-open   { background: var(--dm-ok-soft);  color: var(--dm-ok);  border: 1px solid color-mix(in srgb, var(--success) 34%, transparent); }
+  .dm-pr-ic.dm-merged { background: var(--dm-vio-soft); color: var(--dm-vio); border: 1px solid color-mix(in srgb, var(--dm-vio) 40%, transparent); }
   .dm-prtitle-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .dm-pr-title { font-size: 13px; font-weight: 700; color: var(--text-primary); line-height: 1.35; }
   .dm-pr-title .dm-prnum { color: var(--text-tertiary); font-weight: 500; }
@@ -1063,7 +1169,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-botpill {
     display: inline-flex; align-items: center; gap: 5px; flex: none; margin-top: 1px;
     font-size: 10px; font-weight: 700; color: var(--dm-vio);
-    background: var(--dm-vio-soft); border: 1px solid rgba(123,84,214,.30);
+    background: var(--dm-vio-soft); border: 1px solid color-mix(in srgb, var(--dm-vio) 40%, transparent);
     border-radius: 999px; padding: 3px 8px 3px 6px;
   }
   .dm-botpill svg { width: 12px; height: 12px; }
@@ -1075,7 +1181,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-prcheck {
     display: flex; align-items: center; gap: 9px;
     font-size: 12px; color: var(--text-secondary);
-    background: var(--dm-ok-soft); border: 1px solid rgba(16,185,129,.24);
+    background: var(--dm-ok-soft); border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
     border-radius: 10px; padding: 9px 12px;
   }
   .dm-prcheck > svg { width: 13px; height: 13px; color: var(--dm-ok); flex: none; }
@@ -1110,7 +1216,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   }
   .dm-clickdot {
     position: absolute; z-index: 3; width: 14px; height: 14px; border-radius: 50%;
-    background: rgba(26,20,20,.85); box-shadow: 0 2px 10px rgba(26,20,20,.35), 0 0 0 1px rgba(255,255,255,.5);
+    background: color-mix(in srgb, var(--text-primary) 85%, transparent); box-shadow: 0 2px 10px rgb(0 0 0 / .35), 0 0 0 1px color-mix(in srgb, var(--surface) 65%, transparent);
     right: 40px; bottom: 24px; opacity: 0; pointer-events: none;
   }
   .dm-scene.dm-play .dm-clickdot { animation: dm-ride 1.5s cubic-bezier(.3,.7,.4,1) 3.1s both; }
@@ -1127,7 +1233,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-close-in { max-width: 420px; }
   .dm-check {
     display: inline-grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
-    background: var(--dm-ok-soft); color: var(--dm-ok); border: 1px solid rgba(16,185,129,.30);
+    background: var(--dm-ok-soft); color: var(--dm-ok); border: 1px solid color-mix(in srgb, var(--success) 34%, transparent);
     margin-bottom: 16px;
   }
   .dm-check svg { width: 22px; height: 22px; }
@@ -1351,8 +1457,8 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 <section id="product" class="mk-section pr-root" aria-labelledby="pr-title">
   <div class="pr-wrap">
     <header class="pr-head">
-      <div class="pr-eyebrow">Built for teams</div>
-      <h2 class="pr-title" id="pr-title">Everything you need to run agents you can trust.</h2>
+      <div class="pr-eyebrow">— 02 / Built for teams</div>
+      <h2 class="pr-title" id="pr-title">Everything you need to run agents you can <span class="pr-title-em">trust</span>.</h2>
       <p class="pr-sub">Persistent Claude agents work in your repos — sandboxed, attributable,
       and never merged without a human. The guardrails come standard.</p>
     </header>
@@ -1441,8 +1547,9 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 
   .pr-head { max-width: 720px; margin: 0 auto 48px; text-align: center; }
   .pr-eyebrow {
-    font-size: 12px; font-weight: 700; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--accent-strong);
+    font-family: var(--font-mono);
+    font-size: 12px; font-weight: 500; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent-text);
   }
   .pr-title {
     margin: 14px 0 14px;
@@ -1451,6 +1558,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     letter-spacing: -.015em; color: var(--text-primary);
     text-wrap: balance;
   }
+  .pr-title-em { font-style: italic; color: var(--accent-text); }
   .pr-sub {
     font-size: 16px; line-height: 1.55; color: var(--text-secondary);
     max-width: 600px; margin: 0 auto;
@@ -1476,7 +1584,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .pr-glyph {
     display: inline-grid; place-items: center;
     width: 44px; height: 44px; border-radius: var(--radius-xl);
-    background: var(--navy-soft); color: var(--accent-strong);
+    background: var(--gold-soft); color: var(--accent-strong);
     margin-bottom: 18px;
   }
   .pr-glyph svg { width: 22px; height: 22px; }
@@ -1547,8 +1655,8 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   <div class="ph-wrap">
     <!-- LEFT · sticky narrative rail ------------------------------------- -->
     <div class="ph-rail">
-      <p class="ph-eyebrow"><span class="ph-eyebrow-dot" aria-hidden="true"></span>Take it with you</p>
-      <h2 id="ph-title" class="ph-title">Your agents, in your pocket</h2>
+      <p class="ph-eyebrow"><span class="ph-eyebrow-dot" aria-hidden="true"></span>— 03 / Take it with you</p>
+      <h2 id="ph-title" class="ph-title">Your agents, in your <span class="ph-title-em">pocket</span></h2>
       <p class="ph-lede">The native iOS app pairs to your account with one scan and mirrors the
         web portal — dispatch, steer, and approve from anywhere. You get pulled in only when a
         human decision is needed.</p>
@@ -1628,7 +1736,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
                     <svg class="ph-qr" viewBox="0 0 74 74" role="img" aria-label="Branded pairing QR code">
                       <rect x="0" y="0" width="74" height="74" rx="9" fill="var(--surface)"></rect>
                       <!-- finder eyes -->
-                      <g fill="var(--ink)">
+                      <g fill="var(--ph-ink)">
                         <rect x="6" y="6" width="18" height="18" rx="4"></rect>
                         <rect x="50" y="6" width="18" height="18" rx="4"></rect>
                         <rect x="6" y="50" width="18" height="18" rx="4"></rect>
@@ -1638,13 +1746,13 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
                         <rect x="54" y="10" width="10" height="10" rx="2.5"></rect>
                         <rect x="10" y="54" width="10" height="10" rx="2.5"></rect>
                       </g>
-                      <g fill="var(--ink)">
+                      <g fill="var(--ph-ink)">
                         <rect x="13" y="13" width="4" height="4" rx="1"></rect>
                         <rect x="57" y="13" width="4" height="4" rx="1"></rect>
                         <rect x="13" y="57" width="4" height="4" rx="1"></rect>
                       </g>
                       <!-- data modules -->
-                      <g fill="var(--ink)">
+                      <g fill="var(--ph-ink)">
                         <rect x="30" y="8"  width="4" height="4" rx="1"></rect>
                         <rect x="38" y="8"  width="4" height="4" rx="1"></rect>
                         <rect x="30" y="16" width="4" height="4" rx="1"></rect>
@@ -1669,7 +1777,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
                       </g>
                       <!-- Orcha dot center mark -->
                       <circle cx="37" cy="37" r="7" fill="var(--surface)"></circle>
-                      <circle cx="37" cy="37" r="4.4" fill="var(--navy)"></circle>
+                      <circle cx="37" cy="37" r="4.4" fill="var(--gold)"></circle>
                     </svg>
                   </div>
                 </div>
@@ -1834,7 +1942,14 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
      styles are the scene's representative still (reduced motion + pre-JS
      render shows exactly that). Tokens only; no external requests.
      ==================================================================== */
-  .ph-root { background: var(--paper); }
+  .ph-root {
+    background: var(--paper);
+    /* The phone is a physical device: its bezel, Dynamic Island, camera view,
+       lock screen, QR finder eyes, and the dark-theme preview shot are FIXED
+       (dark chrome + light-on-dark ink) in BOTH page modes — they must not flip
+       with the page theme. --ph-ink = device dark; --ph-paper = ink-on-dark. */
+    --ph-ink:#17130E; --ph-paper:#F1E9DB;
+  }
   .ph-wrap {
     max-width: 1120px; margin: 0 auto; padding: 0 24px;
     display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 460px);
@@ -1844,17 +1959,18 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   /* ---- LEFT rail --------------------------------------------------------- */
   .ph-rail { position: sticky; top: 88px; }
   .ph-eyebrow {
-    display: inline-flex; align-items: center; gap: 8px;
-    font-family: var(--font-sans); font-size: 12px; font-weight: 700;
-    letter-spacing: .08em; text-transform: uppercase; color: var(--accent-strong);
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono); font-size: 12px; font-weight: 500;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--accent-text);
     margin: 0 0 16px;
   }
-  .ph-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--navy); }
+  .ph-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); }
   .ph-title {
     font-family: var(--font-serif); font-weight: 400;
     font-size: clamp(30px, 4vw, 46px); line-height: 1.05; letter-spacing: -.02em;
     color: var(--text-primary); margin: 0;
   }
+  .ph-title-em { font-style: italic; color: var(--accent-text); }
   .ph-lede {
     font-family: var(--font-sans); font-size: 16px; line-height: 1.55;
     color: var(--text-secondary); margin: 20px 0 0; max-width: 40ch;
@@ -1887,11 +2003,11 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     border-radius: 99px; background: var(--border); overflow: hidden;
   }
   .ph-cap-fill {
-    display: block; width: 100%; height: 100%; background: var(--navy);
+    display: block; width: 100%; height: 100%; background: var(--gold);
     transform: scaleY(0); transform-origin: top center;
   }
   .ph-cap[aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow-card); }
-  .ph-cap[aria-pressed="true"] .ph-cap-num { color: var(--accent-strong); }
+  .ph-cap[aria-pressed="true"] .ph-cap-num { color: var(--accent-text); }
   .ph-cap[aria-pressed="true"] .ph-cap-title { color: var(--text-primary); }
   .ph-cap[aria-pressed="true"] .ph-cap-desc { max-height: 72px; opacity: 1; margin-top: 6px; }
   .ph-cap.done .ph-cap-fill { transform: scaleY(1); opacity: .3; }
@@ -1908,7 +2024,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   /* ink bezel — the reference's rounded-[2.6rem] p-2 shadow-float device */
   .ph-bezel {
     position: relative; width: 288px; padding: 8px;
-    border-radius: 42px; background: var(--ink);
+    border-radius: 42px; background: var(--ph-ink);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-float);
   }
@@ -1919,12 +2035,12 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-island {
     position: absolute; left: 50%; top: 11px; z-index: 30;
     width: 92px; height: 24px; border-radius: 99px;
-    background: var(--ink); transform: translateX(-50%);
+    background: var(--ph-ink); transform: translateX(-50%);
   }
   .ph-home {
     position: absolute; left: 50%; bottom: 15px; z-index: 30;
     width: 108px; height: 4px; border-radius: 99px;
-    background: color-mix(in srgb, var(--paper) 60%, transparent); transform: translateX(-50%);
+    background: color-mix(in srgb, var(--ph-paper) 60%, transparent); transform: translateX(-50%);
   }
 
   /* ---- scene transitions ------------------------------------------------- */
@@ -1982,7 +2098,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-appbar-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ph-appbar-tag {
     font-family: var(--font-mono); font-size: 10px; font-weight: 500;
-    color: var(--accent-strong); background: var(--navy-soft);
+    color: var(--accent-text); background: var(--gold-soft);
     border-radius: 99px; padding: 3px 8px; white-space: nowrap;
   }
 
@@ -2004,14 +2120,14 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-qr { width: 108px; height: 108px; border-radius: 12px; box-shadow: var(--shadow-card); }
 
   .ph-cam { position: relative; flex: 1; border-radius: var(--radius-2xl); overflow: hidden;
-    background: var(--ink); min-height: 190px; }
+    background: var(--ph-ink); min-height: 190px; }
   .ph-cam-frame { position: absolute; inset: 18px 22px 60px; }
-  .ph-br { position: absolute; width: 22px; height: 22px; border: 2px solid color-mix(in srgb, var(--paper) 85%, transparent); }
+  .ph-br { position: absolute; width: 22px; height: 22px; border: 2px solid color-mix(in srgb, var(--ph-paper) 85%, transparent); }
   .ph-br.tl { left: 0; top: 0; border-right: 0; border-bottom: 0; border-radius: 6px 0 0 0; }
   .ph-br.tr { right: 0; top: 0; border-left: 0; border-bottom: 0; border-radius: 0 6px 0 0; }
   .ph-br.bl { left: 0; bottom: 0; border-right: 0; border-top: 0; border-radius: 0 0 0 6px; }
   .ph-br.br { right: 0; bottom: 0; border-left: 0; border-top: 0; border-radius: 0 0 6px 0; }
-  .ph-flash { position: absolute; inset: 0; background: var(--paper); opacity: 0; border-radius: 6px; }
+  .ph-flash { position: absolute; inset: 0; background: var(--ph-paper); opacity: 0; border-radius: 6px; }
   .ph-paired {
     position: absolute; left: 12px; right: 12px; bottom: 12px;
     display: inline-flex; align-items: center; justify-content: center; gap: 7px;
@@ -2033,7 +2149,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     background: var(--surface-subtle); border: 1px solid var(--border);
     border-radius: 99px; padding: 4px 10px; white-space: nowrap;
   }
-  .ph-proj.on { color: var(--accent-strong); background: var(--navy-soft); border-color: transparent; }
+  .ph-proj.on { color: var(--accent-text); background: var(--gold-soft); border-color: transparent; }
   .ph-msg { font-family: var(--font-sans); font-size: 13px; line-height: 1.5; border-radius: 16px; padding: 9px 12px; max-width: 88%; }
   .ph-msg.you { align-self: flex-end; background: var(--accent-strong); color: var(--on-accent-strong); border-bottom-right-radius: 5px; }
   .ph-msg.bot { align-self: flex-start; background: var(--surface-subtle); border: 1px solid var(--border); color: var(--text-primary); border-bottom-left-radius: 5px; }
@@ -2043,20 +2159,20 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-msg.bot code {
     font-family: var(--font-mono); font-size: 11px;
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 5px; padding: 1px 5px; color: var(--accent-strong);
+    border-radius: 5px; padding: 1px 5px; color: var(--accent-text);
   }
 
   /* ===== SCENE 3 · push notification ===================================== */
   .ph-sc-push { display: flex; flex-direction: column; align-items: center;
     background:
-      radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--ink) 92%, transparent), var(--ink));
+      radial-gradient(120% 80% at 50% 0%, color-mix(in srgb, var(--ph-ink) 92%, transparent), var(--ph-ink));
     inset: 0; padding: 40px 14px; }
-  .ph-lock { text-align: center; color: var(--paper); margin: 12px 0 40px; }
+  .ph-lock { text-align: center; color: var(--ph-paper); margin: 12px 0 40px; }
   .ph-lock-time { display: block; font-family: var(--font-sans); font-weight: 300; font-size: 52px; line-height: 1; letter-spacing: -.02em; }
   .ph-lock-date { display: block; font-family: var(--font-sans); font-size: 13px; opacity: .7; margin-top: 6px; }
   .ph-banner {
     width: 100%; display: flex; align-items: flex-start; gap: 10px;
-    background: color-mix(in srgb, var(--paper) 18%, transparent); border: 1px solid color-mix(in srgb, var(--paper) 15%, transparent);
+    background: color-mix(in srgb, var(--ph-paper) 18%, transparent); border: 1px solid color-mix(in srgb, var(--ph-paper) 15%, transparent);
     border-radius: var(--radius-2xl); padding: 11px 12px;
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
   }
@@ -2067,11 +2183,11 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-banner-ico svg { width: 15px; height: 15px; }
   .ph-banner-body { flex: 1; min-width: 0; }
   .ph-banner-h { display: flex; align-items: center; gap: 6px; }
-  .ph-banner-h b { font-family: var(--font-sans); font-size: 12px; font-weight: 700; color: var(--paper); }
-  .ph-banner-time { margin-left: auto; font-family: var(--font-sans); font-size: 10px; color: color-mix(in srgb, var(--paper) 60%, transparent); }
-  .ph-banner-txt { display: block; font-family: var(--font-sans); font-size: 12.5px; line-height: 1.4; color: color-mix(in srgb, var(--paper) 92%, transparent); margin-top: 2px; }
+  .ph-banner-h b { font-family: var(--font-sans); font-size: 12px; font-weight: 700; color: var(--ph-paper); }
+  .ph-banner-time { margin-left: auto; font-family: var(--font-sans); font-size: 10px; color: color-mix(in srgb, var(--ph-paper) 60%, transparent); }
+  .ph-banner-txt { display: block; font-family: var(--font-sans); font-size: 12.5px; line-height: 1.4; color: color-mix(in srgb, var(--ph-paper) 92%, transparent); margin-top: 2px; }
   .ph-tap { position: absolute; left: 50%; top: 62%; transform: translate(-50%,-50%); pointer-events: none; }
-  .ph-tap-ring { display: block; width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--paper); }
+  .ph-tap-ring { display: block; width: 40px; height: 40px; border-radius: 50%; border: 2px solid var(--ph-paper); }
 
   /* ===== SCENE 4 · verify ================================================= */
   .ph-sc-verify { display: flex; flex-direction: column; }
@@ -2108,16 +2224,16 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-sc-theme { padding: 52px 16px 26px; }
   .ph-theme-shot { position: absolute; left: 16px; right: 16px; top: 52px; bottom: 74px;
     border-radius: var(--radius-2xl); overflow: hidden; padding: 14px; }
-  .ph-theme-dark { background: var(--ink); border: 1px solid color-mix(in srgb, var(--paper) 16%, var(--ink)); }
+  .ph-theme-dark { background: var(--ph-ink); border: 1px solid color-mix(in srgb, var(--ph-paper) 16%, var(--ph-ink)); }
   .ph-theme-light { background: var(--surface); border: 1px solid var(--border); }
-  .ph-appbar.dark { border-color: color-mix(in srgb, var(--paper) 16%, var(--ink)); color: color-mix(in srgb, var(--paper) 92%, var(--ink)); }
+  .ph-appbar.dark { border-color: color-mix(in srgb, var(--ph-paper) 16%, var(--ph-ink)); color: color-mix(in srgb, var(--ph-paper) 92%, var(--ph-ink)); }
   .ph-appbar.light { border-color: var(--border); color: var(--text-primary); }
-  .ph-appbar-tag.dark { color: var(--paper); background: color-mix(in srgb, var(--paper) 16%, transparent); }
-  .ph-appbar-tag.light { color: var(--accent-strong); background: var(--navy-soft); }
+  .ph-appbar-tag.dark { color: var(--ph-paper); background: color-mix(in srgb, var(--ph-paper) 16%, transparent); }
+  .ph-appbar-tag.light { color: var(--accent-text); background: var(--gold-soft); }
   .ph-theme-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
   .ph-theme-row { height: 34px; border-radius: 12px; }
   .ph-theme-row.short { width: 66%; }
-  .ph-theme-row.dark { background: color-mix(in srgb, var(--paper) 8%, var(--ink)); border: 1px solid color-mix(in srgb, var(--paper) 14%, var(--ink)); }
+  .ph-theme-row.dark { background: color-mix(in srgb, var(--ph-paper) 8%, var(--ph-ink)); border: 1px solid color-mix(in srgb, var(--ph-paper) 14%, var(--ph-ink)); }
   .ph-theme-row.light { background: var(--surface-subtle); border: 1px solid var(--border); }
   .ph-theme-sync {
     position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); z-index: 5;
@@ -2126,7 +2242,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     background: var(--surface); border: 1px solid var(--border);
     border-radius: 99px; padding: 6px 12px; box-shadow: var(--shadow-card);
   }
-  .ph-sync-i { display: inline-flex; color: var(--accent-strong); }
+  .ph-sync-i { display: inline-flex; color: var(--accent-text); }
   .ph-sync-i svg { width: 13px; height: 13px; }
 
   /* ---- playback controls ------------------------------------------------- */
@@ -2142,7 +2258,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-cbtn:hover { color: var(--text-primary); border-color: var(--text-primary); }
   .ph-cbtn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
   .ph-cbtn svg { width: 15px; height: 15px; }
-  .ph-play[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--navy-soft); }
+  .ph-play[aria-pressed="true"] { color: var(--accent-text); border-color: var(--accent-strong); background: var(--gold-soft); }
   .ph-ic-pause { display: none; }
   .ph-play[aria-pressed="true"] .ph-ic-pause { display: block; }
   .ph-play[aria-pressed="true"] .ph-ic-play { display: none; }
@@ -2304,8 +2420,8 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 <section id="deploy" class="mk-section dp-root">
   <div class="dp-wrap">
     <header class="dp-head">
-      <p class="dp-eyebrow">Run it your way</p>
-      <h2 class="dp-title">From laptop to managed cloud</h2>
+      <p class="dp-eyebrow">— 04 / Run it your way</p>
+      <h2 class="dp-title">From laptop to managed <span class="dp-title-em">cloud</span></h2>
       <p class="dp-intro">Orcha is open-core. The same runtime powers three ways to run it &mdash; pick where your code and keys live, and how much you want to operate.</p>
     </header>
 
@@ -2521,14 +2637,16 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 
   .dp-head { max-width: 660px; margin: 0 auto 34px; text-align: center; }
   .dp-eyebrow {
-    margin: 0 0 14px; font-size: 12px; font-weight: 700; line-height: 1;
-    letter-spacing: .08em; text-transform: uppercase; color: var(--accent-strong);
+    margin: 0 0 14px; font-family: var(--font-mono);
+    font-size: 12px; font-weight: 500; line-height: 1;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--accent-text);
   }
   .dp-title {
     margin: 0 0 16px; font-family: var(--font-serif); font-weight: 400;
     font-size: clamp(30px, 4vw, 46px); line-height: 1.05;
     letter-spacing: -.02em; color: var(--text-primary);
   }
+  .dp-title-em { font-style: italic; color: var(--accent-text); }
   .dp-intro { margin: 0; font-size: 17px; line-height: 1.55; color: var(--text-secondary); }
 
   /* ---- segmented tab control ---- */
@@ -2554,11 +2672,11 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     background: var(--surface); border-color: var(--border-strong);
     box-shadow: var(--shadow-card);
   }
-  .dp-tab[aria-selected="true"] .dp-tab-name { color: var(--accent-strong); }
+  .dp-tab[aria-selected="true"] .dp-tab-name { color: var(--accent-text); }
   .dp-ea {
     margin-top: 4px; font-size: 10px; font-weight: 700; line-height: 1;
     letter-spacing: .04em; text-transform: uppercase;
-    color: var(--accent-strong); background: var(--navy-soft);
+    color: var(--accent-text); background: var(--gold-soft);
     border-radius: 999px; padding: 3px 8px;
   }
 
@@ -2573,7 +2691,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     position: relative; overflow: hidden;
     min-height: 384px;
     background:
-      radial-gradient(560px 300px at 84% -12%, var(--navy-soft), transparent 62%),
+      radial-gradient(560px 300px at 84% -12%, var(--gold-soft), transparent 62%),
       var(--surface);
   }
   @media (max-width: 720px) { .dp-stage { min-height: 460px; } }
@@ -2590,7 +2708,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   @media (max-width: 720px) { .dp-panel { padding: 22px 18px; } }
 
   /* shared atoms ------------------------------------------------------------ */
-  .dp-prompt { color: var(--accent-strong); font-weight: 700; }
+  .dp-prompt { color: var(--accent-text); font-weight: 700; }
   .dp-pill {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 11px; font-weight: 640; line-height: 1;
@@ -2599,7 +2717,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   }
   .dp-pill .dp-pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .dp-p-ok   { color: var(--success-text); background: color-mix(in srgb, var(--success) 12%, transparent); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
-  .dp-p-teal { color: var(--accent-strong); background: var(--navy-soft); border-color: color-mix(in srgb, var(--navy) 26%, transparent); }
+  .dp-p-teal { color: var(--accent-text); background: var(--gold-soft); border-color: color-mix(in srgb, var(--gold) 26%, transparent); }
   .dp-p-teal .dp-pdot { animation: dp-pulse 2s infinite; }
   @keyframes dp-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
@@ -2625,21 +2743,24 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     align-items: center;
   }
   @media (max-width: 720px) { .dp-self-grid { grid-template-columns: 1fr; gap: 18px; } }
+  /* A literal terminal: fixed warm-dark chrome in BOTH page modes (its
+     foregrounds are pinned to read on that dark surface, never token-flipped). */
   .dp-term {
-    background: var(--ink); border-radius: var(--radius-xl);
+    --dp-term-bg:#17130E; --dp-term-fg:#D8CFBE;
+    background: var(--dp-term-bg); border-radius: var(--radius-xl);
     box-shadow: var(--shadow-card); overflow: hidden;
   }
   .dp-term-h {
     display: flex; align-items: center; gap: 6px;
-    padding: 9px 12px; background: color-mix(in srgb, var(--ink) 88%, var(--paper));
+    padding: 9px 12px; background: #211B14;
   }
-  .dp-dot { width: 9px; height: 9px; border-radius: 50%; background: color-mix(in srgb, var(--paper) 34%, transparent); }
-  .dp-term-t { margin-left: 8px; font-size: 11px; color: color-mix(in srgb, var(--paper) 62%, transparent); }
+  .dp-dot { width: 9px; height: 9px; border-radius: 50%; background: rgb(216 207 190 / .34); }
+  .dp-term-t { margin-left: 8px; font-size: 11px; color: rgb(216 207 190 / .62); }
   .dp-term-b { padding: 14px 14px 16px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9; }
-  .dp-line { margin: 0; color: color-mix(in srgb, var(--paper) 82%, transparent); white-space: nowrap; overflow: hidden; }
-  .dp-line .dp-prompt { color: var(--navy); }
-  .dp-cmd { color: var(--paper); }
-  .dp-out { color: var(--success); }
+  .dp-line { margin: 0; color: rgb(216 207 190 / .82); white-space: nowrap; overflow: hidden; }
+  .dp-line .dp-prompt { color: var(--gold); }
+  .dp-cmd { color: #F1E9DB; }
+  .dp-out { color: #4ADE80; }
   /* typing + staged reveal under play */
   .dp-typeA, .dp-typeB { display: inline-block; overflow: hidden; white-space: nowrap; vertical-align: bottom; }
   .dp-panel.play .dp-typeA { width: 0; animation: dp-typeA 1.15s steps(34, end) .35s forwards; }
@@ -2663,7 +2784,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     padding: 10px 12px; border-radius: var(--radius-xl);
     background: var(--surface-subtle); border: 1px solid var(--border);
   }
-  .dp-cont-ic { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; color: var(--accent-strong); background: var(--navy-soft); }
+  .dp-cont-ic { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; color: var(--accent-strong); background: var(--gold-soft); }
   .dp-cont-ic svg { width: 15px; height: 15px; }
   .dp-cont-t { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
   .dp-cont .dp-pill { margin-left: auto; }
@@ -2699,8 +2820,8 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dp-ghapp-ck svg { width: 12px; height: 12px; }
   .dp-panel.play .dp-ghapp-ck { transform: scale(0); animation: dp-pop .42s cubic-bezier(.16,1,.3,1) 1.5s forwards; }
   .dp-ghapp-note {
-    margin-left: auto; font-size: 11px; font-weight: 650; color: var(--accent-strong);
-    background: var(--navy-soft); border-radius: 999px; padding: 3px 10px;
+    margin-left: auto; font-size: 11px; font-weight: 650; color: var(--accent-text);
+    background: var(--gold-soft); border-radius: 999px; padding: 3px 10px;
   }
   .dp-boot {
     margin: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--text-secondary);
@@ -2723,7 +2844,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dp-lock {
     display: flex; align-items: center; gap: 11px;
     padding: 12px 14px; border-radius: var(--radius-xl);
-    background: var(--navy-soft); border: 1px solid color-mix(in srgb, var(--navy) 24%, transparent);
+    background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 24%, transparent);
   }
   .dp-lock-ic { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 9px; color: var(--on-accent-strong); background: var(--accent-strong); }
   .dp-lock-ic svg { width: 17px; height: 17px; }
@@ -2780,7 +2901,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     font-size: 10.5px; font-weight: 750; color: var(--on-accent-strong);
     background: var(--accent-strong); box-shadow: 0 0 0 2px var(--surface);
   }
-  .dp-av.dp-a1 { margin-left: 0; background: var(--navy); }
+  .dp-av.dp-a1 { margin-left: 0; background: var(--gold); }
   .dp-av.dp-a2 { background: var(--accent-strong); }
   .dp-av.dp-a3 { background: var(--accent-strong-press); }
   .dp-team-t { margin-left: 12px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
@@ -2806,10 +2927,10 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   }
   .dp-cta {
     margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
-    font-size: 13.5px; font-weight: 650; color: var(--accent-strong);
+    font-size: 13.5px; font-weight: 650; color: var(--accent-text);
     text-decoration: none; border-radius: 8px; padding: 4px 4px;
   }
-  .dp-cta:hover { color: var(--accent-strong-press); }
+  .dp-cta:hover { color: var(--accent-text); filter: brightness(1.1); }
   .dp-cta:hover span { transform: translateX(3px); }
   .dp-cta span { transition: transform .2s ease; }
   .dp-cta:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
@@ -3000,8 +3121,8 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 <section id="themes" class="mk-section th-root" aria-labelledby="th-title">
   <div class="th-wrap">
     <header class="th-head">
-      <p class="th-eyebrow">Make it yours</p>
-      <h2 id="th-title" class="th-h2">Three looks. Your call.</h2>
+      <p class="th-eyebrow">— 05 / Make it yours</p>
+      <h2 id="th-title" class="th-h2">Three looks. Your <span class="th-h2-em">call</span>.</h2>
       <p class="th-lede">
         Theme is a per-user preference — pick one and it follows you, synced across the
         web portal and the iOS app. It never touches how a teammate sees their portal.
@@ -3153,9 +3274,9 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     .th-head { max-width: 640px; margin: 0 auto 52px; text-align: center; }
     .th-eyebrow {
       margin: 0 0 14px;
-      font-family: var(--font-sans);
-      font-size: 12px; font-weight: 700; letter-spacing: .08em;
-      text-transform: uppercase; color: var(--accent-strong);
+      font-family: var(--font-mono);
+      font-size: 12px; font-weight: 500; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent-text);
     }
     .th-h2 {
       margin: 0 0 16px;
@@ -3163,6 +3284,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
       font-size: clamp(30px, 4vw, 46px); line-height: 1.05;
       letter-spacing: -.02em; color: var(--text-primary);
     }
+    .th-h2-em { font-style: italic; color: var(--accent-text); }
     .th-lede {
       margin: 0 auto; max-width: 560px;
       font-family: var(--font-sans); font-size: 16px; line-height: 1.55;
@@ -3399,8 +3521,8 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     <div class="os-grid">
       <!-- ---- left: copy + CTAs ------------------------------------------- -->
       <div class="os-copy">
-        <p class="os-eyebrow">Open core</p>
-        <h2 id="os-title" class="os-h2">Built in the open</h2>
+        <p class="os-eyebrow">— 06 / Open core</p>
+        <h2 id="os-title" class="os-h2">Built in the <span class="os-h2-em">open</span></h2>
         <p class="os-lede">
           The orchestrator, the portal, the sandbox runner, and the iOS app are open
           source at
@@ -3489,9 +3611,9 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     /* ---- copy -------------------------------------------------------------- */
     .os-eyebrow {
       margin: 0 0 14px;
-      font-family: var(--font-sans);
-      font-size: 12px; font-weight: 700; letter-spacing: .08em;
-      text-transform: uppercase; color: var(--accent-strong);
+      font-family: var(--font-mono);
+      font-size: 12px; font-weight: 500; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent-text);
     }
     .os-h2 {
       margin: 0 0 18px;
@@ -3499,17 +3621,18 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
       font-size: clamp(30px, 4vw, 46px); line-height: 1.04;
       letter-spacing: -.02em; color: var(--text-primary);
     }
+    .os-h2-em { font-style: italic; color: var(--accent-text); }
     .os-lede {
       margin: 0 0 28px; max-width: 30rem;
       font-family: var(--font-sans); font-size: 16px; line-height: 1.6;
       color: var(--text-secondary);
     }
     .os-inline-link {
-      color: var(--accent-strong); font-weight: 600;
-      text-decoration: underline; text-decoration-color: var(--navy-soft);
+      color: var(--accent-text); font-weight: 600;
+      text-decoration: underline; text-decoration-color: var(--gold-soft);
       text-underline-offset: 3px; text-decoration-thickness: 2px;
     }
-    .os-inline-link:hover { text-decoration-color: var(--accent-strong); }
+    .os-inline-link:hover { text-decoration-color: var(--accent-text); }
 
     .os-cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
     .os-btn {
@@ -3782,6 +3905,26 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 (function () {
   "use strict";
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---- theme toggle: flip data-theme + persist 'mk-theme' --------------- */
+  (function themeToggle() {
+    var btn = document.getElementById("mk-theme-toggle");
+    var root = document.documentElement;
+    function label() {
+      // the button switches TO the other theme; label reflects the destination
+      var isLight = root.getAttribute("data-theme") === "light";
+      if (btn) btn.setAttribute("aria-label", isLight ? "Switch to dark theme" : "Switch to light theme");
+    }
+    label();
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "light" ? "dark" : "light";
+      root.setAttribute("data-theme", next);
+      root.style.colorScheme = next;
+      try { localStorage.setItem("mk-theme", next); } catch (e) {}
+      label();
+    });
+  })();
 
   /* ---- tiny IntersectionObserver helper fragments MAY use --------------- */
   window.OrchaMk = {

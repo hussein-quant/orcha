@@ -1,8 +1,8 @@
 <section id="themes" class="mk-section th-root" aria-labelledby="th-title">
   <div class="th-wrap">
     <header class="th-head">
-      <p class="th-eyebrow">Make it yours</p>
-      <h2 id="th-title" class="th-h2">Three looks. Your call.</h2>
+      <p class="th-eyebrow">— 05 / Make it yours</p>
+      <h2 id="th-title" class="th-h2">Three looks. Your <span class="th-h2-em">call</span>.</h2>
       <p class="th-lede">
         Theme is a per-user preference — pick one and it follows you, synced across the
         web portal and the iOS app. It never touches how a teammate sees their portal.
@@ -154,9 +154,9 @@
     .th-head { max-width: 640px; margin: 0 auto 52px; text-align: center; }
     .th-eyebrow {
       margin: 0 0 14px;
-      font-family: var(--font-sans);
-      font-size: 12px; font-weight: 700; letter-spacing: .08em;
-      text-transform: uppercase; color: var(--accent-strong);
+      font-family: var(--font-mono);
+      font-size: 12px; font-weight: 500; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent-text);
     }
     .th-h2 {
       margin: 0 0 16px;
@@ -164,6 +164,7 @@
       font-size: clamp(30px, 4vw, 46px); line-height: 1.05;
       letter-spacing: -.02em; color: var(--text-primary);
     }
+    .th-h2-em { font-style: italic; color: var(--accent-text); }
     .th-lede {
       margin: 0 auto; max-width: 560px;
       font-family: var(--font-sans); font-size: 16px; line-height: 1.55;
