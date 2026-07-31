@@ -7,6 +7,8 @@
  *        DELETE .../members/{aid}                      (owner-only remove = retire)
  * The acting identity comes from /api/me via data.js (D.identity); owner-only
  * affordances key off Orcha.actingOwner() — non-owners see the list read-only.
+ * The LAST owner's row never offers demote/remove (the backend 400s both), which
+ * covers the common sole-owner-managing-themselves case.
  * actor_agent_id rides every mutation as the trust-off fallback actor; with a
  * trusted proxy identity the server resolves the actor from the header instead. */
 
@@ -43,7 +45,7 @@ async function loadMembers() {
 }
 
 /* ---- render ----------------------------------------------------------- */
-function memberRowHtml(m, canManage, meId) {
+function memberRowHtml(m, canManage, meId, ownerCount) {
   const login = m.github_login;
   const face = login
     ? (typeof ghAvatar === "function" ? ghAvatar(login, "") : MemO.avatar(login, "human", ""))
@@ -52,10 +54,14 @@ function memberRowHtml(m, canManage, meId) {
   const pending = m.pending ? '<span class="tag mem-pending">pending</span>' : "";
   const you = meId && String(meId) === String(m.agent_id)
     ? '<span class="mem-you">you</span>' : "";
-  const acts = canManage ? `<span class="mem-acts">
+  // NEVER offer demote/remove on the LAST owner's row (the backend 400s both; the
+  // UI must not dangle a dead control) — including the common case: yourself as the
+  // sole owner. With another owner around, every row (self included) is manageable.
+  const lastOwner = m.member_role === "owner" && ownerCount <= 1;
+  const acts = canManage && !lastOwner ? `<span class="mem-acts">
       <button class="btn sm ghost" data-mem-role="${MemO.esc(m.agent_id)}" data-to="${m.member_role === "owner" ? "member" : "owner"}"
         title="${m.member_role === "owner" ? "Demote to member" : "Promote to owner"}">${m.member_role === "owner" ? "Make member" : "Make owner"}</button>
-      <button class="iconbtn" data-mem-remove="${MemO.esc(m.agent_id)}" title="Remove from project">${MemO.icon("x", "")}</button>
+      <button class="iconbtn" data-mem-remove="${MemO.esc(m.agent_id)}" title="Remove access">${MemO.icon("x", "")}</button>
     </span>` : "";
   return `<div class="mem-row">
     ${face}
@@ -83,7 +89,8 @@ function renderMembers(force) {
   const canManage = !!(MemO.actingOwner && MemO.actingOwner()) && !memBusy;
   const ident = MemO.identity ? MemO.identity() : null;
   const meId = ident ? ident.agent_id : null;
-  const rows = MEMBERS.map((m) => memberRowHtml(m, canManage, meId)).join("");
+  const ownerCount = MEMBERS.filter((m) => m.member_role === "owner").length;
+  const rows = MEMBERS.map((m) => memberRowHtml(m, canManage, meId, ownerCount)).join("");
   const invite = canManage ? `<div class="mem-invite">
       <input id="memLogin" class="sc-inp" spellcheck="false" autocomplete="off"
         placeholder="GitHub username to invite…" maxlength="39">
@@ -91,8 +98,8 @@ function renderMembers(force) {
       <button class="btn sm" id="memInvite" type="button">${MemO.icon("plus", "")}Invite</button>
     </div>
     <div class="sc-hint">Invited members appear as <b>pending</b> until they first sign in.
-      The cloud front door (perimeter allowlist) is synced separately — inviting here maps
-      the identity; it doesn't by itself open access.</div>` : "";
+      The cloud front door (perimeter allowlist) follows this roster — a background sync
+      applies invites and removals within a couple of minutes.</div>` : "";
   MemO.patch(host, `<div class="mem-list">${rows || '<div class="none">No human members yet.</div>'}</div>${invite}`, force);
   wireMembers();
 }
@@ -155,8 +162,8 @@ function doRemove(aid) {
   const h = memActor();
   if (!h) { MemO.toast("Pick an acting human first.", "warn"); return; }
   MemO.modal({
-    title: "Remove " + name + "?", danger: true, primary: "Remove member",
-    desc: "They lose the member mapping (their history and messages are kept). Any task naming them as reviewer reverts to anyone. The cloud access allowlist is managed separately.",
+    title: "Remove access for " + name + "?", danger: true, primary: "Remove access",
+    desc: "They lose access to this workspace: the member mapping is retired (their history and messages are kept), any task naming them as reviewer reverts to anyone, and the cloud front door drops them on the next allowlist sync.",
     onPrimary: async () => {
       MemO.closeModal();
       if (memBusy) return;

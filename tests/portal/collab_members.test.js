@@ -169,7 +169,13 @@ async function membersTests() {
   assert(/memLogin/.test(html) && /memInvite/.test(html) && /memRole/.test(html),
     "owners get the invite input + role select");
   assert(/data-mem-role="h2"/.test(html) && /data-mem-remove="h2"/.test(html),
-    "owners get per-row role/remove controls");
+    "owners get per-row role/remove controls on other members");
+  assert(/data-mem-role="h3"/.test(html) && /data-mem-remove="h3"/.test(html),
+    "unmapped local humans are manageable too");
+  /* the LAST owner (here: yourself as sole owner) must never be offered
+     demote/remove — the backend 400s both; the UI must not dangle them */
+  assert(!/data-mem-role="h1"/.test(html) && !/data-mem-remove="h1"/.test(html),
+    "the sole owner's row (self) carries NO demote/remove controls");
 
   /* ---- invite wiring: POST with login+role+trust-off actor ---- */
   owner.reg.memLogin.value = "monalisa";
@@ -190,16 +196,38 @@ async function membersTests() {
   assert(!!patch && patch.url === "/api/containers/c1/members/h2", "role change PATCHes the member");
   assert(patch && patch.init.body === '{"role":"owner","actor_agent_id":"h1"}', "PATCH body carries role + actor");
 
-  /* ---- remove wiring: confirm modal, then DELETE ---- */
+  /* ---- remove wiring: "Remove access" confirm modal, then DELETE ---- */
   vm.runInContext('doRemove("h2")', owner.sandbox);
   const confirm = owner.modals[owner.modals.length - 1];
-  assert(confirm && /Remove hubot\?/.test(confirm.title), "remove opens a confirm modal naming the member");
+  assert(confirm && /Remove access for hubot\?/.test(confirm.title),
+    "remove opens a confirm modal framed as access revocation, naming the member");
+  assert(confirm && confirm.primary === "Remove access", "the confirm's primary action reads 'Remove access'");
   assert(confirm && /reviewer reverts to anyone/i.test(confirm.desc), "confirm copy explains the reviewer reset");
+  assert(confirm && /allowlist sync/i.test(confirm.desc), "confirm copy says the perimeter drops them on sync");
   await confirm.onPrimary();
   await flush();
   const del = calls.find((c) => c.init.method === "DELETE");
   assert(!!del && del.url === "/api/containers/c1/members/h2", "confirming DELETEs the member");
   assert(del && del.init.body === '{"actor_agent_id":"h1"}', "DELETE body carries the trust-off actor");
+
+  /* ---- with a SECOND owner, every row (self included) is manageable ---- */
+  const twoOwners = membersSandbox(() => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve({ members: [
+      { agent_id: "h1", alias: "octocat", github_login: "octocat", member_role: "owner", pending: false },
+      { agent_id: "h2", alias: "hubot", github_login: "hubot", member_role: "owner", pending: false },
+    ] }),
+  }));
+  vm.runInContext("loadMembers()", twoOwners.sandbox);
+  await flush(); await flush();
+  const two = twoOwners.reg.membersCard.innerHTML;
+  assert(/data-mem-role="h1"/.test(two) && /data-mem-remove="h1"/.test(two),
+    "with another owner present, your own owner row IS demotable/removable");
+  assert(/data-mem-role="h2"/.test(two) && /data-mem-remove="h2"/.test(two),
+    "the other owner's row is manageable too");
+  assert(/data-mem-role="h1" data-to="member"/.test(two) || /data-to="member"[^>]*data-mem-role="h1"/.test(two)
+    || /data-mem-role="h1"[\s\S]{0,40}data-to="member"/.test(two),
+    "an owner row's toggle points to member (Make member)");
 
   /* ---- 409 invite: a friendly already-a-member toast, not a failure ---- */
   const dup = membersSandbox((url, init) => (init && init.method === "POST"
