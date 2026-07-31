@@ -33,6 +33,40 @@ function renderCtx() {
     <div class="stat"><span class="n" style="color:${c.wakes_enabled === false ? "var(--danger)" : "var(--ok)"}">${c.wakes_enabled === false ? "Paused" : "Running"}</span><span class="l">Notifier</span></div>`);
 }
 
+/* ---- multi-project: one-time "portal-only" notice on a NEW project ---- */
+// Flagged at creation (app-shell.postNewProject → localStorage orcha:projNotice:<cid>)
+// and shown until dismissed — but ONLY while no host-side notifier serves this
+// container (Orcha.wakesServed reads the daemon's wake-scan stamp, mig 037). Honest by
+// construction: if host glue later binds a workspace and the daemon starts polling,
+// the notice self-clears even without a dismiss. Never shown for the founding project
+// (its flag is never set) or for self-host embedders (fallback wakesServed → true).
+function projNoticeKey() {
+  const c = HomD().container;
+  return c ? "orcha:projNotice:" + c.id : null;
+}
+function renderProjNotice() {
+  const host = Hom$("projNotice"); if (!host) return;
+  const c = HomD().container;
+  const key = projNoticeKey();
+  let flagged = null;
+  try { flagged = key && localStorage.getItem(key); } catch (e) {}
+  const show = !!(flagged && c && !HomO.wakesServed(c));
+  HomO.patch(host, show ? `<div class="proj-notice">
+    ${HomO.icon("alert", "")}
+    <div class="body">
+      <div class="t1">Portal-only for now</div>
+      <div class="t2">Agent wakes need a workspace on the host (<code>orcha init</code> binding);
+        coming with the fleet provisioner. Agents, tasks and requests all work — nothing wakes agents yet.</div>
+    </div>
+    <button class="iconbtn" id="projNoticeX" type="button" title="Dismiss">${HomO.icon("x", "")}</button>
+  </div>` : "");
+  const x = Hom$("projNoticeX");
+  if (x) x.onclick = () => {
+    try { if (key) localStorage.removeItem(key); } catch (e) {}
+    renderProjNotice();
+  };
+}
+
 /* ---- first-run CTA: surface "Get started" when there are no AI agents yet
    (the human authority is registered, but no AI teammate exists). Links to the
    /onboarding wizard. Hidden the moment an AI agent exists — never breaks the

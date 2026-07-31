@@ -41,6 +41,18 @@ function recencyBand() {
   return ts && (Date.now() - ts) <= RECENCY_WINDOW_MS ? 0 : 1;
 }
 
+/* ---- multi-project: is a HOST-SIDE notifier serving this container? ---- *
+ * The daemon's per-tick wake-scan poll stamps containers.last_wake_scan_at (mig 037,
+ * throttled to one write/15s), so a stamp within the last ~2 minutes means "an
+ * `orcha init`-bound workspace's daemon serves THIS project's wakes". NULL/stale ⇒
+ * portal-only: full CRUD works, but nothing wakes agents until host-side glue binds
+ * a workspace (the fleet provisioner). Drives the new-project dashboard notice. */
+const WAKES_SERVED_WINDOW_MS = 2 * 60 * 1000;
+function wakesServed(c) {
+  const t = Date.parse((c && c.last_wake_scan_at) || "");
+  return !!t && (Date.now() - t) <= WAKES_SERVED_WINDOW_MS;
+}
+
 /* ---- real-snapshot accessors (read fresh — keep live across refresh) -- */
 function agents() { return D.agents || []; }
 function tasks() { return D.tasks || []; }

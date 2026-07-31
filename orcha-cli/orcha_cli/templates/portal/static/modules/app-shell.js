@@ -1,5 +1,53 @@
 /* Orcha shared portal module: sidebar, topbar, global search, and navigation chrome. */
 
+/* ---- shared floating menu (house dropdown idiom, mirrors ncFloat) ----- *
+ * One floating host per menu id, appended to <body> so the 3s shell re-render never
+ * clobbers an OPEN menu (mountShell rebuilds the sidebar/topbar markup wholesale);
+ * positioned from the trigger's rect on open. Outside-click + Escape close, with the
+ * anchor looked up FRESH by id so the re-rendered trigger still counts as "inside". */
+const _menus = {};
+function menuFloat(id) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = id; el.className = "pmenu float";
+    document.body.appendChild(el);
+    document.addEventListener("click", (e) => {
+      const st = _menus[id];
+      if (!st || !st.open || el.contains(e.target)) return;
+      const anchor = st.anchorId ? document.getElementById(st.anchorId) : null;
+      if (anchor && anchor.contains(e.target)) return;
+      closeMenu(id);
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(id); });
+  }
+  return el;
+}
+function openMenu(id, anchor, html, align) {
+  const el = menuFloat(id);
+  _menus[id] = { open: true, anchorId: anchor ? anchor.id : null };
+  el.innerHTML = html;
+  const r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+  if (r) {
+    el.style.top = Math.round(r.bottom + 8) + "px";
+    if (align === "right") {
+      el.style.right = Math.round(Math.max(8, window.innerWidth - r.right)) + "px";
+      el.style.left = "auto";
+    } else {
+      el.style.left = Math.round(Math.max(8, r.left)) + "px";
+      el.style.right = "auto";
+    }
+  }
+  el.classList.add("show");
+  return el;
+}
+function closeMenu(id) {
+  if (_menus[id]) _menus[id].open = false;
+  const el = document.getElementById(id);
+  if (el) el.classList.remove("show");
+}
+function menuIsOpen(id) { return !!(_menus[id] && _menus[id].open); }
+
 /* ---- shell ----------------------------------------------------------- */
 /* ---- collapsible sidebar (icon rail) --------------------------------- *
  * Browser-local, same contract as the theme/skin picks: persisted in
@@ -40,6 +88,135 @@ function actingChipHtml() {
     : `<span class="muted">no human registered</span>`;
 }
 
+/* ---- collab: the acting-as account menu (sign out) -------------------- *
+ * The portal sits behind oauth2-proxy; GET /oauth2/sign_out clears the proxy session
+ * (Caddy proxies the path) and rd= sends the signed-out user to the public landing
+ * page. Plain <a> navigation on purpose — no fetch, the proxy owns the redirect. */
+const SIGN_OUT_HREF = "/oauth2/sign_out?rd=%2Fwelcome";
+// Pure builder (harness-pinned): the menu body — login header + the one action.
+function actingMenuHtml() {
+  const ident = identity();
+  if (!ident || !ident.github_login) return "";
+  return `<div class="pm-head">${ghAvatar(ident.github_login, "sm")}
+      <div class="b"><div class="t1">${esc(ident.github_login)}</div>
+      <div class="t2">${esc(ident.member_role || "member")} · GitHub</div></div></div>
+    <a class="pm-row signout" href="${SIGN_OUT_HREF}">${icon("arrow", "")}<span>Sign out</span></a>`;
+}
+// The chip is interactive ONLY with a proxy-verified identity; self-host (identity
+// null) keeps the informational chip untouched — there is no proxy session to clear.
+function wireActingChip() {
+  const chip = document.getElementById("actingChip");
+  if (!chip || !identity()) return;
+  chip.classList.add("menu-trigger");
+  chip.setAttribute("role", "button");
+  chip.setAttribute("aria-haspopup", "true");
+  chip.title = "Signed in via GitHub — account menu";
+  chip.addEventListener("click", () => {
+    if (menuIsOpen("amFloat")) closeMenu("amFloat");
+    else openMenu("amFloat", chip, actingMenuHtml(), "right");
+  });
+}
+
+/* ---- multi-project: the sidebar project switcher ---------------------- *
+ * Lives in the brand area (under the Orcha mark) — the project IS the workspace
+ * context everything below it renders. Menu rows come FRESH from GET /api/containers
+ * on open (name + status + live-agent count, per mig 037); selecting a row hands off
+ * to OrchaData.switchProject (persist orcha:cid + reload on the new project). The
+ * "＋ New project" row opens the house modal → POST /api/containers additional=true. */
+function projSwitchHtml() {
+  const c = D.container;
+  const name = (c && c.name) || "—";
+  return `<button class="proj-switch" id="projSwitch" type="button" aria-haspopup="true"
+      title="Project: ${esc(name)} — switch project">
+      <span class="pdot${c && c.status === "active" ? " on" : ""}"></span>
+      <span class="pname">${esc(name)}</span>${icon("chev", "chev")}</button>`;
+}
+// Pure builder (harness-pinned): the menu body from a containers list + current cid.
+function projMenuHtml(list, cid) {
+  const rows = (list || []).map((c) => {
+    const cur = String(c.id) === String(cid);
+    const agentsN = c.agents != null ? ` · ${c.agents} agent${Number(c.agents) === 1 ? "" : "s"}` : "";
+    return `<button class="pm-row proj${cur ? " on" : ""}" type="button" data-proj="${esc(c.id)}">
+      <span class="pdot${c.status === "active" ? " on" : ""}"></span>
+      <span class="b"><span class="t1">${esc(c.name)}</span>
+      <span class="t2">${esc(c.status)}${agentsN}</span></span>
+      ${cur ? icon("check", "chk") : ""}</button>`;
+  }).join("");
+  return `<div class="pm-head plain">Projects</div>${rows}
+    <button class="pm-row new" type="button" data-proj-new="1">${icon("plus", "")}<span>New project</span></button>`;
+}
+function currentCid() {
+  if (window.OrchaData && window.OrchaData.currentCid) return window.OrchaData.currentCid();
+  return D.container ? D.container.id : null;
+}
+function switchProject(cid) {
+  closeMenu("psFloat");
+  if (D.container && String(D.container.id) === String(cid)) return;   // already here
+  if (window.OrchaData && window.OrchaData.switchProject) window.OrchaData.switchProject(cid);
+}
+function wireProjMenuRows(el) {
+  el.querySelectorAll("[data-proj]").forEach((row) => {
+    row.addEventListener("click", () => switchProject(row.getAttribute("data-proj")));
+  });
+  el.querySelectorAll("[data-proj-new]").forEach((row) => {
+    row.addEventListener("click", () => { closeMenu("psFloat"); openNewProjectModal(); });
+  });
+}
+function openProjectMenu(anchor) {
+  if (menuIsOpen("psFloat")) { closeMenu("psFloat"); return; }
+  openMenu("psFloat", anchor, `<div class="pm-head plain">Projects</div>
+    <div class="pm-row muted">Loading…</div>`);
+  fetch("/api/containers")
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((d) => {
+      if (!menuIsOpen("psFloat")) return;   // closed while loading
+      const el = document.getElementById("psFloat");
+      el.innerHTML = projMenuHtml((d && d.containers) || [], currentCid());
+      wireProjMenuRows(el);
+    })
+    .catch((e) => { closeMenu("psFloat"); toast("Could not load projects: " + e.message, "danger"); });
+}
+
+/* ---- multi-project: the New-project modal ----------------------------- */
+function openNewProjectModal() {
+  modal({
+    title: "New project",
+    desc: "Adds another project to this stack. Portal-only until a host workspace is "
+      + "bound to it — agents and tasks work, but nothing wakes agents yet.",
+    body: `<label class="np-f"><span>Name</span>
+        <input id="npName" maxlength="200" placeholder="e.g. api-gateway" spellcheck="false"></label>
+      <label class="np-f"><span>Description</span>
+        <textarea id="npDesc" class="ta" placeholder="What is this project about? (optional)"></textarea></label>`,
+    primary: "Create project",
+    onPrimary: () => {
+      const name = ((document.getElementById("npName") || {}).value || "").trim();
+      const desc = ((document.getElementById("npDesc") || {}).value || "").trim();
+      if (!name) { toast("A project name is required.", "danger"); return; }
+      postNewProject(name, desc);
+    },
+  });
+}
+function postNewProject(name, desc) {
+  fetch("/api/containers", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name, description: desc || null, additional: true }),
+  })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, status: r.status, d })).catch(() => ({ ok: r.ok, status: r.status, d: {} })))
+    .then(({ ok, status, d }) => {
+      if (!ok) {
+        toast("Create failed" + (d && d.detail ? ": " + d.detail : " (" + status + ")"), "danger");
+        return;
+      }
+      closeModal();
+      // One-time dashboard notice on the NEW project (home-state.renderProjNotice):
+      // flagged here, shown only while no host-side notifier serves it (wakesServed).
+      try { localStorage.setItem("orcha:projNotice:" + d.container_id, "1"); } catch (e) {}
+      toast("Project created — switching…", "ok");
+      switchProject(d.container_id);
+    })
+    .catch((e) => toast("Create failed: " + e.message, "danger"));
+}
+
 function mountShell(page, opts) {
   opts = opts || {};
   const a = attnItems();
@@ -69,6 +246,7 @@ function mountShell(page, opts) {
         <button class="sb-toggle" id="sbToggle" type="button" title="${sbT0}" aria-label="${sbT0}"
           aria-expanded="${sidebarCollapsed() ? "false" : "true"}">${icon("chev", "ico")}</button>
       </div>
+      ${projSwitchHtml()}
       <nav class="nav">
         <div class="lbl">Control room</div>
         ${nv.map((n) => `<a href="${n.href}" class="${n.key === page ? "active" : ""}" title="${n.label}${n.count != null ? " · " + n.count : ""}">
@@ -92,6 +270,8 @@ function mountShell(page, opts) {
       </a>`;
     const sbT = document.getElementById("sbToggle");
     if (sbT) sbT.addEventListener("click", toggleSidebar);
+    const ps = document.getElementById("projSwitch");
+    if (ps) ps.addEventListener("click", () => openProjectMenu(ps));
   }
 
   const topbar = document.getElementById("topbar");
@@ -129,7 +309,7 @@ function mountShell(page, opts) {
             <div class="aut" id="autTop" role="radiogroup" aria-label="Container autonomy level"></div>
           </div>
         </div>
-        <div class="acting" title="You are the human authority on this container">
+        <div class="acting" id="actingChip" title="You are the human authority on this container">
           <span class="lbl">acting as</span>
           <span class="who" id="actingWho">${actingHTML}</span>
         </div>
@@ -151,6 +331,9 @@ function mountShell(page, opts) {
     paintAutonomy();
     // SPEC-3: turn the "Needs you" pill into the notification-center dropdown trigger.
     wireNotifPill();
+    // Collab: with a proxy-verified identity the acting chip opens the account menu
+    // (sign out); identity null (self-host) leaves it informational, untouched.
+    wireActingChip();
     const gs = document.getElementById("globalSearch");
     if (gs) document.addEventListener("keydown", (e) => {
       // the "/" shortcut focuses search — but NOT while the user is typing in a field

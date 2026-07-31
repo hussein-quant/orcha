@@ -1,11 +1,13 @@
-"""Create, reset, and list the single container owned by an Orcha stack."""
+"""Create, reset, and list the container(s) owned by an Orcha stack."""
 
-from fastapi import HTTPException
+import psycopg
+from fastapi import HTTPException, Request
 
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_kind, valid_uuid
+from portal_backend.identity_routes import proxy_login
 from portal_backend.schemas import (
     ContainerCreate,
     ContainerCreateResponse,
@@ -18,27 +20,47 @@ from portal_backend.schemas import (
     response_model=ContainerCreateResponse,
     status_code=201,
 )
-def create_container(body: ContainerCreate):
-    """Orcha#28: stack:db:container is 1:1:1. A stack holds AT MOST one container.
+def create_container(body: ContainerCreate, request: Request):
+    """Create a container ("project") with its root task.
 
-    Returns 409 if one already exists in this DB. To reset, run `orcha down -v &&
-    orcha init` (wipes the volume).
+    Default (`additional` omitted/false) keeps the Orcha#28 `orcha init` contract:
+    a stack holds AT MOST one container — 409 if one already exists in this DB
+    (reset with `orcha down -v && orcha init`, which wipes the volume).
+
+    Multi-project (mig 037): `additional: true` — the portal's "New project" flow —
+    creates ANOTHER container in the same stack and seeds its founding human agent
+    (mirroring what `orcha init` registers via POST .../agents): kind='human',
+    role='operator', member_role='owner'. When the trusted proxy identity is present
+    (ORCHA_TRUST_PROXY_USER=1 + X-Auth-Request-User) the creating GitHub user IS that
+    human — alias + github_login preset to the login, so /api/me resolves them in the
+    new project immediately, no binding-rule pass needed. NB: an additional container
+    gets full portal CRUD but NO agent wakes until host-side glue binds a workspace
+    (`orcha init` binding / fleet provisioner) — see containers.last_wake_scan_at.
     """
     with db_cursor() as (conn, cur):
-        cur.execute("SELECT id, name, status FROM containers LIMIT 1")
-        existing = cur.fetchone()
-        if existing:
-            raise HTTPException(
-                409,
-                f"this stack already has a container ({existing['id']}, "
-                f"name='{existing['name']}', status='{existing['status']}'). "
-                f"Stack:db:container is 1:1:1 — to start a new container, "
-                f"run `orcha down -v && orcha init` to wipe the volume first.",
+        if not body.additional:
+            cur.execute("SELECT id, name, status FROM containers LIMIT 1")
+            existing = cur.fetchone()
+            if existing:
+                raise HTTPException(
+                    409,
+                    f"this stack already has a container ({existing['id']}, "
+                    f"name='{existing['name']}', status='{existing['status']}'). "
+                    f"Stack:db:container is 1:1:1 — to start a new container, "
+                    f"run `orcha down -v && orcha init` to wipe the volume first. "
+                    f"(The portal's New-project flow passes additional=true.)",
+                )
+        try:
+            cur.execute(
+                "INSERT INTO containers (name, description) VALUES (%s, %s) RETURNING id",
+                (body.name, body.description),
             )
-        cur.execute(
-            "INSERT INTO containers (name, description) VALUES (%s, %s) RETURNING id",
-            (body.name, body.description),
-        )
+        except psycopg.errors.UniqueViolation:
+            # containers_name_uq (mig 037): project names are unique per stack,
+            # case-insensitively — same 409 convention as a duplicate agent alias.
+            raise HTTPException(
+                409, f"a project named '{body.name}' already exists in this stack"
+            )
         cid = str(cur.fetchone()["id"])
         cur.execute(
             """INSERT INTO tasks
@@ -55,6 +77,22 @@ def create_container(body: ContainerCreate):
         )
         root_id = str(cur.fetchone()["id"])
         cur.execute("UPDATE containers SET root_task_id=%s WHERE id=%s", (root_id, cid))
+        human_agent_id = None
+        if body.additional:
+            # Seed the founding human OWNER (register_agent's first-human-is-owner
+            # invariant, guaranteed here by construction: the container is brand new).
+            # The init path deliberately does NOT seed — the CLI registers the human
+            # itself (unix username) via POST .../agents right after this call.
+            login = proxy_login(request)
+            alias = login or "operator"
+            cur.execute(
+                """INSERT INTO agents
+                     (container_id, alias, role, kind, github_login, member_role)
+                   VALUES (%s, %s, 'operator', 'human', %s, 'owner')
+                   RETURNING id""",
+                (cid, alias, login),
+            )
+            human_agent_id = str(cur.fetchone()["id"])
         log_event(
             cur,
             cid,
@@ -75,8 +113,24 @@ def create_container(body: ContainerCreate):
             "created",
             {"title": body.name, "is_root": True},
         )
+        if human_agent_id is not None:
+            log_event(
+                cur,
+                cid,
+                "human",
+                None,
+                "agent",
+                human_agent_id,
+                "created",
+                {"alias": alias, "role": "operator", "kind": "human"},
+            )
         conn.commit()
-    return ContainerCreateResponse(container_id=cid, root_task_id=root_id)
+    return ContainerCreateResponse(
+        container_id=cid,
+        root_task_id=root_id,
+        name=body.name,
+        human_agent_id=human_agent_id,
+    )
 
 
 @app.post("/api/containers/{cid}/reset", status_code=200)
@@ -210,17 +264,26 @@ def reset_container(cid: str, body: ContainerReset):
 
 @app.get("/api/containers")
 def list_containers():
-    """Orcha#28: list this stack's container(s).
+    """List this stack's projects (containers).
 
-    Stack:db:container is 1:1:1 by design, so this returns either zero rows
-    (stack is empty, run `orcha init`) or exactly one row. The list shape is
-    kept for the portal / `orcha ls` clients that already consume it.
+    Zero rows = empty stack (run `orcha init`); since mig 037 the portal can add
+    MORE projects (POST /api/containers, additional=true), so several rows are
+    possible. Ordered FOUNDING-FIRST (created_at ASC): CLI consumers (`orcha
+    connect`/`orcha status`) take [0], and the founding container is the one a
+    host workspace + notifier daemon are bound to. Per row, for the switcher:
+      * agents            — live (non-terminated) agent count;
+      * last_wake_scan_at — the notifier's most recent wake-scan poll (stamped by
+        GET .../wake-scan). Recent ⇒ a host-side daemon serves this project's
+        wakes; NULL/stale ⇒ portal-only (CRUD works, nothing wakes).
     """
     with db_cursor() as (_, cur):
         cur.execute(
             """SELECT id, name, description, status, root_task_id, github_repo,
-                      created_at, completed_at
+                      created_at, completed_at, last_wake_scan_at,
+                      (SELECT count(*) FROM agents a
+                        WHERE a.container_id = containers.id
+                          AND a.terminated_at IS NULL) AS agents
                FROM containers
-               ORDER BY created_at DESC""",
+               ORDER BY created_at ASC""",
         )
         return {"containers": cur.fetchall()}

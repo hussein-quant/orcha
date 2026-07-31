@@ -121,6 +121,6 @@ function renderKanban() {
 function render() {
   if (!HomD() || !HomD().container) return;
   HomO.mountShell("home", { title: "Dashboard", ctx: HomD().container.name });
-  renderOnbCta(); renderCtx(); renderQueue(); renderAgents(); renderActivity(); renderKanban();
+  renderProjNotice(); renderOnbCta(); renderCtx(); renderQueue(); renderAgents(); renderActivity(); renderKanban();
 }
 window.OrchaData.start(render, 3000);

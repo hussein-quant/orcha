@@ -122,6 +122,15 @@
 .modal .mh p { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
 .modal .mb { padding: 14px 20px 4px; }
 .modal .mf { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px 18px; }
+/* labeled fields in a modal body (New project) */
+.modal .mb .np-f { display: block; margin-bottom: 12px; }
+.modal .mb .np-f span { display: block; margin-bottom: 5px; color: var(--faint); font-size: 10.5px;
+  font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.modal .mb .np-f input, .modal .mb .np-f textarea { width: 100%; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 9px; color: var(--text); font: inherit;
+  font-size: 13px; padding: 9px 11px; outline: none; }
+.modal .mb .np-f textarea { min-height: 64px; resize: vertical; }
+.modal .mb .np-f input:focus, .modal .mb .np-f textarea:focus { border-color: var(--accent-line); box-shadow: var(--ring); }
 
 /* mobile pairing modal */
 .pair-modal { width: min(640px, 100%); }

@@ -410,7 +410,7 @@ async def test_reviewer_put_validations(client, container, make_agent, make_task
     assert r.status_code == 400, r.text
 
 
-# NOTE: the reviewer route's "wrong container" 400 branch is defensive-only in this
-# harness — `containers_singleton` (Orcha#28, see test_cross_container.py) forbids a
-# second container in the same DB, so a cross-container human is unreachable by
-# construction here. The kind/terminated/unknown branches above pin the guard's shape.
+# NOTE: the reviewer route's "wrong container" 400 branch was defensive-only while
+# `containers_singleton` (Orcha#28) forbade a second container; mig 037 (multi-project,
+# see test_cross_container.py) made it reachable. The kind/terminated/unknown branches
+# above pin the guard's shape; cross-container scoping is pinned in test_cross_container.

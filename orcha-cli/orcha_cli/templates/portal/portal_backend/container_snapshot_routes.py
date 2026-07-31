@@ -27,6 +27,9 @@ def get_container(cid: str, task_limit: int = 1000, request_limit: int = 1000):
             """SELECT id, name, description, status, root_task_id,
                       max_auto_agents, max_tasks, execution_mode, wakes_enabled,
                       autonomy_level, github_repo,
+                      -- mig 037: the notifier's last wake-scan poll — recent means a
+                      -- host daemon serves THIS project's wakes (switcher/notice signal).
+                      last_wake_scan_at,
                       created_at, completed_at
                FROM containers WHERE id=%s""",
             (cid,),
