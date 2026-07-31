@@ -515,12 +515,10 @@ struct AutoWakeSheet: View {
 struct ConversationScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let agentId: String
 
     @State private var draft = ""
     @State private var confirmEnd = false
-    @State private var pulse = false
     /// Issue 4 — client-side reveal window over the already-fetched turns (web parity:
     /// start at the last 10, +20 per "Load earlier" tap). No refetch; the fetch window is 80.
     @State private var revealed = 10
@@ -607,13 +605,19 @@ struct ConversationScreen: View {
                         }
                     }
                     turnRows
-                    if working {
-                        Text("\(agent?.alias ?? "The agent") is working…")
+                    if model.sendFlow.showsPendingBubble {
+                        pendingBubble
+                    }
+                    // One status row at a time: awaiting-reply (just sent) is the most
+                    // specific, then the overdue note, then the ambient "working" pulse.
+                    if model.sendFlow.showsAwaitingReply {
+                        PulsingNoteRow(text: awaitingReplyCopy)
+                    } else if model.sendFlow.showsOverdueNote {
+                        Text("No reply yet — \(agent?.alias ?? "the agent") may still be starting up. Pull down to refresh.")
                             .font(p.uiFont(13))
                             .foregroundStyle(p.muted)
-                            .opacity(!reduceMotion && pulse ? 0.4 : 1)
-                            .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
-                            .onAppear { if !reduceMotion { pulse = true } }
+                    } else if working {
+                        PulsingNoteRow(text: "\(agent?.alias ?? "The agent") is working…")
                     }
                     if let error = model.error {
                         Banner(kind: .danger, text: error)
@@ -622,9 +626,13 @@ struct ConversationScreen: View {
                 }
                 .padding(16)
             }
-            // Scroll to bottom on a NEW/sent turn (newest seq changes) or when the keyboard
-            // opens — never on a "Load earlier" reveal (which only widens the top).
+            // Scroll to bottom on a NEW/sent turn (newest seq changes), on any send-flow
+            // step (pending bubble / indicator appearing), or when the keyboard opens —
+            // never on a "Load earlier" reveal (which only widens the top).
             .onChange(of: model.turns.last?.seq) {
+                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
+            .onChange(of: model.sendFlow.phase) {
                 withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
@@ -659,19 +667,105 @@ struct ConversationScreen: View {
             Bubble(.system, turn.content, tasks: tasks, onTapTask: { linkedTaskId = $0 })
         } else if mine {
             Bubble(.mine, turn.content, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 })
+        } else if ChatSendFlow.isBlankReply(turn.content) {
+            // A blank agent turn (the session restarted mid-reply and no output was
+            // captured) must never render as an empty bubble — show a muted notice.
+            emptyReplyNotice(turn, alias: alias)
         } else {
             Bubble(.theirs, turn.content, author: alias, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 }) {
                 if let rid = turn.runId {
-                    NavigationLink(value: WorkspaceRoute.run(RunDto(runId: rid, agentId: agentId, agentAlias: alias, status: "exited"))) {
-                        Text("Open work log →")
-                            .font(p.uiFont(11, .bold))
-                            .foregroundStyle(p.accent)
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
+                    workLogLink(rid, alias: alias)
                 }
             }
         }
+    }
+
+    /// The "theirs"-side muted notice replacing a blank agent bubble.
+    private func emptyReplyNotice(_ turn: TurnDto, alias: String) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("No reply captured — \(alias)'s session may have restarted.")
+                    .font(p.uiFont(12))
+                    .foregroundStyle(p.muted)
+                if let time = MobileUx.agoLabel(turn.createdAt) {
+                    Text(time)
+                        .font(.system(size: 10.5, design: .monospaced))
+                        .foregroundStyle(p.faint)
+                }
+                if let rid = turn.runId {
+                    workLogLink(rid, alias: alias)
+                }
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(p.border2, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    .allowsHitTesting(false)
+            )
+            Spacer(minLength: 60)
+        }
+    }
+
+    /// The existing run-log link, shared by real replies and the blank-reply notice.
+    private func workLogLink(_ runId: String, alias: String) -> some View {
+        NavigationLink(value: WorkspaceRoute.run(RunDto(runId: runId, agentId: agentId, agentAlias: alias, status: "exited"))) {
+            Text("Open work log →")
+                .font(p.uiFont(11, .bold))
+                .foregroundStyle(p.accent)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 4)
+    }
+
+    // MARK: optimistic send (pending bubble + awaiting-reply copy)
+
+    private var awaitingReplyCopy: String {
+        let alias = agent?.alias ?? "the agent"
+        return model.sendFlow.isFirstTurn
+            ? "Starting \(alias)'s session — the first reply can take a minute."
+            : "\(alias) is waking…"
+    }
+
+    /// The composed message, rendered the moment the send begins: "sending…" while the
+    /// POST is in flight (and until the poll echoes the real turn back — which then
+    /// replaces this bubble), or "tap to retry" when the POST failed. Never both this
+    /// and the echoed turn: `ChatSendFlow.observe` dedupes by content + seq recency.
+    private var pendingBubble: some View {
+        let flow = model.sendFlow
+        return Bubble(.mine, flow.content) {
+            if flow.isFailed {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Not sent — tap to retry")
+                        .font(p.uiFont(11, .bold))
+                    if let reason = flow.failureReason {
+                        Text(reason)
+                            .font(p.uiFont(10.5))
+                            .opacity(0.75)
+                    }
+                }
+                .foregroundStyle(p.accentInk)
+                .padding(.top, 2)
+            } else {
+                Text("sending…")
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(p.accentInk.opacity(0.55))
+            }
+        }
+        .opacity(flow.isFailed ? 1 : 0.75)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard model.sendFlow.isFailed, let restored = model.takeFailedSendContent() else { return }
+            draft = draft.isEmpty ? restored : restored + "\n\n" + draft
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            flow.isFailed
+                ? "Message not sent: \(flow.content)"
+                : "Sending message: \(flow.content)"
+        )
+        .accessibilityHint(flow.isFailed ? "Double-tap to restore the message so you can send it again." : "")
+        .accessibilityAddTraits(flow.isFailed ? .isButton : [])
     }
 
     // MARK: composer
@@ -690,23 +784,35 @@ struct ConversationScreen: View {
                 draft = ""
                 Task { await model.sendTurn(agentId, content: text) }
             } label: {
-                Image(systemName: "paperplane.fill")
-                    .font(p.uiFont(16, .semibold))
-                    .foregroundStyle(p.accentInk)
-                    .frame(width: 40, height: 40)
-                    .background(p.accent, in: Circle())
+                Group {
+                    if model.sendFlow.isSending {
+                        ProgressView()
+                            .tint(p.accentInk)
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                            .font(p.uiFont(16, .semibold))
+                            .foregroundStyle(p.accentInk)
+                    }
+                }
+                .frame(width: 40, height: 40)
+                .background(p.accent, in: Circle())
             }
             .buttonStyle(.plain)
-            .opacity(canSend ? 1 : 0.45)
+            .opacity(canSend || model.sendFlow.isSending ? 1 : 0.45)
             .disabled(!canSend)
+            .accessibilityLabel(model.sendFlow.isSending ? "Sending" : "Send")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(p.bg)
     }
 
+    /// Send gate: non-empty draft, no global action in flight, and the send machine
+    /// allows re-entry (never mid-POST, never over an unretried failed bubble).
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.actionInFlight
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !model.actionInFlight
+            && model.sendFlow.canBegin
     }
 
     // MARK: day dividers
@@ -735,5 +841,24 @@ struct ConversationScreen: View {
             rows.append(.turn(turn))
         }
         return rows
+    }
+}
+
+/// A muted, gently pulsing status line under the transcript (awaiting-reply /
+/// agent-working). Owns its pulse state so each appearance animates afresh;
+/// Reduce Motion renders it static. VoiceOver reads the text as-is.
+private struct PulsingNoteRow: View {
+    @Environment(\.palette) private var p
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let text: String
+    @State private var pulse = false
+
+    var body: some View {
+        Text(text)
+            .font(p.uiFont(13))
+            .foregroundStyle(p.muted)
+            .opacity(!reduceMotion && pulse ? 0.4 : 1)
+            .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
+            .onAppear { if !reduceMotion { pulse = true } }
     }
 }
