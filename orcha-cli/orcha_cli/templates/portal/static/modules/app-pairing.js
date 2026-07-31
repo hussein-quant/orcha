@@ -31,11 +31,22 @@ function pairingHumanSelect(selectedId) {
   </select></label>`;
 }
 
-function openPairingModal() {
-  const cid = D.container && D.container.id;
+/* The modal is CID-SCOPED: opts {cid, name} targets any project (the /projects
+ * landing passes the card's project); default = the loaded container. The QR
+ * payload itself is built by GET /api/containers/{cid}/pairing from the PATH cid,
+ * so the phone always pairs against exactly the project whose button was pressed. */
+let pairingCid = null;
+function openPairingModal(opts) {
+  opts = opts || {};
+  const cid = opts.cid || (D.container && D.container.id);
   if (!cid) { toast("No Orcha container is loaded.", "danger"); return; }
-  const hs = humans();
-  const who = actingHuman() || hs[0] || null;
+  pairingCid = cid;
+  // The human picker only knows the LOADED project's roster; a foreign-cid open
+  // (landing page) skips it — the server resolves the acting member (trusted lane)
+  // or answers 400 choose_human, which renders its own picker below.
+  const sameProject = !!(D.container && String(D.container.id) === String(cid));
+  const hs = sameProject ? humans() : [];
+  const who = sameProject ? (actingHuman() || hs[0] || null) : null;
   const selected = who && who.id;
   clearPairingTimer();
 
@@ -45,12 +56,12 @@ function openPairingModal() {
       <span class="pair-mark">${orcaSVG()}</span>
       <div class="grow">
         <h3 id="pairTitle">Pair your phone</h3>
-        <p>Scan with the Orcha app on the same Wi-Fi network.</p>
+        <p>Scan with the Orcha app on the same Wi-Fi network.${opts.name ? " Project: <b>" + esc(opts.name) + "</b>." : ""}</p>
       </div>
       <button class="iconbtn" id="pairClose" type="button" title="Close">${icon("x", "")}</button>
     </div>
     <div class="pair-content">
-      ${pairingHumanSelect(selected)}
+      ${sameProject ? pairingHumanSelect(selected) : ""}
       <div id="pairBody"><div class="pair-loading">${icon("clock", "")}<span>Preparing pairing code...</span></div></div>
     </div>
   </div>`;
@@ -59,7 +70,7 @@ function openPairingModal() {
   if (close) close.addEventListener("click", closeModal);
   const sel = document.getElementById("pairHuman");
   if (sel) sel.addEventListener("change", () => loadPairing(sel.value));
-  if (!hs.length) {
+  if (sameProject && !hs.length) {
     renderPairingWarning({ title: "No human can pair this phone", message: "Add a human operator before pairing a phone." });
   } else {
     loadPairing(selected);
@@ -89,7 +100,7 @@ function renderPairingLoading() {
 }
 
 async function loadPairing(humanId) {
-  const cid = D.container && D.container.id;
+  const cid = pairingCid || (D.container && D.container.id);
   if (!cid) return;
   const seq = ++pairingSeq;
   clearPairingTimer();
@@ -102,13 +113,36 @@ async function loadPairing(humanId) {
     try { data = await r.json(); } catch (e) {}
     if (seq !== pairingSeq) return;
     if (!r.ok) {
-      renderPairingWarning((data && data.detail) || { message: "Pairing failed (" + r.status + ")." });
+      const detail = data && data.detail;
+      // Foreign-cid open (landing page) with several humans and no trusted
+      // identity: the server answers 400 choose_human with the roster — render
+      // its picker instead of a dead warning.
+      if (detail && detail.reason === "choose_human" && Array.isArray(detail.humans)) {
+        renderPairingChooser(detail.humans);
+        return;
+      }
+      renderPairingWarning(detail || { message: "Pairing failed (" + r.status + ")." });
       return;
     }
     renderPairingPayload(data, humanId);
   } catch (e) {
     if (seq === pairingSeq) renderPairingWarning({ message: "Could not reach the local pairing endpoint: " + e.message });
   }
+}
+
+function renderPairingChooser(hs) {
+  clearPairingTimer();
+  const host = document.getElementById("pairBody");
+  if (!host) return;
+  host.innerHTML = `<div class="pair-warning">
+    <div class="pair-warn-title">${icon("alert", "")}<span>Choose who to pair as</span></div>
+    <label class="pair-select"><span>Pair as</span><select id="pairChoose">
+      <option value="" selected disabled>Select a human…</option>
+      ${hs.map((h) => `<option value="${esc(h.id)}">${esc(h.alias)} (human)</option>`).join("")}
+    </select></label>
+  </div>`;
+  const sel = document.getElementById("pairChoose");
+  if (sel) sel.addEventListener("change", () => loadPairing(sel.value));
 }
 
 function countdownText(ms) {
@@ -176,7 +210,7 @@ function modal(cfg) {
   document.getElementById("__mp").addEventListener("click", () => { if (cfg.onPrimary) cfg.onPrimary(ov); else closeModal(); });
   if (cfg.onOpen) cfg.onOpen(ov);
 }
-function closeModal() { clearPairingTimer(); const ov = document.getElementById("__ov"); if (ov) ov.classList.remove("show"); }
+function closeModal() { clearPairingTimer(); pairingCid = null; const ov = document.getElementById("__ov"); if (ov) ov.classList.remove("show"); }
 
 /* ---- toast ----------------------------------------------------------- */
 let toastT;
