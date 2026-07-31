@@ -48,6 +48,15 @@ DAEMON_ENV="${ORCHA_DAEMON_ENV:-/root/.orcha-daemon-env}"
 MINT="${ORCHA_MINT:-$(dirname "$0")/github-app-token.py}"
 MEMORY="${PROVISION_MEMORY:-1536m}"
 CPUS="${PROVISION_CPUS:-1}"
+# The stack network sandboxes must join. A cloned repo can carry its OWN
+# .orcha/docker-compose.yml, making network derivation target a nonexistent
+# network (wakes die 125) — so pin it explicitly. Auto-detect from the running
+# portal container; PROVISION_NETWORK overrides.
+NETWORK="${PROVISION_NETWORK:-}"
+if [ -z "$NETWORK" ]; then
+    PORTAL_CTR=$(docker ps --filter name=portal --format '{{.Names}}' | head -n 1)
+    [ -n "$PORTAL_CTR" ] && NETWORK=$(docker inspect "$PORTAL_CTR"         --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null | awk '{print $1}')
+fi
 
 # uv-installed `orcha` lives in ~/.local/bin, which systemd's default PATH lacks.
 export PATH="${HOME:-/root}/.local/bin:$PATH"
@@ -153,15 +162,18 @@ EOF
     fi
 
     mkdir -p "$WS/.claude"
-    python3 - "$WS/.claude/orcha.json" "$P_CID" "$PORTAL" "$P_SLUG" "$MEMORY" "$CPUS" <<'PYEOF'
+    python3 - "$WS/.claude/orcha.json" "$P_CID" "$PORTAL" "$P_SLUG" "$MEMORY" "$CPUS" "$NETWORK" <<'PYEOF'
 import json, sys
-path, cid, portal, slug, memory, cpus = sys.argv[1:7]
+path, cid, portal, slug, memory, cpus, network = sys.argv[1:8]
+sandbox = {"enabled": True, "memory": memory, "cpus": cpus}
+if network:
+    sandbox["network"] = network
 with open(path, "w") as fh:
     json.dump({
         "api_base_url": portal,
         "project_name": slug,
         "current_container_id": cid,
-        "sandbox": {"enabled": True, "memory": memory, "cpus": cpus},
+        "sandbox": sandbox,
     }, fh, indent=2)
     fh.write("\n")
 PYEOF
