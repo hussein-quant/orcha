@@ -26,6 +26,9 @@
            notifier serves wakes) shows the persistent chat banner and a queued
            notice after sends — never fake thinking dots. Cold-start honesty:
            the first-ever reply says "starting the agent's session…".
+   PART F  markdown (feat/chat-markdown) — durable turns (agent AND human)
+           render through O().mdText inside a .tx.md container; the transient
+           pending/optimistic bubble stays PLAIN escaped text (esc, no md).
 
    Dependency-free (mirrors project_switcher.test.js): the real portal modules
    in a vm sandbox over a tiny fake DOM.
@@ -323,6 +326,35 @@ async function partE() {
     "…and the no-runtime queued copy stops rendering");
 }
 
+/* ---------------- PART F — markdown on turns; pending bubble stays plain --- */
+async function partF() {
+  console.log("\nPART F — md render on durable turns; pending/optimistic stays PLAIN\n");
+  // make the mdText stub distinguishable from esc so the render path is provable
+  orchaStub.mdText = (s) => "<md>" + String(s == null ? "" : s) + "</md>";
+  run('window.OrchaConvo.mount(__host, "a6")');
+  await drain();
+  net.postMode = "hold"; net.posts = [];
+  els.convInput.value = "**bold** plan";
+  els.convSend.fire("click");
+  await flush();
+  const pendingHtml = els.convList._html;
+  assert(pendingHtml.indexOf("sending…") >= 0 && pendingHtml.indexOf("<md>") < 0,
+    "the optimistic pending bubble does NOT run mdText — plain text only");
+  assert(/class="tx">\*\*bold\*\* plan/.test(pendingHtml),
+    "…its container is plain .tx (no md class), text verbatim");
+  net.heldPosts.splice(0).forEach((release) => release());
+  await drain();
+  assert(els.convList._html.indexOf('<div class="tx md"><md>**bold** plan</md></div>') >= 0,
+    "the DURABLE human turn renders through mdText inside a .tx.md container");
+  net.pollTurns = [{ id: "srv-md-1", seq: 99, role: "agent", author_agent_id: "a6",
+                     content: "# Done\n- item", attachments: [], created_at: "2026-07-31T00:00:03Z", run_id: null, meta: {} }];
+  run("poll()");
+  await drain();
+  assert(els.convList._html.indexOf('<div class="tx md"><md># Done\n- item</md></div>') >= 0,
+    "the AGENT turn renders through mdText inside a .tx.md container");
+  orchaStub.mdText = (s) => String(s == null ? "" : s);
+}
+
 (async () => {
   sb.__host = mountHost;
   await partA();
@@ -330,6 +362,7 @@ async function partE() {
   await partC();
   await partD();
   await partE();
+  await partF();
   console.log("");
   if (failures) { console.error(failures + " FAILURE(S)"); process.exit(1); }
   console.log("ALL PASS");

@@ -73,6 +73,8 @@ function thinkingBubble() {
 // the optimistic human bubble: the just-sent text at reduced opacity until the server's
 // copy lands; on failure it carries an inline danger note + Retry (and the composer got
 // the text back) — a failed send is never silently dropped and never auto-reposted.
+// PLAIN text (esc, no md): the bubble is transient and must mirror the composer verbatim;
+// the markdown render appears when the durable turn lands.
 function pendingBubble() {
   const p = pendingLocal;
   const failed = p.status === "failed";
@@ -81,7 +83,7 @@ function pendingBubble() {
   return `<div class="turn human pending${failed ? " failed" : ""}">
     <div class="tb">
       <div class="tmeta">you<span class="tt">${failed ? "not sent" : "sending…"}</span></div>
-      <div class="tx md">${O().mdText(p.content || "")}</div>
+      <div class="tx">${O().esc(p.content || "")}</div>
       ${atts}
       ${failed ? `<div class="conv-sendfail">${O().icon("alert", "")}<span>${O().esc(p.err || "Couldn't send.")}</span>
         <button type="button" class="btn sm danger" data-retrysend>Retry</button></div>` : ""}

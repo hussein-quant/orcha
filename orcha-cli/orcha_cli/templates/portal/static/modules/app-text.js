@@ -56,31 +56,60 @@ const linkify = (s) => taskRefs(esc(s == null ? "" : String(s)).replace(/https?:
   if (t) { tail = m.slice(m.length - t[0].length); m = m.slice(0, m.length - t[0].length); }
   return `<a class="lnk" href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>${tail}`;
 }));
-// Render a SAFE inline-markdown subset for chat messages (agents emit lots of **bold**,
-// `code`, fenced ```blocks```, lists). SECURITY: esc() FIRST so the text can never inject
-// HTML, THEN format the escaped string. Code spans/fences are stashed before emphasis so
-// their literal *_` survive; a NUL sentinel (impossible in input) marks the stash slots.
-// Newlines are preserved by .tx { white-space: pre-wrap }.
+// Render SAFE markdown for agent-authored chat text — the full chat-scale subset:
+// headings h1–h4, bold/italic, `code` + fenced blocks, ordered/unordered (nested) lists,
+// blockquotes, [text](https://…) links + bare-URL autolink, --- rules, GFM pipe tables,
+// and paragraphs/line breaks. SECURITY: esc() FIRST so authored text can never inject
+// HTML — every pass below operates on the escaped string and only renderer-built tags
+// are emitted. NO raw-html passthrough; images render as plain links (no <img>: remote
+// fetches are a tracking/spoofing vector); link targets are http(s) ONLY, so
+// javascript:/data: URLs stay literal text. Code spans/fences and anchors are stashed
+// behind a NUL sentinel (stripped from the input first, so a forged sentinel can't
+// address the stash) before emphasis runs, keeping their literal *_` and URLs intact.
+// Output is BLOCK html — pair with the `md` container class (styles/markdown.css).
 const mdText = (src) => {
-  let s = esc(src == null ? "" : String(src));
+  let s = esc(src == null ? "" : String(src)).replace(/\u0000/g, "");
   const stash = [];
-  const Z = String.fromCharCode(0);   // NUL sentinel — impossible in esc()'d input, so it never collides with real text
+  const Z = String.fromCharCode(0);   // sentinel — just stripped from the input, so it never collides
   const keep = (html) => { stash.push(html); return Z + (stash.length - 1) + Z; };
-  // fenced code block  ```lang\n…```
+  const anchor = (url, text) => keep(`<a class="lnk" href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
+  // fenced code block  ```lang\n…```  — contents verbatim (already escaped), never formatted
   s = s.replace(/```[^\n`]*\n?([\s\S]*?)```/g, (m, code) => keep(`<pre class="md-pre"><code>${code.replace(/\n+$/, "")}</code></pre>`));
   // inline code  `…`
   s = s.replace(/`([^`\n]+)`/g, (m, code) => keep(`<code class="md-code">${code}</code>`));
-  // GFM tables: a header row, a |---|:--:| delimiter row, then data rows. Rendered in place
-  // (one line, no inner newlines) BEFORE the inline passes so cell text still gets bold/links;
-  // runs after code stashing, so a `pipe|in|code` cell can't be mistaken for columns.
-  {
-    const splitRow = (line) => line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
-    const isDelim = (line) => line != null && /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(line);
-    const cell = (c, tag, al) => `<${tag}${al ? ` style="text-align:${al}"` : ""}>${c}</${tag}>`;
-    const lines = s.split("\n"), out = [];
+  // ![alt](url) images -> plain links, then [text](url) links — http(s) only
+  s = s.replace(/!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)/g, (m, alt, url) => anchor(url, alt || url));
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, text, url) => anchor(url, text));
+  // bare URLs — trailing sentence punctuation / a closing bracket stays OUTSIDE the link
+  s = s.replace(/https?:\/\/[^\s<]+/g, (m) => {
+    let tail = ""; const t = m.match(/[)\].,;:!?]+$/);
+    if (t) { tail = m.slice(m.length - t[0].length); m = m.slice(0, m.length - t[0].length); }
+    return anchor(m, m) + tail;
+  });
+  // bold (before italic, so ** isn't eaten by the single-* rule)
+  s = s.replace(/\*\*(?!\s)([^\n]+?)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/__(?!\s)([^\n_]+?)__/g, "<strong>$1</strong>");
+  // italic — non-space inner edges + word-boundary for _ so snake_case is left alone
+  s = s.replace(/(^|[^*])\*(?!\s)([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>");
+  s = s.replace(/(^|[^_\w])_(?!\s)([^_\n]+?)_(?![\w_])/g, "$1<em>$2</em>");
+
+  /* ---- block pass: line groups -> tables/headings/hr/quotes/lists/paragraphs ---- */
+  const SLOT_LINE = new RegExp("^" + Z + "(\\d+)" + Z + "$");
+  const LIST_RE = /^(\s*)(?:([-*+])|(\d{1,9})[.)])\s+(\S.*)$/;
+  const splitRow = (line) => line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  const isDelim = (line) => line != null && /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(line);
+  const cell = (c, tag, al) => `<${tag}${al ? ` style="text-align:${al}"` : ""}>${c}</${tag}>`;
+  const blocks = (lines) => {
+    const out = [], para = [];
+    const flushP = () => { if (para.length) { out.push(`<div class="md-p">${para.join("<br>")}</div>`); para.length = 0; } };
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].indexOf("|") >= 0 && isDelim(lines[i + 1])) {
-        const head = splitRow(lines[i]);
+      const ln = lines[i];
+      // GFM table: header row + |---|:--:| delimiter + data rows, rendered as ONE line.
+      // Cells already carry inline formatting; code is stashed, so a `pipe|in|code`
+      // span can't be mistaken for columns. Checked before hr so |---| isn't a rule.
+      if (ln.indexOf("|") >= 0 && isDelim(lines[i + 1])) {
+        flushP();
+        const head = splitRow(ln);
         const aligns = splitRow(lines[i + 1]).map((c) => {
           const L = c.startsWith(":"), R = c.endsWith(":");
           return L && R ? "center" : R ? "right" : L ? "left" : "";
@@ -90,28 +119,56 @@ const mdText = (src) => {
         const thead = "<tr>" + head.map((c, k) => cell(c, "th", aligns[k])).join("") + "</tr>";
         const tbody = rows.map((r) => "<tr>" + head.map((_, k) => cell(r[k] == null ? "" : r[k], "td", aligns[k])).join("") + "</tr>").join("");
         out.push(`<table class="md-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`);
-        i = j - 1;
-      } else { out.push(lines[i]); }
+        i = j - 1; continue;
+      }
+      if (!ln.trim()) { flushP(); continue; }                     // blank line = paragraph break
+      const slot = ln.trim().match(SLOT_LINE);                    // a fenced block alone on its line
+      if (slot && stash[+slot[1]].startsWith("<pre")) { flushP(); out.push(ln.trim()); continue; }
+      const h = ln.match(/^\s{0,3}(#{1,6})\s+(.+)$/);             // headings — h5/h6 clamp to chat-scale h4
+      if (h) { flushP(); const lvl = Math.min(h[1].length, 4); out.push(`<h${lvl}>${h[2].trim()}</h${lvl}>`); continue; }
+      if (/^\s{0,3}(?:-{3,}|_{3,}|\*{3,})\s*$/.test(ln)) { flushP(); out.push("<hr>"); continue; }
+      if (/^\s{0,3}&gt;/.test(ln)) {                              // blockquote run (a literal > is &gt; post-esc)
+        flushP();
+        const inner = [];
+        while (i < lines.length && /^\s{0,3}&gt;/.test(lines[i])) { inner.push(lines[i].replace(/^\s{0,3}&gt;\s?/, "")); i++; }
+        i--;
+        out.push(`<blockquote class="md-quote">${blocks(inner)}</blockquote>`);
+        continue;
+      }
+      if (LIST_RE.test(ln)) {                                     // list run — nested via 2-space indent steps
+        flushP();
+        const items = [];
+        while (i < lines.length) {
+          const im = lines[i].match(LIST_RE);
+          if (!im) break;
+          items.push({ ind: im[1].replace(/\t/g, "  ").length, ol: im[3] != null, num: im[3] ? +im[3] : 0, text: im[4].trim() });
+          i++;
+        }
+        i--;
+        const stack = []; let lh = "";
+        const open = (it) => { lh += it.ol ? (it.num > 1 ? `<ol start="${it.num}">` : "<ol>") : "<ul>"; stack.push(it); };
+        const close = () => { lh += stack.pop().ol ? "</ol>" : "</ul>"; };
+        items.forEach((it) => {
+          if (!stack.length || it.ind >= stack[stack.length - 1].ind + 2) open(it);
+          else {
+            while (stack.length > 1 && it.ind <= stack[stack.length - 1].ind - 2) close();
+            if (stack[stack.length - 1].ol !== it.ol) { close(); open(it); }
+          }
+          lh += `<li>${it.text}</li>`;
+        });
+        while (stack.length) close();
+        out.push(lh); continue;
+      }
+      para.push(ln);
     }
-    s = out.join("\n");
-  }
-  // links (http/https) — same trailing-punctuation handling as linkify
-  s = s.replace(/https?:\/\/[^\s<]+/g, (m) => {
-    let tail = ""; const t = m.match(/[)\].,;:!?]+$/);
-    if (t) { tail = m.slice(m.length - t[0].length); m = m.slice(0, m.length - t[0].length); }
-    return keep(`<a class="lnk" href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`) + tail;
-  });
-  // bold (before italic, so ** isn't eaten by the single-* rule)
-  s = s.replace(/\*\*(?!\s)([^\n]+?)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/__(?!\s)([^\n_]+?)__/g, "<strong>$1</strong>");
-  // italic — non-space inner edges + word-boundary for _ so snake_case is left alone
-  s = s.replace(/(^|[^*])\*(?!\s)([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>");
-  s = s.replace(/(^|[^_\w])_(?!\s)([^_\n]+?)_(?![\w_])/g, "$1<em>$2</em>");
-  // headings (#/##/###) and bullet lines (- / *) -> their own styled lines
-  s = s.replace(/^\s{0,3}#{1,3}\s+(.+)$/gm, '<span class="md-h">$1</span>');
-  s = s.replace(/^\s*[-*]\s+(.+)$/gm, '<span class="md-li">$1</span>');
+    flushP();
+    return out.join("");
+  };
+  s = blocks(s.split("\n"));
   // ISS-82: linkify bare task-id refs last — code spans/fences and URLs are already stashed,
-  // so they're protected; emphasis/heading tags are skipped by taskRefs' tag-aware split.
+  // so they're protected; block/emphasis tags are skipped by taskRefs' tag-aware split.
   s = taskRefs(s);
-  return s.replace(new RegExp(Z + "(\\d+)" + Z, "g"), (m, i) => stash[+i]);
+  // un-stash (bounded loop: a markdown link's text may itself hold an inline-code slot)
+  for (let g = 0; g < 5 && s.indexOf(Z) >= 0; g++) s = s.replace(new RegExp(Z + "(\\d+)" + Z, "g"), (m, i) => stash[+i]);
+  return s;
 };
