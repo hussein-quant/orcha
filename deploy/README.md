@@ -110,11 +110,24 @@ git config credential.helper \
   '!f() { echo username=x-access-token; echo "password=$(cat /workspace/.orcha/github-token)"; }; f'
 ```
 
-Agents clone/pull/push over https as the app bot, and open PRs with
-`curl -H "Authorization: Bearer $(cat /workspace/.orcha/github-token)" -X POST
-.../repos/<owner>/<repo>/pulls`. Install the app on every target repo. Note:
-commits/PRs are attributed to the app bot; the human PR review remains the
-authority gate, same as the Orcha task flow.
+**Bot commit identity**: the provisioner also sets workspace-local git config on
+cloned repos so commits are authored by the app bot, never a human account —
+`user.name orcha-cloud-app[bot]`, `user.email
+<APP_ID>+orcha-cloud-app[bot]@users.noreply.github.com` (APP_ID and slug come
+from `github-app.json`). Pre-existing workspaces don't get a migration pass —
+apply it manually once per workspace:
+
+```bash
+cd <ws> && git config user.name 'orcha-cloud-app[bot]' \
+  && git config user.email "$(python3 -c "import json;print(json.load(open('/opt/orcha-secrets/github-app.json'))['id'])")+orcha-cloud-app[bot]@users.noreply.github.com"
+```
+
+Agents clone/pull/push over https as the app bot, and open PRs with the `gh`
+CLI baked into the runner image (its `/usr/local/bin/gh` wrapper re-reads the
+rotating token on every invocation, so auth is always fresh). Install the app
+on every target repo. Note: commits/PRs are attributed to the app bot; the
+human PR review remains the authority gate, same as the Orcha task flow. Full
+story: `docs/agent-prs.md`.
 
 **Multi-org**: install the app on each org/user whose repos Orcha should reach
 (app page → Install App, once per org). The refresh timer discovers all
