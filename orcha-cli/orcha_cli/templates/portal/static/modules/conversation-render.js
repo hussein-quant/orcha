@@ -61,7 +61,7 @@ function queuedBubble(p) {
   const a = O().agentById(agentId);
   const name = a ? a.alias : "agent";
   const msg = (p && p.reason) ? p.reason
-    : name + " is busy with another task — your message is queued and will be answered when it's free.";
+    : "Message queued — " + name + " picks it up on its next wake.";
   return `<div class="turn agent">${O().avatar(name, "ai", "sm")}
     <div class="tb"><div class="tmeta">${O().esc(name)}<span class="tt">queued</span></div>
       <div class="conv-queued">${O().icon("clock", "")}<span>${O().esc(msg)}</span></div></div></div>`;

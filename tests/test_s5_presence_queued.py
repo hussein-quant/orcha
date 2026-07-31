@@ -39,7 +39,10 @@ def test_presence_contract_is_wired_into_the_panel():
     assert "awaitingReply()" in js and "function indicatorBubble" in js, "renderList doesn't use the derived indicator"
     # busy -> honest queued notice, never fake thinking dots
     assert "function queuedBubble" in js and "presence_reason" in js, "no queued notice"
-    assert "is busy with another task" in js, "no generic queued fallback line"
+    # neutral fallback: the queued bubble also renders when the agent looks IDLE with
+    # no live session (sandbox resident lane), so it must not claim "busy with another
+    # task" — the message is simply queued for the next wake.
+    assert "picks it up on its next wake" in js, "no generic queued fallback line"
     # the busy pill + queued styles exist
     css = page_source("agents.html")
     assert ".presence.p-busy" in css and ".conv-queued" in css, "busy pill / queued CSS missing"
