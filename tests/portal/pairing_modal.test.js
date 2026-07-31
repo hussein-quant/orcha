@@ -161,6 +161,10 @@ function moduleSandbox(opts) {
     setInterval: () => 1, clearInterval() {}, setTimeout: () => 0, clearTimeout() {},
     fetch: (url) => {
       fetches.push(String(url));
+      if (opts.error) {
+        return Promise.resolve({ ok: false, status: opts.error.status,
+          json: () => Promise.resolve({ detail: opts.error.detail }) });
+      }
       return Promise.resolve({ ok: true, json: () => Promise.resolve(payload) });
     },
   };
@@ -278,6 +282,25 @@ async function copyTests() {
   await flush(); await flush();
   assert(/sign-in perimeter/.test(mixed.reg.pairBody._html),
     "an https payload URL alone flips the footer cloud-true");
+
+  // warnings: the Wi-Fi troubleshooting foot is local-only; string 403 details render
+  const denied = moduleSandbox({
+    trusted: true, identity: null, locationProtocol: "https:",
+    error: { status: 403, detail: "your GitHub account ('mallory') is not a member of this project — ask an owner for an invite" },
+  });
+  vm.runInContext("openPairingModal()", denied.sandbox);
+  await flush(); await flush();
+  assert(/not a member of this project/.test(denied.reg.pairBody._html),
+    "a plain-string 403 detail renders as the warning message");
+  assert(!/same Wi-Fi/.test(denied.reg.pairBody._html),
+    "…without the local Wi-Fi troubleshooting foot in cloud context");
+
+  const localWarn = moduleSandbox({ trusted: false, identity: null,
+    error: { status: 409, detail: { title: "Phones can't reach this Orcha yet", message: "localhost only" } } });
+  vm.runInContext("openPairingModal()", localWarn.sandbox);
+  await flush(); await flush();
+  assert(/same Wi-Fi/.test(localWarn.reg.pairBody._html),
+    "local warnings keep the Wi-Fi troubleshooting foot");
 }
 
 /* ---------------- PART E — branded card + expiry chip overflow fix ------- */

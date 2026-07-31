@@ -127,7 +127,7 @@ function renderPairingWarning(info) {
     <div class="pair-warn-title">${icon("alert", "")}<span>${esc(info.title || "Phones can't reach this Orcha yet")}</span></div>
     <p>${esc(info.message || "The server could not produce a phone-reachable network address.")}</p>
     ${info.remedy ? `<div class="pair-remedy">${pairingCopyWithCode(info.remedy)}</div>` : ""}
-    <p class="pair-foot">Both devices must be on the same Wi-Fi. Some VPNs and corporate networks block phone-to-laptop traffic.</p>
+    ${pairingCloudContext() ? "" : `<p class="pair-foot">Both devices must be on the same Wi-Fi. Some VPNs and corporate networks block phone-to-laptop traffic.</p>`}
   </div>`;
 }
 
