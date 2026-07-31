@@ -90,6 +90,13 @@ struct OrchaApiClient {
         try await get(base, "/api/models")
     }
 
+    /// The GitHub App installation's repo list for the Connect-repo sheet
+    /// (portal `home-github.js` parity). `available:false` rides a 200 — a
+    /// graceful off state, never thrown.
+    func githubRepos(_ base: String) async throws -> GithubReposResponse {
+        try await get(base, "/api/github/repos")
+    }
+
     func conversation(_ base: String, _ aid: String, limit: Int? = nil) async throws -> ConversationResponse {
         try await get(base, "/api/agents/\(aid)/conversation" + query(["limit": limit.map(String.init)]))
     }
@@ -197,6 +204,13 @@ struct OrchaApiClient {
     /// GH #148 — the autonomy gearbox (`plan` | `pr` | `full`). Human-gated on the server.
     func setAutonomy(_ base: String, _ cid: String, actor: String, level: String) async throws {
         try await post(base, "/api/containers/\(cid)/autonomy", ["level": level, "actor_agent_id": actor])
+    }
+
+    /// Bind (`repo` = "owner/name") or unbind (`repo` = nil) the container's GitHub repo.
+    /// A nil repo makes `send` drop the key entirely — the server's schema defaults the
+    /// absent field to null, so `{}` and `{"repo": null}` both unbind (github_routes.py).
+    func setGithubRepo(_ base: String, _ cid: String, repo: String?) async throws -> GithubBindingResponse {
+        try await putDecoding(base, "/api/containers/\(cid)/github", ["repo": repo])
     }
 
     /// Flow 07a: returns the routed outcome so the UI can tell a real wake
@@ -370,6 +384,11 @@ struct OrchaApiClient {
 
     private func patch(_ base: String, _ path: String, _ body: [String: Any?]) async throws {
         _ = try await send(base, path, method: "PATCH", body)
+    }
+
+    private func putDecoding<T: Decodable>(_ base: String, _ path: String, _ body: [String: Any?]) async throws -> T {
+        let data = try await send(base, path, method: "PUT", body)
+        return try decoder.decode(T.self, from: data)
     }
 }
 

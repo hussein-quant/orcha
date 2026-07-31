@@ -7,6 +7,7 @@ struct HomeTabView: View {
     @Binding var showCreateTask: Bool
     @State private var planSheetTask: TaskDto?
     @State private var verifySheetTask: TaskDto?
+    @State private var showRepoConnect = false
 
     var body: some View {
         Group {
@@ -28,6 +29,9 @@ struct HomeTabView: View {
         }
         .sheet(item: $verifySheetTask) { task in
             VerifySheet(task: task)
+        }
+        .sheet(isPresented: $showRepoConnect) {
+            ConnectRepoSheet()
         }
     }
 
@@ -63,6 +67,14 @@ struct HomeTabView: View {
         return ScrollView {
             VStack(spacing: 10) {
                 ConnectionBanners()
+                // The workspace's repo binding — the portal context card's `.tag.gh`
+                // chip: bound shows the mark + owner/name, unbound invites connecting.
+                HStack {
+                    GitHubRepoChip(repo: snapshot.container.githubRepo) {
+                        showRepoConnect = true
+                    }
+                    Spacer()
+                }
                 if let cu = model.catchUp {
                     CatchUpCard(
                         previous: cu.previous,
