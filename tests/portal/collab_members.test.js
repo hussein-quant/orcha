@@ -124,6 +124,9 @@ function membersSandbox(fetchImpl) {
     modal: (cfg) => modals.push(cfg),
     closeModal() {},
     actingOwner: () => sandbox.__owner !== false,
+    // access model: grant-aware affordance helpers (mirror app-data.js)
+    actingGrant: (g) => sandbox.__owner !== false || (sandbox.__grants || []).indexOf(g) >= 0,
+    viewerRole: () => !!sandbox.__viewerRole,
     actingHuman: () => ({ id: "h1", alias: "octocat" }),
     identity: () => ({ agent_id: "h1", alias: "octocat", github_login: "octocat", member_role: "owner" }),
   };
@@ -138,10 +141,11 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 const ROSTER = {
   members: [
-    { agent_id: "h1", alias: "octocat", github_login: "octocat", member_role: "owner", pending: false },
-    { agent_id: "h2", alias: "hubot", github_login: "hubot", member_role: "member", pending: true },
-    { agent_id: "h3", alias: "ada", github_login: null, member_role: "member", pending: false },
+    { agent_id: "h1", alias: "octocat", github_login: "octocat", member_role: "owner", grants: [], pending: false },
+    { agent_id: "h2", alias: "hubot", github_login: "hubot", member_role: "member", grants: ["manage_keys"], pending: true },
+    { agent_id: "h3", alias: "ada", github_login: null, member_role: "member", grants: [], pending: false },
   ],
+  restricted: false,
 };
 
 async function membersTests() {
@@ -168,8 +172,16 @@ async function membersTests() {
     "an unmapped local human renders with the letter avatar, no gh image");
   assert(/memLogin/.test(html) && /memInvite/.test(html) && /memRole/.test(html),
     "owners get the invite input + role select");
+  assert(/id="memRole"[\s\S]{0,220}value="viewer"/.test(html),
+    "the invite role select offers viewer (access model)");
   assert(/data-mem-role="h2"/.test(html) && /data-mem-remove="h2"/.test(html),
     "owners get per-row role/remove controls on other members");
+  assert(/data-mem-role="h2"[\s\S]{0,340}option value="viewer"/.test(html),
+    "the per-row role select offers viewer");
+  assert(/data-mem-perms="h2"/.test(html) && /data-mem-perms="h3"/.test(html),
+    "owners get the Permissions expander trigger on non-owner rows");
+  assert(/mem-grants"[^>]*title="manage_keys">\+1</.test(html),
+    "a granted member shows a +N grants chip naming the grants");
   assert(/data-mem-role="h3"/.test(html) && /data-mem-remove="h3"/.test(html),
     "unmapped local humans are manageable too");
   /* the LAST owner (here: yourself as sole owner) must never be offered
@@ -214,9 +226,9 @@ async function membersTests() {
   const twoOwners = membersSandbox(() => Promise.resolve({
     ok: true, status: 200,
     json: () => Promise.resolve({ members: [
-      { agent_id: "h1", alias: "octocat", github_login: "octocat", member_role: "owner", pending: false },
-      { agent_id: "h2", alias: "hubot", github_login: "hubot", member_role: "owner", pending: false },
-    ] }),
+      { agent_id: "h1", alias: "octocat", github_login: "octocat", member_role: "owner", grants: [], pending: false },
+      { agent_id: "h2", alias: "hubot", github_login: "hubot", member_role: "owner", grants: [], pending: false },
+    ], restricted: false }),
   }));
   vm.runInContext("loadMembers()", twoOwners.sandbox);
   await flush(); await flush();
@@ -225,9 +237,8 @@ async function membersTests() {
     "with another owner present, your own owner row IS demotable/removable");
   assert(/data-mem-role="h2"/.test(two) && /data-mem-remove="h2"/.test(two),
     "the other owner's row is manageable too");
-  assert(/data-mem-role="h1" data-to="member"/.test(two) || /data-to="member"[^>]*data-mem-role="h1"/.test(two)
-    || /data-mem-role="h1"[\s\S]{0,40}data-to="member"/.test(two),
-    "an owner row's toggle points to member (Make member)");
+  assert(/data-mem-role="h1"[\s\S]{0,140}option value="owner" selected/.test(two),
+    "an owner row's role select shows owner selected (demote = pick member/viewer)");
 
   /* ---- 409 invite: a friendly already-a-member toast, not a failure ---- */
   const dup = membersSandbox((url, init) => (init && init.method === "POST"
@@ -250,6 +261,64 @@ async function membersTests() {
   assert(/mem-row/.test(ro) && /tag role-owner/.test(ro), "non-owners still see the member list + roles");
   assert(!/memInvite/.test(ro) && !/data-mem-role=/.test(ro) && !/data-mem-remove=/.test(ro),
     "non-owners get NO invite bar and NO role/remove controls");
+
+  /* ---- access model: the owner-only Permissions expander + grants PATCH ---- */
+  const gcalls = [];
+  const granter = membersSandbox((url, init) => {
+    gcalls.push({ url, init: init || {} });
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(ROSTER) });
+  });
+  vm.runInContext("loadMembers()", granter.sandbox);
+  await flush(); await flush();
+  vm.runInContext('memOpenPerms.add("h2"); renderMembers(true);', granter.sandbox);
+  const gp = granter.reg.membersCard.innerHTML;
+  assert(/data-perms-panel="h2"/.test(gp), "the Permissions expander opens per row");
+  ["manage_keys", "manage_members", "manage_repo", "manage_autonomy", "manage_agents", "assign_reviewers"]
+    .forEach((g) => assert(new RegExp('data-grant="' + g + '"').test(gp), "expander offers " + g));
+  assert(/data-grant="manage_keys"[^>]*checked/.test(gp), "a held grant renders checked");
+  assert(/data-perms-save="h2"/.test(gp), "the expander carries a Save action");
+  vm.runInContext('doGrants("h2", ["manage_keys", "manage_repo"])', granter.sandbox);
+  await flush(); await flush();
+  const gpatch = gcalls.find((c) => c.init.method === "PATCH");
+  assert(!!gpatch && gpatch.url === "/api/containers/c1/members/h2",
+    "saving permissions PATCHes the member");
+  assert(gpatch && gpatch.init.body === '{"grants":["manage_keys","manage_repo"],"actor_agent_id":"h1"}',
+    "PATCH body carries the full grants replacement + the trust-off actor");
+
+  /* ---- manage_members WITHOUT owner: manage below owner, no Permissions ---- */
+  const mgr = membersSandbox(() =>
+    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(ROSTER) }));
+  mgr.sandbox.__owner = false;
+  mgr.sandbox.__grants = ["manage_members"];
+  vm.runInContext("loadMembers()", mgr.sandbox);
+  await flush(); await flush();
+  const mg = mgr.reg.membersCard.innerHTML;
+  assert(/memInvite/.test(mg) && /data-mem-role="h2"/.test(mg) && /data-mem-remove="h2"/.test(mg),
+    "a manage_members holder gets invite + role/remove on plain members");
+  assert(!/data-mem-role="h1"/.test(mg) && !/data-mem-remove="h1"/.test(mg),
+    "…but NO controls on owner rows (to/from owner stays owner-only)");
+  assert(!/data-mem-perms=/.test(mg), "…and NO Permissions expander (grants are owner-only)");
+  assert(!/id="memRole"[\s\S]{0,220}value="owner"/.test(mg)
+    && !/data-mem-role="h2"[\s\S]{0,340}option value="owner"/.test(mg),
+    "…and no owner option in any role select");
+
+  /* ---- roster privacy: restricted:true renders only your own membership ---- */
+  const rest = membersSandbox(() => Promise.resolve({
+    ok: true, status: 200,
+    json: () => Promise.resolve({ members: [
+      { agent_id: "h1", alias: "octocat", github_login: "octocat", member_role: "member", grants: [], pending: false },
+    ], restricted: true }),
+  }));
+  rest.sandbox.__owner = false;
+  vm.runInContext("loadMembers()", rest.sandbox);
+  await flush(); await flush();
+  const rr = rest.reg.membersCard.innerHTML;
+  assert(/mem-you">you</.test(rr) && /github\.com\/octocat\.png/.test(rr),
+    "restricted view renders your own membership card");
+  assert(/mem-restricted/.test(rr) && /visible to owners/.test(rr),
+    "…with the roster-privacy note");
+  assert(!/hubot/.test(rr) && !/memInvite/.test(rr) && !/data-mem-role=/.test(rr),
+    "…and neither the roster nor any management control");
 }
 
 async function run() {

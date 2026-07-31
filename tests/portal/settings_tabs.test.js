@@ -91,7 +91,7 @@ function tabNode(name, on) {
   return n;
 }
 
-function boot(startHash) {
+function boot(startHash, orcha) {
   const tabs = [tabNode("workspace", true), tabNode("collaboration", false), tabNode("appearance", false)];
   const wrap = {
     _attrs: {},
@@ -104,6 +104,7 @@ function boot(startHash) {
     window: {
       location: { hash: startHash || "" },
       addEventListener: (ev, fn) => { winListeners[ev] = fn; },
+      Orcha: orcha,
     },
     document: {
       querySelector: (sel) => (sel === ".set-wrap" ? wrap : null),
@@ -149,6 +150,35 @@ function behaviorTests() {
   d.sandbox.window.location.hash = "#tab=collaboration";
   d.winListeners.hashchange();
   assert(d.wrap.getAttribute("data-tab") === "collaboration", "hashchange re-selects the tab");
+
+  // access model: a trusted identity WITHOUT manage_keys loses the Workspace tab
+  // (keys + models) — server still enforces; this just removes a dead tab.
+  const g = boot("", {
+    identity: () => ({ member_role: "member", grants: [] }),
+    actingGrant: () => false,
+  });
+  assert(g.tabs[0].classList.contains("hidden"), "no manage_keys → the Workspace pill hides");
+  assert(g.wrap.getAttribute("data-tab") === "collaboration",
+    "…and the selection falls to the first visible tab (Collaboration)");
+  const g2 = boot("#tab=workspace", {
+    identity: () => ({ member_role: "member", grants: [] }),
+    actingGrant: () => false,
+  });
+  assert(g2.wrap.getAttribute("data-tab") === "collaboration",
+    "a #tab=workspace deep link cannot resurrect the hidden tab");
+
+  // holding the grant (or being an owner) keeps every tab
+  const k = boot("", {
+    identity: () => ({ member_role: "member", grants: ["manage_keys"] }),
+    actingGrant: (x) => x === "manage_keys",
+  });
+  assert(!k.tabs[0].classList.contains("hidden") && k.wrap.getAttribute("data-tab") === "workspace",
+    "manage_keys (or owner) keeps the Workspace tab + default selection");
+
+  // trust off / no identity: self-host sees every tab, unchanged
+  const t = boot("", { identity: () => null, actingGrant: () => false });
+  assert(!t.tabs[0].classList.contains("hidden") && t.wrap.getAttribute("data-tab") === "workspace",
+    "no identity (trust off) hides nothing");
 }
 
 console.log("settings_tabs.test.js\n");

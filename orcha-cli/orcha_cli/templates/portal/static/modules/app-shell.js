@@ -132,12 +132,16 @@ function wireActingChip() {
   });
 }
 
-/* ---- per-project identity: the non-member VIEWER banner ---------------- *
- * Shown under the topbar on every page when a trusted sign-in resolved NO
- * membership in the current project (viewerOnly). Same idiom as the pausebar:
- * a pure builder the harness can pin + an idempotent ensure that toggles a
- * .show class, so the 3s shell re-render reconciles it cheaply. */
+/* ---- per-project identity: the read-only banner ------------------------ *
+ * Shown under the topbar on every page in either read-only state: a trusted
+ * sign-in that resolved NO membership in the current project (viewerOnly), or a
+ * member whose project role is 'viewer' (mig 039 — can look, every write 403s).
+ * Same idiom as the pausebar: a pure builder the harness can pin + an idempotent
+ * ensure that toggles a .show class, so the 3s shell re-render reconciles it. */
 function viewerBannerHtml() {
+  if (typeof viewerRole === "function" && viewerRole() && !viewerOnly()) {
+    return `<span>Your role here is viewer — read-only. Ask an owner for the member role to act.</span>`;
+  }
   return `<span>You're viewing as a non-member — ask an owner for an invite to act.</span>`;
 }
 function ensureViewerBanner(topbar) {
@@ -147,10 +151,11 @@ function ensureViewerBanner(topbar) {
     bar = document.createElement("div");
     bar.className = "viewerbar";
     bar.id = "viewerbar";
-    bar.innerHTML = viewerBannerHtml();
     topbar.insertAdjacentElement("afterend", bar);
   }
-  bar.classList[viewerOnly() ? "add" : "remove"]("show");
+  const on = typeof actingReadOnly === "function" ? actingReadOnly() : viewerOnly();
+  bar.innerHTML = viewerBannerHtml();
+  bar.classList[on ? "add" : "remove"]("show");
 }
 
 /* ---- multi-project: the sidebar project switcher ---------------------- *
@@ -179,6 +184,7 @@ function projMenuHtml(list, cid) {
       ${cur ? icon("check", "chk") : ""}</button>`;
   }).join("");
   return `<div class="pm-head plain">Projects</div>${rows}
+    <a class="pm-row all" href="/projects">${icon("home", "")}<span>All projects</span></a>
     <button class="pm-row new" type="button" data-proj-new="1">${icon("plus", "")}<span>New project</span></button>`;
 }
 function currentCid() {
@@ -253,24 +259,36 @@ function postNewProject(name, desc) {
     .catch((e) => toast("Create failed: " + e.message, "danger"));
 }
 
+/* Multi-project landing: in-project nav links carry ?cid=<current> so a bare "/"
+ * is unambiguous — it belongs to the /projects hub. Without the param, sidebar
+ * "Dashboard" clicks from a multi-project stack would bounce through the landing
+ * redirect (home boot) instead of staying in the project. No container yet ⇒ the
+ * bare path (the landing decides). */
+function withCid(href) {
+  const cid = currentCid();
+  if (!cid) return href;
+  return href + (href.indexOf("?") >= 0 ? "&" : "?") + "cid=" + encodeURIComponent(cid);
+}
+
 function mountShell(page, opts) {
   opts = opts || {};
   const a = attnItems();
   // hrefs are the served FastAPI routes (extensionless), NOT the *.html filenames —
-  // the portal serves /, /agents, /tasks, /requests (review P2: *.html would 404).
+  // the portal serves /, /agents, /tasks, /requests (review P2: *.html would 404) —
+  // each carrying the active project's cid (withCid).
   const nv = [
-    { key: "home", href: "/", ico: "home", label: "Dashboard" },
-    { key: "agents", href: "/agents", ico: "agents", label: "Agents", count: agents().length },
-    { key: "tasks", href: "/tasks", ico: "tasks", label: "Tasks",
+    { key: "home", href: withCid("/"), ico: "home", label: "Dashboard" },
+    { key: "agents", href: withCid("/agents"), ico: "agents", label: "Agents", count: agents().length },
+    { key: "tasks", href: withCid("/tasks"), ico: "tasks", label: "Tasks",
       count: tasks().filter((t) => t.status === "needs_verification").length, attn: true },
-    { key: "requests", href: "/requests", ico: "requests", label: "Requests",
+    { key: "requests", href: withCid("/requests"), ico: "requests", label: "Requests",
       count: requests().filter((r) => r.status === "open").length },
     // Metrics page — usage/cost visibility per agent. No count badge (an
     // aggregate page has no "N waiting" semantics).
     { key: "metrics", href: "/metrics", ico: "metrics", label: "Metrics" },
     // SPEC-SETTINGS §5: 5th control-room entry — the Settings page (API key +,
     // later, per-use-case model selection). No count badge.
-    { key: "settings", href: "/settings", ico: "sliders", label: "Settings" },
+    { key: "settings", href: withCid("/settings"), ico: "sliders", label: "Settings" },
   ];
 
   const sidebar = document.getElementById("sidebar");
@@ -278,7 +296,7 @@ function mountShell(page, opts) {
     const sbT0 = sidebarCollapsed() ? "Expand sidebar" : "Collapse sidebar";
     sidebar.innerHTML = `
       <div class="brand-row">
-        <a class="brand" href="/" style="color:inherit">
+        <a class="brand" href="${withCid("/")}" style="color:inherit">
           <span class="mark">${orcaSVG()}</span>
           <span class="word">Orcha<small>orchestration portal</small></span>
         </a>
@@ -293,7 +311,7 @@ function mountShell(page, opts) {
           ${n.count != null ? `<span class="ncount${n.attn && n.count ? " attn" : ""}">${n.count}</span>` : ""}
         </a>`).join("")}
         <div class="lbl">Live</div>
-        <a href="/agents" class="" title="Run feed">
+        <a href="${withCid("/agents")}" class="" title="Run feed">
           ${icon("live", "ico")}<span class="grow">Run feed</span>
         </a>
       </nav>
@@ -302,9 +320,9 @@ function mountShell(page, opts) {
         <div class="h">${icon("bell", "")}<span>Needs you</span></div>
         <div class="big tnum">${a.count}</div>
         <div class="sub">${a.verifs.length} to verify · ${a.escs.length} escalation${a.escs.length === 1 ? "" : "s"}</div>
-        <a class="go" href="/#needs">Open action queue ${icon("arrow", "")}</a>
+        <a class="go" href="${withCid("/")}#needs">Open action queue ${icon("arrow", "")}</a>
       </div>
-      <a class="attn-mini" href="/#needs" title="Needs you · ${a.count} — open action queue">
+      <a class="attn-mini" href="${withCid("/")}#needs" title="Needs you · ${a.count} — open action queue">
         ${icon("bell", "")}<span class="n tnum">${a.count}</span>
       </a>`;
     const sbT = document.getElementById("sbToggle");
@@ -329,7 +347,7 @@ function mountShell(page, opts) {
           <input id="globalSearch" placeholder="Search agents, tasks, requests…" spellcheck="false" autocomplete="off">
           <span class="kbd">/</span>
         </div>
-        <a class="attn-pill" id="attnPill" href="/#needs" title="Notifications — approvals, verifications & activity" aria-haspopup="true">
+        <a class="attn-pill" id="attnPill" href="${withCid("/")}#needs" title="Notifications — approvals, verifications & activity" aria-haspopup="true">
           ${icon("bell", "bell")}<span>Needs you</span><span class="n tnum">${a.count}</span>
         </a>
       </div>

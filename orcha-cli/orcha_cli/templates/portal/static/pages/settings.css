@@ -111,3 +111,12 @@
   .mem-invite { display: flex; align-items: center; gap: 8px; margin-top: 14px;
     padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
   .mem-role-sel { flex: 0 0 110px; }
+  /* access model: per-member grant chips + the owner-only Permissions expander */
+  .mem-grants { color: var(--accent); border-color: var(--accent-line); }
+  .mem-perms { display: flex; flex-direction: column; gap: 7px; margin: 2px 0 10px;
+    padding: 12px 14px; border: 1px dashed var(--border); border-radius: 11px; }
+  .mem-perms .btn { align-self: flex-start; margin-top: 4px; }
+  .mem-grant { display: flex; align-items: center; gap: 9px; font-size: 12.5px;
+    color: var(--text-2); cursor: pointer; }
+  .mem-grant input { accent-color: var(--accent); }
+  .mem-restricted { margin-top: 12px; }
