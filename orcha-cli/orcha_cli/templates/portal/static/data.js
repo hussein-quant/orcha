@@ -148,14 +148,49 @@ window.OrchaData = (function () {
     return { container: raw.container || null, agents, byAlias, tasks, requests };
   }
 
-  // 1:1:1 auto-resolve: ?cid= wins, else the sole/active container.
+  // Multi-project (mig 037): the ACTIVE project cid, persisted per-browser so the
+  // switcher pick sticks across pages/reloads (same contract as orcha:theme/sidebar).
+  const CID_KEY = "orcha:cid";
+  function savedCid() {
+    try { return localStorage.getItem(CID_KEY); } catch (e) { return null; }
+  }
+  function persistCid(cid) {
+    try { localStorage.setItem(CID_KEY, String(cid)); } catch (e) {}
+  }
+
+  // Resolve the active cid: ?cid= wins, else the persisted switcher pick, else the
+  // active/first (founding) container. Every candidate is VALIDATED against the live
+  // /api/containers list, so a deep-link or a stale localStorage cid naming a container
+  // that no longer exists falls back to the first container cleanly instead of
+  // 404-looping the poll. The winner is persisted so the switcher stays consistent.
   async function resolveCid() {
     const q = Q.get("cid");
-    if (q) return q;
-    const list = await getJSON("/api/containers");
-    const arr = Array.isArray(list) ? list : (list.containers || []);
-    const active = arr.find((c) => c.status === "active") || arr[0];
-    return active ? active.id : null;
+    let arr;
+    try {
+      const list = await getJSON("/api/containers");
+      arr = Array.isArray(list) ? list : (list.containers || []);
+    } catch (e) {
+      return q || savedCid() || null;   // list unreachable: trust the explicit picks
+    }
+    const has = (id) => !!id && arr.some((c) => String(c.id) === String(id));
+    let cid = null;
+    if (has(q)) cid = q;
+    else if (has(savedCid())) cid = savedCid();
+    else {
+      const active = arr.find((c) => c.status === "active") || arr[0];
+      cid = active ? active.id : null;
+    }
+    if (cid) persistCid(cid);
+    return cid;
+  }
+
+  // Switch the portal to another project: persist the pick, then reload at the BARE
+  // path — the poll, /api/me, and the event stream all boot fresh on the new cid, and
+  // page-level caches (threads, run streams) can't leak across projects. Query/hash
+  // deep-links (?task=/?req=/?cid=) refer to the OLD project, so they are dropped.
+  function switchProject(cid) {
+    persistCid(cid);
+    if (typeof location !== "undefined") location.assign(location.pathname);
   }
 
   let _cid = null;
@@ -233,5 +268,7 @@ window.OrchaData = (function () {
     connect();
   }
 
-  return { mapSnapshot, resolveCid, refresh, start, startEventStream, aliasFor, mapThread, threadOf, _cidOf: () => _cid };
+  return { mapSnapshot, resolveCid, refresh, start, startEventStream, aliasFor, mapThread, threadOf,
+           // multi-project: the active cid + the switcher's entry point (app-shell)
+           currentCid: () => _cid, switchProject, _cidOf: () => _cid };
 })();

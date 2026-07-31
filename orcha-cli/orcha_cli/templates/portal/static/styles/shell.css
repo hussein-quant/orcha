@@ -33,6 +33,22 @@
 .brand .word small { display: block; font-weight: 550; font-size: 10.5px; letter-spacing: .14em;
   text-transform: uppercase; color: var(--muted); margin-top: 4px; }
 
+/* ---- multi-project: the sidebar project switcher ---- */
+.proj-switch { display: flex; align-items: center; gap: 8px; width: 100%; margin: 2px 0 4px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 12.5px;
+  font-weight: 620; cursor: pointer; text-align: left;
+  transition: border-color .14s, background .14s; }
+.proj-switch:hover { border-color: var(--accent-line); background: var(--hover); }
+.proj-switch .pname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-switch .chev { width: 13px; height: 13px; flex: none; color: var(--faint); }
+.pdot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--idle); }
+.pdot.on { background: var(--ok); }
+/* collapsed rail: the switcher shrinks to its status dot (tooltip keeps the name) */
+html[data-sidebar="collapsed"] .proj-switch { justify-content: center; padding: 9px 0; }
+html[data-sidebar="collapsed"] .proj-switch .pname,
+html[data-sidebar="collapsed"] .proj-switch .chev { display: none; }
+
 /* ---- shared floating menu (project switcher / acting-as account menu) ---- */
 .pmenu.float { position: fixed; z-index: 70; min-width: 236px; max-width: 320px; display: none;
   background: var(--surface); border: 1px solid var(--border-2); border-radius: 13px;
@@ -55,7 +71,10 @@
 .pmenu .pm-row .b { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .pmenu .pm-row .t1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pmenu .pm-row .t2 { font-size: 11px; color: var(--muted); }
+.pmenu .pm-row .chk { width: 14px; height: 14px; flex: none; color: var(--accent); }
 .pmenu .pm-row svg.ico { width: 15px; height: 15px; flex: none; }
+.pmenu .pm-row.new { color: var(--accent); font-weight: 620; }
+.pmenu .pm-row.new:hover { background: var(--accent-soft); }
 .pmenu .pm-row.signout:hover { color: var(--danger); background: var(--danger-soft); }
 
 .nav { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }

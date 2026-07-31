@@ -117,6 +117,106 @@ function wireActingChip() {
   });
 }
 
+/* ---- multi-project: the sidebar project switcher ---------------------- *
+ * Lives in the brand area (under the Orcha mark) — the project IS the workspace
+ * context everything below it renders. Menu rows come FRESH from GET /api/containers
+ * on open (name + status + live-agent count, per mig 037); selecting a row hands off
+ * to OrchaData.switchProject (persist orcha:cid + reload on the new project). The
+ * "＋ New project" row opens the house modal → POST /api/containers additional=true. */
+function projSwitchHtml() {
+  const c = D.container;
+  const name = (c && c.name) || "—";
+  return `<button class="proj-switch" id="projSwitch" type="button" aria-haspopup="true"
+      title="Project: ${esc(name)} — switch project">
+      <span class="pdot${c && c.status === "active" ? " on" : ""}"></span>
+      <span class="pname">${esc(name)}</span>${icon("chev", "chev")}</button>`;
+}
+// Pure builder (harness-pinned): the menu body from a containers list + current cid.
+function projMenuHtml(list, cid) {
+  const rows = (list || []).map((c) => {
+    const cur = String(c.id) === String(cid);
+    const agentsN = c.agents != null ? ` · ${c.agents} agent${Number(c.agents) === 1 ? "" : "s"}` : "";
+    return `<button class="pm-row proj${cur ? " on" : ""}" type="button" data-proj="${esc(c.id)}">
+      <span class="pdot${c.status === "active" ? " on" : ""}"></span>
+      <span class="b"><span class="t1">${esc(c.name)}</span>
+      <span class="t2">${esc(c.status)}${agentsN}</span></span>
+      ${cur ? icon("check", "chk") : ""}</button>`;
+  }).join("");
+  return `<div class="pm-head plain">Projects</div>${rows}
+    <button class="pm-row new" type="button" data-proj-new="1">${icon("plus", "")}<span>New project</span></button>`;
+}
+function currentCid() {
+  if (window.OrchaData && window.OrchaData.currentCid) return window.OrchaData.currentCid();
+  return D.container ? D.container.id : null;
+}
+function switchProject(cid) {
+  closeMenu("psFloat");
+  if (D.container && String(D.container.id) === String(cid)) return;   // already here
+  if (window.OrchaData && window.OrchaData.switchProject) window.OrchaData.switchProject(cid);
+}
+function wireProjMenuRows(el) {
+  el.querySelectorAll("[data-proj]").forEach((row) => {
+    row.addEventListener("click", () => switchProject(row.getAttribute("data-proj")));
+  });
+  el.querySelectorAll("[data-proj-new]").forEach((row) => {
+    row.addEventListener("click", () => { closeMenu("psFloat"); openNewProjectModal(); });
+  });
+}
+function openProjectMenu(anchor) {
+  if (menuIsOpen("psFloat")) { closeMenu("psFloat"); return; }
+  openMenu("psFloat", anchor, `<div class="pm-head plain">Projects</div>
+    <div class="pm-row muted">Loading…</div>`);
+  fetch("/api/containers")
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((d) => {
+      if (!menuIsOpen("psFloat")) return;   // closed while loading
+      const el = document.getElementById("psFloat");
+      el.innerHTML = projMenuHtml((d && d.containers) || [], currentCid());
+      wireProjMenuRows(el);
+    })
+    .catch((e) => { closeMenu("psFloat"); toast("Could not load projects: " + e.message, "danger"); });
+}
+
+/* ---- multi-project: the New-project modal ----------------------------- */
+function openNewProjectModal() {
+  modal({
+    title: "New project",
+    desc: "Adds another project to this stack. Portal-only until a host workspace is "
+      + "bound to it — agents and tasks work, but nothing wakes agents yet.",
+    body: `<label class="np-f"><span>Name</span>
+        <input id="npName" maxlength="200" placeholder="e.g. api-gateway" spellcheck="false"></label>
+      <label class="np-f"><span>Description</span>
+        <textarea id="npDesc" class="ta" placeholder="What is this project about? (optional)"></textarea></label>`,
+    primary: "Create project",
+    onPrimary: () => {
+      const name = ((document.getElementById("npName") || {}).value || "").trim();
+      const desc = ((document.getElementById("npDesc") || {}).value || "").trim();
+      if (!name) { toast("A project name is required.", "danger"); return; }
+      postNewProject(name, desc);
+    },
+  });
+}
+function postNewProject(name, desc) {
+  fetch("/api/containers", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name, description: desc || null, additional: true }),
+  })
+    .then((r) => r.json().then((d) => ({ ok: r.ok, status: r.status, d })).catch(() => ({ ok: r.ok, status: r.status, d: {} })))
+    .then(({ ok, status, d }) => {
+      if (!ok) {
+        toast("Create failed" + (d && d.detail ? ": " + d.detail : " (" + status + ")"), "danger");
+        return;
+      }
+      closeModal();
+      // One-time dashboard notice on the NEW project (home-state.renderProjNotice):
+      // flagged here, shown only while no host-side notifier serves it (wakesServed).
+      try { localStorage.setItem("orcha:projNotice:" + d.container_id, "1"); } catch (e) {}
+      toast("Project created — switching…", "ok");
+      switchProject(d.container_id);
+    })
+    .catch((e) => toast("Create failed: " + e.message, "danger"));
+}
+
 function mountShell(page, opts) {
   opts = opts || {};
   const a = attnItems();
@@ -146,6 +246,7 @@ function mountShell(page, opts) {
         <button class="sb-toggle" id="sbToggle" type="button" title="${sbT0}" aria-label="${sbT0}"
           aria-expanded="${sidebarCollapsed() ? "false" : "true"}">${icon("chev", "ico")}</button>
       </div>
+      ${projSwitchHtml()}
       <nav class="nav">
         <div class="lbl">Control room</div>
         ${nv.map((n) => `<a href="${n.href}" class="${n.key === page ? "active" : ""}" title="${n.label}${n.count != null ? " · " + n.count : ""}">
@@ -169,6 +270,8 @@ function mountShell(page, opts) {
       </a>`;
     const sbT = document.getElementById("sbToggle");
     if (sbT) sbT.addEventListener("click", toggleSidebar);
+    const ps = document.getElementById("projSwitch");
+    if (ps) ps.addEventListener("click", () => openProjectMenu(ps));
   }
 
   const topbar = document.getElementById("topbar");
