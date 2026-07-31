@@ -17,7 +17,7 @@ from . import (
     cli_update,
 )
 from .cli_env import _append_env_file, _read_env_file_value, _tighten_env_file
-from .cli_http import _get_json, _post_json, _wait_for_portal
+from .cli_http import _get_json, _post_json, _put_json, _wait_for_portal
 from .cli_text import _codex_skill_body
 from .notifier import ensure_daemon, stop_daemon
 
@@ -53,6 +53,7 @@ __all__ = [
     "_cli_source_root",
     "_compose",
     "_copy_tree",
+    "_detect_github_repo",
     "_discover_pairing_host",
     "_discover_stacks",
     "_ensure_secret_key",
@@ -65,6 +66,7 @@ __all__ = [
     "_parse_host_port",
     "_project_exists",
     "_prune_stale_bindings",
+    "_put_json",
     "_reinstall_cli",
     "_resolve_bridge_port",
     "_usable_pairing_ip",
@@ -107,6 +109,11 @@ def _install_orcha_skill_templates(root: pathlib.Path):
     return cli_project_setup.install_skill_templates(
         root, PKG_TEMPLATES, _codex_skill_body
     )
+
+
+def _detect_github_repo(root: pathlib.Path):
+    """owner/name from the checkout's GitHub origin remote, or None (auto-bind)."""
+    return cli_project_setup.detect_github_repo(root)
 
 
 def _install_project_preferences(root: pathlib.Path):
