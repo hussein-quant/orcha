@@ -140,7 +140,9 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
    ========================================================================== */
 .mk-nav {
   position: sticky; top: 0; z-index: 100;
-  background: color-mix(in srgb, var(--canvas) 82%, transparent);
+  /* 90% (was 82%): the hero's ambient wash refracted through the blur as a
+     visible smudge blob beside the wordmark — firmer glass kills it. */
+  background: color-mix(in srgb, var(--canvas) 90%, transparent);
   -webkit-backdrop-filter: blur(14px) saturate(1.4);
   backdrop-filter: blur(14px) saturate(1.4);
   border-bottom: 1px solid transparent;
@@ -149,7 +151,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-nav.is-scrolled {
   border-bottom-color: var(--border);
   box-shadow: 0 1px 0 rgb(26 20 20 / .02), 0 8px 24px -20px rgb(26 20 20 / .25);
-  background: color-mix(in srgb, var(--canvas) 90%, transparent);
+  background: color-mix(in srgb, var(--canvas) 95%, transparent);
 }
 .mk-nav-inner {
   display: flex; align-items: center; gap: 20px;
@@ -468,6 +470,12 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     if (!target) return;
     e.preventDefault();
     target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    // a clicked tab highlights NOW — and holds through the smooth scroll so the
+    // spy doesn't flicker across the sections the scroll passes over
+    if (a.hasAttribute("data-spy")) {
+      setActive(a.getAttribute("data-spy"));
+      spyLockUntil = Date.now() + (reduce ? 150 : 900);
+    }
     // move focus for a11y without a second jump
     target.setAttribute("tabindex", "-1");
     target.focus({ preventScroll: true });
@@ -508,22 +516,33 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     }
   }
 
-  if ("IntersectionObserver" in window && sections.length) {
-    var visible = {};
-    var spy = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        visible[entry.target.id] = entry.isIntersecting ? entry.intersectionRatio : 0;
-      });
-      // pick the most-visible section
-      var best = null, bestRatio = 0;
-      sections.forEach(function (s) {
-        var r = visible[s.id] || 0;
-        if (r > bestRatio) { bestRatio = r; best = s.id; }
-      });
-      if (best) setActive(best);
-    }, { threshold: [0.15, 0.35, 0.6], rootMargin: "-45% 0px -45% 0px" });
-    sections.forEach(function (s) { spy.observe(s); });
+  // Position-based spy. (The old IntersectionObserver version used a -45% root
+  // band with 0.15+ ratio thresholds — a tall section can never fill 15% of a
+  // thin center band, so after the initial callback no threshold ever crossed
+  // again and no tab highlighted. Scroll position has no such failure mode.)
+  var spyLockUntil = 0;
+  function spyUpdate() {
+    if (!sections.length || Date.now() < spyLockUntil) return;
+    var navH = nav ? nav.offsetHeight : 60;
+    var pos = window.scrollY + navH + 90;
+    var best = null;
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].offsetTop <= pos) best = sections[i].id;
+    }
+    // pinned to the bottom → the last section wins even when it's short
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4) {
+      best = sections[sections.length - 1].id;
+    }
+    setActive(best); // null (still in the hero) clears every tab
   }
+  var spyTick = false;
+  window.addEventListener("scroll", function () {
+    if (spyTick) return;
+    spyTick = true;
+    requestAnimationFrame(function () { spyTick = false; spyUpdate(); });
+  }, { passive: true });
+  window.addEventListener("resize", spyUpdate, { passive: true });
+  spyUpdate();
 })();
 </script>
 
