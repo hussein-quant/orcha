@@ -565,6 +565,29 @@ Settings → Members, the allowlist follows; pair phones from the pairing QR.
 
 ---
 
+
+## GitHub App — permissions & settings reference (field-hardened)
+
+Everything the Orcha GitHub App needs, with the failure you'll see when it's
+missing. `deploy/setup-github.py` now creates apps with all of this baked in;
+apps created before 2026-08-01 need the manual fixes below.
+
+| Setting | Required value | Where | Symptom when wrong |
+|---|---|---|---|
+| App visibility | **Public** | App settings → Advanced → Make public | Any account except the app owner gets GitHub's 404 on the OAuth authorize step — invitees can never sign in (private apps are owner-authorizable only) |
+| Account permissions → Email addresses | **Read-only** | App settings → Permissions & events | OAuth callback 500s: oauth2-proxy fetches `/user/emails` to mint the session → GitHub 403 "Resource not accessible by integration" |
+| Repository permissions → Contents | **Read and write** | App settings → Permissions & events | Read-only: clone and repo listing work, but the agent's `git push` 403s — no branches, no PRs |
+| Repository permissions → Pull requests | **Read and write** | App settings → Permissions & events | `gh pr create` fails as the bot |
+| Repository permissions → Metadata | Read-only (automatic) | — | — |
+| Webhook | Inactive (none needed) | App settings → Webhook | — |
+| **Installation** | App installed on EVERY org/account whose repos agents touch | App page → Install App → *Only select repositories* | Repos absent from the Connect-repo list; token mint fails "installed on nothing"; multi-org is supported (tokens are minted per-owner) |
+| **Permission-update approval** | Org admin accepts pending request after any permission change | Org → Settings → GitHub Apps → Configure | New scopes silently absent from freshly minted tokens until accepted — pushes keep 403ing after you "fixed" the permission |
+
+Credentials placement (never in a container, never in git): client id/secret →
+`deploy/auth/.env` (0600); private key + app metadata → `/opt/orcha-secrets/`
+on the box (0600). Installation tokens (1 h) are the only credentials agents
+ever see.
+
 ## 5. Operations
 
 ### Upgrades (manual today; control plane later)
