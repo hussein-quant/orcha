@@ -106,6 +106,11 @@ async function renderProjects() {
   if (list.length) {
     try { me = await projFetch("/api/me?cid=" + encodeURIComponent(list[0].id)); } catch (e) {}
   }
+  // Stash the trusted identity where the shared pairing modal reads it (D via
+  // identity()/identityTrusted()), so a per-card QR shows the "Pairing as"
+  // GitHub chip. The login/avatar are account-level (valid for every card);
+  // the modal never sends the agent_id — the server resolves per project.
+  if (me && PrjO.D) { PrjO.D.identity = me.identity || null; PrjO.D.identityTrusted = !!me.trusted; }
   const top = Prj$("projTop");
   if (top) {
     top.innerHTML = projTopHtml(me);

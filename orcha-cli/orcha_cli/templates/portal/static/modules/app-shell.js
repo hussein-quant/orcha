@@ -372,7 +372,7 @@ function mountShell(page, opts) {
           <span class="lbl">acting as</span>
           <span class="who" id="actingWho">${actingHTML}</span>
         </div>
-        <button class="btn sm subtle pair-top" id="pairPhoneBtn" type="button" title="Pair a phone on this Wi-Fi network">
+        <button class="btn sm subtle pair-top" id="pairPhoneBtn" type="button" title="Pair a phone with this Orcha">
           ${icon("phone", "")}Pair phone
         </button>
         <button class="iconbtn" id="themeBtn" title="Theme: ${currentTheme()} — click to cycle">

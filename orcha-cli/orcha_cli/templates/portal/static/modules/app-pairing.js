@@ -31,6 +31,42 @@ function pairingHumanSelect(selectedId) {
   </select></label>`;
 }
 
+/* Identity-correct pairing: when the TRUSTED proxy lane resolved a signed-in
+ * GitHub member, that member is the ONLY human a phone can pair as — no "Pair
+ * as" selector, and the server enforces the same rule (mismatch → 403). The
+ * typeof guards keep this module loadable in harnesses/embeddings that carry
+ * no identity layer; every real page loads app-data.js first. */
+function pairingTrustedLane() {
+  try { return typeof identityTrusted === "function" && identityTrusted(); } catch (e) { return false; }
+}
+function pairingIdentity() {
+  if (!pairingTrustedLane()) return null;
+  try { return typeof identity === "function" ? identity() : null; } catch (e) { return null; }
+}
+/* The "Pairing as" line, house acting-chip style: GitHub avatar + login. */
+function pairingIdentityChip(ident) {
+  const av = typeof ghAvatar === "function" ? ghAvatar(ident.github_login, "sm") : "";
+  return `<span class="pair-identity">${av}<span class="gh-login">${esc(ident.github_login)}</span></span>`;
+}
+
+/* Honest network copy: behind the cloud sign-in perimeter (https / non-local
+ * payload URL) the phone connects from anywhere — the "same Wi-Fi" and
+ * "nothing goes through the cloud" claims are only true for local self-host. */
+function pairingCloudContext(baseUrl) {
+  if (/^https:/i.test(baseUrl || "")) return true;
+  try { return typeof location !== "undefined" && location.protocol === "https:"; } catch (e) { return false; }
+}
+function pairingScanCopy(cloud) {
+  return cloud
+    ? "Scan with the Orcha app — works from anywhere."
+    : "Scan with the Orcha app on the same Wi-Fi network.";
+}
+function pairingFootCopy(cloud) {
+  return cloud
+    ? "Your phone connects securely over HTTPS through this Orcha's sign-in perimeter."
+    : "Your phone talks directly to this computer on your network. Nothing goes through the cloud.";
+}
+
 /* The modal is CID-SCOPED: opts {cid, name} targets any project (the /projects
  * landing passes the card's project); default = the loaded container. The QR
  * payload itself is built by GET /api/containers/{cid}/pairing from the PATH cid,
@@ -41,13 +77,17 @@ function openPairingModal(opts) {
   const cid = opts.cid || (D.container && D.container.id);
   if (!cid) { toast("No Orcha container is loaded.", "danger"); return; }
   pairingCid = cid;
-  // The human picker only knows the LOADED project's roster; a foreign-cid open
-  // (landing page) skips it — the server resolves the acting member (trusted lane)
-  // or answers 400 choose_human, which renders its own picker below.
+  // Trusted lane: the resolved identity IS the pairing human — no selector, the
+  // server resolves (and enforces) the member from the verified login, so no
+  // human_agent_id rides the request. Trust off (self-host): the human picker
+  // only knows the LOADED project's roster; a foreign-cid open (landing page)
+  // skips it — the server answers 400 choose_human, which renders its own
+  // picker below.
+  const trusted = pairingTrustedLane();
   const sameProject = !!(D.container && String(D.container.id) === String(cid));
-  const hs = sameProject ? humans() : [];
-  const who = sameProject ? (actingHuman() || hs[0] || null) : null;
-  const selected = who && who.id;
+  const hs = !trusted && sameProject ? humans() : [];
+  const who = !trusted && sameProject ? (actingHuman() || hs[0] || null) : null;
+  const selected = !trusted && who ? who.id : null;
   clearPairingTimer();
 
   const ov = ensureOverlay();
@@ -56,12 +96,12 @@ function openPairingModal(opts) {
       <span class="pair-mark">${orcaSVG()}</span>
       <div class="grow">
         <h3 id="pairTitle">Pair your phone</h3>
-        <p>Scan with the Orcha app on the same Wi-Fi network.${opts.name ? " Project: <b>" + esc(opts.name) + "</b>." : ""}</p>
+        <p>${esc(pairingScanCopy(pairingCloudContext()))}${opts.name ? " Project: <b>" + esc(opts.name) + "</b>." : ""}</p>
       </div>
       <button class="iconbtn" id="pairClose" type="button" title="Close">${icon("x", "")}</button>
     </div>
     <div class="pair-content">
-      ${sameProject ? pairingHumanSelect(selected) : ""}
+      ${!trusted && sameProject ? pairingHumanSelect(selected) : ""}
       <div id="pairBody"><div class="pair-loading">${icon("clock", "")}<span>Preparing pairing code...</span></div></div>
     </div>
   </div>`;
@@ -70,7 +110,7 @@ function openPairingModal(opts) {
   if (close) close.addEventListener("click", closeModal);
   const sel = document.getElementById("pairHuman");
   if (sel) sel.addEventListener("change", () => loadPairing(sel.value));
-  if (sameProject && !hs.length) {
+  if (!trusted && sameProject && !hs.length) {
     renderPairingWarning({ title: "No human can pair this phone", message: "Add a human operator before pairing a phone." });
   } else {
     loadPairing(selected);
@@ -82,11 +122,12 @@ function renderPairingWarning(info) {
   const host = document.getElementById("pairBody");
   if (!host) return;
   info = info || {};
+  if (typeof info === "string") info = { message: info };  // plain-string 403 details
   host.innerHTML = `<div class="pair-warning">
     <div class="pair-warn-title">${icon("alert", "")}<span>${esc(info.title || "Phones can't reach this Orcha yet")}</span></div>
     <p>${esc(info.message || "The server could not produce a phone-reachable network address.")}</p>
     ${info.remedy ? `<div class="pair-remedy">${pairingCopyWithCode(info.remedy)}</div>` : ""}
-    <p class="pair-foot">Both devices must be on the same Wi-Fi. Some VPNs and corporate networks block phone-to-laptop traffic.</p>
+    ${pairingCloudContext() ? "" : `<p class="pair-foot">Both devices must be on the same Wi-Fi. Some VPNs and corporate networks block phone-to-laptop traffic.</p>`}
   </div>`;
 }
 
@@ -155,7 +196,7 @@ function countdownText(ms) {
 function startPairingCountdown(data, humanId) {
   clearPairingTimer();
   const exp = Date.parse(data.expiresAt || "");
-  const el = document.getElementById("pairCountdown");
+  const el = document.getElementById("pairCountText");
   if (!exp || !el) return;
   const tick = () => {
     const left = exp - Date.now();
@@ -173,23 +214,29 @@ function startPairingCountdown(data, humanId) {
 function renderPairingPayload(data, humanId) {
   const host = document.getElementById("pairBody");
   if (!host) return;
+  const ident = pairingIdentity();
   const human = data.humanAgentAlias || aliasFor(data.humanAgentId) || "selected human";
+  const pairAs = ident && ident.github_login
+    ? pairingIdentityChip(ident)
+    : `${esc(human)} (human)`;
   host.innerHTML = `<div class="pair-grid">
-    <div class="pair-qr-wrap">
-      <div class="pair-qr" aria-label="Orcha phone pairing QR code">${data.qrSvg || ""}</div>
+    <div class="pair-card">
+      <div class="pair-brand">${orcaSVG()}<span class="pair-wordmark">Orcha</span></div>
+      <div class="pair-qr" role="img" aria-label="Orcha phone pairing QR code">${data.qrSvg || ""}</div>
+      <div class="pair-scanline">Scan with the Orcha app</div>
       <div class="pair-url mono">${esc(data.baseUrl || "")}</div>
     </div>
     <div class="pair-meta">
       <div>
         <div class="pair-label">Pairing as</div>
-        <div class="pair-value">${esc(human)} (human)</div>
+        <div class="pair-value">${pairAs}</div>
       </div>
       <div>
         <div class="pair-label">Manual code</div>
         <div class="pair-code mono">${esc(data.shortCode || "")}</div>
       </div>
-      <div class="pill s-warn" id="pairCountdown">${icon("clock", "gl")}expires soon</div>
-      <div class="pair-foot">Your phone talks directly to this computer on your network. Nothing goes through the cloud.</div>
+      <div class="pill s-warn pair-expiry" id="pairCountdown">${icon("clock", "gl")}<span id="pairCountText">expires soon</span></div>
+      <div class="pair-foot">${esc(pairingFootCopy(pairingCloudContext(data.baseUrl)))}</div>
     </div>
   </div>`;
   startPairingCountdown(data, humanId || data.humanAgentId);
