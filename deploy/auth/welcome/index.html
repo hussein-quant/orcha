@@ -6,20 +6,32 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orcha — sign in</title>
 <style>
+  /* ==========================================================================
+     Page shell — the sign-in act (unchanged look) + the how-it-works act.
+     Fully self-contained: no external fonts, scripts, styles, or images.
+     ========================================================================== */
   :root {
     --bg: #0b0d10; --panel: #12151a; --line: #232830;
     --text: #f2f4f7; --muted: #9aa3b2; --accent: #6c5ce7;
   }
   * { box-sizing: border-box; margin: 0; }
-  html, body { height: 100%; }
+  html { scroll-behavior: smooth; }
   body {
+    min-height: 100svh;
     background:
       radial-gradient(1200px 600px at 80% -10%, rgba(108,92,231,.14), transparent 60%),
       radial-gradient(900px 500px at -10% 110%, rgba(108,92,231,.08), transparent 55%),
       var(--bg);
     color: var(--text);
     font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    display: grid; place-items: center; padding: 24px;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+  /* ---- act 1: hero + sign-in (primary, above the fold) ------------------- */
+  .hero {
+    min-height: 100svh;
+    display: grid; place-items: center; align-content: center;
+    padding: 24px; position: relative;
   }
   .card {
     width: min(420px, 100%);
@@ -58,33 +70,1021 @@
   .rule { height: 1px; background: var(--line); margin: 30px 0 22px; }
   .foot { font-size: 12px; color: var(--muted); }
   .foot a { color: var(--muted); }
+
+  /* the quiet invitation to scroll into the second act */
+  .cue {
+    margin-top: 28px;
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--muted); font-size: 13px; font-weight: 600;
+    text-decoration: none; letter-spacing: .02em;
+    transition: color .15s ease;
+  }
+  .cue:hover { color: var(--text); }
+  .cue svg { width: 14px; height: 14px; animation: cue-bob 2.2s ease-in-out infinite; }
+  @keyframes cue-bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(4px); } }
+
+  /* ==========================================================================
+     Act 2 — the cinematic. Scoped tokens mirror the portal's real design
+     system (styles/tokens.css): dark surfaces, teal accent, mono details.
+     The mock window below IS a stylized portal shell — sidebar rail, stage,
+     caption bar — so what plays here is what members see after the door.
+     ========================================================================== */
+  .demo {
+    /* portal token mirror (dark) */
+    --s0: #0a0d12; --s1: #111620; --s2: #161d29; --s3: #1c2532;
+    --ln: #232d3d; --ln2: #2c3848;
+    --tx: #e8edf6; --tx2: #c4cedd; --mut: #8b98ae; --fnt: #5a6678;
+    --teal: #1fc7cd; --teal-ink: #04181a;
+    --teal-soft: rgba(31,199,205,.12); --teal-line: rgba(31,199,205,.34);
+    --ok: #38d39a;   --ok-soft: rgba(56,211,154,.12);   --ok-line: rgba(56,211,154,.32);
+    --warn: #f5b13d; --warn-soft: rgba(245,177,61,.13); --warn-line: rgba(245,177,61,.34);
+    --vio: #b08cff;  --vio-soft: rgba(176,140,255,.13); --vio-line: rgba(176,140,255,.32);
+    --amber: #f2a83c;
+    --shadow-lg: 0 24px 60px rgba(0,0,0,.55);
+    padding: 96px 24px 110px;
+    max-width: 1060px; margin: 0 auto;
+  }
+
+  .demo-head { text-align: center; max-width: 640px; margin: 0 auto 44px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px; letter-spacing: .3em; text-transform: uppercase;
+    color: var(--teal); font-weight: 600;
+  }
+  .eyebrow::before, .eyebrow::after {
+    content: ""; width: 26px; height: 1px; background: var(--teal-line);
+  }
+  .demo-head h2 {
+    margin: 16px 0 12px;
+    font-size: clamp(26px, 4.4vw, 38px); font-weight: 750;
+    letter-spacing: -.02em; line-height: 1.15;
+  }
+  .demo-sub { color: var(--muted); font-size: 15.5px; max-width: 520px; margin: 0 auto; }
+
+  /* soft reveal when the act scrolls into view */
+  .demo-head, .theater { opacity: 0; transform: translateY(26px); transition: opacity .9s cubic-bezier(.16,1,.3,1), transform .9s cubic-bezier(.16,1,.3,1); }
+  .theater { transition-delay: .12s; }
+  .demo.in .demo-head, .demo.in .theater { opacity: 1; transform: none; }
+
+  /* ---- the theater: a stylized portal window ----------------------------- */
+  .theater {
+    background: var(--s1);
+    border: 1px solid var(--ln);
+    border-radius: 18px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+  }
+
+  /* window chrome */
+  .chrome {
+    display: flex; align-items: center; gap: 7px;
+    padding: 12px 16px;
+    background: var(--s2); border-bottom: 1px solid var(--ln);
+  }
+  .chrome .dot3 { width: 10px; height: 10px; border-radius: 50%; background: var(--ln2); }
+  .chrome .url {
+    margin-left: 10px;
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--s0); border: 1px solid var(--ln);
+    border-radius: 8px; padding: 4px 12px 4px 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px; color: var(--mut);
+  }
+  .chrome .url svg { width: 15px; height: 15px; border-radius: 4px; }
+  .chrome .lock { width: 10px; height: 10px; color: var(--fnt); }
+
+  /* frame: step rail + stage */
+  .frame { display: grid; grid-template-columns: 296px 1fr; }
+
+  /* ---- the step rail (the portal's sidebar, retold as chapters) ---------- */
+  .rail {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 14px 10px;
+    background: var(--s2); border-right: 1px solid var(--ln);
+  }
+  .rstep {
+    all: unset; cursor: pointer;
+    display: block; border-radius: 11px;
+    padding: 10px 12px 12px;
+    transition: background .18s ease;
+    position: relative;
+  }
+  .rstep:hover { background: var(--s3); }
+  .rstep:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+  .rstep .rtop { display: flex; align-items: baseline; gap: 10px; }
+  .rstep .num {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--fnt); font-weight: 600;
+    transition: color .2s ease;
+  }
+  .rstep .rtitle {
+    font-size: 13.5px; font-weight: 650; color: var(--tx2);
+    letter-spacing: -.01em; transition: color .2s ease;
+  }
+  .rstep .rdesc {
+    display: block; margin: 3px 0 0 31px;
+    font-size: 12px; line-height: 1.45; color: var(--mut);
+    max-height: 0; opacity: 0; overflow: hidden;
+    transition: max-height .35s cubic-bezier(.16,1,.3,1), opacity .3s ease, margin .3s ease;
+  }
+  /* per-step progress track */
+  .rstep .trk {
+    display: block; margin: 9px 0 0 31px; height: 3px; border-radius: 99px;
+    background: var(--ln); overflow: hidden;
+  }
+  .rstep .trk .fill {
+    display: block; height: 100%; width: 100%;
+    background: var(--teal); border-radius: 99px;
+    transform: scaleX(0); transform-origin: left center;
+  }
+  .rstep[aria-pressed="true"] { background: var(--s3); }
+  .rstep[aria-pressed="true"] .num { color: var(--teal); }
+  .rstep[aria-pressed="true"] .rtitle { color: var(--tx); }
+  .rstep[aria-pressed="true"] .rdesc { max-height: 60px; opacity: 1; margin-top: 5px; }
+  .rstep.done .trk .fill { transform: scaleX(1); opacity: .35; }
+
+  /* ---- the stage --------------------------------------------------------- */
+  .stage {
+    position: relative; overflow: hidden;
+    min-height: 440px;
+    background:
+      radial-gradient(560px 300px at 82% -10%, rgba(31,199,205,.06), transparent 60%),
+      var(--s1);
+  }
+  .scene {
+    position: absolute; inset: 0;
+    padding: 26px 28px;
+    opacity: 0; transform: translateX(26px);
+    transition: opacity .38s cubic-bezier(.16,1,.3,1), transform .38s cubic-bezier(.16,1,.3,1);
+    pointer-events: none;
+    visibility: hidden;
+  }
+  .scene.on { opacity: 1; transform: none; visibility: visible; }
+  .scene.bye { opacity: 0; transform: translateX(-22px); visibility: visible; }
+
+  /* ---- caption bar (the reference's caption rail) ------------------------ */
+  .capbar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 18px;
+    background: var(--s2); border-top: 1px solid var(--ln);
+  }
+  .cap { flex: 1; min-width: 0; font-size: 13px; color: var(--tx2); }
+  .cap strong { color: var(--tx); font-weight: 650; }
+  .cap { opacity: 1; transition: opacity .28s ease; }
+  .cap.swap { opacity: 0; }
+  .count {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px; color: var(--fnt); white-space: nowrap;
+  }
+  .ctrl { display: flex; align-items: center; gap: 6px; }
+  .cbtn {
+    all: unset; cursor: pointer;
+    width: 32px; height: 32px; border-radius: 9px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--mut); background: transparent;
+    border: 1px solid var(--ln2);
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .cbtn:hover { color: var(--tx); border-color: var(--teal-line); background: var(--s3); }
+  .cbtn:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .cbtn svg { width: 14px; height: 14px; }
+  .cbtn.play-t[aria-pressed="true"] { color: var(--teal); border-color: var(--teal-line); background: var(--teal-soft); }
+  .cbtn .ic-pause { display: none; }
+  .cbtn.play-t[aria-pressed="true"] .ic-pause { display: block; }
+  .cbtn.play-t[aria-pressed="true"] .ic-play { display: none; }
+
+  /* ==========================================================================
+     Scene grammar — shared mock-UI atoms (portal look) + choreography.
+     Elements marked data-an animate ONLY while their scene has .play; their
+     resting styles are each scene's representative still (reduced motion,
+     and the pre-JS / no-JS render, shows exactly that).
+     ========================================================================== */
+  .pane {
+    background: var(--s2); border: 1px solid var(--ln); border-radius: 14px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.35);
+  }
+  .pane-h {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; border-bottom: 1px solid var(--ln);
+    font-size: 12.5px; font-weight: 650; color: var(--tx2);
+  }
+  .pane-h .grow { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-weight: 640; font-size: 11px; line-height: 1;
+    padding: 5px 10px; border-radius: 999px; border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .pill .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .pill.p-teal { color: var(--teal); background: var(--teal-soft); border-color: var(--teal-line); }
+  .pill.p-teal .pdot { animation: pulse 2s infinite; }
+  .pill.p-ok   { color: var(--ok);   background: var(--ok-soft);   border-color: var(--ok-line); }
+  .pill.p-warn { color: var(--warn); background: var(--warn-soft); border-color: var(--warn-line); }
+  .pill.p-vio  { color: var(--vio);  background: var(--vio-soft);  border-color: var(--vio-line); }
+  .pill.p-idle { color: var(--mut);  background: rgba(107,120,142,.14); border-color: rgba(107,120,142,.30); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10.5px; color: var(--tx2);
+    background: var(--s3); border: 1px solid var(--ln2);
+    border-radius: 7px; padding: 4px 8px; white-space: nowrap;
+  }
+  .chip svg { width: 11px; height: 11px; color: var(--teal); }
+
+  .av {
+    width: 26px; height: 26px; border-radius: 50%; flex: none;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 750; color: #07141a;
+    background: linear-gradient(135deg, #7ee3e7, #1fc7cd);
+    box-shadow: 0 0 0 2px var(--s2), 0 0 0 3.5px var(--amber);
+  }
+  .av.bot {
+    border-radius: 8px; background: linear-gradient(135deg, #2c3848, #1c2532);
+    color: var(--teal); box-shadow: none; border: 1px solid var(--ln2);
+  }
+  .av.bot svg { width: 14px; height: 14px; }
+
+  .sbtn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    font-size: 12px; font-weight: 650; border-radius: 8px;
+    padding: 7px 14px; border: 1px solid transparent;
+  }
+  .sbtn.go { background: var(--ok); color: #04231a; }
+  .sbtn.ghost { background: transparent; color: var(--tx2); border-color: var(--ln2); }
+  .sbtn.merge { background: #238636; color: #fff; }
+
+  .scene .note {
+    position: absolute; left: 28px; right: 28px; bottom: 20px;
+    font-size: 11.5px; color: var(--fnt); text-align: center;
+  }
+  .scene .note b { color: var(--mut); font-weight: 650; }
+
+  /* choreography atoms */
+  @keyframes rise { from { opacity: 0; transform: translateY(13px); } to { opacity: 1; transform: none; } }
+  @keyframes slide { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+  @keyframes pop  { from { opacity: 0; transform: scale(.62); } to { opacity: 1; transform: none; } }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes gone { to { opacity: 0; transform: scale(.86); visibility: hidden; } }
+  @keyframes dim  { to { opacity: .38; } }
+  @keyframes press { 0%,100% { transform: none; } 45% { transform: scale(.94); filter: brightness(1.18); } }
+  .scene.play [data-an] { animation-delay: var(--d, 0s); animation-fill-mode: both; }
+  .scene.play [data-an="rise"]  { animation-name: rise;  animation-duration: .55s; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+  .scene.play [data-an="slide"] { animation-name: slide; animation-duration: .5s;  animation-timing-function: cubic-bezier(.16,1,.3,1); }
+  .scene.play [data-an="pop"]   { animation-name: pop;   animation-duration: .42s; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+  .scene.play [data-an="fade"]  { animation-name: fade;  animation-duration: .5s; }
+  .scene.play [data-an="gone"]  { animation-name: gone;  animation-duration: .4s;  animation-timing-function: ease; }
+  .scene.play [data-an="dim"]   { animation-name: dim;   animation-duration: .5s;  animation-timing-function: ease; }
+  .scene.play [data-an="press"] { animation-name: press; animation-duration: .5s;  animation-timing-function: ease; }
+  /* Late-beat elements (.late) rest VISIBLE — the static still shows the
+     scene's completed state; under .play their animation's fill-mode:both
+     hides them until their delay. Swap-in elements (.swap-in) REPLACE a
+     sibling in a .stack, so they rest hidden — the still shows the "before"
+     (needs-verification, the open PR) — and only appear mid-choreography. */
+  .swap-in { opacity: 0; visibility: hidden; }
+  .scene.play .swap-in { opacity: 1; visibility: visible; }
+
+  /* ---- scene 1 · task in from anywhere ----------------------------------- */
+  .sc-task { display: grid; grid-template-columns: 224px 1fr; gap: 44px; align-items: center; height: 100%; padding-bottom: 52px; }
+  .phone {
+    width: 224px; border-radius: 26px; padding: 10px 10px 14px;
+    background: var(--s0); border: 1px solid var(--ln2);
+    box-shadow: 0 14px 40px rgba(0,0,0,.4);
+  }
+  .phone .pnotch { width: 64px; height: 5px; border-radius: 99px; background: var(--ln2); margin: 2px auto 10px; }
+  .phone .pscr { background: var(--s1); border: 1px solid var(--ln); border-radius: 16px; padding: 12px 11px; }
+  .phone .papp { display: flex; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 650; color: var(--tx2); margin-bottom: 10px; }
+  .phone .papp svg { width: 15px; height: 15px; border-radius: 4px; }
+  .phone .ptime { margin-left: auto; font-size: 10px; color: var(--fnt); font-family: ui-monospace, Menlo, monospace; }
+  .bubble {
+    background: var(--teal-soft); border: 1px solid var(--teal-line);
+    color: var(--tx); border-radius: 12px 12px 4px 12px;
+    padding: 8px 10px; font-size: 11px; line-height: 1.45;
+    margin-left: 8px; max-width: 100%; overflow: hidden;
+  }
+  .bubble .type {
+    display: block; overflow: hidden; white-space: nowrap;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 9.5px;
+  }
+  .scene.play .bubble .type { width: 0; animation: type 1.55s steps(24, end) .55s forwards; }
+  @keyframes type { from { width: 0; } to { width: 25.5ch; } }
+  .composer {
+    margin-top: 10px; display: flex; align-items: center; gap: 7px;
+    background: var(--s2); border: 1px solid var(--ln); border-radius: 99px;
+    padding: 6px 6px 6px 12px; font-size: 10px; color: var(--fnt);
+  }
+  .composer .send {
+    margin-left: auto; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--teal); color: var(--teal-ink);
+    display: grid; place-items: center; flex: none;
+  }
+  .composer .send svg { width: 11px; height: 11px; }
+  .sc-task .comet {
+    position: absolute; left: 252px; right: 46%; top: 50%;
+    height: 2px; margin-top: -27px;
+    background: repeating-linear-gradient(90deg, var(--ln2) 0 6px, transparent 6px 12px);
+  }
+  .sc-task .comet .cdot {
+    position: absolute; top: 50%; left: 0; margin-top: -4px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--teal); box-shadow: 0 0 12px var(--teal);
+    opacity: 0;
+  }
+  .scene.play .sc-task .comet .cdot { animation: comet 1s ease-in-out 2.75s forwards; }
+  @keyframes comet { 0% { left: 0; opacity: 0; } 18% { opacity: 1; } 82% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
+  .tasklist { min-width: 0; }
+  .trow {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; border-bottom: 1px solid var(--ln);
+    font-size: 12.5px; color: var(--tx2);
+  }
+  .trow:last-child { border-bottom: 0; }
+  .trow .tid { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--fnt); }
+  .trow .tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trow.new { background: var(--teal-soft); }
+  .trow.new .tt { color: var(--tx); font-weight: 600; }
+
+  /* ---- scene 2 · the github gate ----------------------------------------- */
+  .sc-gate { display: grid; place-items: center; height: 100%; padding-bottom: 52px; }
+  .gate { width: min(330px, 100%); padding-bottom: 14px; }
+  .gate .gmini { text-align: center; padding: 18px 18px 6px; }
+  .gate .gmini .gm-name { font-size: 21px; font-weight: 750; letter-spacing: -.02em; color: var(--tx); }
+  .gate .gmini .gm-name i { color: var(--teal); font-style: normal; }
+  .gate .ghb {
+    margin: 12px 18px 4px; display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: var(--tx); color: #0b0d10; border-radius: 9px;
+    font-size: 12.5px; font-weight: 650; padding: 9px 12px;
+  }
+  .gate .ghb svg { width: 15px; height: 15px; }
+  .gate .checks { margin: 14px 18px 0; display: flex; flex-direction: column; gap: 8px; }
+  .gcheck {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 12px; color: var(--tx2);
+    background: var(--s3); border: 1px solid var(--ln);
+    border-radius: 9px; padding: 8px 11px;
+  }
+  .gcheck .gc-i {
+    width: 16px; height: 16px; border-radius: 50%; flex: none;
+    display: grid; place-items: center;
+    background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line);
+  }
+  .gcheck .gc-i svg { width: 9px; height: 9px; }
+  .gcheck .who { display: flex; align-items: center; gap: 8px; flex: 1; }
+  .gcheck .who .av { width: 22px; height: 22px; font-size: 9.5px; }
+  .gate .verdict { margin: 14px 18px 0; text-align: center; }
+
+  /* ---- scene 3 · sandbox spins up ----------------------------------------- */
+  .sc-box { display: grid; place-items: center; height: 100%; padding-bottom: 52px; }
+  .sbx { position: relative; width: min(430px, 100%); padding: 20px 22px 18px; }
+  .sbx .edge { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .sbx .edge rect {
+    fill: none; stroke: var(--teal-line); stroke-width: 1.6;
+    stroke-dasharray: 7 6; vector-effect: non-scaling-stroke;
+  }
+  .scene.play .sbx .edge rect {
+    stroke-dashoffset: 0;
+    animation: sketch 1.3s cubic-bezier(.16,1,.3,1) .15s both;
+  }
+  @keyframes sketch { from { stroke-dashoffset: 260; opacity: 0; } 12% { opacity: 1; } to { stroke-dashoffset: 0; opacity: 1; } }
+  .sbx .sbx-t {
+    position: absolute; top: -9px; left: 18px;
+    background: var(--s1); padding: 0 8px;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--teal);
+  }
+  .sbx .clone {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px; line-height: 1.9; color: var(--tx2);
+  }
+  .sbx .clone .pr { color: var(--fnt); }
+  .sbx .clone .okt { color: var(--ok); }
+  .sbx .caps { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+  .sbx .iso {
+    margin-top: 16px; display: flex; align-items: center; gap: 8px;
+    font-size: 11.5px; color: var(--mut);
+  }
+  .sbx .iso svg { width: 13px; height: 13px; color: var(--teal); flex: none; }
+
+  /* ---- scene 4 · durable runs --------------------------------------------- */
+  .sc-term { height: 100%; padding-bottom: 52px; display: grid; align-items: center; }
+  .term {
+    background: #0b0f14; border: 1px solid #1d2836; border-radius: 12px;
+    padding: 14px 16px; position: relative; overflow: hidden;
+    box-shadow: 0 14px 40px rgba(0,0,0,.4);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11.5px; line-height: 1.9; color: #aebacc;
+  }
+  .term .tl { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .term .tp { color: #5a6678; }
+  .term .tc { color: #1fc7cd; }
+  .term .tg { color: #38d39a; }
+  .term .tw { color: #f5b13d; }
+  .term .cursor::after {
+    content: "▍"; color: #1fc7cd; animation: blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .lidchip {
+    position: absolute; top: 12px; right: 12px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 7px;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+  .lidchip .sleep {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10.5px; color: var(--mut);
+    background: var(--s2); border: 1px solid var(--ln2);
+    border-radius: 99px; padding: 4px 9px;
+  }
+  .lidchip .sleep svg { width: 12px; height: 12px; }
+
+  /* ---- scene 5 · human stays in charge ------------------------------------ */
+  .sc-gavel { display: grid; place-items: center; height: 100%; padding-bottom: 52px; }
+  .verify { width: min(430px, 100%); }
+  .verify .vrows { padding: 12px 14px 4px; display: flex; flex-direction: column; gap: 8px; }
+  .vrow {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 12px; color: var(--tx2);
+    background: var(--s3); border: 1px solid var(--ln);
+    border-radius: 9px; padding: 8px 11px;
+  }
+  .vrow .mono { font-size: 11px; color: var(--mut); }
+  .vrow .grow { flex: 1; }
+  .vrow .dadd { color: var(--ok); font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+  .vrow .ddel { color: #f6757e; font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+  .verify .acts { display: flex; gap: 9px; padding: 12px 14px 16px; position: relative; }
+  .verify .stack { position: relative; display: inline-grid; }
+  .verify .stack > * { grid-area: 1 / 1; }
+  .clickdot {
+    position: absolute; z-index: 3; width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(232,237,246,.92); box-shadow: 0 2px 10px rgba(0,0,0,.5), 0 0 0 1px rgba(0,0,0,.25);
+    left: 46px; top: 18px; opacity: 0; pointer-events: none;
+  }
+  .scene.play .clickdot { animation: ride 1.5s cubic-bezier(.3,.7,.4,1) 2.5s both; }
+  @keyframes ride {
+    0% { opacity: 0; transform: translate(120px, 58px) scale(1); }
+    30% { opacity: 1; }
+    72% { transform: translate(0,0) scale(1); }
+    84% { transform: translate(0,0) scale(.72); }
+    100% { opacity: 0; transform: translate(0,0) scale(1.5); }
+  }
+
+  /* ---- scene 6 · the PR --------------------------------------------------- */
+  .sc-pr { display: grid; place-items: center; height: 100%; padding-bottom: 52px; }
+  .pr { width: min(450px, 100%); }
+  .pr .pr-h { align-items: flex-start; }
+  .pr .pr-ic { width: 26px; height: 26px; border-radius: 7px; flex: none; display: grid; place-items: center; margin-top: 1px; }
+  .pr .pr-ic svg { width: 15px; height: 15px; }
+  .pr .pr-ic.open { background: var(--ok-soft); color: var(--ok); border: 1px solid var(--ok-line); }
+  .pr .pr-ic.merged { background: var(--vio-soft); color: var(--vio); border: 1px solid var(--vio-line); }
+  .pr .pr-title { font-size: 13px; font-weight: 650; color: var(--tx); line-height: 1.35; }
+  .pr .pr-title .prnum { color: var(--fnt); font-weight: 500; }
+  .pr .pr-meta { font-size: 11.5px; color: var(--mut); margin-top: 3px; line-height: 1.5; }
+  .pr .pr-meta .mono { font-size: 10.5px; }
+  .pr .pr-body { padding: 12px 14px 16px; display: flex; flex-direction: column; gap: 9px; }
+  .pr .stack { position: relative; display: grid; }
+  .pr .stack > * { grid-area: 1 / 1; }
+  .prcheck {
+    display: flex; align-items: center; gap: 9px;
+    font-size: 12px; color: var(--tx2);
+    background: var(--s3); border: 1px solid var(--ln);
+    border-radius: 9px; padding: 8px 11px;
+  }
+  .prcheck svg { width: 13px; height: 13px; color: var(--ok); flex: none; }
+  .pr .clickdot { left: auto; right: 40px; top: auto; bottom: 26px; }
+  .scene.play .pr .clickdot { animation-delay: 3.1s; }
+
+  /* ---- postscript under the theater --------------------------------------- */
+  .after {
+    margin-top: 30px; text-align: center;
+    font-size: 13.5px; color: var(--muted);
+  }
+  .after a { color: var(--text); font-weight: 650; text-decoration: none; border-bottom: 1px solid var(--accent); }
+  .after a:hover { color: var(--accent); }
+
+  /* ==========================================================================
+     Responsive
+     ========================================================================== */
+  @media (max-width: 880px) {
+    .demo { padding: 72px 14px 84px; }
+    .frame { grid-template-columns: 1fr; }
+    /* the rail folds into a story-style segment strip */
+    .rail {
+      flex-direction: row; gap: 6px;
+      padding: 12px 14px; border-right: 0; border-bottom: 1px solid var(--ln);
+    }
+    .rstep { flex: 1; padding: 8px 0; border-radius: 8px; }
+    .rstep:hover { background: transparent; }
+    .rstep[aria-pressed="true"] { background: transparent; }
+    .rstep .rtop, .rstep .rdesc { display: none; }
+    .rstep .trk { margin: 0; }
+    .stage { min-height: 470px; }
+    .scene { padding: 20px 16px; }
+    .sc-task { grid-template-columns: 1fr; gap: 18px; padding-bottom: 46px; align-content: center; }
+    .phone { width: min(224px, 70%); margin: 0 auto; }
+    .sc-task .comet { display: none; }
+    .capbar { flex-wrap: wrap; gap: 10px 14px; padding: 12px 14px; }
+    .cap { flex: 1 1 100%; order: 3; font-size: 12.5px; }
+    .count { order: 1; }
+    .ctrl { order: 2; margin-left: auto; }
+    .scene .note { left: 16px; right: 16px; bottom: 14px; font-size: 11px; }
+  }
+  @media (max-width: 420px) {
+    .stage { min-height: 500px; }
+  }
+
+  /* ==========================================================================
+     Light scheme — page + demo token flips (mirrors the portal light theme)
+     ========================================================================== */
   @media (prefers-color-scheme: light) {
     :root { --bg:#f6f7f9; --panel:#ffffff; --line:#e4e7ec; --text:#111418; --muted:#5b6472; }
     .gh-btn { background:#111418; color:#fff; }
+    .demo {
+      --s0: #eef3f9; --s1: #ffffff; --s2: #f5f8fc; --s3: #eef3f9;
+      --ln: #e4eaf2; --ln2: #d3dce8;
+      --tx: #0e1722; --tx2: #2c3a4d; --mut: #5a6678; --fnt: #8794a6;
+      --teal: #0c9aa0; --teal-ink: #ffffff;
+      --teal-soft: rgba(12,154,160,.10); --teal-line: rgba(12,154,160,.30);
+      --ok: #11a472;   --ok-soft: rgba(17,164,114,.11);  --ok-line: rgba(17,164,114,.28);
+      --warn: #c9871a; --warn-soft: rgba(201,135,26,.13); --warn-line: rgba(201,135,26,.30);
+      --vio: #7b54d6;  --vio-soft: rgba(123,84,214,.11);  --vio-line: rgba(123,84,214,.26);
+      --amber: #d9881c;
+      --shadow-lg: 0 24px 60px rgba(16,28,48,.16);
+    }
+    .theater { box-shadow: var(--shadow-lg); }
+    .pane { box-shadow: 0 8px 28px rgba(16,28,48,.10); }
+    .phone { box-shadow: 0 14px 40px rgba(16,28,48,.16); }
+    .gate .ghb { background: #111418; color: #fff; }
+    .av { box-shadow: 0 0 0 2px var(--s2), 0 0 0 3.5px var(--amber); }
+    .clickdot { background: rgba(14,23,34,.85); box-shadow: 0 2px 10px rgba(16,28,48,.35); }
+    /* the terminal stays a terminal in daylight */
+  }
+
+  /* ==========================================================================
+     Reduced motion — static representative panels; navigation stays manual
+     ========================================================================== */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .cue svg { animation: none; }
+    .demo-head, .theater { opacity: 1; transform: none; transition: none; }
+    .scene { transition: none; }
+    .pill.p-teal .pdot { animation: none; }
+    .term .cursor::after { animation: none; }
+    .cbtn.play-t { display: none; }
   }
 </style>
 </head>
 <body>
-  <main class="card">
-    <div class="mark">Human-authoritative agents</div>
-    <h1>orcha<span class="dot">.</span></h1>
-    <p class="tag">Your agents do the work.<br>You make the calls.</p>
-    <a class="gh-btn" href="/oauth2/start?rd=%2F">
-      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
-        0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
-        1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
-        0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09
-        2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87
-        3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16
-        8c0-4.42-3.58-8-8-8z"/>
-      </svg>
-      Continue with GitHub
-    </a>
-    <p class="fine">Access is limited to invited project members.<br>
-    Signing in authorizes the <code>orcha-cloud-app</code> GitHub App.</p>
-    <div class="rule"></div>
-    <p class="foot">Powered by <a href="https://github.com/open-orcha/orcha">open-source Orcha</a> · sandboxed agents · human final call</p>
-  </main>
+
+  <!-- ======================= ACT 1 · THE DOOR ======================= -->
+  <div class="hero">
+    <div>
+      <main class="card">
+        <div class="mark">Human-authoritative agents</div>
+        <h1>orcha<span class="dot">.</span></h1>
+        <p class="tag">Your agents do the work.<br>You make the calls.</p>
+        <a class="gh-btn" href="/oauth2/start?rd=%2F">
+          <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+            0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01
+            1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+            0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09
+            2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87
+            3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16
+            8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+          Continue with GitHub
+        </a>
+        <p class="fine">Access is limited to invited project members.<br>
+        Signing in authorizes the <code>orcha-cloud-app</code> GitHub App.</p>
+        <div class="rule"></div>
+        <p class="foot">Powered by <a href="https://github.com/open-orcha/orcha">open-source Orcha</a> · sandboxed agents · human final call</p>
+      </main>
+      <div style="text-align:center">
+        <a class="cue" href="#how">
+          Watch how it works
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6l5 5 5-5"/></svg>
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== ACT 2 · HOW IT WORKS ===================== -->
+  <section class="demo" id="how" aria-label="How Orcha Cloud works">
+    <header class="demo-head">
+      <div class="eyebrow">How it works</div>
+      <h2>From a thought on your phone<br>to a merged PR.</h2>
+      <p class="demo-sub">Six beats. Sandboxed the whole way, durable in the cloud,
+      and a human holds the pen on every decision that matters.</p>
+    </header>
+
+    <div class="theater" id="theater">
+      <!-- window chrome -->
+      <div class="chrome" aria-hidden="true">
+        <span class="dot3"></span><span class="dot3"></span><span class="dot3"></span>
+        <span class="url">
+          <svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#0b1216"/><path d="M27,83 C28,55 33,32 45.5,22.5 C51.5,18 57.5,19.5 60,27 C64.5,46 70.5,67 73,83 Z" fill="#f3fbfb"/><g stroke="#06171c" stroke-width="2.4" stroke-linecap="round"><line x1="49" y1="38" x2="40" y2="62"/><line x1="49" y1="38" x2="56" y2="62"/><line x1="49" y1="38" x2="50" y2="74"/></g><g fill="#06171c"><circle cx="39" cy="64" r="4"/><circle cx="57" cy="64" r="4"/><circle cx="50" cy="76" r="4"/></g><circle cx="49" cy="35" r="6" fill="#1fc7cd"/><path d="M13,86 C28,82 38,82 50,82.5 C62,82 72,82 87,86" stroke="#1fc7cd" stroke-width="5" stroke-linecap="round" fill="none"/></svg>
+          orcha.nursoftai.com
+        </span>
+      </div>
+
+      <div class="frame">
+        <!-- step rail -->
+        <nav class="rail" role="group" aria-label="Demo steps" id="rail">
+          <button class="rstep" type="button" aria-pressed="true">
+            <span class="rtop"><span class="num">01</span><span class="rtitle">Task in from anywhere</span></span>
+            <span class="rdesc">Phone or portal — one queue.</span>
+            <span class="trk"><span class="fill"></span></span>
+          </button>
+          <button class="rstep" type="button" aria-pressed="false">
+            <span class="rtop"><span class="num">02</span><span class="rtitle">Sign in with GitHub</span></span>
+            <span class="rdesc">Identity and membership, checked at the door.</span>
+            <span class="trk"><span class="fill"></span></span>
+          </button>
+          <button class="rstep" type="button" aria-pressed="false">
+            <span class="rtop"><span class="num">03</span><span class="rtitle">A sandbox spins up</span></span>
+            <span class="rdesc">Fresh container, capped, repo cloned.</span>
+            <span class="trk"><span class="fill"></span></span>
+          </button>
+          <button class="rstep" type="button" aria-pressed="false">
+            <span class="rtop"><span class="num">04</span><span class="rtitle">The agent works durably</span></span>
+            <span class="rdesc">Close the laptop — the run keeps going.</span>
+            <span class="trk"><span class="fill"></span></span>
+          </button>
+          <button class="rstep" type="button" aria-pressed="false">
+            <span class="rtop"><span class="num">05</span><span class="rtitle">You stay in charge</span></span>
+            <span class="rdesc">needs-verification, until a human says so.</span>
+            <span class="trk"><span class="fill"></span></span>
+          </button>
+          <button class="rstep" type="button" aria-pressed="false">
+            <span class="rtop"><span class="num">06</span><span class="rtitle">A PR comes out</span></span>
+            <span class="rdesc">Bot-authored. Human-merged.</span>
+            <span class="trk"><span class="fill"></span></span>
+          </button>
+        </nav>
+
+        <!-- stage -->
+        <div class="stage" id="stage" role="img" aria-label="Animated preview: a task typed on a phone">
+
+          <!-- scene 1 · task in from anywhere -->
+          <div class="scene on" data-scene="0">
+            <div class="sc-task">
+              <div class="phone" data-an="rise" style="--d:.1s">
+                <div class="pnotch"></div>
+                <div class="pscr">
+                  <div class="papp">
+                    <svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="#0b1216"/><path d="M27,83 C28,55 33,32 45.5,22.5 C51.5,18 57.5,19.5 60,27 C64.5,46 70.5,67 73,83 Z" fill="#f3fbfb"/><circle cx="49" cy="35" r="6" fill="#1fc7cd"/><path d="M13,86 C28,82 38,82 50,82.5 C62,82 72,82 87,86" stroke="#1fc7cd" stroke-width="5" stroke-linecap="round" fill="none"/></svg>
+                    Orcha <span class="ptime">21:47</span>
+                  </div>
+                  <div class="bubble"><span class="type">Fix flaky auth test → PR</span></div>
+                  <div class="composer">New task…
+                    <span class="send" data-an="press" style="--d:2.4s">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg>
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div class="comet" aria-hidden="true"><span class="cdot"></span></div>
+              <div class="pane tasklist" data-an="rise" style="--d:.3s">
+                <div class="pane-h">Tasks <span class="grow"></span><span class="mono" style="font-size:10px;color:var(--fnt)">quantal-labs/orcha</span></div>
+                <div class="trow"><span class="tid">#140</span><span class="tt">Tighten sandbox egress allowlist</span><span class="pill p-vio">done</span></div>
+                <div class="trow"><span class="tid">#141</span><span class="tt">Portal: markdown in agent replies</span><span class="pill p-ok">verified</span></div>
+                <div class="trow new late" data-an="slide" style="--d:3.55s"><span class="tid">#142</span><span class="tt">Fix the flaky auth retry test</span><span class="pill p-teal"><span class="pdot"></span>queued</span></div>
+              </div>
+            </div>
+            <p class="note">Phone, portal, or CLI — every task lands in the <b>same queue</b>, attributed to you.</p>
+          </div>
+
+          <!-- scene 2 · sign in with github -->
+          <div class="scene" data-scene="1">
+            <div class="sc-gate">
+              <div class="pane gate" data-an="rise" style="--d:.1s">
+                <div class="gmini">
+                  <div class="gm-name">orcha<i>.</i></div>
+                </div>
+                <div class="ghb" data-an="press" style="--d:.9s">
+                  <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+                  Continue with GitHub
+                </div>
+                <div class="checks">
+                  <div class="gcheck late" data-an="slide" style="--d:1.7s">
+                    <span class="who"><span class="av">H</span>@hussein — identity verified</span>
+                    <span class="gc-i"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5 6 12l7.5-8"/></svg></span>
+                  </div>
+                  <div class="gcheck late" data-an="slide" style="--d:2.5s">
+                    <span class="who">Invited member of <span class="mono" style="font-size:10.5px">quantal-labs</span></span>
+                    <span class="gc-i"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5 6 12l7.5-8"/></svg></span>
+                  </div>
+                </div>
+                <div class="verdict late" data-an="pop" style="--d:3.4s">
+                  <span class="pill p-ok">access granted</span>
+                </div>
+              </div>
+            </div>
+            <p class="note">The GitHub gate: OAuth in front, <b>invited members only</b>. Everyone else sees a closed door.</p>
+          </div>
+
+          <!-- scene 3 · sandbox spins up -->
+          <div class="scene" data-scene="2">
+            <div class="sc-box">
+              <div class="sbx">
+                <svg class="edge" aria-hidden="true" preserveAspectRatio="none" viewBox="0 0 100 100"><rect x="1" y="1" width="98" height="98" rx="4" pathLength="260"/></svg>
+                <span class="sbx-t">sandbox · task-142</span>
+                <div class="clone">
+                  <span data-an="fade" style="--d:.8s"><span class="pr">$</span> podman run --rm orcha-runner:latest</span><br>
+                  <span data-an="fade" style="--d:1.5s"><span class="pr">$</span> git clone quantal-labs/orcha.git</span><br>
+                  <span class="late" data-an="fade" style="--d:2.4s"><span class="okt">✓</span> workspace ready in 2.1s</span>
+                </div>
+                <div class="caps">
+                  <span class="chip late" data-an="pop" style="--d:2.9s"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="2" width="12" height="12" rx="2.5"/><rect x="5.5" y="5.5" width="5" height="5" rx="1"/></svg>2 vCPU</span>
+                  <span class="chip late" data-an="pop" style="--d:3.1s"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="4" width="12" height="8" rx="2"/><path d="M5 12v1.5M11 12v1.5"/></svg>4 GB</span>
+                  <span class="chip late" data-an="pop" style="--d:3.3s"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="7" width="10" height="7" rx="2"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></svg>scoped token</span>
+                  <span class="chip late" data-an="pop" style="--d:3.5s"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-3.5 3.8-3.5 8.2 0 12M8 2c3.5 3.8 3.5 8.2 0 12"/></svg>egress allowlist</span>
+                </div>
+                <div class="iso late" data-an="fade" style="--d:4s">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5 13.5 4v4c0 3.2-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.2 2.5 8V4L8 1.5z"/></svg>
+                  Isolated from your machine, your creds, and prod. Nothing escapes the box.
+                </div>
+              </div>
+            </div>
+            <p class="note">Every task gets a <b>fresh container</b> — resource caps on, credentials scoped to the job.</p>
+          </div>
+
+          <!-- scene 4 · the agent works durably -->
+          <div class="scene" data-scene="3">
+            <div class="sc-term">
+              <div class="term" data-an="rise" style="--d:.1s">
+                <span class="tl" data-an="fade" style="--d:.5s"><span class="tp">$</span> orcha run task-142</span>
+                <span class="tl" data-an="fade" style="--d:1.2s"><span class="tc">▸</span> reading tests/test_auth_retry.py</span>
+                <span class="tl" data-an="fade" style="--d:2s"><span class="tc">▸</span> repro: race in exponential backoff</span>
+                <span class="tl" data-an="fade" style="--d:2.9s"><span class="tc">✎</span> patching auth/retry.py <span class="tg">+14</span> <span class="tw">−3</span></span>
+                <span class="tl late" data-an="fade" style="--d:5.4s"><span class="tc">▸</span> running the suite…</span>
+                <span class="tl late" data-an="fade" style="--d:6.4s"><span class="tg">✓</span> 42 passed, 0 failed</span>
+                <span class="tl late cursor" data-an="fade" style="--d:7s"><span class="tp">agent</span> preparing summary</span>
+                <div class="lidchip">
+                  <span class="sleep late" data-an="pop" style="--d:3.9s">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 10.5h11M4 10.5V5a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 12 5v5.5M1.5 12.5h13"/></svg>
+                    your laptop sleeps
+                  </span>
+                  <span class="pill p-teal late" data-an="pop" style="--d:4.7s"><span class="pdot"></span>still running · cloud</span>
+                </div>
+              </div>
+            </div>
+            <p class="note">The run lives in the cloud, <b>not your terminal</b>. Disconnect, board a flight — it finishes.</p>
+          </div>
+
+          <!-- scene 5 · human stays in charge -->
+          <div class="scene" data-scene="4">
+            <div class="sc-gavel">
+              <div class="pane verify" data-an="rise" style="--d:.1s">
+                <div class="pane-h">
+                  task-142 · patch ready
+                  <span class="grow"></span>
+                  <span class="stack" style="display:inline-grid">
+                    <span class="pill p-warn" data-an="gone" style="--d:3.9s"><span class="pdot"></span>needs verification</span>
+                    <span class="pill p-ok swap-in" data-an="pop" style="--d:4s">verified by @hussein</span>
+                  </span>
+                </div>
+                <div class="vrows">
+                  <div class="vrow" data-an="slide" style="--d:.7s"><span class="mono">auth/retry.py</span><span class="grow"></span><span class="dadd">+14</span><span class="ddel">−3</span></div>
+                  <div class="vrow" data-an="slide" style="--d:1.1s"><span class="mono">tests/test_auth_retry.py</span><span class="grow"></span><span class="dadd">+9</span><span class="ddel">−1</span></div>
+                  <div class="vrow" data-an="slide" style="--d:1.5s">Plan: pin backoff jitter seed, retry once on 503<span class="grow"></span></div>
+                </div>
+                <div class="acts">
+                  <span class="stack">
+                    <span class="sbtn go" data-an="press" style="--d:3.6s">Approve</span>
+                    <span class="clickdot" aria-hidden="true"></span>
+                  </span>
+                  <span class="sbtn ghost">Request changes</span>
+                </div>
+              </div>
+            </div>
+            <p class="note">Agents stop at <b>needs-verification</b> — they never self-certify. A human makes the call.</p>
+          </div>
+
+          <!-- scene 6 · a PR comes out -->
+          <div class="scene" data-scene="5">
+            <div class="sc-pr">
+              <div class="pane pr" data-an="rise" style="--d:.1s">
+                <div class="pane-h pr-h">
+                  <span class="stack">
+                    <span class="pr-ic open" data-an="gone" style="--d:4.3s"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="4" cy="3.5" r="1.7"/><path d="M4 5.2v5.6"/><circle cx="4" cy="12.5" r="1.7"/><path d="M7.5 3.5h2.5a2 2 0 0 1 2 2v5.3"/><circle cx="12" cy="12.5" r="1.7"/></svg></span>
+                    <span class="pr-ic merged swap-in" data-an="pop" style="--d:4.4s"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="4" cy="3.5" r="1.7"/><path d="M4 5.2v5.6"/><circle cx="4" cy="12.5" r="1.7"/><path d="M4.2 5.2c.4 2.4 2.6 4.3 5.9 4.3"/><circle cx="12" cy="9.5" r="1.7"/></svg></span>
+                  </span>
+                  <span style="flex:1;min-width:0">
+                    <span class="pr-title">Fix flaky auth retry backoff <span class="prnum">#87</span></span>
+                    <span class="pr-meta"><span class="mono">orcha-cloud-app[bot]</span> wants to merge 1 commit into <span class="mono">main</span> from <span class="mono">orcha/task-142</span></span>
+                  </span>
+                  <span class="av bot" title="orcha-cloud-app[bot]"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="5" width="10" height="8" rx="2"/><path d="M8 5V2.5"/><circle cx="8" cy="2" r=".8" fill="currentColor"/><path d="M6 8.5v1M10 8.5v1"/></svg></span>
+                </div>
+                <div class="pr-body">
+                  <div class="prcheck late" data-an="slide" style="--d:1.2s"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5 6 12l7.5-8"/></svg>All checks passed — 42 tests, lint, build</div>
+                  <div class="prcheck late" data-an="slide" style="--d:1.9s"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5 6 12l7.5-8"/></svg>Verified in Orcha by <b style="margin-left:3px">@hussein</b></div>
+                  <div class="stack">
+                    <span data-an="gone" style="--d:4.45s"><span class="sbtn merge" data-an="press" style="--d:4.1s;width:100%">Merge pull request</span></span>
+                    <span class="pill p-vio swap-in" data-an="pop" style="--d:4.65s;place-self:center">merged by @hussein</span>
+                  </div>
+                  <span class="clickdot" aria-hidden="true"></span>
+                </div>
+              </div>
+            </div>
+            <p class="note">The bot holds the pen, <b>you hold the merge button</b>. Clean attribution, end to end.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- caption bar -->
+      <div class="capbar">
+        <p class="cap" id="cap"><strong>Task in from anywhere.</strong> Phone, portal, or CLI — it lands in one queue.</p>
+        <span class="count" id="count">01 / 06</span>
+        <div class="ctrl">
+          <button class="cbtn" id="prev" type="button" aria-label="Previous step">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3 5 8l5 5"/></svg>
+          </button>
+          <button class="cbtn play-t" id="play" type="button" aria-label="Pause autoplay" aria-pressed="true">
+            <svg class="ic-play" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4.5 2.8v10.4c0 .6.65.97 1.17.66l8.2-5.2a.78.78 0 0 0 0-1.32l-8.2-5.2a.78.78 0 0 0-1.17.66z"/></svg>
+            <svg class="ic-pause" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3.5" y="2.5" width="3.4" height="11" rx="1"/><rect x="9.1" y="2.5" width="3.4" height="11" rx="1"/></svg>
+          </button>
+          <button class="cbtn" id="next" type="button" aria-label="Next step">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <p class="after">Invited to a project? <a href="/oauth2/start?rd=%2F">Sign in with GitHub</a> and put an agent to work.</p>
+  </section>
+
+<script>
+/* ============================================================================
+   The cinematic player — vanilla translation of the quantal-marketing
+   cinematics (product-demo-cinematic.tsx): per-step dwell times, auto-advance
+   that pauses off-screen / on tab-hide / on any manual interaction, a synced
+   step rail whose buttons jump (and pause), per-step progress driven by rAF,
+   and a static manual-only mode under prefers-reduced-motion.
+   QA hooks (headless renders): ?step=N (0-based) picks a step, &paused=1
+   stops autoplay, &bare=1 hides the hero so the act needs no scrolling,
+   &goto=demo jumps straight to the theater.
+   ========================================================================== */
+(function () {
+  "use strict";
+
+  var STEPS = [
+    { ms: 7200, cap: "<strong>Task in from anywhere.</strong> Phone, portal, or CLI — it lands in one queue.",
+      aria: "A task typed on a phone lands in the shared task queue" },
+    { ms: 6400, cap: "<strong>Sign in with GitHub.</strong> Identity and org membership, checked at the door.",
+      aria: "GitHub sign-in verifying identity and project membership" },
+    { ms: 6800, cap: "<strong>A sandbox spins up.</strong> Fresh container, resource caps, repo cloned.",
+      aria: "An isolated sandbox container starting with resource caps and a cloned repo" },
+    { ms: 9000, cap: "<strong>The agent works durably.</strong> Close the laptop — the run continues in the cloud.",
+      aria: "A terminal stream that keeps running after the laptop disconnects" },
+    { ms: 8400, cap: "<strong>You stay in charge.</strong> Agents stop at needs-verification; a human approves.",
+      aria: "A needs-verification card being approved by a human" },
+    { ms: 8400, cap: "<strong>A PR comes out.</strong> Authored by orcha-cloud-app[bot], merged by you.",
+      aria: "A bot-authored pull request being merged by a human" }
+  ];
+  var N = STEPS.length;
+
+  var demo    = document.getElementById("how");
+  var theater = document.getElementById("theater");
+  var stage   = document.getElementById("stage");
+  var scenes  = stage.querySelectorAll(".scene");
+  var rsteps  = document.getElementById("rail").querySelectorAll(".rstep");
+  var fills   = [];
+  rsteps.forEach(function (b) { fills.push(b.querySelector(".fill")); });
+  var capEl   = document.getElementById("cap");
+  var countEl = document.getElementById("count");
+  var playBtn = document.getElementById("play");
+
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var qs      = new URLSearchParams(location.search);
+
+  var cur = 0;
+  var elapsed = 0;              // ms into the current step
+  var userPaused = reduced || qs.get("paused") === "1";
+  var inView = false;
+  var raf = null, lastT = 0;
+
+  function playing() { return !userPaused && !reduced && inView && !document.hidden; }
+
+  function pad(n) { return (n + 1 < 10 ? "0" : "") + (n + 1); }
+
+  function paintRail() {
+    rsteps.forEach(function (b, i) {
+      b.setAttribute("aria-pressed", i === cur ? "true" : "false");
+      b.classList.toggle("done", i < cur);
+      if (i < cur)  fills[i].style.transform = "scaleX(1)";
+      if (i > cur)  fills[i].style.transform = "scaleX(0)";
+      if (i === cur && reduced) fills[i].style.transform = "scaleX(1)";
+    });
+  }
+
+  function setScene(i) {
+    var old = cur;
+    cur = ((i % N) + N) % N;
+    if (scenes[old] && old !== cur) {
+      scenes[old].classList.remove("on", "play");
+      scenes[old].classList.add("bye");
+      (function (el) { setTimeout(function () { el.classList.remove("bye"); }, 420); })(scenes[old]);
+    }
+    var sc = scenes[cur];
+    sc.classList.add("on");
+    if (!reduced) {
+      sc.classList.remove("play");
+      void sc.offsetWidth;               // restart the scene's choreography
+      sc.classList.add("play");
+    }
+    elapsed = 0;
+    if (!reduced) fills[cur].style.transform = "scaleX(0)";
+    paintRail();
+    countEl.textContent = pad(cur) + " / " + pad(N - 1);
+    stage.setAttribute("aria-label", "Animated preview: " + STEPS[cur].aria);
+    capEl.classList.add("swap");
+    setTimeout(function () { capEl.innerHTML = STEPS[cur].cap; capEl.classList.remove("swap"); }, 160);
+  }
+
+  function tick(t) {
+    raf = null;
+    if (playing()) {
+      var dt = lastT ? Math.min(t - lastT, 100) : 0;
+      lastT = t;
+      elapsed += dt;
+      var p = elapsed / STEPS[cur].ms;
+      if (p >= 1) { setScene(cur + 1); }
+      else { fills[cur].style.transform = "scaleX(" + p.toFixed(4) + ")"; }
+      raf = requestAnimationFrame(tick);
+    } else {
+      lastT = 0;
+    }
+  }
+
+  function sync() {
+    playBtn.setAttribute("aria-pressed", userPaused ? "false" : "true");
+    playBtn.setAttribute("aria-label", userPaused ? "Resume autoplay" : "Pause autoplay");
+    if (playing() && raf === null) raf = requestAnimationFrame(tick);
+  }
+
+  function jump(i) { userPaused = true; setScene(i); sync(); }
+
+  rsteps.forEach(function (b, i) {
+    b.addEventListener("click", function () { if (i !== cur) jump(i); });
+  });
+  document.getElementById("prev").addEventListener("click", function () { jump(cur - 1); });
+  document.getElementById("next").addEventListener("click", function () { jump(cur + 1); });
+  playBtn.addEventListener("click", function () {
+    userPaused = !userPaused;
+    sync();
+  });
+  theater.addEventListener("keydown", function (e) {
+    if (e.key === "ArrowLeft")  { jump(cur - 1); }
+    if (e.key === "ArrowRight") { jump(cur + 1); }
+  });
+
+  // pause when the theater scrolls away or the tab hides (reference: useInView).
+  // Geometry first (works everywhere), IntersectionObserver refines live.
+  function onScreen(el, slack) {
+    var r = el.getBoundingClientRect();
+    var vh = window.innerHeight || document.documentElement.clientHeight;
+    return r.top < vh * (slack || 1) && r.bottom > 0;
+  }
+  inView = onScreen(theater);
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(function (entries) {
+      inView = entries[0].isIntersecting;
+      sync();
+    }, { threshold: 0.3 }).observe(theater);
+  }
+  window.addEventListener("load", function () { inView = onScreen(theater); sync(); });
+  window.addEventListener("scroll", function () { inView = onScreen(theater); reveal(); sync(); }, { passive: true });
+  document.addEventListener("visibilitychange", sync);
+
+  // soft reveal of the act — geometry fallback keeps it from ever staying hidden
+  function reveal() { if (onScreen(demo, 0.92)) { demo.classList.add("in"); return true; } return false; }
+  if (reduced || !("IntersectionObserver" in window)) { demo.classList.add("in"); }
+  else if (!reveal()) {
+    var rev = new IntersectionObserver(function (entries) {
+      if (entries[0].isIntersecting) { demo.classList.add("in"); rev.disconnect(); }
+    }, { threshold: 0.12 });
+    rev.observe(demo);
+    window.addEventListener("load", reveal, { once: true });
+  }
+
+  // initial state (QA hooks may pick the step / jump straight to the act)
+  var s0 = parseInt(qs.get("step") || "0", 10);
+  if (!(s0 >= 0 && s0 < N)) s0 = 0;
+  scenes[0].classList.remove("on");
+  setScene(s0);
+  if (qs.get("goto") === "demo") {
+    demo.classList.add("in");
+    theater.scrollIntoView({ behavior: "auto", block: "center" });
+    inView = true;
+  }
+  if (qs.get("bare") === "1") {   // QA: demo-only render, no scrolling needed
+    document.querySelector(".hero").style.display = "none";
+    demo.classList.add("in");
+    inView = true;
+  }
+  sync();
+})();
+</script>
 </body>
 </html>
