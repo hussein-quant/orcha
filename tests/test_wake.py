@@ -965,6 +965,37 @@ def test_format_persona_always_injects_human_comms_guardrail():
     assert "No bare UUIDs" in out
 
 
+def test_format_persona_always_injects_multi_human_steering():
+    """Project-runtime epic: every wake that boots AS an agent carries the multi-human
+    conflict rules — owner > member, DoD > chat, explicit overrides, escalate genuine
+    contradictions via a request to the owner rather than silently picking a side."""
+    out = notifier.format_persona({"system_prompt": "You are Tim."}, None)
+    assert "Multi-human steering" in out
+    assert "owner's instructions outrank a member's" in out
+    assert "definition-of-done outranks chat steering" in out
+    assert "following X's direction over Y's earlier note" in out
+    assert "file an Orcha request addressed to the owner" in out
+    assert "pause that thread of work" in out
+    assert "Chat guidance is advisory" in out
+    # like the comms guardrail, it rides on the PERSONA — never on a persona-less render
+    assert "Multi-human steering" not in notifier.format_persona(
+        None, {"digest": {"current_focus": "X"}})
+
+
+def test_multi_human_steering_rides_conversation_lane_too():
+    """The conversation responder gets the same conflict rules — chat is exactly where
+    contradictory human steering shows up first."""
+    out = notifier.format_persona(
+        {"system_prompt": "You are Tim."}, None, lane="conversation")
+    assert "Multi-human steering" in out
+    assert "conversation responder" in out
+    # steering block stays in the stable prefix: ahead of the volatile digest sections
+    out2 = notifier.format_persona(
+        {"system_prompt": "You are Tim."},
+        {"digest": {"current_focus": "wake epic"}})
+    assert out2.index("Multi-human steering") < out2.index("Where you left off")
+
+
 def test_format_persona_surfaces_audience_register_ahead_of_facts():
     """#325: the digest's `audience` slice renders as 'Who you're talking to', and lands
     BEFORE the 'Where you left off' facts so the conversational register frames the work."""
