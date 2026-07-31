@@ -24,6 +24,15 @@ struct OrchaApp: App {
                         NotificationCoordinator.scheduleAppRefresh()
                     }
                 }
+                .onOpenURL { url in
+                    // orcha://auth/callback belongs to the GitHub device-token
+                    // flow, and the live ASWebAuthenticationSession intercepts
+                    // it before the app ever sees it. One landing here is a
+                    // stray (stale browser tab after the session closed) —
+                    // swallow it; a bare URL must never mutate pairing state.
+                    guard !DeviceAuth.isAuthCallback(url) else { return }
+                    // No other orcha:// routes exist in this target yet.
+                }
         }
     }
 }

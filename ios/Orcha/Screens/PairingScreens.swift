@@ -4,8 +4,8 @@ import VisionKit
 /// Flow 03 — QR scanner (frame I1) with the camera-permission-denied state (I2).
 /// DataScannerViewController reads the QR; payloads run through the same
 /// normalize+probe path as manual entry. Cloud: when the probe hits the auth
-/// perimeter, the scanner hands off to the token prompt — scan → token (only
-/// when required) → connected.
+/// perimeter, the scanner hands off to the auth options — scan → sign in with
+/// GitHub (only when required) → connected.
 struct ScannerScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
@@ -131,23 +131,44 @@ private struct QRScannerRepresentable: UIViewControllerRepresentable {
     }
 }
 
-/// The focused step between "scanned the QR" and "connected" on a protected
-/// deployment: the address is already known (from the scan), only the team
-/// access token is missing. Kept to a single secure field so the headline
-/// path stays scan → token → in.
-struct AccessTokenPromptSheet: View {
+/// The step between "scanned the QR" and "connected" on a protected
+/// deployment, now an options sheet: the primary way in is "Sign in with
+/// GitHub" — the browser round-trip mints a per-device token and pairing
+/// resumes by itself. Pasting a team access token stays available, collapsed,
+/// as the advanced fallback. Headline path: scan → sign in → connected.
+struct AuthOptionsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
+    @State private var showTokenEntry = false
     @State private var token = ""
-    @FocusState private var focused: Bool
+    @FocusState private var tokenFocused: Bool
 
-    /// Just the host, for the title — the draft may be a raw QR payload.
+    /// Just the host, for the copy — the draft may be a raw QR payload.
     private var host: String {
         guard let draft = model.connectDraft,
               let base = try? OrchaServerAddress.parse(draft).baseUrl,
-              let url = URL(string: base) else { return "this Orcha" }
-        return url.host ?? "this Orcha"
+              let url = URL(string: base) else { return "This Orcha" }
+        return url.host ?? "This Orcha"
+    }
+
+    private var phase: DeviceAuthFlow.Phase { model.deviceAuth.phase }
+
+    private var isFailed: Bool {
+        if case .failed = phase { return true }
+        return false
+    }
+
+    private var busy: Bool {
+        phase == .signingIn || phase == .connecting || model.connecting
+    }
+
+    private var signInTitle: String {
+        switch phase {
+        case .signingIn: "Waiting for GitHub…"
+        case .connecting: "Connecting…"
+        default: "Sign in with GitHub"
+        }
     }
 
     var body: some View {
@@ -155,33 +176,21 @@ struct AccessTokenPromptSheet: View {
             OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
                     VStack(spacing: 12) {
-                        Banner(kind: .info, text: "\(host) is protected. Paste the team access token your admin shared to finish pairing.")
-                        SecureField("Access token", text: $token)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .focused($focused)
-                            .padding(12)
-                            .background(p.surface2, in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.border2, lineWidth: 1))
-                        KitButton(
-                            title: model.connecting ? "Connecting…" : "Connect",
-                            enabled: !model.connecting && !token.trimmingCharacters(in: .whitespaces).isEmpty
-                        ) {
+                        Banner(kind: .info, text: "\(host) is protected. Sign in with GitHub and this phone gets its own device token — nothing to paste.")
+                        KitButton(title: signInTitle, enabled: !busy, systemImage: "arrow.up.forward.app") {
                             Task {
-                                guard let draft = model.connectDraft else { return }
-                                if await model.connect(draft, accessToken: token) {
-                                    dismiss()
-                                }
+                                if await model.signInWithGitHub() { dismiss() }
                             }
                         }
-                        if let error = model.error {
-                            Banner(kind: .danger, text: error)
+                        if case let .failed(message) = phase {
+                            Banner(kind: .danger, text: message)
                         }
+                        tokenFallback
                     }
                     .padding(16)
                 }
             }
-            .navigationTitle("Access token")
+            .navigationTitle("Sign in")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -189,7 +198,63 @@ struct AccessTokenPromptSheet: View {
                 }
             }
         }
-        .onAppear { focused = true }
+        .onAppear { model.resetDeviceAuth() }
+        .interactiveDismissDisabled(phase == .connecting)
+    }
+
+    /// The advanced path, collapsed by default: the pasted team access token —
+    /// the same secure field the flow always had.
+    private var tokenFallback: some View {
+        OrchaCard {
+            Button {
+                withAnimation(.spring(duration: 0.3)) { showTokenEntry.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "key.horizontal")
+                        .font(.system(size: 14))
+                        .foregroundStyle(p.accent)
+                    Text("Use an access token instead")
+                        .font(p.uiFont(14, .semibold))
+                        .foregroundStyle(p.text)
+                    Spacer()
+                    Image(systemName: showTokenEntry ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(p.faint)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if showTokenEntry {
+                SecureField("Access token", text: $token)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($tokenFocused)
+                    .padding(12)
+                    .background(p.surface2, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.border2, lineWidth: 1))
+                Text("Advanced: paste the team access token your admin shared. Sign-in above does this for you.")
+                    .font(p.uiFont(12))
+                    .foregroundStyle(p.faint)
+                KitButton(
+                    title: model.connecting ? "Connecting…" : "Connect with token",
+                    role: .neutral,
+                    enabled: !busy && !token.trimmingCharacters(in: .whitespaces).isEmpty
+                ) {
+                    Task {
+                        guard let draft = model.connectDraft else { return }
+                        if await model.connect(draft, accessToken: token) {
+                            dismiss()
+                        }
+                    }
+                }
+                if let error = model.error, !isFailed {
+                    Banner(kind: .danger, text: error)
+                }
+            }
+        }
+        .onChange(of: showTokenEntry) { _, shown in
+            if shown { tokenFocused = true }
+        }
     }
 }
 
@@ -272,7 +337,7 @@ struct ManualConnectSheet: View {
                     .padding(12)
                     .background(p.surface2, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.border2, lineWidth: 1))
-                Text("Cloud deployments sit behind a sign-in — paste the team access token your admin shared. Leave it empty for an unprotected local server.")
+                Text("Cloud deployments sit behind a sign-in — connect and you'll get a Sign in with GitHub option, or paste the team access token your admin shared. Leave the token empty for an unprotected local server.")
                     .font(p.uiFont(12))
                     .foregroundStyle(p.faint)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -284,6 +349,16 @@ struct ManualConnectSheet: View {
                 }
                 if let error = model.error, !failed {
                     Banner(kind: .danger, text: error)
+                }
+                if model.connectNeedsToken {
+                    // The perimeter bounced this address: GitHub sign-in is the
+                    // primary way through — it mints this phone's device token
+                    // and retries the connect by itself.
+                    KitButton(title: "Sign in with GitHub instead", role: .tonal, enabled: !model.connecting) {
+                        Task {
+                            if await model.signInWithGitHub() { dismiss() }
+                        }
+                    }
                 }
                 selfHostHelp
             }

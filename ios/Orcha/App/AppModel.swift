@@ -30,6 +30,7 @@ enum WorkspaceTab: Hashable {
 final class AppModel {
     private let store = ContainerStore()
     private let api = OrchaApiClient()
+    private let webAuth = WebAuthSession()
     private var pollTask: Task<Void, Never>?
     /// Issue 3 — the live run-log collector; cancelled on leaving RunDetailScreen.
     private var runStreamTask: Task<Void, Never>?
@@ -57,8 +58,11 @@ final class AppModel {
     /// rejected). Drives the token prompt instead of the unreachable checklist.
     var connectNeedsToken = false
     /// Add-flow: the raw address/QR payload whose probe needed a token, kept so the
-    /// token prompt and manual sheet can retry it without re-scanning.
+    /// auth-options and manual sheets can retry it without re-scanning.
     var connectDraft: String?
+    /// Perimeter-bounce sign-in state — drives AuthOptionsSheet's primary
+    /// button and failure banner (the pure machine; see DeviceAuthFlow).
+    var deviceAuth = DeviceAuthFlow()
 
     // workspace data
     var snapshot: ContainerSnapshot?
@@ -253,6 +257,59 @@ final class AppModel {
                 remoteBaseUrl: payload.remoteBaseUrl
             ))
         }
+    }
+
+    /// Fresh flow per presentation of the auth-options sheet. Also clears the
+    /// bounce message that got the user here — the sheet opens with its own
+    /// explainer, so any error that appears afterwards is a fresh one.
+    func resetDeviceAuth() {
+        deviceAuth = DeviceAuthFlow()
+        error = nil
+    }
+
+    /// The primary way through the auth perimeter (QR → GitHub OAuth →
+    /// device token): run the deployment's oauth2 start page in an
+    /// ASWebAuthenticationSession, let the authenticated portal's
+    /// `/auth/device` page mint a per-device token and call back
+    /// `orcha://auth/callback?host&token`, then retry the captured pairing
+    /// draft with it — the existing `connect` path persists the token per
+    /// container and rebuilds `BearerTokens`. Returns true when the retry
+    /// connected (the sheet should dismiss).
+    func signInWithGitHub() async -> Bool {
+        // The manual sheet can start a sign-in without the options sheet's
+        // onAppear reset — never let a stale terminal phase eat the events.
+        if deviceAuth.phase == .connected { deviceAuth = DeviceAuthFlow() }
+        deviceAuth.handle(.signInTapped)
+        guard let draft = connectDraft,
+              let base = try? OrchaServerAddress.parse(draft).baseUrl,
+              let startURL = DeviceAuth.startURL(forBase: base) else {
+            deviceAuth.handle(.retryFailed("The pairing address went missing — close this and scan the portal's QR again."))
+            return false
+        }
+        let callbackURL: URL
+        do {
+            callbackURL = try await webAuth.authenticate(startURL: startURL)
+        } catch {
+            // The user closed the browser sheet — or the server showed its own
+            // error page and never redirected, which ends the session the same
+            // way. Either way: back to the options, no banner.
+            deviceAuth.handle(.cancelled)
+            return false
+        }
+        guard let callback = DeviceAuth.parseCallback(callbackURL),
+              DeviceAuth.callback(callback, matchesBase: base) else {
+            deviceAuth.handle(.invalidCallback)
+            return false
+        }
+        deviceAuth.handle(.callbackReceived)
+        if await connect(draft, accessToken: callback.token) {
+            deviceAuth.handle(.retrySucceeded)
+            return true
+        }
+        deviceAuth.handle(.retryFailed(connectNeedsToken
+            ? "GitHub signed you in, but the minted device token wasn't accepted. Try again, or paste an access token instead."
+            : (error ?? "Signed in, but the connection then failed. Check the deployment and try again.")))
+        return false
     }
 
     /// Settings: set/rotate the team access token for a connection (applies to every
