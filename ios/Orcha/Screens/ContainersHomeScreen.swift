@@ -178,6 +178,21 @@ private struct ContainerCard: View {
                         StatusPill(status: "\(needs) need you", domain: .agent)
                     }
                 }
+                // Bound GitHub repo (glance-only — connect/change lives in the
+                // workspace, on the Home tab's repo chip).
+                if let repo = health?.githubRepo {
+                    HStack(spacing: 5) {
+                        GitHubMark()
+                            .frame(width: 11, height: 11)
+                            .foregroundStyle(p.faint)
+                        Text(repo)
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundStyle(p.muted)
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("GitHub repository: \(repo)")
+                }
             }
         }
     }
