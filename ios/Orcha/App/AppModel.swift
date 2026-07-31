@@ -52,6 +52,13 @@ final class AppModel {
     /// captured once per workspace session when the gap is meaningful. The
     /// Home card narrates the delta against the live snapshot, on-device.
     var catchUp: (previous: String, gapLabel: String)?
+    /// Add-flow: the last probe was intercepted by an auth perimeter — the address is
+    /// right, but the deployment wants the team access token (or the one given was
+    /// rejected). Drives the token prompt instead of the unreachable checklist.
+    var connectNeedsToken = false
+    /// Add-flow: the raw address/QR payload whose probe needed a token, kept so the
+    /// token prompt and manual sheet can retry it without re-scanning.
+    var connectDraft: String?
 
     // workspace data
     var snapshot: ContainerSnapshot?
@@ -143,52 +150,117 @@ final class AppModel {
         }
     }
 
+    /// Cloud multi-project: one pairing covers the whole deployment, so forgetting a
+    /// project forgets its connection — every project sharing the base URL. (Leaving
+    /// just one behind would only get re-added by the next discovery pass.)
     func forgetContainer(_ id: String) {
-        containers = store.remove(id)
-        if selectedContainer?.id == id {
+        let base = containers.first { $0.id == id }?.baseUrl
+        containers = store.removeConnection(of: id)
+        if let sel = selectedContainer, sel.baseUrl == base || sel.id == id {
             selectedContainer = nil
             snapshot = nil
         }
     }
 
-    // MARK: pairing (flow 03)
+    // MARK: pairing (flow 03, cloud-first)
 
-    func connect(_ raw: String) async -> Bool {
+    /// Probe + pair. `accessToken` is the team credential for deployments behind the
+    /// auth perimeter — attached to the probe itself (it isn't persisted yet), then
+    /// stored per container so `BearerTokens` serves every later request. One pairing
+    /// stores EVERY project `/api/containers` lists on that box; the QR's container
+    /// (or the first) opens immediately and the rest land on the containers home.
+    func connect(_ raw: String, accessToken: String? = nil) async -> Bool {
         connecting = true
         error = nil
+        connectNeedsToken = false
+        let trimmed = accessToken?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let token = (trimmed?.isEmpty ?? true) ? nil : trimmed
         defer { connecting = false }
         do {
             let payload = try OrchaServerAddress.parse(raw)
             let base = payload.baseUrl
-            guard let container = try await api.listContainers(base).containers.first else {
-                error = "No Orcha container was found at this address."
+            let probeApi = token == nil ? api : OrchaApiClient(bearerToken: token)
+            let listed = try await probeApi.listContainers(base).containers
+            guard !listed.isEmpty else {
+                error = "No Orcha project was found at this address."
                 return false
             }
-            let snap = try await api.snapshot(base, container.id)
+            let primary = listed.first { $0.id == payload.containerId } ?? listed[0]
+            let snap = try await probeApi.snapshot(base, primary.id)
             // Prefer the operator named in the QR (disambiguates multi-human containers);
             // fall back to the sole human in the snapshot for manual entry. Verify the
             // paired id is actually a human on this container before trusting it.
             let humans = snap.agents.filter { $0.kind == "human" }
             let pairedHuman = payload.humanAgentId.flatMap { id in humans.first { $0.id == id } }
             let human = pairedHuman ?? (humans.count == 1 ? humans.first : nil)
-            let stored = StoredContainer(
-                id: container.id,
-                displayName: container.name,
-                baseUrl: base,
-                humanAgentId: human?.id ?? payload.humanAgentId,
-                humanAlias: human?.alias ?? payload.humanAgentAlias,
-                pairingToken: payload.token,
-                remoteBaseUrl: payload.remoteBaseUrl
-            )
-            containers = store.upsert(stored)
-            selectedContainer = stored
+            for dto in listed {
+                storeProject(
+                    dto, base: base, token: token, payload: payload,
+                    human: dto.id == primary.id ? human : nil,
+                    isPrimary: dto.id == primary.id
+                )
+            }
+            selectedContainer = containers.first { $0.id == primary.id }
             snapshot = snap
             selectedTab = .home
+            connectDraft = nil
             startPolling()
             return true
         } catch {
-            self.error = friendly(error)
+            if error is OrchaAuthRequiredError {
+                // Item-1 UX: scan/enter → token prompt only when the perimeter asks.
+                connectNeedsToken = true
+                connectDraft = raw
+                self.error = token == nil
+                    ? "This Orcha is protected — enter its team access token to connect."
+                    : "That access token wasn't accepted. Check it and try again."
+            } else {
+                self.error = friendly(error)
+            }
             return false
+        }
+    }
+
+    /// Upsert one discovered project, preserving local edits (rename, remote address,
+    /// resolved human) when it's already paired. Non-primary projects start without a
+    /// human identity — `refresh()` resolves it on first open, by alias when possible.
+    private func storeProject(
+        _ dto: ContainerDto, base: String, token: String?,
+        payload: OrchaServerAddress.Payload, human: AgentDto?, isPrimary: Bool
+    ) {
+        if var existing = containers.first(where: { $0.id == dto.id }) {
+            existing.baseUrl = base
+            existing.accessToken = token
+            existing.remoteBaseUrl = payload.remoteBaseUrl ?? existing.remoteBaseUrl
+            if isPrimary {
+                existing.pairingToken = payload.token
+                existing.humanAgentId = human?.id ?? payload.humanAgentId ?? existing.humanAgentId
+                existing.humanAlias = human?.alias ?? payload.humanAgentAlias ?? existing.humanAlias
+                existing.lastOpenedAt = .now
+            }
+            containers = store.upsert(existing)
+        } else {
+            containers = store.upsert(StoredContainer(
+                id: dto.id,
+                displayName: dto.name,
+                baseUrl: base,
+                humanAgentId: isPrimary ? (human?.id ?? payload.humanAgentId) : nil,
+                // The operator's ALIAS carries across projects (same person on the
+                // whole box) even where the per-project agent id can't.
+                humanAlias: human?.alias ?? payload.humanAgentAlias,
+                pairingToken: isPrimary ? payload.token : nil,
+                accessToken: token,
+                remoteBaseUrl: payload.remoteBaseUrl
+            ))
+        }
+    }
+
+    /// Settings: set/rotate the team access token for a connection (applies to every
+    /// project sharing the address — one box, one token).
+    func setAccessToken(_ id: String, to accessToken: String?) {
+        containers = store.setAccessToken(id, to: accessToken)
+        if let sel = selectedContainer {
+            selectedContainer = containers.first { $0.id == sel.id } ?? sel
         }
     }
 
@@ -235,23 +307,57 @@ final class AppModel {
         probeContainers()
     }
 
-    /// Flow 04 H1: per-card reachability + glance counts, non-blocking per card.
+    /// Flow 04 H1 + cloud multi-project: each paired address is one connection to a
+    /// whole box, so first re-list its containers (projects created after pairing
+    /// appear here automatically), then probe per-card health, non-blocking per card.
     func probeContainers() {
+        discoverProjects()
         for stored in containers {
-            containerHealth[stored.id, default: ContainerHealth(state: "probing")].state = "probing"
+            probeHealth(stored)
+        }
+    }
+
+    /// One `GET /api/containers` per distinct base URL; unknown projects are stored
+    /// as siblings of the connection (same address + token). Removal stays manual —
+    /// an unreachable box must not silently drop pairings.
+    private func discoverProjects() {
+        for (base, group) in Dictionary(grouping: containers, by: \.baseUrl) {
             Task {
-                do {
-                    let snap = try await api.snapshot(stored.baseUrl, stored.id)
-                    let plans = snap.tasks.filter { $0.status == "in_progress" && $0.planMessage != nil && $0.planDecision == nil }
-                    let verifs = snap.tasks.filter { $0.status == "needs_verification" }
-                    let reqs = snap.requests.filter { $0.status == "open" && ($0.targetId == stored.humanAgentId || $0.targetId == nil) }
-                    containerHealth[stored.id] = ContainerHealth(
-                        state: "polling", agents: snap.agents.count, tasks: snap.tasks.count,
-                        needsYou: plans.count + verifs.count + reqs.count
+                guard let listed = try? await api.listContainers(base).containers else { return }
+                let known = Set(containers.map(\.id))
+                let template = group[0]
+                for dto in listed where !known.contains(dto.id) {
+                    let sibling = StoredContainer(
+                        id: dto.id,
+                        displayName: dto.name,
+                        baseUrl: base,
+                        humanAgentId: nil,
+                        humanAlias: template.humanAlias,
+                        pairingToken: nil,
+                        accessToken: template.accessToken,
+                        remoteBaseUrl: template.remoteBaseUrl
                     )
-                } catch {
-                    containerHealth[stored.id] = ContainerHealth(state: "unreachable")
+                    containers = store.upsert(sibling)
+                    probeHealth(sibling)
                 }
+            }
+        }
+    }
+
+    private func probeHealth(_ stored: StoredContainer) {
+        containerHealth[stored.id, default: ContainerHealth(state: "probing")].state = "probing"
+        Task {
+            do {
+                let snap = try await api.snapshot(stored.baseUrl, stored.id)
+                let plans = snap.tasks.filter { $0.status == "in_progress" && $0.planMessage != nil && $0.planDecision == nil }
+                let verifs = snap.tasks.filter { $0.status == "needs_verification" }
+                let reqs = snap.requests.filter { $0.status == "open" && ($0.targetId == stored.humanAgentId || $0.targetId == nil) }
+                containerHealth[stored.id] = ContainerHealth(
+                    state: "polling", agents: snap.agents.count, tasks: snap.tasks.count,
+                    needsYou: plans.count + verifs.count + reqs.count
+                )
+            } catch {
+                containerHealth[stored.id] = ContainerHealth(state: "unreachable")
             }
         }
     }
@@ -265,12 +371,19 @@ final class AppModel {
         do {
             let snap = try await api.snapshot(sel.baseUrl, sel.id)
             snapshot = snap
-            if sel.humanAgentId == nil, let human = snap.agents.first(where: { $0.kind == "human" }) {
-                var upgraded = sel
-                upgraded.humanAgentId = human.id
-                upgraded.humanAlias = human.alias
-                containers = store.upsert(upgraded)
-                selectedContainer = upgraded
+            // Resolve the human identity lazily for projects paired via discovery:
+            // match the connection's operator alias first (the same person across a
+            // box's projects), else the sole human — never guess among several.
+            if sel.humanAgentId == nil {
+                let humans = snap.agents.filter { $0.kind == "human" }
+                let match = humans.first { $0.alias == sel.humanAlias } ?? (humans.count == 1 ? humans.first : nil)
+                if let human = match {
+                    var upgraded = sel
+                    upgraded.humanAgentId = human.id
+                    upgraded.humanAlias = human.alias
+                    containers = store.upsert(upgraded)
+                    selectedContainer = upgraded
+                }
             }
             error = nil
             // Anything visible in the open app counts as seen — it must never
@@ -760,9 +873,12 @@ final class AppModel {
         if let e = error as? OrchaServerAddress.AddressError {
             return e.localizedDescription
         }
+        if let e = error as? OrchaAuthRequiredError {
+            return e.localizedDescription
+        }
         if let e = error as? OrchaApiError {
             return e.localizedDescription
         }
-        return "Could not reach Orcha at this address. Check that Orcha is running and your phone is on the same Wi-Fi."
+        return "Could not reach Orcha at this address. Check the address and that your Orcha is up."
     }
 }

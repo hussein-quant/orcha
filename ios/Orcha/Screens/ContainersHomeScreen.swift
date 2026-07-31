@@ -7,6 +7,7 @@ struct ContainersHomeScreen: View {
     @Environment(\.palette) private var p
     @State private var showScanner = false
     @State private var showManualEntry = false
+    @State private var showTokenPrompt = false
     @State private var showSettings = false
     @State private var renaming: StoredContainer?
     @State private var newName = ""
@@ -36,13 +37,24 @@ struct ContainersHomeScreen: View {
         .task { model.probeContainers() }
         .refreshable { model.probeContainers() }
         .fullScreenCover(isPresented: $showScanner) {
-            ScannerScreen(onManualEntry: {
-                showScanner = false
-                showManualEntry = true
-            })
+            ScannerScreen(
+                onManualEntry: {
+                    showScanner = false
+                    showManualEntry = true
+                },
+                onTokenRequired: {
+                    // Scan hit the auth perimeter: the address is captured, only
+                    // the team token is missing — ask for exactly that.
+                    showScanner = false
+                    showTokenPrompt = true
+                }
+            )
         }
         .sheet(isPresented: $showManualEntry) {
             ManualConnectSheet()
+        }
+        .sheet(isPresented: $showTokenPrompt) {
+            AccessTokenPromptSheet()
         }
         .sheet(isPresented: $showSettings) {
             SettingsScreen()
@@ -70,14 +82,14 @@ struct ContainersHomeScreen: View {
             }
             Button("Cancel", role: .cancel) { disconnecting = nil }
         } message: {
-            Text("This only removes the pairing from this phone. The Orcha keeps running on your computer, and you can pair again anytime from the portal.")
+            Text("This removes the pairing — and every project sharing its address — from this phone only. The Orcha keeps running, and you can pair again anytime from the portal.")
         }
     }
 
     private var emptyState: some View {
         StateLayout(
             title: "Add your Orcha",
-            sub: "On your computer, open the Orcha portal and choose Pair phone — then scan the QR code here. Phone and laptop must share a Wi-Fi network."
+            sub: "Open your Orcha portal and choose Pair phone, then scan the QR here — or type the portal address, like orcha.yourteam.com. One pairing brings in every project on that Orcha."
         ) {
             BrandMark(size: 44)
         } actions: {
@@ -110,7 +122,7 @@ struct ContainersHomeScreen: View {
                         Button("Disconnect", role: .destructive) { disconnecting = container }
                     }
                 }
-                Text("Long-press a card to rename or disconnect. Your phone talks to each Orcha directly on your network.")
+                Text("Every project on a paired Orcha appears here automatically — tap one to switch into it. Long-press a card to rename or disconnect.")
                     .font(p.uiFont(13))
                     .foregroundStyle(p.faint)
                     .padding(.horizontal, 4)
@@ -152,7 +164,7 @@ private struct ContainerCard: View {
                     .font(p.uiFont(13))
                     .foregroundStyle(p.faint)
             case "unreachable":
-                Text("Last seen a while ago — is the laptop awake?")
+                Text("Last seen a while ago — is this Orcha up?")
                     .font(p.uiFont(13))
                     .foregroundStyle(p.muted)
             default:

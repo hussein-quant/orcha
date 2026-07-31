@@ -69,12 +69,6 @@ struct ContainerStore {
         return next
     }
 
-    func remove(_ id: String) -> [StoredContainer] {
-        let next = load().filter { $0.id != id }
-        save(next)
-        return next
-    }
-
     /// Cloud multi-project: disconnecting a project disconnects its whole
     /// connection — every row sharing the base URL — otherwise the next
     /// discovery pass would just re-add the "forgotten" project.

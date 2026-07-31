@@ -238,7 +238,7 @@ struct UnreachableState: View {
 
     var body: some View {
         StateLayout(
-            title: "Can't reach your laptop",
+            title: "Can't reach this Orcha",
             sub: "\(model.selectedContainer?.baseUrl ?? "The container") didn't answer. Your work is safe — the phone just can't see it right now.",
             danger: true
         ) {
@@ -248,9 +248,9 @@ struct UnreachableState: View {
         } actions: {
             VStack(spacing: 12) {
                 OrchaCard {
-                    Text("1  Is the phone on the same Wi-Fi as the laptop?")
-                    Text("2  Is the laptop awake and Orcha running?")
-                    Text("3  Firewall or VPN blocking the port?")
+                    Text("1  Are you online? The portal needs an internet connection.")
+                    Text("2  Is the deployment up — or, self-hosting, is the computer awake with Orcha running?")
+                    Text("3  Access token rotated? Update it in Settings → Containers.")
                 }
                 .font(p.uiFont(13))
                 .foregroundStyle(p.text2)

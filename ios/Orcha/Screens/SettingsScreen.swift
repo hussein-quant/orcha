@@ -152,6 +152,21 @@ struct SettingsScreen: View {
                             .foregroundStyle(p.danger)
                     }
                     HStack(spacing: 8) {
+                        Image(systemName: "key.horizontal")
+                            .font(.system(size: 12))
+                            .foregroundStyle(container.accessToken == nil ? p.faint : p.accent)
+                        Text(container.accessToken == nil ? "No access token" : "Access token set")
+                            .font(p.uiFont(12))
+                            .foregroundStyle(container.accessToken == nil ? p.faint : p.text2)
+                        Spacer()
+                        Button(container.accessToken == nil ? "Add token…" : "Update token…") {
+                            tokenDraft = ""
+                            tokenEditing = container
+                        }
+                        .font(p.uiFont(12, .semibold))
+                        .foregroundStyle(p.accent)
+                    }
+                    HStack(spacing: 8) {
                         Image(systemName: "network")
                             .font(.system(size: 12))
                             .foregroundStyle(container.remoteBaseUrl == nil ? p.faint : p.accent)
@@ -161,7 +176,7 @@ struct SettingsScreen: View {
                                 .foregroundStyle(p.text2)
                                 .lineLimit(1)
                         } else {
-                            Text("Local only")
+                            Text("No second address")
                                 .font(p.uiFont(12))
                                 .foregroundStyle(p.faint)
                         }
@@ -176,10 +191,21 @@ struct SettingsScreen: View {
                     }
                 }
             }
-            Text("Remote access is optional: install Tailscale (free for personal use) on this iPhone and on the computer, then add the computer's Tailscale address here. The app uses it automatically whenever the local address doesn't answer — leave it empty to stay local-only.")
+            Text("Cloud deployments authenticate every request with the team access token — update it here when your admin rotates it; it applies to every project at that address. The remote address is for self-hosted boxes only: add the computer's Tailscale address and the app fails over to whichever answers.")
                 .font(p.uiFont(12))
                 .foregroundStyle(p.faint)
                 .padding(.horizontal, 2)
+                .alert("Access token", isPresented: tokenAlertShown) {
+                    SecureField("Paste the team access token", text: $tokenDraft)
+                    Button("Save") { saveToken() }
+                    Button("Remove", role: .destructive) {
+                        if let c = tokenEditing { model.setAccessToken(c.id, to: nil) }
+                        tokenEditing = nil
+                    }
+                    Button("Cancel", role: .cancel) { tokenEditing = nil }
+                } message: {
+                    Text("Sent as the bearer credential on every request to this Orcha, and applied to all its projects. Needed for cloud deployments; leave unset for an unprotected local server.")
+                }
         }
         .alert("Remote address (Tailscale)", isPresented: remoteAlertShown) {
             TextField("e.g. my-mac.tailnet.ts.net:8001", text: $remoteDraft)
@@ -199,12 +225,30 @@ struct SettingsScreen: View {
     @State private var remoteEditing: StoredContainer?
     @State private var remoteDraft = ""
     @State private var remoteError: String?
+    @State private var tokenEditing: StoredContainer?
+    @State private var tokenDraft = ""
 
     private var remoteAlertShown: Binding<Bool> {
         Binding(
             get: { remoteEditing != nil },
             set: { if !$0 { remoteEditing = nil } }
         )
+    }
+
+    private var tokenAlertShown: Binding<Bool> {
+        Binding(
+            get: { tokenEditing != nil },
+            set: { if !$0 { tokenEditing = nil } }
+        )
+    }
+
+    private func saveToken() {
+        guard let container = tokenEditing else { return }
+        defer { tokenEditing = nil }
+        let draft = tokenDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return }
+        model.setAccessToken(container.id, to: draft)
+        model.toast = "Access token saved"
     }
 
     private func saveRemote() {

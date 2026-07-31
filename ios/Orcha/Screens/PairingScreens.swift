@@ -3,12 +3,15 @@ import VisionKit
 
 /// Flow 03 — QR scanner (frame I1) with the camera-permission-denied state (I2).
 /// DataScannerViewController reads the QR; payloads run through the same
-/// normalize+probe path as manual entry.
+/// normalize+probe path as manual entry. Cloud: when the probe hits the auth
+/// perimeter, the scanner hands off to the token prompt — scan → token (only
+/// when required) → connected.
 struct ScannerScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
     let onManualEntry: () -> Void
+    let onTokenRequired: () -> Void
     @State private var scanned = false
 
     private var scannerAvailable: Bool {
@@ -26,7 +29,11 @@ struct ScannerScreen: View {
                             dismiss()
                         } else {
                             dismiss()
-                            onManualEntry()
+                            if model.connectNeedsToken {
+                                onTokenRequired()
+                            } else {
+                                onManualEntry()
+                            }
                         }
                     }
                 }
@@ -40,7 +47,7 @@ struct ScannerScreen: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 8)
                             .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
-                        Button("Can't scan? Enter manually") {
+                        Button("Can't scan? Enter the address") {
                             dismiss()
                             onManualEntry()
                         }
@@ -68,7 +75,7 @@ struct ScannerScreen: View {
                             }
                         }
                         .frame(maxWidth: 240)
-                        KitButton(title: "Enter code manually", role: .neutral) {
+                        KitButton(title: "Enter the address instead", role: .neutral) {
                             dismiss()
                             onManualEntry()
                         }
@@ -124,14 +131,83 @@ private struct QRScannerRepresentable: UIViewControllerRepresentable {
     }
 }
 
-/// Flow 03 — manual entry fallback (frame A4) + the unreachable checklist state (A3).
+/// The focused step between "scanned the QR" and "connected" on a protected
+/// deployment: the address is already known (from the scan), only the team
+/// access token is missing. Kept to a single secure field so the headline
+/// path stays scan → token → in.
+struct AccessTokenPromptSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var p
+    @Environment(\.dismiss) private var dismiss
+    @State private var token = ""
+    @FocusState private var focused: Bool
+
+    /// Just the host, for the title — the draft may be a raw QR payload.
+    private var host: String {
+        guard let draft = model.connectDraft,
+              let base = try? OrchaServerAddress.parse(draft).baseUrl,
+              let url = URL(string: base) else { return "this Orcha" }
+        return url.host ?? "this Orcha"
+    }
+
+    var body: some View {
+        NavigationStack {
+            OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        Banner(kind: .info, text: "\(host) is protected. Paste the team access token your admin shared to finish pairing.")
+                        SecureField("Access token", text: $token)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($focused)
+                            .padding(12)
+                            .background(p.surface2, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.border2, lineWidth: 1))
+                        KitButton(
+                            title: model.connecting ? "Connecting…" : "Connect",
+                            enabled: !model.connecting && !token.trimmingCharacters(in: .whitespaces).isEmpty
+                        ) {
+                            Task {
+                                guard let draft = model.connectDraft else { return }
+                                if await model.connect(draft, accessToken: token) {
+                                    dismiss()
+                                }
+                            }
+                        }
+                        if let error = model.error {
+                            Banner(kind: .danger, text: error)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Access token")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .onAppear { focused = true }
+    }
+}
+
+/// Flow 03 — manual entry (frame A4) + the unreachable checklist state (A3).
+/// Cloud-first: the primary path is the deployed portal's address (https, no
+/// port needed) plus the team access token when the deployment is protected.
+/// Local self-host addresses (http, host:port) keep working unchanged.
 struct ManualConnectSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
     @State private var address = ""
+    @State private var token = ""
     @State private var failed = false
-    @State private var showRemoteHelp = false
+    @State private var showSelfHostHelp = false
+    @FocusState private var focus: Field?
+
+    private enum Field { case address, token }
 
     var body: some View {
         NavigationStack {
@@ -152,6 +228,25 @@ struct ManualConnectSheet: View {
                 }
             }
         }
+        .onAppear {
+            // A scan that bounced off the auth perimeter lands here with the
+            // address already captured — only the token is missing.
+            if let draft = model.connectDraft, address.isEmpty {
+                address = draft
+                focus = model.connectNeedsToken ? .token : .address
+            }
+        }
+    }
+
+    private func tryConnect() {
+        Task {
+            if await model.connect(address, accessToken: token) {
+                dismiss()
+            } else if !model.connectNeedsToken {
+                failed = true
+            }
+            // needs-token: stay on the form — the danger banner + focus do the asking
+        }
     }
 
     private var form: some View {
@@ -159,68 +254,72 @@ struct ManualConnectSheet: View {
             VStack(spacing: 12) {
                 Banner(
                     kind: .info,
-                    text: "The portal's Pair-phone QR endpoint is still in review — until it ships, paste an orcha-pair payload or enter the laptop's Wi-Fi address."
+                    text: "Enter your Orcha's address — for a cloud deployment that's the portal domain, like orcha.yourteam.com. Scanning the portal's Pair-phone QR fills this in for you."
                 )
-                TextField("Address or QR payload", text: $address, prompt: Text("192.168.1.24:8001"), axis: .vertical)
+                TextField("Address or QR payload", text: $address, prompt: Text("orcha.yourteam.com"), axis: .vertical)
                     .lineLimit(1...5)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
+                    .focused($focus, equals: .address)
                     .padding(12)
                     .background(p.surface2, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.border2, lineWidth: 1))
+                SecureField("Access token (if required)", text: $token)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($focus, equals: .token)
+                    .padding(12)
+                    .background(p.surface2, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.border2, lineWidth: 1))
+                Text("Cloud deployments sit behind a sign-in — paste the team access token your admin shared. Leave it empty for an unprotected local server.")
+                    .font(p.uiFont(12))
+                    .foregroundStyle(p.faint)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 KitButton(
                     title: model.connecting ? "Connecting…" : "Connect",
                     enabled: !model.connecting && !address.trimmingCharacters(in: .whitespaces).isEmpty
                 ) {
-                    Task {
-                        if await model.connect(address) {
-                            dismiss()
-                        } else {
-                            failed = true
-                        }
-                    }
+                    tryConnect()
                 }
                 if let error = model.error, !failed {
                     Banner(kind: .danger, text: error)
                 }
-                remoteHelp
+                selfHostHelp
             }
             .padding(16)
         }
     }
 
-    /// The pair-phone workflow's optional remote-access explainer: how to set up
-    /// Tailscale, and how the app hands off between the local and remote address
-    /// when you leave home Wi-Fi. Collapsed by default — local-only pairing
-    /// stays a one-field flow.
-    private var remoteHelp: some View {
+    /// Collapsed explainer for the self-host path: local Wi-Fi entry and the
+    /// optional Tailscale remote address. The cloud path never needs any of it.
+    private var selfHostHelp: some View {
         OrchaCard {
             Button {
-                withAnimation(.spring(duration: 0.3)) { showRemoteHelp.toggle() }
+                withAnimation(.spring(duration: 0.3)) { showSelfHostHelp.toggle() }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "network")
+                    Image(systemName: "desktopcomputer")
                         .font(.system(size: 14))
                         .foregroundStyle(p.accent)
-                    Text("Want to check in from anywhere?")
+                    Text("Running Orcha on your own computer?")
                         .font(p.uiFont(14, .semibold))
                         .foregroundStyle(p.text)
                     Spacer()
-                    Image(systemName: showRemoteHelp ? "chevron.up" : "chevron.down")
+                    Image(systemName: showSelfHostHelp ? "chevron.up" : "chevron.down")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(p.faint)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if showRemoteHelp {
+            if showSelfHostHelp {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Out of the box, Orcha is local-only: the phone talks directly to your computer on your Wi-Fi, and nothing goes through any cloud. To supervise your agents from anywhere, add Tailscale — a free (for personal use) encrypted tunnel between your own devices. Nothing gets exposed to the internet.")
-                    step(1, "Install Tailscale on this iPhone (App Store) and on your computer (tailscale.com), and sign both into the same account.")
-                    step(2, "Find the computer's Tailscale address: run “tailscale ip -4” on it, or use its name from the Tailscale menu, e.g. my-mac.tailnet.ts.net.")
-                    step(3, "Pair here on Wi-Fi as usual, then open Settings → Containers → “Add remote…” and enter that address with the portal port, e.g. 100.x.y.z:8001.")
-                    Text("From then on the switch is automatic: the app uses whichever address answers. Leave home Wi-Fi and the local address goes quiet, so the next refresh fails over to the Tailscale address — and back again the same way. You'll see a “Connected via …” note when it hands off. The only requirement while you're out: the computer must be awake.")
+                    Text("A cloud portal works from anywhere and none of this applies. Self-hosting on your own machine instead? Then the phone talks straight to that computer:")
+                    step(1, "On the same Wi-Fi, enter the computer's address with the portal port, e.g. 192.168.1.24:8001. No access token needed unless you put one in front of it.")
+                    step(2, "To check in from outside that Wi-Fi, install Tailscale (free for personal use) on this iPhone and on the computer, signed into the same account — an encrypted tunnel between your own devices.")
+                    step(3, "Add the computer's Tailscale address under Settings → Containers → “Add remote…”, e.g. my-mac.tailnet.ts.net:8001. The app then uses whichever address answers, switching automatically as you come and go.")
+                    Text("The only requirement while you're out: the computer must be awake.")
                 }
                 .font(p.uiFont(13))
                 .foregroundStyle(p.text2)
@@ -242,7 +341,7 @@ struct ManualConnectSheet: View {
 
     private var unreachable: some View {
         StateLayout(
-            title: "Can't reach your laptop",
+            title: "Can't reach this Orcha",
             sub: "\(address.isEmpty ? "That address" : address) didn't answer. Your work is safe — the phone just can't see it right now.",
             danger: true
         ) {
@@ -252,15 +351,15 @@ struct ManualConnectSheet: View {
         } actions: {
             VStack(spacing: 12) {
                 OrchaCard {
-                    Text("1  Is the phone on the same Wi-Fi as the laptop?")
-                    Text("2  Is the laptop awake and Orcha running?")
-                    Text("3  Firewall or VPN blocking the port?")
+                    Text("1  Is the address right? A cloud portal needs no port.")
+                    Text("2  Is the deployment up — or, self-hosting, is the computer awake with Orcha running?")
+                    Text("3  On a local address: same Wi-Fi, and no firewall or VPN in the way?")
                 }
                 .font(p.uiFont(13))
                 .foregroundStyle(p.text2)
                 KitButton(title: "Try again", role: .neutral, enabled: !model.connecting) {
                     Task {
-                        if await model.connect(address) {
+                        if await model.connect(address, accessToken: token) {
                             dismiss()
                         }
                     }
