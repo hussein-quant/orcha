@@ -15,9 +15,22 @@ the control plane will automate.
 
 ```bash
 curl -fsSL https://get.docker.com | sh
-git clone https://github.com/hussein-quant/orcha-cloud.git && cd orcha-cloud
-pipx install ./orcha-cli   # or: uv tool install ./orcha-cli
 ```
+
+**Private-repo clone via the GitHub App** (no PATs, no deploy keys). One-time:
+copy the app credentials created by setup-github.py to the box and install the
+app on the repo (app page → Install App → select `orcha-cloud`):
+
+```bash
+ssh <box> mkdir -p /opt/orcha-secrets
+scp deploy/auth/github-app.pem deploy/auth/github-app.json <box>:/opt/orcha-secrets/
+ssh <box> chmod 600 /opt/orcha-secrets/github-app.pem
+scp deploy/github-app-token.py deploy/bootstrap-clone.sh <box>:/tmp/
+ssh <box> 'sh /tmp/bootstrap-clone.sh'     # clones → /opt/orcha-cloud, installs orcha-cli
+```
+
+Re-run `bootstrap-clone.sh` anytime to pull + reinstall (tokens are minted
+fresh, used once, and scrubbed from git config).
 
 ## 2. Project + sandbox mode
 
@@ -78,6 +91,30 @@ Verify:
 
 The iOS app must send `Authorization: Bearer <team token>` — that change rides
 the iOS branch stack. Until it's installed, supervise from the browser.
+
+## Agent repo access (sandboxed pull/push/PR as the app bot)
+
+The app's PEM never enters a container. A systemd timer refreshes a 1-hour
+installation token into each workspace, where sandboxes read it via the mount:
+
+```bash
+scp deploy/github-token-refresh.* <box>:/opt/orcha-cloud/deploy/
+ssh <box> 'cp /opt/orcha-cloud/deploy/github-token-refresh.{service,timer} /etc/systemd/system/ \
+  && systemctl daemon-reload && systemctl enable --now github-token-refresh.timer'
+```
+
+Then in a workspace repo (once, from the host or an agent task):
+
+```bash
+git config credential.helper \
+  '!f() { echo username=x-access-token; echo "password=$(cat /workspace/.orcha/github-token)"; }; f'
+```
+
+Agents clone/pull/push over https as the app bot, and open PRs with
+`curl -H "Authorization: Bearer $(cat /workspace/.orcha/github-token)" -X POST
+.../repos/<owner>/<repo>/pulls`. Install the app on every target repo. Note:
+commits/PRs are attributed to the app bot; the human PR review remains the
+authority gate, same as the Orcha task flow.
 
 ## Notes
 
