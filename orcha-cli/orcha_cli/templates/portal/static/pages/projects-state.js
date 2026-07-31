@@ -28,13 +28,30 @@ function projMembersHtml(c) {
   return "";
 }
 
-function projectCardHtml(c) {
+/* per-user default star (mig 040) — rendered ONLY when server prefs are active
+ * (opts.stars), so self-host/trust-off keeps the pre-040 card byte-identical.
+ * The mark is COSMETIC-plus-tiebreak: data.js resolveCid consults it solely
+ * where "/" would otherwise fall back to the active/first project. Toggleable —
+ * clicking the starred card's star clears the mark. */
+function defStarHtml(c, opts) {
+  if (!opts || !opts.stars) return "";
+  const on = opts.defaultCid != null && String(opts.defaultCid) === String(c.id);
+  return `<button class="defstar${on ? " on" : ""}" type="button" data-def-cid="${PrjO.esc(c.id)}"
+      aria-pressed="${on ? "true" : "false"}"
+      title="${on ? "Default project — click to unset" : "Make this your default project"}">
+      <svg viewBox="0 0 20 20" fill="${on ? "currentColor" : "none"}" stroke="currentColor" stroke-width="1.5"
+        stroke-linejoin="round"><path d="M10 2.8l2.2 4.5 4.9.7-3.6 3.5.9 4.9-4.4-2.3-4.4 2.3.9-4.9L3 8l4.9-.7z"/></svg>
+    </button>`;
+}
+
+function projectCardHtml(c, opts) {
   const needs = Number(c.needs_you || 0);
   const openHref = "/?cid=" + encodeURIComponent(c.id);
   return `<div class="pcard" data-proj-card="${PrjO.esc(c.id)}">
     <div class="ph">
       <span class="pdot${c.status === "active" ? " on" : ""}"></span>
       <span class="pname">${PrjO.esc(c.name)}</span>
+      ${defStarHtml(c, opts)}
       ${needs ? `<span class="needs" title="Verifications + requests waiting on a human">Needs you · ${needs}</span>` : ""}
     </div>
     <div class="pdesc">${PrjO.esc(c.description || "No description yet.")}</div>
@@ -60,7 +77,7 @@ function newProjectCardHtml() {
   </div>`;
 }
 
-function projectsGridHtml(list) {
+function projectsGridHtml(list, opts) {
   list = list || [];
   if (!list.length) {
     return `<div class="proj-empty">
@@ -69,7 +86,7 @@ function projectsGridHtml(list) {
       owner for an invite.</div>
     </div>${newProjectCardHtml()}`;
   }
-  return list.map(projectCardHtml).join("") + newProjectCardHtml();
+  return list.map((c) => projectCardHtml(c, opts)).join("") + newProjectCardHtml();
 }
 
 /* top chrome: brand · account (viewer identity if resolved) · theme toggle */

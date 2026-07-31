@@ -35,6 +35,18 @@
   font-family: "Space Grotesk", Inter, sans-serif; font-weight: 650; font-size: 15.5px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* per-user default star — subtle; rendered only when server prefs are active */
+.pcard .ph .defstar {
+  margin-left: auto; flex: none; width: 26px; height: 26px; padding: 0;
+  display: grid; place-items: center; border: 0; background: transparent;
+  color: var(--faint); cursor: pointer; border-radius: 7px;
+  transition: color .14s, background .14s;
+}
+.pcard .ph .defstar:hover { color: var(--text-2); background: var(--hover); }
+.pcard .ph .defstar.on { color: var(--warn); }
+.pcard .ph .defstar svg { width: 15px; height: 15px; }
+/* when the star is present it owns the right-push; the needs badge follows it */
+.pcard .ph .defstar + .needs { margin-left: 8px; }
 .pcard .needs {
   margin-left: auto; flex: none;
   font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px;

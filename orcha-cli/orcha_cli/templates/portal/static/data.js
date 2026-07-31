@@ -173,9 +173,19 @@ window.OrchaData = (function () {
       return q || savedCid() || null;   // list unreachable: trust the explicit picks
     }
     const has = (id) => !!id && arr.some((c) => String(c.id) === String(id));
+    // Per-user prefs (mig 040): the user's starred default project, mirrored into
+    // localStorage by OrchaPrefs.sync (server-backed; self-host never sets it).
+    // Consumed ONLY here, at the last fallback — where "/" (or a bare in-project
+    // URL) would otherwise pick the active/first project arbitrarily. An explicit
+    // ?cid= or the browser's own switcher pick always outranks it, and the
+    // /projects landing redirect is untouched (no surprise navigation).
+    const defCid = (() => {
+      try { return localStorage.getItem("orcha:defaultCid"); } catch (e) { return null; }
+    })();
     let cid = null;
     if (has(q)) cid = q;
     else if (has(savedCid())) cid = savedCid();
+    else if (has(defCid)) cid = defCid;
     else {
       const active = arr.find((c) => c.status === "active") || arr[0];
       cid = active ? active.id : null;
@@ -223,6 +233,10 @@ window.OrchaData = (function () {
     if (!_cid) _cid = await resolveCid();
     if (!_cid) throw new Error("no container found");
     const me = await fetchMe();
+    // Per-user prefs (mig 040): after /api/me, pull the account's cosmetic prefs
+    // ONCE per page load (OrchaPrefs.sync single-flights; the 3s poll re-entry is
+    // a no-op). Not awaited — appearance application never blocks the snapshot.
+    if (window.OrchaPrefs) window.OrchaPrefs.sync();
     const raw = await getJSON("/api/containers/" + encodeURIComponent(_cid));
     if (window.Orcha) window.Orcha.applySnapshot(mapSnapshot(raw));
     else window.ORCHA = mapSnapshot(raw);

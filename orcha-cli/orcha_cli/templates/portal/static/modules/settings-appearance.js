@@ -19,6 +19,8 @@ function applySkin(id) {
   const d = document.documentElement;
   if (id === "classic") d.removeAttribute("data-skin"); else d.setAttribute("data-skin", id);
   try { localStorage.setItem("orcha:skin", id); } catch (e) {}
+  // per-user prefs (mig 040): mirror the pick to the account (debounced PUT).
+  if (window.OrchaPrefs) window.OrchaPrefs.queuePut();
 }
 function renderSkins() {
   const host = document.getElementById("skinGrid");

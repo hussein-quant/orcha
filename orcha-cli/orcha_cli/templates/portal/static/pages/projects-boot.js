@@ -8,9 +8,32 @@ async function projFetch(url) {
   return r.json();
 }
 
+/* default-star click: toggle the mark (starred → unset), persist via OrchaPrefs
+ * (localStorage immediately + debounced PUT), and repaint every star IN PLACE —
+ * no refetch, the 15s refresh reconciles anything else. */
+function wireDefStars(grid) {
+  const stars = grid.querySelectorAll("[data-def-cid]");
+  const paint = (def) => stars.forEach((s) => {
+    const on = def != null && s.getAttribute("data-def-cid") === String(def);
+    s.classList.toggle("on", on);
+    s.setAttribute("aria-pressed", on ? "true" : "false");
+    s.title = on ? "Default project — click to unset" : "Make this your default project";
+    const svg = s.querySelector && s.querySelector("svg");
+    if (svg) svg.setAttribute("fill", on ? "currentColor" : "none");
+  });
+  stars.forEach((b) => b.addEventListener("click", () => {
+    const cid = b.getAttribute("data-def-cid");
+    const cur = window.OrchaPrefs ? window.OrchaPrefs.defaultCid() : null;
+    const next = cur != null && String(cur) === String(cid) ? null : cid;
+    if (window.OrchaPrefs) window.OrchaPrefs.setDefaultCid(next);
+    paint(next);
+  }));
+}
+
 function wireProjGrid() {
   const grid = Prj$("projGrid");
   if (!grid || !grid.querySelectorAll) return;
+  wireDefStars(grid);
   // Per-card QR: opens the EXISTING pairing modal scoped to THAT project's cid —
   // the payload/QR comes from GET /api/containers/<cid>/pairing (path-scoped).
   grid.querySelectorAll("[data-pair-cid]").forEach((b) => b.addEventListener("click", () =>
@@ -63,6 +86,11 @@ function openProjCreateModal() {
 }
 
 async function renderProjects() {
+  // Per-user prefs (mig 040): kick the once-per-load /api/prefs sync alongside
+  // the list fetch (single-flight — the 15s refresh re-await is instant). The
+  // hub needs it settled before painting so the default stars render honestly
+  // (and self-host, where prefs resolve null, paints NO stars at all).
+  const prefsReady = window.OrchaPrefs ? window.OrchaPrefs.sync() : Promise.resolve(null);
   // Identity for the account chip: any project's cid works for /api/me; use the
   // first listed (or skip the chip on an empty stack).
   let list = [];
@@ -88,8 +116,12 @@ async function renderProjects() {
   if (sub) sub.textContent = list.length
     ? "Everything you're a member of on this Orcha."
     : "No memberships yet — create a project or ask an owner for an invite.";
+  try { await prefsReady; } catch (e) {}
+  const starOpts = window.OrchaPrefs && window.OrchaPrefs.active()
+    ? { stars: true, defaultCid: window.OrchaPrefs.defaultCid() }
+    : null;
   const grid = Prj$("projGrid");
-  if (grid) grid.innerHTML = projectsGridHtml(list);
+  if (grid) grid.innerHTML = projectsGridHtml(list, starOpts);
   wireProjGrid();
 }
 

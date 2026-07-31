@@ -23,6 +23,10 @@ function applySnapshot(fresh) {
 function applyTheme(t) {
   document.documentElement.setAttribute("data-theme", t);
   try { localStorage.setItem("orcha:theme", t); } catch (e) {}
+  // per-user prefs (mig 040): localStorage stays the instant local write; a
+  // debounced PUT mirrors it to the signed-in user's server prefs (no-op when
+  // trust is off / the login is unmapped — OrchaPrefs stays inactive).
+  if (window.OrchaPrefs) window.OrchaPrefs.queuePut();
 }
 function currentTheme() {
   try { return localStorage.getItem("orcha:theme") || "auto"; } catch (e) { return "auto"; }
