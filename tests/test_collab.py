@@ -179,6 +179,7 @@ async def test_invite_and_gate_via_trusted_header(client, container, make_agent,
     )
     assert r.status_code == 201, r.text
     assert r.json()["pending"] is True
+    hubot_id = r.json()["agent_id"]
 
     # hubot (a plain member) arriving through the proxy cannot invite
     r = await client.post(
@@ -194,6 +195,11 @@ async def test_invite_and_gate_via_trusted_header(client, container, make_agent,
         headers={"X-Auth-Request-User": "mallory"},
     )
     assert r.status_code == 403, r.text
+    # trust-on removal needs NO body at all — the header is the actor
+    r = await client.request(
+        "DELETE", f"/api/containers/{cid}/members/{hubot_id}", headers=OCTO
+    )
+    assert r.status_code == 200, r.text
 
 
 async def test_member_pending_clears_on_activity(client, container, make_agent, db, no_trust_proxy):
