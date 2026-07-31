@@ -1,7 +1,7 @@
 <section id="demo" class="mk-section dm-root" aria-labelledby="dm-title">
   <header class="dm-head">
-    <div class="dm-eyebrow">Product demo</div>
-    <h2 class="dm-title" id="dm-title">One task, end to end.</h2>
+    <div class="dm-eyebrow">— 01 / Product demo</div>
+    <h2 class="dm-title" id="dm-title">One task, <span class="dm-title-em">end to end</span>.</h2>
     <p class="dm-sub">Dispatch from anywhere, watch it run in a sandbox, read the diff,
     bring in a reviewer, and merge — a human holds the pen on every decision that matters.</p>
   </header>
@@ -12,7 +12,7 @@
       <span class="dm-dot3"></span><span class="dm-dot3"></span><span class="dm-dot3"></span>
       <span class="dm-url">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M8 1.5 13.5 4v4c0 3.2-2.3 5.6-5.5 6.5C4.8 13.6 2.5 11.2 2.5 8V4L8 1.5z"/></svg>
-        orcha.nursoftai.com
+        app.orcha.cloud
       </span>
     </div>
 
@@ -266,20 +266,22 @@
 
   <style>
   /* =========================================================================
-     PRODUCT DEMO CINEMATIC (dm-) — a light-theme port of the portal cinematic.
-     Mechanics from the existing welcome/index.html scene engine; restyled to
-     the warm paper design system with the navy interactive accent. Tokens only (var()), no raw hex.
+     PRODUCT DEMO CINEMATIC (dm-) — the portal cinematic on the editorial system.
+     Mechanics from the existing welcome/index.html scene engine; restyled to the
+     warm-ink / champagne-gold design system, theme-aware via var() tokens (both
+     the dark default and the light override). Status softs use color-mix so they
+     track the surface in both modes; --dm-crm text uses --accent-text (AA-safe).
      ========================================================================= */
   .dm-root {
     /* local status semantics mapped onto contract tokens */
     --dm-ok: var(--success-text);
-    --dm-ok-soft: rgba(16,185,129,.10);
+    --dm-ok-soft: color-mix(in srgb, var(--success) 14%, transparent);
     --dm-warn: var(--warning-text);
-    --dm-warn-soft: rgba(245,158,11,.13);
-    --dm-vio: #7B54D6;            /* PR "merged" purple — GitHub convention, decorative */
-    --dm-vio-soft: rgba(123,84,214,.11);
-    --dm-crm: var(--accent-strong);
-    --dm-crm-soft: var(--navy-soft);
+    --dm-warn-soft: color-mix(in srgb, var(--warning-text) 15%, transparent);
+    --dm-vio: #9B78E6;           /* PR "merged" purple — GitHub convention, decorative */
+    --dm-vio-soft: color-mix(in srgb, #9B78E6 16%, transparent);
+    --dm-crm: var(--accent-text);
+    --dm-crm-soft: var(--gold-soft);
     padding: 96px 24px;
     background: var(--canvas);
     color: var(--text-primary);
@@ -288,8 +290,9 @@
 
   .dm-head { max-width: 720px; margin: 0 auto 44px; text-align: center; }
   .dm-eyebrow {
-    font-size: 12px; font-weight: 700; letter-spacing: .08em;
-    text-transform: uppercase; color: var(--accent-strong);
+    font-family: var(--font-mono);
+    font-size: 12px; font-weight: 500; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent-text);
   }
   .dm-title {
     margin: 14px 0 14px;
@@ -297,6 +300,7 @@
     font-size: clamp(30px, 4vw, 46px); line-height: 1.08;
     letter-spacing: -.015em; color: var(--text-primary);
   }
+  .dm-title-em { font-style: italic; color: var(--accent-text); }
   .dm-sub {
     font-size: 16px; line-height: 1.55; color: var(--text-secondary);
     max-width: 620px; margin: 0 auto;
@@ -342,7 +346,7 @@
     position: relative; overflow: hidden;
     min-height: 452px;
     background:
-      radial-gradient(560px 300px at 84% -10%, var(--navy-soft), transparent 60%),
+      radial-gradient(560px 300px at 84% -10%, var(--gold-soft), transparent 60%),
       var(--surface);
   }
   .dm-scene {
@@ -381,7 +385,7 @@
   .dm-cbtn:hover { color: var(--text-primary); border-color: var(--accent-strong); }
   .dm-cbtn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
   .dm-cbtn svg { width: 14px; height: 14px; }
-  .dm-cbtn.dm-play-t[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--navy-soft); }
+  .dm-cbtn.dm-play-t[aria-pressed="true"] { color: var(--accent-text); border-color: var(--accent-strong); background: var(--gold-soft); }
   .dm-cbtn .dm-ic-pause { display: none; }
   .dm-cbtn.dm-play-t[aria-pressed="true"] .dm-ic-pause { display: block; }
   .dm-cbtn.dm-play-t[aria-pressed="true"] .dm-ic-play { display: none; }
@@ -446,11 +450,11 @@
     white-space: nowrap;
   }
   .dm-pill .dm-pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .dm-p-crm  { color: var(--dm-crm);  background: var(--dm-crm-soft);  border-color: rgba(195,43,56,.28); }
+  .dm-p-crm  { color: var(--dm-crm);  background: var(--dm-crm-soft);  border-color: color-mix(in srgb, var(--gold) 40%, transparent); }
   .dm-p-crm .dm-pdot { animation: dm-pulse 2s infinite; }
-  .dm-p-ok   { color: var(--dm-ok);   background: var(--dm-ok-soft);   border-color: rgba(16,185,129,.30); }
-  .dm-p-warn { color: var(--dm-warn); background: var(--dm-warn-soft); border-color: rgba(245,158,11,.34); }
-  .dm-p-vio  { color: var(--dm-vio);  background: var(--dm-vio-soft);  border-color: rgba(123,84,214,.30); }
+  .dm-p-ok   { color: var(--dm-ok);   background: var(--dm-ok-soft);   border-color: color-mix(in srgb, var(--success) 34%, transparent); }
+  .dm-p-warn { color: var(--dm-warn); background: var(--dm-warn-soft); border-color: color-mix(in srgb, var(--warning-text) 40%, transparent); }
+  .dm-p-vio  { color: var(--dm-vio);  background: var(--dm-vio-soft);  border-color: color-mix(in srgb, var(--dm-vio) 40%, transparent); }
   .dm-p-idle { color: var(--text-tertiary); background: var(--surface-subtle); border-color: var(--border-strong); }
   @keyframes dm-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
@@ -466,7 +470,7 @@
     width: 26px; height: 26px; border-radius: 50%; flex: none;
     display: grid; place-items: center;
     font-size: 11px; font-weight: 800; color: var(--on-accent-strong);
-    background: linear-gradient(135deg, var(--navy), var(--accent-strong));
+    background: linear-gradient(135deg, var(--gold), var(--accent-strong));
   }
   .dm-av-you { background: linear-gradient(135deg, var(--text-secondary), var(--text-primary)); }
   .dm-av-sm { width: 18px; height: 18px; font-size: 9px; }
@@ -507,7 +511,7 @@
   .dm-chat { align-self: center; }
   .dm-chatbody { padding: 12px 12px 12px; }
   .dm-bubble {
-    background: var(--navy-soft); border: 1px solid rgba(195,43,56,.24);
+    background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 32%, transparent);
     color: var(--text-primary); border-radius: 12px 12px 4px 12px;
     padding: 9px 11px; font-size: 12px; line-height: 1.4;
     margin-left: 24px; overflow: hidden;
@@ -537,7 +541,7 @@
   .dm-sc-task .dm-comet .dm-cdot {
     position: absolute; top: 50%; left: 0; margin-top: -4px;
     width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent-strong); box-shadow: 0 0 12px var(--navy);
+    background: var(--accent-strong); box-shadow: 0 0 12px var(--gold);
     opacity: 0;
   }
   .dm-scene.dm-play .dm-sc-task .dm-comet .dm-cdot { animation: dm-comet 1s ease-in-out 2.9s forwards; }
@@ -551,7 +555,7 @@
   .dm-trow:last-child { border-bottom: 0; }
   .dm-tid { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
   .dm-tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dm-trow.dm-new { background: var(--navy-soft); }
+  .dm-trow.dm-new { background: var(--gold-soft); }
   .dm-trow.dm-new .dm-tt { color: var(--text-primary); font-weight: 600; }
 
   /* ---- scene 2 · sandbox -------------------------------------------------- */
@@ -567,7 +571,7 @@
   .dm-sbx .dm-sbx-t {
     position: absolute; top: -9px; left: 20px;
     background: var(--surface); padding: 0 8px;
-    font-family: var(--font-mono); font-size: 11px; color: var(--accent-strong);
+    font-family: var(--font-mono); font-size: 11px; color: var(--accent-text);
   }
   .dm-sbx .dm-clone {
     font-family: var(--font-mono); font-size: 11.5px; line-height: 1.95;
@@ -583,20 +587,21 @@
   .dm-sbx .dm-iso svg { width: 14px; height: 14px; color: var(--accent-strong); flex: none; }
 
   /* ---- scene 3 · terminal ------------------------------------------------- */
-  /* A terminal stays a terminal in daylight: it sits on --ink (a dark surface),
-     so its foregrounds use the design system's OWN dark-theme token values —
-     light-mode tokens would be illegible here. These mirror .dark's
-     --text-secondary / --text-tertiary / navy / success-text / warning-text. */
+  /* A terminal is a literal terminal: it renders on a fixed warm near-black in
+     BOTH page themes (its foregrounds are hardcoded to read on that dark chrome).
+     --dm-t-crm is the champagne accent (matches the page's gold), the rest are
+     the terminal's own warm greys/greens/ambers. */
   .dm-term {
-    --dm-t-fg:  #C9C0B4;  /* = .dark --text-secondary */
-    --dm-t-mut: #A39A8E;  /* = .dark --text-tertiary */
-    --dm-t-crm: #FF5A66;  /* = .dark --navy */
-    --dm-t-ok:  #4ADE80;  /* = .dark --success-text */
-    --dm-t-warn:#FBBF24;  /* = .dark --warning-text */
+    --dm-t-bg:  #17130E;  /* fixed dark terminal chrome (both modes) */
+    --dm-t-fg:  #D8CFBE;  /* warm terminal foreground */
+    --dm-t-mut: #9C9284;  /* muted */
+    --dm-t-crm: #E7C368;  /* champagne accent (= page --gold) */
+    --dm-t-ok:  #4ADE80;  /* success green */
+    --dm-t-warn:#FBBF24;  /* warning amber */
   }
   .dm-sc-term { height: 100%; padding-bottom: 40px; display: grid; align-items: center; }
   .dm-term {
-    background: var(--ink); border: 1px solid var(--border-strong); border-radius: var(--radius-xl);
+    background: var(--dm-t-bg); border: 1px solid #3A3226; border-radius: var(--radius-xl);
     padding: 16px 18px; overflow: hidden; box-shadow: var(--shadow-card);
     font-family: var(--font-mono); font-size: 11.5px; line-height: 1.95; color: var(--dm-t-fg);
   }
@@ -632,13 +637,13 @@
   .dm-ln.dm-e { color: transparent; }
   .dm-dsign { flex: none; width: 16px; text-align: center; color: var(--text-tertiary); }
   .dm-dcode { flex: 1; min-width: 0; padding-right: 12px; color: var(--text-primary); white-space: pre; overflow-x: auto; }
-  .dm-dl.dm-del { background: rgba(239,68,68,.09); }
+  .dm-dl.dm-del { background: color-mix(in srgb, var(--danger) 12%, transparent); }
   .dm-dl.dm-del .dm-dsign { color: var(--danger); }
-  .dm-dl.dm-add { background: rgba(16,185,129,.11); }
+  .dm-dl.dm-add { background: color-mix(in srgb, var(--success) 14%, transparent); }
   .dm-dl.dm-add .dm-dsign { color: var(--dm-ok); }
   .dm-dl.dm-ctx { background: transparent; }
   .dm-kw  { color: var(--dm-vio); }
-  .dm-num { color: var(--accent-strong); }
+  .dm-num { color: var(--accent-text); }
   .dm-cmt { color: var(--text-tertiary); font-style: italic; }
 
   /* ---- scene 5 · members -------------------------------------------------- */
@@ -673,8 +678,8 @@
   .dm-pr-h { align-items: flex-start; }
   .dm-pr-ic { width: 26px; height: 26px; border-radius: 7px; flex: none; display: grid; place-items: center; margin-top: 1px; }
   .dm-pr-ic svg { width: 15px; height: 15px; }
-  .dm-pr-ic.dm-open   { background: var(--dm-ok-soft);  color: var(--dm-ok);  border: 1px solid rgba(16,185,129,.30); }
-  .dm-pr-ic.dm-merged { background: var(--dm-vio-soft); color: var(--dm-vio); border: 1px solid rgba(123,84,214,.30); }
+  .dm-pr-ic.dm-open   { background: var(--dm-ok-soft);  color: var(--dm-ok);  border: 1px solid color-mix(in srgb, var(--success) 34%, transparent); }
+  .dm-pr-ic.dm-merged { background: var(--dm-vio-soft); color: var(--dm-vio); border: 1px solid color-mix(in srgb, var(--dm-vio) 40%, transparent); }
   .dm-prtitle-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .dm-pr-title { font-size: 13px; font-weight: 700; color: var(--text-primary); line-height: 1.35; }
   .dm-pr-title .dm-prnum { color: var(--text-tertiary); font-weight: 500; }
@@ -683,7 +688,7 @@
   .dm-botpill {
     display: inline-flex; align-items: center; gap: 5px; flex: none; margin-top: 1px;
     font-size: 10px; font-weight: 700; color: var(--dm-vio);
-    background: var(--dm-vio-soft); border: 1px solid rgba(123,84,214,.30);
+    background: var(--dm-vio-soft); border: 1px solid color-mix(in srgb, var(--dm-vio) 40%, transparent);
     border-radius: 999px; padding: 3px 8px 3px 6px;
   }
   .dm-botpill svg { width: 12px; height: 12px; }
@@ -695,7 +700,7 @@
   .dm-prcheck {
     display: flex; align-items: center; gap: 9px;
     font-size: 12px; color: var(--text-secondary);
-    background: var(--dm-ok-soft); border: 1px solid rgba(16,185,129,.24);
+    background: var(--dm-ok-soft); border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
     border-radius: 10px; padding: 9px 12px;
   }
   .dm-prcheck > svg { width: 13px; height: 13px; color: var(--dm-ok); flex: none; }
@@ -730,7 +735,7 @@
   }
   .dm-clickdot {
     position: absolute; z-index: 3; width: 14px; height: 14px; border-radius: 50%;
-    background: rgba(26,20,20,.85); box-shadow: 0 2px 10px rgba(26,20,20,.35), 0 0 0 1px rgba(255,255,255,.5);
+    background: color-mix(in srgb, var(--text-primary) 85%, transparent); box-shadow: 0 2px 10px rgb(0 0 0 / .35), 0 0 0 1px color-mix(in srgb, var(--surface) 65%, transparent);
     right: 40px; bottom: 24px; opacity: 0; pointer-events: none;
   }
   .dm-scene.dm-play .dm-clickdot { animation: dm-ride 1.5s cubic-bezier(.3,.7,.4,1) 3.1s both; }
@@ -747,7 +752,7 @@
   .dm-close-in { max-width: 420px; }
   .dm-check {
     display: inline-grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
-    background: var(--dm-ok-soft); color: var(--dm-ok); border: 1px solid rgba(16,185,129,.30);
+    background: var(--dm-ok-soft); color: var(--dm-ok); border: 1px solid color-mix(in srgb, var(--success) 34%, transparent);
     margin-bottom: 16px;
   }
   .dm-check svg { width: 22px; height: 22px; }

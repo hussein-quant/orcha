@@ -3,8 +3,8 @@
     <div class="os-grid">
       <!-- ---- left: copy + CTAs ------------------------------------------- -->
       <div class="os-copy">
-        <p class="os-eyebrow">Open core</p>
-        <h2 id="os-title" class="os-h2">Built in the open</h2>
+        <p class="os-eyebrow">— 06 / Open core</p>
+        <h2 id="os-title" class="os-h2">Built in the <span class="os-h2-em">open</span></h2>
         <p class="os-lede">
           The orchestrator, the portal, the sandbox runner, and the iOS app are open
           source at
@@ -93,9 +93,9 @@
     /* ---- copy -------------------------------------------------------------- */
     .os-eyebrow {
       margin: 0 0 14px;
-      font-family: var(--font-sans);
-      font-size: 12px; font-weight: 700; letter-spacing: .08em;
-      text-transform: uppercase; color: var(--accent-strong);
+      font-family: var(--font-mono);
+      font-size: 12px; font-weight: 500; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent-text);
     }
     .os-h2 {
       margin: 0 0 18px;
@@ -103,17 +103,18 @@
       font-size: clamp(30px, 4vw, 46px); line-height: 1.04;
       letter-spacing: -.02em; color: var(--text-primary);
     }
+    .os-h2-em { font-style: italic; color: var(--accent-text); }
     .os-lede {
       margin: 0 0 28px; max-width: 30rem;
       font-family: var(--font-sans); font-size: 16px; line-height: 1.6;
       color: var(--text-secondary);
     }
     .os-inline-link {
-      color: var(--accent-strong); font-weight: 600;
-      text-decoration: underline; text-decoration-color: var(--navy-soft);
+      color: var(--accent-text); font-weight: 600;
+      text-decoration: underline; text-decoration-color: var(--gold-soft);
       text-underline-offset: 3px; text-decoration-thickness: 2px;
     }
-    .os-inline-link:hover { text-decoration-color: var(--accent-strong); }
+    .os-inline-link:hover { text-decoration-color: var(--accent-text); }
 
     .os-cta-row { display: flex; flex-wrap: wrap; gap: 12px; }
     .os-btn {

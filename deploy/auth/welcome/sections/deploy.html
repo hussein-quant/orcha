@@ -1,8 +1,8 @@
 <section id="deploy" class="mk-section dp-root">
   <div class="dp-wrap">
     <header class="dp-head">
-      <p class="dp-eyebrow">Run it your way</p>
-      <h2 class="dp-title">From laptop to managed cloud</h2>
+      <p class="dp-eyebrow">— 04 / Run it your way</p>
+      <h2 class="dp-title">From laptop to managed <span class="dp-title-em">cloud</span></h2>
       <p class="dp-intro">Orcha is open-core. The same runtime powers three ways to run it &mdash; pick where your code and keys live, and how much you want to operate.</p>
     </header>
 
@@ -218,14 +218,16 @@
 
   .dp-head { max-width: 660px; margin: 0 auto 34px; text-align: center; }
   .dp-eyebrow {
-    margin: 0 0 14px; font-size: 12px; font-weight: 700; line-height: 1;
-    letter-spacing: .08em; text-transform: uppercase; color: var(--accent-strong);
+    margin: 0 0 14px; font-family: var(--font-mono);
+    font-size: 12px; font-weight: 500; line-height: 1;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--accent-text);
   }
   .dp-title {
     margin: 0 0 16px; font-family: var(--font-serif); font-weight: 400;
     font-size: clamp(30px, 4vw, 46px); line-height: 1.05;
     letter-spacing: -.02em; color: var(--text-primary);
   }
+  .dp-title-em { font-style: italic; color: var(--accent-text); }
   .dp-intro { margin: 0; font-size: 17px; line-height: 1.55; color: var(--text-secondary); }
 
   /* ---- segmented tab control ---- */
@@ -251,11 +253,11 @@
     background: var(--surface); border-color: var(--border-strong);
     box-shadow: var(--shadow-card);
   }
-  .dp-tab[aria-selected="true"] .dp-tab-name { color: var(--accent-strong); }
+  .dp-tab[aria-selected="true"] .dp-tab-name { color: var(--accent-text); }
   .dp-ea {
     margin-top: 4px; font-size: 10px; font-weight: 700; line-height: 1;
     letter-spacing: .04em; text-transform: uppercase;
-    color: var(--accent-strong); background: var(--navy-soft);
+    color: var(--accent-text); background: var(--gold-soft);
     border-radius: 999px; padding: 3px 8px;
   }
 
@@ -270,7 +272,7 @@
     position: relative; overflow: hidden;
     min-height: 384px;
     background:
-      radial-gradient(560px 300px at 84% -12%, var(--navy-soft), transparent 62%),
+      radial-gradient(560px 300px at 84% -12%, var(--gold-soft), transparent 62%),
       var(--surface);
   }
   @media (max-width: 720px) { .dp-stage { min-height: 460px; } }
@@ -287,7 +289,7 @@
   @media (max-width: 720px) { .dp-panel { padding: 22px 18px; } }
 
   /* shared atoms ------------------------------------------------------------ */
-  .dp-prompt { color: var(--accent-strong); font-weight: 700; }
+  .dp-prompt { color: var(--accent-text); font-weight: 700; }
   .dp-pill {
     display: inline-flex; align-items: center; gap: 6px;
     font-size: 11px; font-weight: 640; line-height: 1;
@@ -296,7 +298,7 @@
   }
   .dp-pill .dp-pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .dp-p-ok   { color: var(--success-text); background: color-mix(in srgb, var(--success) 12%, transparent); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
-  .dp-p-teal { color: var(--accent-strong); background: var(--navy-soft); border-color: color-mix(in srgb, var(--navy) 26%, transparent); }
+  .dp-p-teal { color: var(--accent-text); background: var(--gold-soft); border-color: color-mix(in srgb, var(--gold) 26%, transparent); }
   .dp-p-teal .dp-pdot { animation: dp-pulse 2s infinite; }
   @keyframes dp-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
@@ -322,21 +324,24 @@
     align-items: center;
   }
   @media (max-width: 720px) { .dp-self-grid { grid-template-columns: 1fr; gap: 18px; } }
+  /* A literal terminal: fixed warm-dark chrome in BOTH page modes (its
+     foregrounds are pinned to read on that dark surface, never token-flipped). */
   .dp-term {
-    background: var(--ink); border-radius: var(--radius-xl);
+    --dp-term-bg:#17130E; --dp-term-fg:#D8CFBE;
+    background: var(--dp-term-bg); border-radius: var(--radius-xl);
     box-shadow: var(--shadow-card); overflow: hidden;
   }
   .dp-term-h {
     display: flex; align-items: center; gap: 6px;
-    padding: 9px 12px; background: color-mix(in srgb, var(--ink) 88%, var(--paper));
+    padding: 9px 12px; background: #211B14;
   }
-  .dp-dot { width: 9px; height: 9px; border-radius: 50%; background: color-mix(in srgb, var(--paper) 34%, transparent); }
-  .dp-term-t { margin-left: 8px; font-size: 11px; color: color-mix(in srgb, var(--paper) 62%, transparent); }
+  .dp-dot { width: 9px; height: 9px; border-radius: 50%; background: rgb(216 207 190 / .34); }
+  .dp-term-t { margin-left: 8px; font-size: 11px; color: rgb(216 207 190 / .62); }
   .dp-term-b { padding: 14px 14px 16px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9; }
-  .dp-line { margin: 0; color: color-mix(in srgb, var(--paper) 82%, transparent); white-space: nowrap; overflow: hidden; }
-  .dp-line .dp-prompt { color: var(--navy); }
-  .dp-cmd { color: var(--paper); }
-  .dp-out { color: var(--success); }
+  .dp-line { margin: 0; color: rgb(216 207 190 / .82); white-space: nowrap; overflow: hidden; }
+  .dp-line .dp-prompt { color: var(--gold); }
+  .dp-cmd { color: #F1E9DB; }
+  .dp-out { color: #4ADE80; }
   /* typing + staged reveal under play */
   .dp-typeA, .dp-typeB { display: inline-block; overflow: hidden; white-space: nowrap; vertical-align: bottom; }
   .dp-panel.play .dp-typeA { width: 0; animation: dp-typeA 1.15s steps(34, end) .35s forwards; }
@@ -360,7 +365,7 @@
     padding: 10px 12px; border-radius: var(--radius-xl);
     background: var(--surface-subtle); border: 1px solid var(--border);
   }
-  .dp-cont-ic { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; color: var(--accent-strong); background: var(--navy-soft); }
+  .dp-cont-ic { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; color: var(--accent-strong); background: var(--gold-soft); }
   .dp-cont-ic svg { width: 15px; height: 15px; }
   .dp-cont-t { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
   .dp-cont .dp-pill { margin-left: auto; }
@@ -396,8 +401,8 @@
   .dp-ghapp-ck svg { width: 12px; height: 12px; }
   .dp-panel.play .dp-ghapp-ck { transform: scale(0); animation: dp-pop .42s cubic-bezier(.16,1,.3,1) 1.5s forwards; }
   .dp-ghapp-note {
-    margin-left: auto; font-size: 11px; font-weight: 650; color: var(--accent-strong);
-    background: var(--navy-soft); border-radius: 999px; padding: 3px 10px;
+    margin-left: auto; font-size: 11px; font-weight: 650; color: var(--accent-text);
+    background: var(--gold-soft); border-radius: 999px; padding: 3px 10px;
   }
   .dp-boot {
     margin: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--text-secondary);
@@ -420,7 +425,7 @@
   .dp-lock {
     display: flex; align-items: center; gap: 11px;
     padding: 12px 14px; border-radius: var(--radius-xl);
-    background: var(--navy-soft); border: 1px solid color-mix(in srgb, var(--navy) 24%, transparent);
+    background: var(--gold-soft); border: 1px solid color-mix(in srgb, var(--gold) 24%, transparent);
   }
   .dp-lock-ic { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 9px; color: var(--on-accent-strong); background: var(--accent-strong); }
   .dp-lock-ic svg { width: 17px; height: 17px; }
@@ -477,7 +482,7 @@
     font-size: 10.5px; font-weight: 750; color: var(--on-accent-strong);
     background: var(--accent-strong); box-shadow: 0 0 0 2px var(--surface);
   }
-  .dp-av.dp-a1 { margin-left: 0; background: var(--navy); }
+  .dp-av.dp-a1 { margin-left: 0; background: var(--gold); }
   .dp-av.dp-a2 { background: var(--accent-strong); }
   .dp-av.dp-a3 { background: var(--accent-strong-press); }
   .dp-team-t { margin-left: 12px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
@@ -503,10 +508,10 @@
   }
   .dp-cta {
     margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
-    font-size: 13.5px; font-weight: 650; color: var(--accent-strong);
+    font-size: 13.5px; font-weight: 650; color: var(--accent-text);
     text-decoration: none; border-radius: 8px; padding: 4px 4px;
   }
-  .dp-cta:hover { color: var(--accent-strong-press); }
+  .dp-cta:hover { color: var(--accent-text); filter: brightness(1.1); }
   .dp-cta:hover span { transform: translateX(3px); }
   .dp-cta span { transition: transform .2s ease; }
   .dp-cta:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
