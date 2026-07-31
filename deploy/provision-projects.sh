@@ -141,10 +141,14 @@ provision_one() { # provision_one <cid> <slug> <repo-or-empty>
             return 0
         fi
         git -C "$WS" remote set-url origin "https://github.com/${P_REPO}.git"  # never persist the token
-        # Sandboxed agents authenticate through the refreshed token file (deploy/README.md).
-        # shellcheck disable=SC2016  # the $(cat ...) must expand at CREDENTIAL time, not now
+        # Sandboxed agents authenticate through the refreshed token file
+        # (deploy/README.md). The sandbox mounts the workspace PATH-IDENTICALLY
+        # and stamps ORCHA_WORKSPACE_ROOT; without the env (host mode) the
+        # helper walks UP from $PWD — so a git-worktree cwd still resolves the
+        # ROOT's .orcha/github-token.
+        # shellcheck disable=SC2016  # everything must expand at CREDENTIAL time, not now
         git -C "$WS" config credential.helper \
-            '!f() { echo username=x-access-token; echo "password=$(cat /workspace/.orcha/github-token)"; }; f'
+            '!f() { d="${ORCHA_WORKSPACE_ROOT:-$PWD}"; while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -f "$d/.orcha/github-token" ]; do d=$(dirname "$d"); done; echo username=x-access-token; echo "password=$(cat "$d/.orcha/github-token")"; }; f'
         # Commits/PRs are authored by the app BOT, never a human account
         # (docs/agent-prs.md). Workspace-local config so agents inherit it.
         BOT_SLUG=$(python3 -c "import json;print(json.load(open('$SECRETS/github-app.json')).get('slug') or 'orcha-cloud-app')" 2>/dev/null) \

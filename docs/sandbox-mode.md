@@ -77,15 +77,33 @@ Each wake becomes one `docker run` instead of one host `Popen`:
   `.claude/orcha.json`) — the labels the reaper uses to find, adopt, and
   scope-limit its sweeps to *this* project's containers, even on a host
   running several Orcha stacks side by side.
-- The project's workspace is bind-mounted at `/workspace`, and the container's
-  working directory is set there — the same repo checkout and build caches a
-  host-mode wake would use, so nothing is re-cloned between wakes.
+- The project's workspace ROOT is bind-mounted **path-identically** — the same
+  absolute path inside the container as on the host (e.g.
+  `-v /opt/orcha-work/myproj:/opt/orcha-work/myproj`) — and `-w` is set to the
+  actual spawn directory (the root, or a per-conversation/task git worktree
+  under `<root>/.orcha-worktrees/`). Path-identity is load-bearing: a worktree's
+  `.git` is a pointer *file* containing a host-absolute `gitdir:` path into the
+  root checkout, and the git credential helper + `gh` wrapper read the root's
+  `.orcha/github-token` — all of which would dangle under any path remap. The
+  spawner also stamps `ORCHA_WORKSPACE_ROOT=<root>` into the container env,
+  which is how the `gh` wrapper and credential helper locate the token file
+  (both fall back to walking up from `$PWD` when the env is absent).
 - A sandbox-scoped copy of `.claude/orcha.json` (with `api_base_url` rewritten
-  to `http://portal:8000`) is bind-mounted read-only over the workspace's own
-  copy at `/workspace/.claude/orcha.json`. The host's copy points at
-  `localhost:<port>`, which is unreachable from inside a container, so this
-  override is what lets the orcha skills (curl/Bash calls to the API) work
-  unmodified.
+  to `http://portal:8000`) is bind-mounted read-only over the copy the agent
+  reads: the spawn directory's `.claude/orcha.json` (and, for worktree spawns,
+  the root's copy as well). The host's copy points at `localhost:<port>`, which
+  is unreachable from inside a container, so this override is what lets the
+  orcha skills (curl/Bash calls to the API) work unmodified.
+- **Agent session state persists across containers**: the container's
+  `~/.claude` (the agent CLI's home — session transcripts, hook and
+  cross-session state) is bind-mounted from `<workspace-root>/.orcha/agent-home`
+  on the host. That is what lets a resident conversation's pinned session
+  `--resume` after a container restart — previously each container booted with
+  an empty `~/.claude` and every resume died with "No conversation found with
+  session ID". One-shot wakes share the same per-workspace home, so hook state
+  and session context accrete across wakes. The dir is created (and best-effort
+  chowned to the uid-1000 runner) *before* `docker run`; if it cannot be
+  created the wake fails loudly rather than silently dropping the mount.
 - The container joins the stack's compose network (`network`, above, unless
   overridden), so those same skill calls resolve `http://portal:8000` to the
   real portal service — no host networking, no published ports needed.

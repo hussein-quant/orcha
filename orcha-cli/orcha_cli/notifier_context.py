@@ -90,6 +90,7 @@ from .notifier_session_io import (
     _extract_codex_session_id,
     _extract_session_id,
     _result_after,
+    _resume_error_in_log,
     _send_user_turn,
 )
 from .notifier_wake_prompts import (

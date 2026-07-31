@@ -148,6 +148,10 @@ def spawn_headless(
         sbx_name = _sandbox.new_container_name()
         if spawn_info is not None:
             spawn_info["sandbox_container_id"] = sbx_name
+        # Path-identical mounting: mount the workspace ROOT (a worktree cwd's
+        # main checkout — its `.git` pointer file and the root's
+        # .orcha/github-token must resolve in-container) and run in `cwd`.
+        ws_root = str(_sandbox.workspace_root_for(cwd))
         # Dry-run must not touch the project dir — compute the mount path only.
         # A real spawn writes the sandbox-scoped api config, guarded: an
         # unwritable dir or garbled orcha.json fails the wake loudly (§3.2),
@@ -161,6 +165,15 @@ def spawn_headless(
                 api_cfg = _sandbox.write_api_config(cwd, sbx_name)
             except (OSError, ValueError) as e:
                 return False, f"(sandbox unavailable: cannot write api config: {e})", None
+            # Session-persistence: the agent-home dir backing the container's
+            # ~/.claude must exist BEFORE docker run (docker would create a
+            # missing source root-owned → the uid-1000 runner can't write it
+            # and resumes quietly break again). Failure fails the wake loudly
+            # (§3.2) — never a silent skip of the mount.
+            try:
+                _sandbox.ensure_agent_home(ws_root)
+            except OSError as e:
+                return False, f"(sandbox unavailable: cannot create agent home: {e})", None
         # Inside the runner image the binaries are bare `claude`/`codex` on
         # PATH — a host-resolved absolute executable path (which-hit or
         # ORCHA_*_EXEC override) is meaningless in the container.
@@ -180,8 +193,10 @@ def spawn_headless(
             # from the reaper's orphan pass (it owns no run row by design).
             sbx_labels.append(_sandbox.LABEL_SIDECAR)
         argv = _sandbox.build_docker_argv(
-            argv, cfg=sandbox_cfg, name=sbx_name, workspace=cwd,
-            network=sandbox_cfg.network or _sandbox.compose_network(cwd),
+            argv, cfg=sandbox_cfg, name=sbx_name, workspace=ws_root, workdir=cwd,
+            # The stack's compose file lives at the ROOT (worktrees never carry
+            # the generated .orcha/docker-compose.yml).
+            network=sandbox_cfg.network or _sandbox.compose_network(ws_root),
             api_config_mount=api_cfg,
             extra_labels=tuple(sbx_labels),
         )

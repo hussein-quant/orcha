@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -37,6 +38,17 @@ LABEL_SIDECAR = "orcha.sidecar=1"
 # dev machine runs two!) never lets one daemon's orphan pass stop another
 # project's live run containers — managed_containers() filters on it server-side.
 LABEL_CID_KEY = "orcha.cid"
+
+# Session-persistence (sandbox continuity fix): the agent CLI's state dir
+# (`~/.claude` inside the container — session transcripts, hook state) was
+# ephemeral, dying with each container. A resident conversation pinned a
+# session id, the next container had no ~/.claude, and every `--resume` failed
+# with "No conversation found with session ID: …". Persist it per WORKSPACE on
+# the host and bind-mount it into every sandboxed wake. Runner user is `node`
+# uid 1000 (Dockerfile `USER node`, HOME=/home/node).
+AGENT_HOME_CONTAINER = "/home/node/.claude"
+RUNNER_UID = 1000
+RUNNER_GID = 1000
 
 # Secrets and identity ride the CLIENT env (docker inherits `-e KEY` values from
 # the client process), never argv — `ps` must not show tokens (spec §3.5).
@@ -125,11 +137,76 @@ def write_api_config(project_dir: str | pathlib.Path, name: str) -> str:
     return str(out)
 
 
+_GITDIR_POINTER_RE = re.compile(r"^gitdir:\s*(.+?)\s*$", re.M)
+
+
+def workspace_root_for(cwd: str | pathlib.Path) -> pathlib.Path:
+    """The workspace ROOT a sandboxed wake must mount PATH-IDENTICALLY.
+
+    A resident/task wake's cwd is usually a git WORKTREE under
+    `<root>/.orcha-worktrees/<slug>` whose `.git` is a POINTER FILE
+    (`gitdir: <root>/.git/worktrees/<slug>`, host-absolute). Mounting only the
+    worktree — or remapping it to a different container path — leaves that
+    pointer dangling inside the container: ALL git dead, and the root's
+    `.orcha/github-token` invisible. Resolve the pointer's main checkout and
+    mount THAT at its real path; the worktree rides along inside it. A normal
+    checkout (`.git` is a dir) or a non-git dir is its own root."""
+    cwd = pathlib.Path(cwd)
+    gitfile = cwd / ".git"
+    try:
+        if gitfile.is_file():
+            m = _GITDIR_POINTER_RE.search(gitfile.read_text())
+            if m:
+                gitdir = pathlib.Path(m.group(1))
+                if not gitdir.is_absolute():
+                    gitdir = (cwd / gitdir).resolve()
+                # <root>/.git/worktrees/<name> → <root>
+                if gitdir.parent.parent.name == ".git":
+                    return gitdir.parent.parent.parent
+    except OSError:
+        pass
+    return cwd
+
+
+def agent_home_dir(workspace: str | pathlib.Path) -> pathlib.Path:
+    """Host-side home for the container's `~/.claude` — durable per workspace
+    ROOT (worktree wakes share the root's home: same conversation continuity)."""
+    return pathlib.Path(workspace) / ".orcha" / "agent-home"
+
+
+def ensure_agent_home(workspace: str | pathlib.Path) -> str:
+    """Create the agent-home dir BEFORE `docker run` mounts it — docker creates a
+    missing bind-mount source ROOT-owned, and the non-root runner (uid 1000)
+    could then never write its session state, silently re-breaking resumes.
+
+    mkdir failure PROPAGATES (OSError) — same convention as write_api_config:
+    the caller fails the wake loudly, never silently skips the mount. The chown
+    to the runner uid is best-effort and never raises (it fails EPERM for
+    non-root callers on Linux; Docker Desktop maps ownership transparently and
+    the BYOC provisioner chowns the whole workspace anyway)."""
+    path = agent_home_dir(workspace)
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chown(path, RUNNER_UID, RUNNER_GID)
+    except OSError:
+        pass
+    return str(path)
+
+
 def build_docker_argv(inner_argv: "Sequence[str]", *, cfg: SandboxConfig, name: str,
                       workspace: str, network: Optional[str],
                       api_config_mount: str,
                       extra_labels: "Sequence[str]" = (),
-                      interactive: bool = False) -> "list[str]":
+                      interactive: bool = False,
+                      workdir: Optional[str] = None) -> "list[str]":
+    """PATH-IDENTICAL mounting: `workspace` (the ROOT — see workspace_root_for)
+    is mounted at its own host path and `-w` is the actual spawn cwd
+    (`workdir`, default = root). This keeps git-worktree `.git` pointer files,
+    the credential helper, and `.orcha/github-token` paths valid inside the
+    container — the old `/workspace` remap broke all three for worktree wakes.
+    The container also gets ORCHA_WORKSPACE_ROOT=<root> so the gh wrapper and
+    credential helper resolve the token file without hardcoded paths."""
+    workdir = str(workdir or workspace)
     argv = ["docker", "run"]
     if interactive:
         # Resident lane: `docker run -i` keeps the CLIENT's stdin piped through to
@@ -149,9 +226,29 @@ def build_docker_argv(inner_argv: "Sequence[str]", *, cfg: SandboxConfig, name: 
         "--memory", cfg.memory,
         "--cpus", cfg.cpus,
         "--pids-limit", str(cfg.pids_limit),
-        "-v", f"{workspace}:/workspace",
-        "-v", f"{api_config_mount}:/workspace/.claude/orcha.json:ro",
-        "-w", "/workspace",
+        # The workspace ROOT, path-identical (host path == container path).
+        "-v", f"{workspace}:{workspace}",
+        # The api-base override masks the config the agent actually READS —
+        # skills resolve `.claude/orcha.json` relative to their CWD.
+        "-v", f"{api_config_mount}:{workdir}/.claude/orcha.json:ro",
+    ]
+    if workdir != str(workspace):
+        # Worktree spawn: ALSO mask the root's copy (the root is visible under
+        # path-identical mounting, and its api_base_url points at a host port
+        # unreachable from inside the container).
+        argv += ["-v", f"{api_config_mount}:{workspace}/.claude/orcha.json:ro"]
+        if not pathlib.PurePath(workdir).is_relative_to(workspace):
+            # Defensive: a spawn cwd OUTSIDE the root (not the current layout —
+            # worktrees live under <root>/.orcha-worktrees) still resolves.
+            argv += ["-v", f"{workdir}:{workdir}"]
+    argv += [
+        # Durable agent home: session transcripts (`--resume`), hook state, and
+        # cross-wake context survive the container. One-shot wakes share it per
+        # workspace by design — harmless, and hook/session state accretes.
+        "-v", f"{agent_home_dir(workspace)}:{AGENT_HOME_CONTAINER}",
+        "-w", workdir,
+        # Not a secret — ride argv (unlike ENV_PASSTHROUGH's client-env keys).
+        "-e", f"ORCHA_WORKSPACE_ROOT={workspace}",
     ]
     if network:
         argv += ["--network", network]

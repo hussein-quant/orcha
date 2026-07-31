@@ -103,11 +103,14 @@ ssh <box> 'cp /opt/orcha-cloud/deploy/github-token-refresh.{service,timer} /etc/
   && systemctl daemon-reload && systemctl enable --now github-token-refresh.timer'
 ```
 
-Then in a workspace repo (once, from the host or an agent task):
+Then in a workspace repo (once, from the host or an agent task). The helper
+resolves the token via `ORCHA_WORKSPACE_ROOT` (stamped by the sandbox, which
+mounts the workspace path-identically) and falls back to walking up from
+`$PWD` — so it also works from a git-worktree checkout and in host mode:
 
 ```bash
 git config credential.helper \
-  '!f() { echo username=x-access-token; echo "password=$(cat /workspace/.orcha/github-token)"; }; f'
+  '!f() { d="${ORCHA_WORKSPACE_ROOT:-$PWD}"; while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -f "$d/.orcha/github-token" ]; do d=$(dirname "$d"); done; echo username=x-access-token; echo "password=$(cat "$d/.orcha/github-token")"; }; f'
 ```
 
 **Bot commit identity**: the provisioner also sets workspace-local git config on

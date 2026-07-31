@@ -210,10 +210,14 @@ token must be present in the process env that starts it (sourced from
   `orcha.cid=<project container id>` (scopes the reaper's sweeps to *this*
   project on a multi-stack host), `orcha.sidecar=1` for drain sidecars
   (orphan-sweep exemption).
-- **Scoped filesystem**: only the workspace is mounted (at `/workspace`),
-  plus a read-only api-config override that rewrites `api_base_url` to
-  `http://portal:8000` so the agent's skill calls reach the portal over the
-  compose network. No docker socket, no other host mounts.
+- **Scoped filesystem**: only the workspace is mounted — **path-identically**
+  (same absolute path inside the container, so git-worktree `.git` pointer
+  files and token paths stay valid; the spawner stamps
+  `ORCHA_WORKSPACE_ROOT=<root>`) — plus a durable agent-home mount
+  (`<root>/.orcha/agent-home` → `~/.claude`, session continuity across
+  containers) and a read-only api-config override that rewrites
+  `api_base_url` to `http://portal:8000` so the agent's skill calls reach the
+  portal over the compose network. No docker socket, no other host mounts.
 - **Secrets via env, never argv**: identity and keys ride the client
   process's environment through `docker run -e KEY` — they never appear in
   `ps` output.
@@ -239,8 +243,8 @@ token must be present in the process env that starts it (sourced from
    mints 1-hour, repo-scoped installation tokens from the app's PEM. The PEM
    stays on the host at `/opt/orcha-secrets/`, always; containers only ever
    see the short-lived tokens via the workspace mount
-   (`/workspace/.orcha/github-token`), which the standard git credential
-   helper reads. Agents open PRs as the app bot; the human PR review remains
+   (`<workspace-root>/.orcha/github-token`, resolved through
+   `$ORCHA_WORKSPACE_ROOT`), which the standard git credential helper reads. Agents open PRs as the app bot; the human PR review remains
    the authority gate. Multi-org: install the app once per org; the refresh
    timer discovers all installations and owner-matches bound repos.
 

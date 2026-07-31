@@ -94,6 +94,11 @@ def spawn_resident(
         sbx_name = _sandbox.new_container_name()
         if spawn_info is not None:
             spawn_info["sandbox_container_id"] = sbx_name
+        # Path-identical mounting: a resident's cwd is a PER-CONVERSATION git
+        # worktree whose `.git` is a pointer file into the ROOT checkout, and
+        # the rotating .orcha/github-token lives at the root — mount the root
+        # at its real host path and run in the worktree.
+        ws_root = str(_sandbox.workspace_root_for(cwd))
         # Dry-run must not touch the project dir — compute the mount path only.
         # A real spawn writes the sandbox-scoped api config, guarded: an
         # unwritable dir or garbled orcha.json fails the boot loudly (§3.2),
@@ -107,6 +112,16 @@ def spawn_resident(
                 api_cfg = _sandbox.write_api_config(cwd, sbx_name)
             except (OSError, ValueError) as e:
                 return False, f"(sandbox unavailable: cannot write api config: {e})", None
+            # Session-persistence: the agent-home dir backing the container's
+            # ~/.claude must exist BEFORE docker run (docker would create a
+            # missing source root-owned → the uid-1000 runner can't write it).
+            # This is what makes a pinned session's `--resume` survive a
+            # container restart. Failure fails the boot loudly (§3.2) — never
+            # a silent skip of the mount.
+            try:
+                _sandbox.ensure_agent_home(ws_root)
+            except OSError as e:
+                return False, f"(sandbox unavailable: cannot create agent home: {e})", None
         # Inside the runner image the binary is bare `claude` on PATH — a
         # host-resolved absolute executable path is meaningless in the container.
         argv = [services._runtime_executable(services.RUNTIME_CLAUDE), *argv[1:]]
@@ -117,8 +132,10 @@ def spawn_resident(
         if run_cid:
             sbx_labels.append(f"{_sandbox.LABEL_CID_KEY}={run_cid}")
         argv = _sandbox.build_docker_argv(
-            argv, cfg=sandbox_cfg, name=sbx_name, workspace=cwd,
-            network=sandbox_cfg.network or _sandbox.compose_network(cwd),
+            argv, cfg=sandbox_cfg, name=sbx_name, workspace=ws_root, workdir=cwd,
+            # The stack's compose file lives at the ROOT (worktrees never carry
+            # the generated .orcha/docker-compose.yml).
+            network=sandbox_cfg.network or _sandbox.compose_network(ws_root),
             api_config_mount=api_cfg,
             extra_labels=tuple(sbx_labels),
             interactive=True,

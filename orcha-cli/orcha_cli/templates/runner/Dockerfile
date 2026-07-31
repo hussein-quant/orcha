@@ -22,7 +22,8 @@ RUN npm install -g @anthropic-ai/claude-code @openai/codex \
     && curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 # Always-fresh gh auth despite hourly token rotation: this POSIX-sh wrapper
 # shadows the real /usr/bin/gh via PATH order (/usr/local/bin precedes /usr/bin
-# for the non-root runner user) and re-reads /workspace/.orcha/github-token on
+# for the non-root runner user) and re-reads
+# $ORCHA_WORKSPACE_ROOT/.orcha/github-token (falling back to a $PWD walk-up) on
 # EVERY invocation — a long resident session never holds a stale token.
 COPY gh /usr/local/bin/gh
 RUN chmod 0755 /usr/local/bin/gh
@@ -30,4 +31,6 @@ RUN chmod 0755 /usr/local/bin/gh
 # uid; reuse it as the runner identity with a real writable HOME.
 ENV HOME=/home/node
 USER node
-WORKDIR /workspace
+# No baked WORKDIR pointing at a mount: the spawner mounts the workspace
+# PATH-IDENTICALLY and always passes `-w <real spawn cwd>` (sandbox.py).
+WORKDIR /home/node

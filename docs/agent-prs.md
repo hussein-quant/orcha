@@ -26,20 +26,26 @@ commands in `deploy/README.md`, "Bot commit identity").
 
 The App's private key (PEM) stays on the host. A systemd timer
 (`deploy/github-token-refresh.sh`, every 40 min) mints a **1-hour installation
-token** into each workspace at `.orcha/github-token` — inside the sandbox
-that's `/workspace/.orcha/github-token`. Repo-bound workspaces get a token
-minted from the **owner-matched installation, scoped to that repo**.
+token** into each workspace at `<workspace-root>/.orcha/github-token`. The
+sandbox mounts the workspace **path-identically** (same absolute path inside
+the container) and stamps `ORCHA_WORKSPACE_ROOT=<root>` into the container
+env, so the token file is at the same path everywhere — including from a git
+worktree spawn, whose own `.orcha` is the repo's committed dir, not the
+runtime one. Repo-bound workspaces get a token minted from the
+**owner-matched installation, scoped to that repo**.
 
 Two consumers read it, both at *use time* so rotation never strands them:
 
 - **git** — the credential helper the provisioner installs:
-  `password=$(cat /workspace/.orcha/github-token)`, evaluated per operation.
+  `password=$(cat "$d/.orcha/github-token")` where `d` is
+  `$ORCHA_WORKSPACE_ROOT`, falling back to walking up from `$PWD` — evaluated
+  per operation.
 - **gh** — the runner image ships `/usr/local/bin/gh`, a tiny POSIX-sh wrapper
-  that shadows the real `/usr/bin/gh` via PATH order and does
-  `GH_TOKEN="$(cat /workspace/.orcha/github-token 2>/dev/null)"; export
-  GH_TOKEN; exec /usr/bin/gh "$@"` on **every invocation**. A resident session
-  that lives for hours never holds a stale token, and the token never appears
-  in argv or on screen.
+  that shadows the real `/usr/bin/gh` via PATH order and resolves
+  `$ORCHA_WORKSPACE_ROOT/.orcha/github-token` (same `$PWD` walk-up fallback)
+  into `GH_TOKEN` on **every invocation**. A resident session that lives for
+  hours never holds a stale token, and the token never appears in argv or on
+  screen.
 
 The `gh` binary itself comes from GitHub's official apt repo
 (`templates/runner/Dockerfile`); nothing is pinned beyond the repo.
@@ -77,7 +83,7 @@ human, and the Orcha-side work stops at `needs_verification` regardless.
 
 | Symptom | Likely cause / fix |
 |---|---|
-| `/workspace/.orcha/github-token` absent | The workspace isn't in `/opt/orcha-work/workspaces.list`, or the refresh timer isn't running: `systemctl status github-token-refresh.timer`, then check `journalctl -u github-token-refresh`. |
+| `<workspace-root>/.orcha/github-token` absent | The workspace isn't in `/opt/orcha-work/workspaces.list`, or the refresh timer isn't running: `systemctl status github-token-refresh.timer`, then check `journalctl -u github-token-refresh`. |
 | `gh` says "not logged in" / 401 | Empty or stale token file → same timer checks as above. Also confirm the App is **installed on the target repo** (app page → Install App). |
 | Push rejected (403) on a repo the agent can read | Token is repo-scoped to the *bound* repo; pushing elsewhere needs that repo in the App installation and (for scoping) a binding. |
 | Commits attributed to a human | Workspace predates the provisioner change — apply the "Bot commit identity" one-liner from `deploy/README.md`. |

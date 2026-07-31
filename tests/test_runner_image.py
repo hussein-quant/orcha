@@ -2,9 +2,11 @@
 
 Static assertions on the shipped templates/runner files (gh installed from the
 official apt repo; the /usr/local/bin/gh wrapper present, executable, POSIX-sh)
-plus BEHAVIOR tests of the wrapper itself: a copy with the two production
-absolute paths rewritten to tmp paths runs against a fake `gh` that captures
-its environment and argv — proving the token is re-read fresh on every
+plus BEHAVIOR tests of the wrapper itself: a copy with the production gh path
+rewritten to a capturing fake runs against a REAL workspace layout — proving
+the token is resolved from $ORCHA_WORKSPACE_ROOT/.orcha/github-token (the env
+the path-identical sandbox stamps), that an unset env falls back to walking UP
+from $PWD (host mode / worktree cwd), that the token is re-read fresh on every
 invocation, a missing token file yields an empty (not unset) GH_TOKEN, args
 pass through untouched, and the token never rides in argv.
 
@@ -20,7 +22,8 @@ RUNNER_DIR = (pathlib.Path(__file__).resolve().parent.parent
 DOCKERFILE = RUNNER_DIR / "Dockerfile"
 WRAPPER = RUNNER_DIR / "gh"
 
-TOKEN_PATH = "/workspace/.orcha/github-token"
+TOKEN_RELPATH = ".orcha/github-token"
+ROOT_ENV = "ORCHA_WORKSPACE_ROOT"
 REAL_GH = "/usr/bin/gh"
 
 
@@ -47,6 +50,14 @@ def test_dockerfile_ships_wrapper_over_real_gh():
     assert text.index("COPY gh /usr/local/bin/gh") < text.index("USER node")
 
 
+def test_dockerfile_has_no_baked_workspace_workdir():
+    # Path-identical mounting: /workspace no longer exists in-container. The
+    # spawner always passes -w <real spawn cwd>; a baked WORKDIR pointing at
+    # the dead remap would silently mask a missing -w.
+    text = DOCKERFILE.read_text()
+    assert "WORKDIR /workspace" not in text
+
+
 # --------------------------------------------------------------- static: wrapper file
 
 def test_wrapper_present_executable_posix_sh():
@@ -57,21 +68,28 @@ def test_wrapper_present_executable_posix_sh():
     body = "\n".join(ln for ln in lines if not ln.lstrip().startswith("#"))
     for bashism in ("[[", "function ", "${GH_TOKEN:0", "local "):
         assert bashism not in body, f"bashism in wrapper: {bashism!r}"
-    # the two production paths this wrapper is contractually about:
-    assert TOKEN_PATH in body
+    # the contract: env-rooted token path with a $PWD walk-up fallback
+    assert ROOT_ENV in body
+    assert TOKEN_RELPATH in body
+    assert "$PWD" in body                                         # the fallback seed
     assert f'exec {REAL_GH} "$@"' in body
+    # no stale absolute /workspace path survives the path-identical redesign
+    assert "/workspace" not in body
     # the token is read into the env, never echoed
     assert "echo" not in body and "printf" not in body
 
 
 # --------------------------------------------------------------- behavior harness
 
-def _run_wrapper(tmp_path, args, token=None):
-    """Run a path-rewritten copy of the REAL wrapper against a capturing fake gh.
-    Returns the captured lines (GH_TOKEN=..., then ARG:... per argv word)."""
+def _run_wrapper(tmp_path, args, token=None, root_env=True, cwd=None):
+    """Run a gh-rewritten copy of the REAL wrapper against a capturing fake gh
+    and a real workspace layout (<tmp>/ws/.orcha/github-token). Returns the
+    captured lines (GH_TOKEN=..., then ARG:... per argv word)."""
     src = WRAPPER.read_text()
-    assert TOKEN_PATH in src and REAL_GH in src   # rewrite targets really present
-    token_file = tmp_path / "github-token"
+    assert REAL_GH in src                          # rewrite target really present
+    ws = tmp_path / "ws"
+    (ws / ".orcha").mkdir(parents=True, exist_ok=True)
+    token_file = ws / ".orcha" / "github-token"
     fake_gh = tmp_path / "real-gh"
     capture = tmp_path / "capture.log"
 
@@ -90,14 +108,17 @@ def _run_wrapper(tmp_path, args, token=None):
     fake_gh.chmod(0o755)
 
     rewritten = tmp_path / "gh-wrapper"
-    rewritten.write_text(
-        src.replace(TOKEN_PATH, str(token_file)).replace(REAL_GH, str(fake_gh))
-    )
+    rewritten.write_text(src.replace(REAL_GH, str(fake_gh)))
     capture.write_text("")
     env = dict(os.environ, CAPTURE=str(capture))
     env.pop("GH_TOKEN", None)                     # prove the wrapper sets it, not us
+    if root_env:
+        env[ROOT_ENV] = str(ws)                   # the sandbox-stamped root
+    else:
+        env.pop(ROOT_ENV, None)                   # host mode: fall back to $PWD walk-up
     result = subprocess.run(["sh", str(rewritten), *args],
-                            capture_output=True, text=True, env=env, timeout=30)
+                            capture_output=True, text=True, env=env, timeout=30,
+                            cwd=str(cwd) if cwd else None)
     assert result.returncode == 0, result.stderr
     # no token anywhere on the wrapper's own stdout/stderr
     return capture.read_text().splitlines(), result
@@ -112,9 +133,31 @@ def test_wrapper_reads_token_fresh_on_every_invocation(tmp_path):
     assert "GH_TOKEN=ghs_FIRST" not in lines2
 
 
+def test_wrapper_walks_up_from_pwd_without_root_env(tmp_path):
+    # Host mode / manual container: no ORCHA_WORKSPACE_ROOT. From a nested cwd
+    # (e.g. a worktree under the root) the wrapper walks UP until it finds
+    # .orcha/github-token — resolving the ROOT's token.
+    nested = tmp_path / "ws" / ".orcha-worktrees" / "resident-C1" / "src"
+    nested.mkdir(parents=True)
+    lines, _ = _run_wrapper(tmp_path, ["auth", "status"], token="ghs_WALKED",
+                            root_env=False, cwd=nested)
+    assert "GH_TOKEN=ghs_WALKED" in lines
+
+
 def test_wrapper_missing_token_file_yields_empty_gh_token(tmp_path):
     lines, _ = _run_wrapper(tmp_path, ["pr", "list"], token=None)
     assert "GH_TOKEN=" in lines                   # set-but-empty, not __UNSET__
+    assert not any(ln.startswith("GH_TOKEN=__UNSET__") for ln in lines)
+
+
+def test_wrapper_missing_token_no_env_no_match_yields_empty(tmp_path):
+    # The walk-up can terminate at / without ever finding a token file — still
+    # a clean empty GH_TOKEN, never a hang or an error exit.
+    nested = tmp_path / "nowhere" / "deep"
+    nested.mkdir(parents=True)
+    lines, _ = _run_wrapper(tmp_path, ["pr", "list"], token=None,
+                            root_env=False, cwd=nested)
+    assert "GH_TOKEN=" in lines
     assert not any(ln.startswith("GH_TOKEN=__UNSET__") for ln in lines)
 
 
