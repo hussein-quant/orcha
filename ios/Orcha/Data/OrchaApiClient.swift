@@ -15,8 +15,13 @@ struct OrchaApiClient {
     /// closes, so the 20s `timeoutIntervalForResource` on `session` would kill it (Issue 3).
     private let streamSession: URLSession
     private let decoder = JSONDecoder()
+    /// Explicit credential override — used by the add-flow probe, where the token the
+    /// user just pasted isn't persisted (and so isn't in `BearerTokens`) yet. Nil for
+    /// the app-wide client: it resolves per request from the registry.
+    private let bearerOverride: String?
 
-    init() {
+    init(bearerToken: String? = nil) {
+        bearerOverride = bearerToken
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 20
@@ -111,10 +116,13 @@ struct OrchaApiClient {
         AsyncThrowingStream { continuation in
             let work = Task {
                 do {
-                    var request = URLRequest(url: try url(base, "/api/agents/\(aid)/runs/\(runId)/stream"))
+                    var request = try makeRequest(base, "/api/agents/\(aid)/runs/\(runId)/stream")
                     request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                     let (bytes, response) = try await streamSession.bytes(for: request)
                     guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+                    if Self.perimeterIntercepted(status: http.statusCode, contentType: http.value(forHTTPHeaderField: "Content-Type"), body: Data()) {
+                        throw OrchaAuthRequiredError()
+                    }
                     guard (200..<300).contains(http.statusCode) else {
                         throw OrchaApiError(status: http.statusCode, body: "")
                     }
@@ -272,9 +280,40 @@ struct OrchaApiClient {
 
     // MARK: plumbing
 
-    private func url(_ base: String, _ path: String) throws -> URL {
+    /// Every request is built here so the bearer credential (cloud auth perimeter's
+    /// iOS/API lane) rides on ALL calls — reads, writes, and streams alike — whenever
+    /// the target base URL has a token.
+    private func makeRequest(_ base: String, _ path: String) throws -> URLRequest {
         guard let url = URL(string: base + path) else { throw URLError(.badURL) }
-        return url
+        var request = URLRequest(url: url)
+        if let token = bearerOverride ?? BearerTokens.token(for: base) {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
+    /// The auth perimeter never answers portal JSON when the bearer credential is
+    /// missing or wrong — the request falls through to the browser OAuth lane and
+    /// comes back as a 401, or (after URLSession follows the sign-in redirects) an
+    /// HTML page. Surface that as "needs an access token", never as a decode error.
+    /// Portal-level errors (403 authority, 404, 409, 422 — all JSON) pass through.
+    static func perimeterIntercepted(status: Int, contentType: String?, body: Data) -> Bool {
+        if status == 401 { return true }
+        if contentType?.lowercased().contains("text/html") == true { return true }
+        let head = String(decoding: body.prefix(64), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return head.hasPrefix("<!doctype html") || head.hasPrefix("<html")
+    }
+
+    private static func checkPerimeter(_ http: HTTPURLResponse, _ data: Data) throws {
+        if perimeterIntercepted(
+            status: http.statusCode,
+            contentType: http.value(forHTTPHeaderField: "Content-Type"),
+            body: data
+        ) {
+            throw OrchaAuthRequiredError()
+        }
     }
 
     /// Build a `?a=1&b=2` suffix, dropping nil values and percent-encoding each value
@@ -291,8 +330,9 @@ struct OrchaApiClient {
     }
 
     private func raw(_ base: String, _ path: String) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await session.data(from: url(base, path))
+        let (data, response) = try await session.data(for: makeRequest(base, path))
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        try Self.checkPerimeter(http, data)
         guard (200..<300).contains(http.statusCode) else {
             throw OrchaApiError(status: http.statusCode, body: String(decoding: data.prefix(300), as: UTF8.self))
         }
@@ -305,13 +345,14 @@ struct OrchaApiClient {
     }
 
     private func send(_ base: String, _ path: String, method: String, _ body: [String: Any?]) async throws -> Data {
-        var request = URLRequest(url: try url(base, path))
+        var request = try makeRequest(base, path)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let cleaned = body.compactMapValues { $0 }
         request.httpBody = try JSONSerialization.data(withJSONObject: cleaned)
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        try Self.checkPerimeter(http, data)
         guard (200..<300).contains(http.statusCode) else {
             throw OrchaApiError(status: http.statusCode, body: String(decoding: data.prefix(300), as: UTF8.self))
         }
@@ -336,6 +377,14 @@ private extension CharacterSet {
     /// Conservative unreserved set for query VALUES — encodes `:`, `+`, `&`, `=`, space, etc.
     static let orchaQueryValue = CharacterSet(charactersIn:
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+}
+
+/// The auth perimeter intercepted the request (bearer missing or rejected): the
+/// caller needs a — correct — access token, not a different address.
+struct OrchaAuthRequiredError: LocalizedError, Equatable {
+    var errorDescription: String? {
+        "This Orcha requires a team access token. Add or update it under Settings → Containers."
+    }
 }
 
 struct OrchaApiError: LocalizedError {
