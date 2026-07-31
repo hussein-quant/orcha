@@ -7,6 +7,10 @@ The open-core boundary: everything inside a team VM is open-source Orcha; the
 fleet layer (auth, TLS, provisioning, billing, upgrades) is this repo and stays
 closed.
 
+**Start here for BYOC: [`docs/byoc-guide.md`](byoc-guide.md)** — the single
+comprehensive guide (what BYOC is, architecture, automated-vs-manual matrix,
+setup walkthrough, operations, security posture).
+
 ## State
 
 - **Sandbox runner (sub-project 1): COMPLETE** — reviewed end-to-end, final
