@@ -16,6 +16,10 @@ missing.
   and survive daemon restarts instead of being orphaned by them. Per-run
   metering rides the existing `worker_runs` table. New `orcha sandbox`
   CLI (`on` / `off` / `status` / `build-image`); see `docs/sandbox-mode.md`.
+- GitHub-aware project dashboard: the portal home page shows the workspace's bound
+  GitHub repo (or a Connect-repo modal listing the GitHub App installation's repos)
+  and persists the binding; self-hosters without the App see a graceful off state
+  (`docs/github-dashboard.md`).
 
 ## [0.5.0] - 2026-07-20
 
