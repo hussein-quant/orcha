@@ -65,6 +65,43 @@ async def test_me_binds_first_unmapped_human(client, container, make_agent, trus
     assert cased["agent_id"] == a["agent_id"] and cased["github_login"] == "octocat"
 
 
+async def test_me_signin_clears_pending(client, container, make_agent, db, trust_proxy):
+    """The live-feedback bug: the signed-in owner must NOT read as pending. `pending`
+    means invited-but-never-signed-in, and /api/me stamps presence (last_heartbeat_at)
+    exactly once on BOTH resolution paths — bind and match."""
+    cid = container["id"]
+    await make_agent("root", "operator", kind="human")
+
+    # BIND path: the founding human bound by first arrival is immediately not pending
+    await client.get(f"/api/me?cid={cid}", headers=OCTO)
+    me = (await _members(client, cid))[0]
+    assert me["github_login"] == "octocat" and me["pending"] is False
+    stamp = db.execute(
+        "SELECT last_heartbeat_at FROM agents WHERE id=%s", (me["agent_id"],)
+    )[0]["last_heartbeat_at"]
+    assert stamp is not None
+    # stamped ONCE: a re-poll resolves via MATCH without moving the presence stamp
+    # (ongoing activity is bump_agent's job, not the sign-in mark's)
+    await client.get(f"/api/me?cid={cid}", headers=OCTO)
+    again = db.execute(
+        "SELECT last_heartbeat_at FROM agents WHERE id=%s", (me["agent_id"],)
+    )[0]["last_heartbeat_at"]
+    assert again == stamp
+
+    # MATCH path: an invitee stays pending until THEIR first sign-in flips it
+    r = await client.post(
+        f"/api/containers/{cid}/members",
+        json={"github_login": "hubot", "role": "member"},
+        headers=OCTO,
+    )
+    assert r.status_code == 201 and r.json()["pending"] is True
+    hubot_hdr = {"X-Auth-Request-User": "hubot"}
+    ident = (await client.get(f"/api/me?cid={cid}", headers=hubot_hdr)).json()["identity"]
+    assert ident and ident["github_login"] == "hubot"
+    hubot = [m for m in await _members(client, cid) if m["github_login"] == "hubot"][0]
+    assert hubot["pending"] is False
+
+
 async def test_me_second_distinct_user_is_unmapped(client, container, make_agent, trust_proxy):
     """Once ANY human is mapped, arrivals stop binding — membership is invite-only."""
     cid = container["id"]

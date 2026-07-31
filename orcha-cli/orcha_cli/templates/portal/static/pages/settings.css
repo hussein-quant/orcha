@@ -8,6 +8,18 @@
   .set-card .card-b { padding: 18px 20px; }
   .set-card .lead { color: var(--muted); font-size: 12.5px; line-height: 1.55; margin: -2px 0 16px; }
 
+  /* settings tabs — regrouping chrome only. The bar reuses the topbar's .aut/.seg
+     pill group (shell.css) so all themes/skins hold; the active tab lights in the
+     accent tone like an autonomy level pill. Cards keep their DOM order (settings_key
+     Case 15: the Anthropic key card stays the FIRST .lead) — inactive groups hide via
+     the [data-tab] rules below, and before/without JS no data-tab is set, so every
+     card stays visible. */
+  .set-tabs { margin: 0 0 18px; }
+  .set-tabs .seg.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+  .set-wrap[data-tab="workspace"] .set-card[data-settab]:not([data-settab="workspace"]),
+  .set-wrap[data-tab="collaboration"] .set-card[data-settab]:not([data-settab="collaboration"]),
+  .set-wrap[data-tab="appearance"] .set-card[data-settab]:not([data-settab="appearance"]) { display: none; }
+
   /* status banner (ok / warn / err / muted) — built from the same soft tokens
      used by .attn-card / callouts so it stays theme-correct. */
   .sc-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px;

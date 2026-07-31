@@ -26,12 +26,22 @@
 
         <div class="set-intro">
           <h1>Settings</h1>
-          <p>Workspace-level configuration. The provider API keys below power Orcha's
-             universal LLM client (#290) — the direct-API calls behind guided onboarding and
-             wake triage — separate from each agent's own embodiment model.</p>
+          <p>Workspace-level configuration. The provider API keys (under Workspace) power
+             Orcha's universal LLM client (#290) — the direct-API calls behind guided
+             onboarding and wake triage — separate from each agent's own embodiment model.</p>
         </div>
 
-        <div class="card set-card">
+        <!-- Tabs are regrouping chrome only: every card stays in the DOM in its original
+             order (settings_key Case 15 pins the Anthropic key card as the first .lead);
+             the inactive groups hide via CSS keyed on .set-wrap[data-tab]. Deep link:
+             #tab=workspace|collaboration|appearance (settings-tabs.js). -->
+        <nav class="aut set-tabs" id="setTabs" role="tablist" aria-label="Settings sections">
+          <span class="seg on" role="tab" tabindex="0" aria-selected="true" data-tab="workspace">Workspace</span>
+          <span class="seg" role="tab" tabindex="0" aria-selected="false" data-tab="collaboration">Collaboration</span>
+          <span class="seg" role="tab" tabindex="0" aria-selected="false" data-tab="appearance">Appearance</span>
+        </nav>
+
+        <div class="card set-card" data-settab="workspace">
           <div class="card-h"><h2>Anthropic API key</h2></div>
           <div class="card-b">
             <div class="lead">Stored encrypted on this workspace and used for the universal
@@ -41,7 +51,7 @@
           </div>
         </div>
 
-        <div class="card set-card">
+        <div class="card set-card" data-settab="workspace">
           <div class="card-h"><h2>xAI / Grok API key</h2></div>
           <div class="card-b">
             <div class="lead">Stored encrypted on this workspace and used when a use-case below is
@@ -51,7 +61,7 @@
           </div>
         </div>
 
-        <div class="card set-card">
+        <div class="card set-card" data-settab="workspace">
           <div class="card-h"><h2>Universal model selection</h2></div>
           <div class="card-b">
             <div class="lead">Pick which model powers each non-agent task. These are direct-API
@@ -61,7 +71,7 @@
           </div>
         </div>
 
-        <div class="card set-card">
+        <div class="card set-card" data-settab="collaboration">
           <div class="card-h"><h2>Members</h2></div>
           <div class="card-b">
             <div class="lead">Who's on this project. Members map verified GitHub identities to
@@ -71,7 +81,7 @@
           </div>
         </div>
 
-        <div class="card set-card">
+        <div class="card set-card" data-settab="collaboration">
           <div class="card-h"><h2>Phone pairing</h2></div>
           <div class="card-b">
             <div class="lead">Pair the Orcha mobile app with this workspace on your local Wi-Fi network.</div>
@@ -79,7 +89,7 @@
           </div>
         </div>
 
-        <div class="card set-card">
+        <div class="card set-card" data-settab="appearance">
           <div class="card-h"><h2>Appearance</h2></div>
           <div class="card-b">
             <div class="lead">How the portal looks in this browser — applies instantly, per
@@ -114,6 +124,7 @@
 <script src="/assets/modules/settings-provider-keys.js"></script>
 <script src="/assets/modules/settings-members.js"></script>
 <script src="/assets/modules/settings-appearance.js"></script>
+<script src="/assets/modules/settings-tabs.js"></script>
 <script src="/assets/settings.js"></script>
 </body>
 </html>

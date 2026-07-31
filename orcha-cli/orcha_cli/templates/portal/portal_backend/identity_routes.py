@@ -80,6 +80,32 @@ def bind_first_unmapped_human(cur, container_id, login):
     return cur.fetchone()
 
 
+def _stamp_presence(cur, agent_id) -> bool:
+    """First-sign-in mark: set last_heartbeat_at once so the members list's `pending`
+    flag (github_login set ∧ last_heartbeat_at IS NULL) means "invited but has never
+    signed in" — humans never run workers, so without this a bound/invited user who
+    only ever browsed would read pending forever.
+
+    Reusing last_heartbeat_at (no new column) is safe by consumer audit:
+      - bump_agent already stamps HUMANS on every message/request turn, so the column
+        is a mixed human+AI "last activity" signal, not a worker-liveness channel;
+      - the wake scan (wake_scan_queries.list_wake_agents) filters kind='ai', so a
+        human heartbeat never makes it a wake candidate;
+      - the orphan-lease reaper only considers rows holding a LIVE lease
+        (orphan_lease_routes._reap_lane: w.<lease_col> > now()) — humans hold none;
+      - pick_human (guards) prefers the freshest heartbeat, which a sign-in stamp
+        makes MORE correct ("most recently active human"), and the snapshot's
+        last_active/heartbeat_age_secs simply report the sign-in as activity.
+    Guarded WHERE ... IS NULL: stamped exactly once; later activity is bump_agent's.
+    Returns True when this call did the stamping (caller commits)."""
+    cur.execute(
+        "UPDATE agents SET last_heartbeat_at = now() "
+        "WHERE id = %s AND last_heartbeat_at IS NULL",
+        (agent_id,),
+    )
+    return cur.rowcount > 0
+
+
 def require_owner(cur, request: Request, container_id, actor_agent_id):
     """Gate an owner-only write; returns the acting owner's agent row.
 
@@ -161,6 +187,10 @@ def get_me(request: Request, cid: str):
             else:
                 # Lost a concurrent bind for the SAME login? Re-read before giving up.
                 member = find_member_by_login(cur, cid, login)
+        # Both resolution paths (match AND bind) count as "signed in": clear the
+        # invited-but-never-seen state the members list renders as `pending`.
+        if member is not None and _stamp_presence(cur, member["id"]):
+            conn.commit()
     if member is None:
         return {"identity": None}
     return {"identity": _identity_payload(member)}

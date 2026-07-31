@@ -15,9 +15,10 @@ from portal_backend.schemas import MemberCreate, MemberRemove, MemberRoleUpdate
 
 _MEMBER_FIELDS = (
     "id AS agent_id, alias, github_login, member_role, "
-    # pending = invited (github_login set) but never yet active in the portal. Humans
-    # don't run workers, so last_heartbeat_at IS the activity signal (the snapshot's
-    # last_active GREATEST() adds only worker_runs on top of it).
+    # pending = invited (github_login set) but has NEVER SIGNED IN. /api/me stamps
+    # last_heartbeat_at once on first identity resolution (match or bind —
+    # identity_routes._stamp_presence), and bump_agent stamps humans on turns, so a
+    # NULL heartbeat on a mapped human genuinely means "never arrived".
     "(github_login IS NOT NULL AND last_heartbeat_at IS NULL) AS pending"
 )
 
