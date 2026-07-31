@@ -307,6 +307,13 @@ def _state(*, running, exit_code=None, oom=False, started_at=None):
         started_at=started_at or _dt.datetime.now(_dt.timezone.utc).isoformat())
 
 
+def _ago(seconds):
+    """ISO timestamp `seconds` in the past — for aging containers/rows against
+    the M7 ORPHAN_BOOT_GRACE_SECS boot grace."""
+    return (_dt.datetime.now(_dt.timezone.utc)
+            - _dt.timedelta(seconds=seconds)).isoformat()
+
+
 def _fake_sandbox(monkeypatch, *, states=None, managed=(), daemon_ok=True):
     """Recording fakes for the sweep's docker seams. `states` maps container name →
     SandboxState (missing name → probe None, i.e. vanished). `daemon_ok=False`
@@ -500,12 +507,16 @@ def test_live_resident_container_shielded_from_orphan_pass(monkeypatch):
     unreferenced container still is."""
     _patch_io(monkeypatch, [])
     calls = _fake_sandbox(monkeypatch,
+                          states={"orcha-run-orphan":
+                                  _state(running=True, started_at=_ago(600))},
                           managed=["orcha-run-warm", "orcha-run-orphan"])
 
     n = notifier.reap_orphaned_runs("http://x", "C1",
                                     live_sandbox=frozenset({"orcha-run-warm"}))
     assert n == 0
     assert calls["stop"] == ["orcha-run-orphan"]     # shielded resident untouched
+    assert "orcha-run-warm" not in calls["probe"]    # shield short-circuits BEFORE the
+                                                     # per-candidate grace inspect
 
 
 def test_orphan_container_with_no_open_run_row_is_stopped(monkeypatch):
@@ -516,7 +527,9 @@ def test_orphan_container_with_no_open_run_row_is_stopped(monkeypatch):
         {"run_id": "S", "agent_id": "A1", "pid": _DEAD_PID, "wake_kind": "sandbox",
          "sandbox_container_id": "orcha-run-owned"}])
     calls = _fake_sandbox(monkeypatch,
-                          states={"orcha-run-owned": _state(running=True)},
+                          states={"orcha-run-owned": _state(running=True),
+                                  "orcha-run-orphan":
+                                  _state(running=True, started_at=_ago(600))},
                           managed=["orcha-run-owned", "orcha-run-orphan"])
 
     notifier.reap_orphaned_runs("http://x", "C1")
@@ -526,9 +539,130 @@ def test_orphan_container_with_no_open_run_row_is_stopped(monkeypatch):
 
 def test_orphan_pass_runs_even_with_zero_open_runs(monkeypatch):
     _patch_io(monkeypatch, [])
-    calls = _fake_sandbox(monkeypatch, managed=["orcha-run-zombie"])
+    calls = _fake_sandbox(monkeypatch,
+                          states={"orcha-run-zombie":
+                                  _state(running=True, started_at=_ago(600))},
+                          managed=["orcha-run-zombie"])
     assert notifier.reap_orphaned_runs("http://x", "C1") == 0
     assert calls["stop"] == ["orcha-run-zombie"]
+
+
+def test_orphan_pass_grace_shields_young_rowless_container(monkeypatch):
+    """M7 boot grace (field bug: first chat message dies as 'vanished'): a row-less
+    managed container whose StartedAt is only ~30s ago is a BOOTING wake whose
+    run-row POST hasn't landed yet — the orphan pass must NOT stop it this sweep.
+    An old row-less sibling in the same sweep is still stopped as before."""
+    _patch_io(monkeypatch, [])
+    calls = _fake_sandbox(monkeypatch,
+                          states={"orcha-run-booting":
+                                  _state(running=True, started_at=_ago(30)),
+                                  "orcha-run-stale":
+                                  _state(running=True, started_at=_ago(600))},
+                          managed=["orcha-run-booting", "orcha-run-stale"])
+
+    n = notifier.reap_orphaned_runs("http://x", "C1")
+    assert n == 0
+    assert calls["stop"] == ["orcha-run-stale"]          # young one deferred, old one stopped
+    assert set(calls["probe"]) == {"orcha-run-booting", "orcha-run-stale"}  # one inspect each
+
+
+def test_orphan_pass_probe_failure_is_fail_safe_no_stop(monkeypatch):
+    """M7 fail-safe: the grace check needs the container's StartedAt; if probe
+    fails (docker hiccup, or the container is mid-`docker create` and not
+    inspectable yet) its age is UNKNOWN — never stop what we cannot age. The
+    candidate is simply retried next sweep."""
+    _patch_io(monkeypatch, [])
+    calls = _fake_sandbox(monkeypatch, states={},        # probe → None
+                          managed=["orcha-run-mystery"])
+
+    n = notifier.reap_orphaned_runs("http://x", "C1")
+    assert n == 0
+    assert calls["probe"] == ["orcha-run-mystery"]       # it TRIED to age it
+    assert calls["stop"] == []                           # ...and refused to stop blind
+
+
+def test_orphan_pass_unparseable_started_at_is_fail_safe(monkeypatch):
+    """A probe that answers with a garbled StartedAt also reads as UNKNOWN age —
+    same fail-safe skip as a probe failure."""
+    _patch_io(monkeypatch, [])
+    calls = _fake_sandbox(monkeypatch,
+                          states={"orcha-run-garbled":
+                                  _state(running=True, started_at="not-a-time")},
+                          managed=["orcha-run-garbled"])
+
+    assert notifier.reap_orphaned_runs("http://x", "C1") == 0
+    assert calls["stop"] == []
+
+
+def test_vanished_verdict_deferred_for_young_row(monkeypatch):
+    """M7, the observed field failure (dogfood 2026-07-30: 15s between the run
+    row's POST landing and the container's network join): a run row whose
+    container is not probeable is only VANISHED once the row outlives the boot
+    grace. A young row (started_at now-30s) + probe None → defer: no finish, no
+    kill — the next sweep re-evaluates."""
+    posts = _patch_io(monkeypatch, [
+        {"run_id": "S", "agent_id": "A1", "pid": _DEAD_PID, "wake_kind": "sandbox",
+         "sandbox_container_id": "orcha-run-midboot", "started_at": _ago(30)}])
+    calls = _fake_sandbox(monkeypatch, states={})        # probe → None (not born yet)
+
+    n = notifier.reap_orphaned_runs("http://x", "C1")
+    assert n == 0
+    assert not any("/finish" in u for u, _ in posts)     # verdict deferred, row stays open
+    assert calls["stop"] == [] and calls["remove"] == []
+
+
+def test_vanished_verdict_deferred_for_young_resident_first_turn(monkeypatch):
+    """The resident boot-window case behind the user-visible bug: the FIRST
+    conversation turn's row lands while `docker run` is still creating the warm
+    session's container — probe None on that young row must NOT stamp the turn
+    'sandbox container vanished' (the retry-a-minute-later symptom)."""
+    posts = _patch_io(monkeypatch, [
+        {"run_id": "T1", "agent_id": "A1", "pid": _DEAD_PID, "wake_kind": "resident",
+         "lane": "conversation", "sandbox_container_id": "orcha-run-coldboot",
+         "started_at": _ago(30)}])
+    _fake_sandbox(monkeypatch, states={})
+
+    n = notifier.reap_orphaned_runs("http://x", "C1")
+    assert n == 0
+    assert not any("/finish" in u for u, _ in posts)
+    # the lane lease is shielded too (unknown ≠ dead): no release ack
+    assert not any("wake-ack" in u and (b or {}).get("release_lease")
+                   for u, b in posts)
+
+
+def test_vanished_verdict_still_stamped_after_grace(monkeypatch):
+    """Grace is a deferral, not an exemption (#342's 'busy forever' stays
+    bounded): the same probe-less row PAST the grace is finished killed with the
+    vanished reason exactly as before."""
+    posts = _patch_io(monkeypatch, [
+        {"run_id": "S", "agent_id": "A1", "pid": _DEAD_PID, "wake_kind": "sandbox",
+         "sandbox_container_id": "orcha-run-gone", "started_at": _ago(600)}])
+    _fake_sandbox(monkeypatch, states={})
+
+    n = notifier.reap_orphaned_runs("http://x", "C1")
+    assert n == 1
+    fin = [(u, b) for u, b in posts if "/runs/S/finish" in u]
+    assert fin and fin[0][1]["status"] == "killed"
+    assert "sandbox container vanished" in (fin[0][1].get("kill_reason") or "")
+
+
+def test_live_sandbox_shield_unions_workers_and_residents():
+    """The daemon's orphan-pass shield must cover BOTH in-memory maps: a one-shot
+    sandbox worker's container is spawned BEFORE its run-row POST (a transient
+    POST failure leaves it row-less while alive), and a warm resident owns a row
+    only per-turn. Before the fix only residents were shielded — a row-less
+    one-shot was stopped by the next sweep (~2s later)."""
+    live_workers = {
+        "A1": {"proc": object(), "sandbox_container_id": "orcha-run-oneshot"},
+        "A2": {"proc": object(), "sandbox_container_id": None},   # host-mode worker
+    }
+    live_residents = {
+        "conv1": {"proc": object(), "sandbox_container_id": "orcha-run-warm"},
+        "conv2": {"proc": object()},                              # host-mode resident
+    }
+    assert notifier.live_sandbox_shield(live_workers, live_residents) == frozenset(
+        {"orcha-run-oneshot", "orcha-run-warm"})
+    assert notifier.live_sandbox_shield({}, {}) == frozenset()
 
 
 def test_orphan_pass_skipped_when_api_unreachable(monkeypatch):

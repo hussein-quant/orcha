@@ -186,3 +186,78 @@ def test_sweep_helpers_never_raise_without_docker_binary(tmp_path, monkeypatch):
     assert sandbox.daemon_reachable() is False
     sandbox.stop("orcha-run-x")
     sandbox.remove("orcha-run-x")
+
+
+# ---- M7 boot grace, end-to-end through the REAL sandbox helpers (PATH shim) ----
+# The fakes in test_iss342 prove the sweep's decision table; these prove the same
+# decisions ride the real docker plumbing: managed_containers → probe(StartedAt)
+# → age gate → stop/skip. The shim's `info` arm answers ok (daemon reachable) and
+# `inspect` serves the canned State for the ps-listed orphan candidate.
+
+import datetime as _dt
+
+from orcha_cli import notifier
+
+
+def _iso_ago(seconds: float) -> str:
+    return (_dt.datetime.now(_dt.timezone.utc)
+            - _dt.timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%S") + "Z"
+
+
+def _mute_api(monkeypatch):
+    monkeypatch.setattr(notifier, "_get_json", lambda u, **k: {"runs": []})
+    monkeypatch.setattr(notifier, "_post_json", lambda u, b=None, **k: {})
+
+
+def test_orphan_pass_shim_young_rowless_container_not_stopped(tmp_path, monkeypatch):
+    """StartedAt now-30s (< ORPHAN_BOOT_GRACE_SECS): the row-less candidate is a
+    booting wake whose run-row POST hasn't landed — inspected but NOT stopped."""
+    log = str(tmp_path / "log")
+    _shim(tmp_path, monkeypatch,
+          {"State": {"Status": "running", "OOMKilled": False, "ExitCode": 0,
+                     "StartedAt": _iso_ago(30)}}, log)
+    _mute_api(monkeypatch)
+    assert notifier.reap_orphaned_runs("http://x", "CID123") == 0
+    contents = open(log).read()
+    assert "inspect orcha-run-orphan1" in contents        # the one grace probe ran
+    assert "stop" not in contents                         # ...and deferred the stop
+
+
+def test_orphan_pass_shim_old_rowless_container_stopped(tmp_path, monkeypatch):
+    """StartedAt now-10min (> grace): the row-less candidate is a genuine orphan —
+    stopped exactly as before the grace landed (and the sidecar stays exempt)."""
+    log = str(tmp_path / "log")
+    _shim(tmp_path, monkeypatch,
+          {"State": {"Status": "running", "OOMKilled": False, "ExitCode": 0,
+                     "StartedAt": _iso_ago(600)}}, log)
+    _mute_api(monkeypatch)
+    assert notifier.reap_orphaned_runs("http://x", "CID123") == 0
+    contents = open(log).read()
+    assert "stop --time 20 orcha-run-orphan1" in contents
+    assert "orcha-run-sidecar1" not in "".join(
+        line for line in contents.splitlines() if line.startswith("stop"))
+
+
+def test_orphan_pass_shim_inspect_failure_skips_fail_safe(tmp_path, monkeypatch):
+    """Probe-fail during the grace check (inspect exits 1 — e.g. the container is
+    mid-`docker create` and has no inspectable object yet): age UNKNOWN → skip
+    this sweep, never stop blind."""
+    d = tmp_path / "bin"; d.mkdir(exist_ok=True)
+    log = tmp_path / "log"
+    ps_file = tmp_path / "ps_out.txt"
+    ps_file.write_text(_PS_DEFAULT)
+    f = d / "docker"
+    f.write_text(
+        "#!/bin/sh\n"
+        f"echo \"$@\" >> {log}\n"
+        "case \"$1\" in\n"
+        "  inspect) exit 1;;\n"
+        f"  ps) cat {ps_file};;\n"
+        "esac\nexit 0\n")
+    f.chmod(f.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{d}:{os.environ['PATH']}")
+    _mute_api(monkeypatch)
+    assert notifier.reap_orphaned_runs("http://x", "CID123") == 0
+    contents = open(log).read()
+    assert "inspect orcha-run-orphan1" in contents
+    assert "stop" not in contents
