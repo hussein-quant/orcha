@@ -10,6 +10,24 @@ missing.
 
 ## [Unreleased]
 
+### Fixed
+- Sandbox session continuity + path-identical mounts: each sandboxed wake's
+  `~/.claude` (session transcripts, hook state) now persists on the host at
+  `<workspace-root>/.orcha/agent-home`, so a resident conversation's pinned
+  session can `--resume` across container restarts instead of always dying
+  with "No conversation found with session ID" and surfacing an empty chat
+  turn. Sandbox mounts are now **path-identical** (the workspace root is
+  mounted at its real host path, `-w` is the actual spawn dir, and the
+  container gets `ORCHA_WORKSPACE_ROOT`), which un-breaks git inside
+  resident/task worktree wakes (their `.git` pointer files reference
+  host-absolute paths) and lets the `gh` wrapper and git credential helper
+  find the rotating `.orcha/github-token` from any spawn dir. The notifier is
+  also resilient when a resume still fails: the empty result is never posted
+  as a blank chat bubble — the pinned session is dropped and the resident
+  reboots fresh once, re-servicing the same turn (a fresh boot that also
+  produces nothing stamps a visible error turn instead). Requires a runner
+  image rebuild (`orcha sandbox build-image`) for the updated `gh` wrapper.
+
 ### Added
 - Agent→PR: sandboxed agents can branch, commit, push, and open GitHub PRs as
   the `orcha-cloud-app[bot]` App installation — never a human account. The
