@@ -103,10 +103,35 @@ Review and merge. Nothing in this pipeline can self-approve: the bot has no
 review authority over itself, agents are instructed that merge is always
 human, and the Orcha-side work stops at `needs_verification` regardless.
 
+### Agents can file GitHub issues too
+
+The same bot token lets agents run `gh issue create` — "file your findings as
+issues" works end to end — **but only when the App holds Issues: Read and
+write**. Without it both create AND read 403 (an agent can't even check for
+duplicates). The manifest grants it for new installs; apps created before
+2026-08-01 need the manual flip.
+
+**Field-hardened acceptance notes** (this permission was field-added; every
+lesson below was hit live):
+
+1. Flip the permission once at the App level: App settings → Permissions &
+   events → Issues: **Read and write** → Save.
+2. The new scope stays INERT per installation until an org admin accepts it —
+   check every org: `GET /app/installations` (JWT) and look at
+   `permissions.issues` per account. Partial acceptance is real: we shipped
+   with 2 of 3 orgs accepted and the third silently 403ing.
+3. The org-settings installations LIST page 404s for accounts that hold only
+   the org's **App manager** role (not full owner). The DEEP LINK still works
+   for them: `github.com/organizations/<org>/settings/installations/<id>` —
+   get `<id>` from `GET /app/installations`.
+4. Tokens snapshot permissions AT MINT: after acceptance, re-mint (run the
+   `github-token-refresh` service) before retrying, or the agent keeps
+   403ing on a stale token.
+
 ## Limits
 
 - **Repo reach = the App installation's repository selection.** Agents can
-  only touch repos the `orcha-cloud-app` App is installed on (install it per
+  only touch repos the `orcha-cloud` App is installed on (install it per
   org/user; the refresh timer discovers all installations automatically —
   see "Multi-org" in `deploy/README.md`).
 - Tokens live 1 hour and are scoped to the bound repo where a binding exists.
