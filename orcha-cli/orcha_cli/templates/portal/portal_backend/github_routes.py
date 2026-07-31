@@ -11,7 +11,11 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
-from portal_backend.identity_routes import trusted_actor
+from portal_backend.identity_routes import (
+    enforce_grant,
+    require_member_read,
+    trusted_actor,
+)
 from portal_backend.schemas import ContainerGithubBinding
 
 # One page of 100 covers every realistic single-project installation; a >100-repo
@@ -152,12 +156,14 @@ def list_github_repos():
 
 
 @app.get("/api/containers/{cid}/github")
-def get_container_github(cid: str):
+def get_container_github(cid: str, request: Request):
     """Read a container's GitHub repo binding: {"repo": "owner/name" | null}."""
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (_, cur):
         require_container(cur, cid)
+        # Access model: reads are project-isolated (trusted non-member 403).
+        require_member_read(cur, request, cid)
         cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
         return {"repo": cur.fetchone()["github_repo"]}
 
@@ -174,7 +180,9 @@ def put_container_github(cid: str, body: ContainerGithubBinding, request: Reques
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
-        # Per-project identity: binding a repo is a member action (403 non-member).
+        # Per-project identity + access model: binding a repo is owner-or-manage_repo
+        # under the trusted lane (403 non-member / ungranted member / viewer).
+        enforce_grant(cur, request, cid, "manage_repo")
         trusted_actor(cur, request, cid, None)
         cur.execute(
             "UPDATE containers SET github_repo=%s WHERE id=%s RETURNING github_repo",

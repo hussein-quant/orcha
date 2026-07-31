@@ -17,6 +17,19 @@ from portal_backend.guards import require_container, require_kind, valid_uuid
 TRUST_ENV = "ORCHA_TRUST_PROXY_USER"
 PROXY_USER_HEADER = "X-Auth-Request-User"
 
+# The granular permission grants (mig 039, agents.grants JSONB array). Grants are
+# ADDITIVE extras on top of the member role's work bundle; owners hold all of them
+# implicitly. A grant on a VIEWER affects reads only (today: manage_members reveals
+# the roster) — the viewer role's write ban is absolute.
+GRANTS = (
+    "manage_keys",       # LLM/provider keys + universal model settings
+    "manage_members",    # invite/remove/re-role BELOW owner + see the full roster
+    "manage_repo",       # bind/unbind the GitHub repo
+    "manage_autonomy",   # notifier/autonomy/wakes switches, status, reset, sweep
+    "manage_agents",     # register/retire/update agents, model + effort changes
+    "assign_reviewers",  # name the human reviewer on a task
+)
+
 
 def _proxy_trusted() -> bool:
     """Whether the operator opted in to trusting the proxy's identity header."""
@@ -34,12 +47,45 @@ def proxy_login(request: Request):
 def find_member_by_login(cur, container_id, login):
     """The container's live human agent mapped to a GitHub login (case-insensitive)."""
     cur.execute(
-        """SELECT id, alias, github_login, member_role FROM agents
+        """SELECT id, alias, github_login, member_role, grants FROM agents
            WHERE container_id=%s AND kind='human' AND terminated_at IS NULL
              AND lower(github_login)=lower(%s)""",
         (container_id, login),
     )
     return cur.fetchone()
+
+
+def container_mapped(cur, container_id) -> bool:
+    """Whether ANY live human here carries a github_login (i.e. bootstrap is over)."""
+    cur.execute(
+        """SELECT 1 FROM agents
+           WHERE container_id=%s AND kind='human' AND terminated_at IS NULL
+             AND github_login IS NOT NULL LIMIT 1""",
+        (container_id,),
+    )
+    return cur.fetchone() is not None
+
+
+def has_grant(member_row, grant) -> bool:
+    """Does this member hold a permission grant? Owners hold every grant implicitly;
+    member/viewer rows need it in agents.grants. PURE capability predicate — the
+    viewer role's write ban is enforced by the gates, not here, so a read-side
+    consumer (roster visibility) can honor a grant held by a viewer."""
+    if not member_row:
+        return False
+    if member_row["member_role"] == "owner":
+        return True
+    return grant in (member_row.get("grants") or [])
+
+
+def _forbid_viewer_write(member_row):
+    """The viewer role is read-only: every write is refused, grants or not."""
+    if member_row is not None and member_row["member_role"] == "viewer":
+        raise HTTPException(
+            403,
+            "your role on this project is viewer — it is read-only; "
+            "ask an owner for the member role to act",
+        )
 
 
 def bind_first_unmapped_human(cur, container_id, login):
@@ -74,7 +120,7 @@ def bind_first_unmapped_human(cur, container_id, login):
                               WHERE m.container_id=%s AND m.kind='human'
                                 AND m.terminated_at IS NULL
                                 AND m.github_login IS NOT NULL)
-           RETURNING id, alias, github_login, member_role""",
+           RETURNING id, alias, github_login, member_role, grants""",
         (login, login, login, container_id, container_id),
     )
     return cur.fetchone()
@@ -115,7 +161,8 @@ def _stamp_presence(cur, login) -> bool:
     return cur.rowcount > 0
 
 
-def trusted_actor(cur, request: Request, container_id, claimed_actor_id=None):
+def trusted_actor(cur, request: Request, container_id, claimed_actor_id=None,
+                  *, write=True):
     """Bind the actor of a human-authoritative write to the proxy-verified identity.
 
     THE per-project identity rule (cloud, multi-user): under proxy trust a signed-in
@@ -136,25 +183,26 @@ def trusted_actor(cur, request: Request, container_id, claimed_actor_id=None):
           github_login — the fresh pre-binding bootstrap state) ⇒ claimed actor
           unchanged, mirroring bind_first_unmapped_human's NOT-EXISTS guard.
         * otherwise ⇒ 403 — a non-member can look, never act.
+
+    Access model (mig 039): a resolved member whose role is VIEWER is refused on any
+    `write=True` call (the default) — the viewer role is read-only across the board.
+    The pairing payload builder passes write=False: pairing a phone for yourself is
+    read-scoped access, not a project mutation.
     """
     login = proxy_login(request)
     if not login:
         return claimed_actor_id
     member = find_member_by_login(cur, container_id, login)
     if member is None:
-        cur.execute(
-            """SELECT 1 FROM agents
-               WHERE container_id=%s AND kind='human' AND terminated_at IS NULL
-                 AND github_login IS NOT NULL LIMIT 1""",
-            (container_id,),
-        )
-        if cur.fetchone() is None:
+        if not container_mapped(cur, container_id):
             return claimed_actor_id  # bootstrap: nobody is mapped yet
         raise HTTPException(
             403,
             f"your GitHub account ('{login}') is not a member of this project "
             "— ask an owner for an invite",
         )
+    if write:
+        _forbid_viewer_write(member)
     resolved = str(member["id"])
     if claimed_actor_id and str(claimed_actor_id) != resolved:
         log_event(
@@ -194,7 +242,7 @@ def require_owner(cur, request: Request, container_id, actor_agent_id):
         return member
     require_kind(cur, actor_agent_id, ("human",))  # Orcha#30 convention
     cur.execute(
-        """SELECT id, alias, github_login, member_role FROM agents
+        """SELECT id, alias, github_login, member_role, grants FROM agents
            WHERE id=%s AND container_id=%s AND terminated_at IS NULL""",
         (actor_agent_id, container_id),
     )
@@ -206,6 +254,89 @@ def require_owner(cur, request: Request, container_id, actor_agent_id):
     return row
 
 
+def require_grant(cur, request: Request, container_id, actor_agent_id, grant):
+    """Gate a management write on owner-or-grant; returns the acting member row.
+
+    require_owner relaxed to `has_grant`: the same two lanes (trusted proxy identity
+    IS the actor / trust-off body-actor fallback), but a member holding the named
+    grant passes alongside owners. Viewers are refused outright — the viewer role is
+    read-only, and a grant on a viewer affects reads only, never writes."""
+    login = proxy_login(request)
+    if login:
+        member = find_member_by_login(cur, container_id, login)
+        if not member:
+            raise HTTPException(
+                403, f"GitHub user '{login}' is not a member of this project"
+            )
+    else:
+        require_kind(cur, actor_agent_id, ("human",))  # Orcha#30 convention
+        cur.execute(
+            """SELECT id, alias, github_login, member_role, grants FROM agents
+               WHERE id=%s AND container_id=%s AND terminated_at IS NULL""",
+            (actor_agent_id, container_id),
+        )
+        member = cur.fetchone()
+        if not member:
+            raise HTTPException(403, "actor is not a live member of this container")
+    _forbid_viewer_write(member)
+    if not has_grant(member, grant):
+        raise HTTPException(
+            403, f"this action requires the owner role or the '{grant}' permission"
+        )
+    return member
+
+
+def enforce_grant(cur, request: Request, container_id, grant):
+    """TRUSTED-LANE owner-or-grant gate for endpoints whose trust-off convention must
+    stay permissive (keys, repo binding, autonomy/wakes/status/reset/sweep, agent
+    management): the CLI, the notifier daemon, and self-hosters call these without a
+    proxy identity, and those lanes keep today's behavior byte-for-byte.
+
+    Trust off / no header ⇒ None (caller's existing gates apply unchanged). Trusted
+    login ⇒ the member must be an owner or hold the grant (viewers refused — writes
+    are banned for the role); a non-member is 403 unless the container is still
+    UNMAPPED (fresh-bootstrap exemption, mirroring trusted_actor)."""
+    login = proxy_login(request)
+    if not login:
+        return None
+    member = find_member_by_login(cur, container_id, login)
+    if member is None:
+        if not container_mapped(cur, container_id):
+            return None  # bootstrap: nobody is mapped yet
+        raise HTTPException(
+            403, f"GitHub user '{login}' is not a member of this project"
+        )
+    _forbid_viewer_write(member)
+    if not has_grant(member, grant):
+        raise HTTPException(
+            403, f"this action requires the owner role or the '{grant}' permission"
+        )
+    return member
+
+
+def require_member_read(cur, request: Request, container_id):
+    """Close a cid-scoped READ to trusted non-members (project isolation).
+
+    Trust off / no header ⇒ passthrough (self-host + break-glass unchanged). Trusted
+    login ⇒ any resolved member reads (viewer included — viewing is the one thing the
+    role is for); an UNMAPPED container stays world-readable to trusted users (the
+    fresh-stack bootstrap exemption — its founder must be able to see it to claim
+    it); otherwise 403. Returns the member row when one resolved."""
+    login = proxy_login(request)
+    if not login:
+        return None
+    member = find_member_by_login(cur, container_id, login)
+    if member is not None:
+        return member
+    if not container_mapped(cur, container_id):
+        return None
+    raise HTTPException(
+        403,
+        f"your GitHub account ('{login}') is not a member of this project "
+        "— ask an owner for an invite",
+    )
+
+
 def _identity_payload(member):
     login = member["github_login"]
     return {
@@ -213,6 +344,11 @@ def _identity_payload(member):
         "alias": member["alias"],
         "github_login": login,
         "member_role": member["member_role"],
+        # Access model (mig 039): the acting member's own grants, so the frontend can
+        # gate affordances (settings tabs, roster management) off the same source the
+        # server enforces. Owners implicitly hold everything; their list is not
+        # synthesized here — consumers check member_role first, like has_grant().
+        "grants": list(member.get("grants") or []),
         # GitHub serves any user's avatar at this well-known URL — no API call needed.
         "avatar_url": f"https://github.com/{login}.png" if login else None,
     }

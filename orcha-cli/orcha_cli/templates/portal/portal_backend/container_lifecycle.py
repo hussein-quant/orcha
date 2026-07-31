@@ -20,6 +20,7 @@ from portal_backend.model_policy import (
     DEFAULT_MODEL,
     DEFAULT_REASONING_EFFORT,
 )
+from portal_backend.identity_routes import enforce_grant as _enforce_grant
 from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.schemas import ContainerStatusUpdate
 
@@ -52,6 +53,8 @@ def set_container_status(cid: str, body: ContainerStatusUpdate, request: Request
     with db_cursor() as (conn, cur):
         c = _require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: pause/resume/complete are owner-or-manage_autonomy.
+        _enforce_grant(cur, request, cid, "manage_autonomy")
         body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_kind(cur, body.actor_agent_id, ("human",))  # Orcha#30
         old = c["status"]

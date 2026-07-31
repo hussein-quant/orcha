@@ -58,7 +58,7 @@ class MemberCreate(BaseModel):
         max_length=39,
         description="GitHub username to invite (matched case-insensitively)",
     )
-    role: Literal["owner", "member"] = Field(
+    role: Literal["owner", "member", "viewer"] = Field(
         default="member", description="project role for the invited member"
     )
     actor_agent_id: Optional[str] = Field(
@@ -68,9 +68,20 @@ class MemberCreate(BaseModel):
 
 
 class MemberRoleUpdate(BaseModel):
-    """PATCH /api/containers/{cid}/members/{aid} — owner changes a member's role."""
+    """PATCH /api/containers/{cid}/members/{aid} — change a member's role and/or
+    replace their grant set (access model, mig 039). PARTIAL: only supplied fields
+    change; at least one must be supplied. Grants changes are owner-only; role
+    changes to/from owner are owner-only; other role moves are owner-or-
+    manage_members (member_routes enforces)."""
 
-    role: Literal["owner", "member"]
+    role: Optional[Literal["owner", "member", "viewer"]] = None
+    grants: Optional[list[Literal[
+        "manage_keys", "manage_members", "manage_repo",
+        "manage_autonomy", "manage_agents", "assign_reviewers",
+    ]]] = Field(
+        default=None,
+        description="full replacement grant set for the member (owner-only)",
+    )
     actor_agent_id: Optional[str] = Field(
         default=None,
         description="acting human's UUID when no trusted proxy identity is present",

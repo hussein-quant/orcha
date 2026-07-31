@@ -25,6 +25,8 @@ from portal_backend.provider_keys import (
 from portal_backend.provider_keys import (
     provider_stored_row as _provider_stored_row,
 )
+from portal_backend.identity_routes import enforce_grant as _enforce_grant
+from portal_backend.identity_routes import require_member_read as _require_member_read
 from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.schemas import LlmKeyActor, LlmKeyTest, LlmKeyUpdate
 
@@ -90,7 +92,7 @@ def _ping_provider_key(provider: str, candidate: str) -> dict:
 
 
 @app.get("/api/containers/{cid}/settings/provider-keys", status_code=200)
-def list_container_provider_keys(cid: str):
+def list_container_provider_keys(cid: str, request: Request):
     """One key-status entry per AVAILABLE catalog provider, for the SETTINGS key cards. NEVER
     returns a secret — only a masked 'sk-...1234' hint + source (env override shadows stored).
     Read-only/open, like GET /settings/providers."""
@@ -104,6 +106,8 @@ def list_container_provider_keys(cid: str):
     keys = []
     with db_cursor() as (_, cur):
         _require_container(cur, cid)
+        # Access model: reads are project-isolated (trusted non-member 403).
+        _require_member_read(cur, request, cid)
         for p in llm_util.PROVIDER_CATALOG:
             if not p["available"]:
                 continue
@@ -148,6 +152,8 @@ def put_container_provider_key(cid: str, provider: str, body: LlmKeyUpdate, requ
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: credentials are owner-or-manage_keys (trusted lane).
+        _enforce_grant(cur, request, cid, "manage_keys")
         body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_kind(cur, body.actor_agent_id, ("human",))
         if not secret_box.master_key_present():
@@ -196,6 +202,8 @@ def delete_container_provider_key(cid: str, provider: str, body: LlmKeyActor, re
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: credentials are owner-or-manage_keys (trusted lane).
+        _enforce_grant(cur, request, cid, "manage_keys")
         body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_kind(cur, body.actor_agent_id, ("human",))
         # Unified table (migration 027) — clear the row for any provider, Anthropic included.
@@ -238,6 +246,8 @@ def test_container_provider_key(cid: str, provider: str, body: LlmKeyTest, reque
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: credentials are owner-or-manage_keys (trusted lane).
+        _enforce_grant(cur, request, cid, "manage_keys")
         body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_kind(cur, body.actor_agent_id, ("human",))
         if body.api_key and body.api_key.strip():

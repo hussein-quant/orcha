@@ -7,7 +7,7 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_agent, require_kind, valid_uuid
-from portal_backend.identity_routes import trusted_actor
+from portal_backend.identity_routes import enforce_grant, trusted_actor
 from portal_backend.schemas.agent_state import AgentRetire, AgentUpdate
 
 
@@ -68,6 +68,8 @@ def retire_agent(aid: str, body: AgentRetire, request: Request):
     with db_cursor() as (conn, cur):
         agent = require_agent(cur, aid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: retiring an agent is owner-or-manage_agents.
+        enforce_grant(cur, request, str(agent["container_id"]), "manage_agents")
         body.actor_agent_id = trusted_actor(
             cur, request, str(agent["container_id"]), body.actor_agent_id
         )
@@ -117,6 +119,8 @@ def update_agent(aid: str, body: AgentUpdate, request: Request):
         if not row:
             raise HTTPException(404, f"agent {aid} not found")
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: editing an agent's profile is owner-or-manage_agents.
+        enforce_grant(cur, request, str(row["container_id"]), "manage_agents")
         body.actor_agent_id = trusted_actor(
             cur, request, str(row["container_id"]), body.actor_agent_id
         )

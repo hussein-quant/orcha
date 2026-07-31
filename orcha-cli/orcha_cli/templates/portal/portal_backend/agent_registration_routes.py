@@ -8,6 +8,7 @@ from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container as _require_container
 from portal_backend.guards import valid_uuid as _valid_uuid
+from portal_backend.identity_routes import enforce_grant as _enforce_grant
 from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.model_policy import DEFAULT_MODEL
 from portal_backend.schemas import AgentCreate, AgentCreateResponse
@@ -46,6 +47,9 @@ def register_agent(cid: str, body: AgentCreate, request: Request):
         # fresh-container bootstrap (no mapped human yet — `orcha init` / onboarding)
         # passes through, mirroring the binding rule's NOT-EXISTS guard.
         _trusted_actor(cur, request, cid, None)
+        # Access model: registering agents is owner-or-manage_agents (trusted lane;
+        # the CLI's headerless `orcha init` registration is untouched).
+        _enforce_grant(cur, request, cid, "manage_agents")
         model = body.model
         if body.kind == "human":
             model = None

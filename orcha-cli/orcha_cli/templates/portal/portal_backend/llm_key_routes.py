@@ -25,6 +25,8 @@ from portal_backend.provider_keys import (
 from portal_backend.provider_keys import (
     provider_stored_row as _provider_stored_row,
 )
+from portal_backend.identity_routes import enforce_grant as _enforce_grant
+from portal_backend.identity_routes import require_member_read as _require_member_read
 from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.schemas import LlmKeyActor, LlmKeyTest, LlmKeyUpdate
 
@@ -49,7 +51,7 @@ def _mask_llm_key(hint: Optional[str]) -> Optional[str]:
 
 
 @app.get("/api/containers/{cid}/settings/llm-key", status_code=200)
-def get_container_llm_key(cid: str):
+def get_container_llm_key(cid: str, request: Request):
     """Report whether a container has an LLM key configured, and from where — NEVER the secret.
     Precedence mirrors the read path: an ORCHA_LLM_API_KEY env override is reported as
     source='env' (and shadows any stored key); else a stored key is source='db'; else
@@ -58,6 +60,8 @@ def get_container_llm_key(cid: str):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
+        # Access model: reads are project-isolated (trusted non-member 403).
+        _require_member_read(cur, request, cid)
         row = _provider_stored_row(
             cur, cid, "anthropic"
         )  # unified table (migration 027)
@@ -92,6 +96,8 @@ def put_container_llm_key(cid: str, body: LlmKeyUpdate, request: Request):
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: credentials are owner-or-manage_keys (trusted lane).
+        _enforce_grant(cur, request, cid, "manage_keys")
         body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_kind(
             cur, body.actor_agent_id, ("human",)
@@ -135,6 +141,8 @@ def delete_container_llm_key(cid: str, body: LlmKeyActor, request: Request):
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: credentials are owner-or-manage_keys (trusted lane).
+        _enforce_grant(cur, request, cid, "manage_keys")
         body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_kind(cur, body.actor_agent_id, ("human",))
         cur.execute(
@@ -190,6 +198,8 @@ def test_container_llm_key(cid: str, body: LlmKeyTest, request: Request):
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: credentials are owner-or-manage_keys (trusted lane).
+        _enforce_grant(cur, request, cid, "manage_keys")
         body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_kind(cur, body.actor_agent_id, ("human",))
         if body.api_key and body.api_key.strip():
