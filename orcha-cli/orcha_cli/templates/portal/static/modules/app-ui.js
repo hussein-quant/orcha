@@ -59,6 +59,9 @@ const I = {
   // SPEC-SETTINGS §5: two slider tracks with knobs — reads as "per-use-case
   // settings," distinct from the gear cliché, consistent with the thin-stroke set.
   sliders: '<path d="M4 6h7M14 6h2M4 14h2M9 14h7"/><circle cx="12.5" cy="6" r="1.8"/><circle cx="7.5" cy="14" r="1.8"/>',
+  // Metrics page: three columns off a baseline — reads as "usage over time,"
+  // consistent with the thin-stroke set.
+  metrics: '<path d="M3.5 16.5h13"/><path d="M6.2 12.8v3.7M10 8.2v8.3M13.8 10.6v5.9"/>',
 };
 const icon = (name, cls) => `<svg class="${cls || "ico"}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[name] || ""}</svg>`;
 
