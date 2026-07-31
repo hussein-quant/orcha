@@ -56,6 +56,10 @@ window.OrchaData = (function () {
       model: a.model != null ? a.model : null,
       reasoning_effort: a.reasoning_effort != null ? a.reasoning_effort : null,
       status: a.status,
+      // Collab v1: GitHub identity + project role — whitelisted (the adapter drops
+      // unmapped fields) so member chips/avatars and owner gating render off the poll.
+      github_login: a.github_login != null ? a.github_login : null,
+      member_role: a.member_role != null ? a.member_role : null,
       // §3b/E1 (#141): the agent's single-flight EMBODIMENT — idle|ephemeral|resident|live.
       // Drives the S3 terminal guard + the conversation live-lock (Orcha.leaseOf).
       embodiment: a.embodiment != null ? a.embodiment : null,
@@ -88,6 +92,10 @@ window.OrchaData = (function () {
       // SPEC-4: per-task hand-off protocol (Ledger: tasks.protocol JSONB, surfaced via the shared
       // _task_list_sql). null when unset. Whitelisted here so the adapter doesn't drop it.
       protocol: t.protocol != null ? t.protocol : null,
+      // Collab v1: the owner-assigned reviewer — raw id + the resolved
+      // {agent_id, alias, github_login} chip (null = anyone may verify).
+      reviewer_agent_id: t.reviewer_agent_id != null ? t.reviewer_agent_id : null,
+      reviewer: t.reviewer != null ? t.reviewer : null,
       result: t.result != null ? t.result : null,
       // D7: latest plan_approval decision {decision, reason, actor, at}; null pre-D7. The
       // plan TEXT itself is the agent's opening thread message — this is the durable
@@ -151,12 +159,32 @@ window.OrchaData = (function () {
   }
 
   let _cid = null;
+
+  // Collab v1: resolve the acting identity ONCE per page load (GET /api/me?cid=…).
+  // The call is also what runs the server-side binding rule the first time a verified
+  // GitHub user reaches a fresh container (root-human → GitHub name); it's idempotent,
+  // so a single fetch is enough — the 3s poll doesn't need to re-ask. Stashed on
+  // D.identity (applySnapshot only overwrites the snapshot's own keys). Failure or an
+  // unmapped/untrusted visitor leaves identity null → every consumer falls back.
+  let _mePromise = null;
+  function fetchMe() {
+    if (!_cid) return Promise.resolve(null);
+    if (!_mePromise) {
+      _mePromise = getJSON("/api/me?cid=" + encodeURIComponent(_cid))
+        .then((d) => ((d && d.identity) || null))
+        .catch(() => null);
+    }
+    return _mePromise;
+  }
+
   async function refresh() {
     if (!_cid) _cid = await resolveCid();
     if (!_cid) throw new Error("no container found");
+    const me = await fetchMe();
     const raw = await getJSON("/api/containers/" + encodeURIComponent(_cid));
     if (window.Orcha) window.Orcha.applySnapshot(mapSnapshot(raw));
     else window.ORCHA = mapSnapshot(raw);
+    window.ORCHA.identity = me;
     return window.ORCHA;
   }
 

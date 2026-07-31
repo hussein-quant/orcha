@@ -43,6 +43,9 @@ def get_container(cid: str, task_limit: int = 1000, request_limit: int = 1000):
             """SELECT a.id, a.alias, a.role, a.kind, a.turns_used, a.turn_budget,
                       a.last_heartbeat_at, a.is_auto_created, a.created_at, a.terminated_at,
                       a.model, a.reasoning_effort,
+                      -- Collab v1: GitHub identity + project role so the portal renders
+                      -- member chips/avatars and owner-only affordances off the same poll.
+                      a.github_login, a.member_role,
                       -- #266: the configured clock-driven auto-wake cadence (NULL = off) so the
                       -- portal can render/edit it on the agent card without a second call.
                       a.auto_wake_interval_secs,

@@ -55,6 +55,43 @@ function postAssign(t, actorId, agentId, alias, reassign) {
     });
 }
 
+/* ---------- collab v1: assign the task's reviewer (owner authority) ----------
+   PUT /api/tasks/{tid}/reviewer {reviewer_agent_id|null}. The picker lists the
+   container's human MEMBERS (snapshot roster) + an "Anyone" reset; the backend
+   re-validates (owner gate, human-member target). */
+function doReviewer(t) {
+  const h = actorOrWarn(); if (!h) return;
+  const hs = (TasD().agents || []).filter((x) => x.kind === "human");
+  const cur = t.reviewer_agent_id || "";
+  const opts = ['<option value="">— Anyone —</option>']
+    .concat(hs.map((x) => `<option value="${TasO.esc(x.id)}"${String(x.id) === String(cur) ? " selected" : ""}>${TasO.esc(x.github_login || x.alias)}${String(x.id) === String(cur) ? " (current)" : ""}</option>`))
+    .join("");
+  TasO.modal({
+    title: "Who should review this task?",
+    desc: "The reviewer is asked to verify when the task completes. Anyone may still verify — this routes attention, it doesn't lock the gate.",
+    body: `<select id="revSel" class="reply-in" style="width:100%">${opts}</select>`,
+    primary: "Set reviewer", approve: true,
+    onPrimary: (ov) => {
+      const sel = ov.querySelector("#revSel");
+      const rid = sel && sel.value ? sel.value : null;
+      fetch("/api/tasks/" + encodeURIComponent(t.id) + "/reviewer", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewer_agent_id: rid, actor_agent_id: h.id }),
+      }).then((r) => r.json().then((d) => ({ ok: r.ok, status: r.status, d })).catch(() => ({ ok: r.ok, status: r.status, d: {} })))
+        .then(({ ok, status, d }) => {
+          TasO.closeModal();
+          if (!ok) { TasO.toast("Setting reviewer failed (" + status + ")" + (d.detail ? ": " + d.detail : ""), "danger"); return; }
+          // update in place — no 3s-poll wait (mirrors ghSaveBinding)
+          t.reviewer = d.reviewer || null;
+          t.reviewer_agent_id = d.reviewer ? d.reviewer.agent_id : null;
+          TasO.toast(d.reviewer ? "Reviewer set — " + (d.reviewer.github_login || d.reviewer.alias) : "Reviewer cleared — anyone may verify", "ok");
+          renderDetail(true);
+        })
+        .catch(() => { TasO.closeModal(); TasO.toast("Setting reviewer failed — network error.", "danger"); });
+    },
+  });
+}
+
 /* ---------- create-task (human authority) — POST /api/containers/{cid}/tasks ----------
    The enabler so a human can create+assign from the portal (then test assign->wake).
    created_by resolves the acting human server-side via created_by_agent_id. */

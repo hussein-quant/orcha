@@ -1,6 +1,13 @@
 """Pydantic request and response contracts grouped by API responsibility."""
 
-from .agents import AgentCreate, AgentCreateResponse, InitialTask
+from .agents import (
+    AgentCreate,
+    AgentCreateResponse,
+    InitialTask,
+    MemberCreate,
+    MemberRemove,
+    MemberRoleUpdate,
+)
 from .containers import (
     ContainerCreate,
     ContainerCreateResponse,
@@ -29,6 +36,9 @@ __all__ = [
     "LlmKeyActor",
     "LlmKeyTest",
     "LlmKeyUpdate",
+    "MemberCreate",
+    "MemberRemove",
+    "MemberRoleUpdate",
     "ModelSettingOverride",
     "ModelSettingsUpdate",
     "ProposeBody",

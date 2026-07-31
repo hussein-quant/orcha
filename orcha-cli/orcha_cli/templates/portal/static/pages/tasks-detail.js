@@ -13,6 +13,8 @@ function renderDetail(force) {
           <span class="prio ${t.priority<=20?'p-hi':t.priority<=40?'p-md':''}">Priority ${TasO.esc(t.priority)}</span>
           <span class="muted" style="font-size:12.5px">·</span>
           <span class="muted" style="font-size:12.5px">assignee</span> ${who ? TasO.agentLink(who) : "—"}
+          <span class="muted" style="font-size:12.5px">·</span>
+          <span class="muted" style="font-size:12.5px">reviewer</span> ${reviewerChip(t)}
         </div>
       </div>
     </div>
@@ -124,6 +126,23 @@ function gateSurface(t) {
     </div></div>`;
 }
 function who(t) { return t.assignee || "the assignee"; }
+
+/* ---------- collab v1: the task's assigned reviewer ----------
+   Advisory (the verify gate stays open to any human): the chip shows WHO the owner
+   asked to verify — GitHub avatar + login for a mapped member, letter avatar + alias
+   otherwise, "anyone" when unset. Owners get a change affordance (member picker on
+   the shared modal — wired in tasks-thread.js like every other data-act). */
+function reviewerChip(t) {
+  const r = t.reviewer;
+  const face = !r ? '<span class="muted" style="font-size:12.5px">anyone</span>'
+    : r.github_login
+      ? `${typeof ghAvatar === "function" ? ghAvatar(r.github_login, "sm") : ""}<span style="font-size:12.5px;font-weight:600">${TasO.esc(r.github_login)}</span>`
+      : `${TasO.avatar(r.alias, "human", "sm")}<span style="font-size:12.5px;font-weight:600">${TasO.esc(r.alias)}</span>`;
+  const edit = TasO.actingOwner && TasO.actingOwner()
+    ? `<button class="iconbtn" data-act="reviewer" type="button" title="Change reviewer" style="width:22px;height:22px">${TasO.icon("pencil", "gl")}</button>`
+    : "";
+  return `<span style="display:inline-flex;align-items:center;gap:6px">${face}${edit}</span>`;
+}
 
 /* ---------- SPEC-4 protocol panel — collapsible hand-off rules on the task itself ----------
    Reads `t.protocol` (Ledger: tasks.protocol JSONB {review_chain,handoff_to,autonomy,notes},

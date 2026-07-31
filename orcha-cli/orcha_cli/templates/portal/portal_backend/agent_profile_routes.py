@@ -10,6 +10,49 @@ from portal_backend.guards import require_agent, require_kind, valid_uuid
 from portal_backend.schemas.agent_state import AgentRetire, AgentUpdate
 
 
+def retire_agent_record(cur, aid):
+    """Shared retire mechanics (ISS-51 + collab v1's member removal — one semantics,
+    never two drifting copies): drop the agent's active task assignments, release any
+    task left with NO active assignee back to 'ready' (the thread is retained), clear
+    its self-wakes, and stamp terminated_at + status='terminated'. Returns the released
+    task ids. Callers own the authority gate, audit event, and commit."""
+    cur.execute(
+        """SELECT task_id FROM agent_tasks
+           WHERE agent_id=%s AND assignment_status IN ('assigned','accepted','working')""",
+        (aid,),
+    )
+    active_task_ids = [str(row["task_id"]) for row in cur.fetchall()]
+    cur.execute(
+        "DELETE FROM agent_tasks WHERE agent_id=%s "
+        "AND assignment_status IN ('assigned','accepted','working')",
+        (aid,),
+    )
+    cur.execute("DELETE FROM agent_self_wake WHERE agent_id=%s", (aid,))
+
+    released = []
+    for task_id in active_task_ids:
+        cur.execute(
+            """SELECT 1 FROM agent_tasks
+               WHERE task_id=%s AND assignment_status IN ('assigned','accepted','working')
+               LIMIT 1""",
+            (task_id,),
+        )
+        if cur.fetchone() is None:
+            cur.execute(
+                "UPDATE tasks SET status='ready', started_at=NULL "
+                "WHERE id=%s AND status='in_progress' AND is_root=false RETURNING id",
+                (task_id,),
+            )
+            if cur.fetchone():
+                released.append(task_id)
+
+    cur.execute(
+        "UPDATE agents SET terminated_at=now(), status='terminated' WHERE id=%s",
+        (aid,),
+    )
+    return released
+
+
 @app.post("/api/agents/{aid}/retire", status_code=200)
 def retire_agent(aid: str, body: AgentRetire):
     """ISS-51: retire an agent — human-authority gated. Sets agents.terminated_at +
@@ -33,40 +76,7 @@ def retire_agent(aid: str, body: AgentRetire):
                 "already_retired": True,
             }
 
-        cur.execute(
-            """SELECT task_id FROM agent_tasks
-               WHERE agent_id=%s AND assignment_status IN ('assigned','accepted','working')""",
-            (aid,),
-        )
-        active_task_ids = [str(row["task_id"]) for row in cur.fetchall()]
-        cur.execute(
-            "DELETE FROM agent_tasks WHERE agent_id=%s "
-            "AND assignment_status IN ('assigned','accepted','working')",
-            (aid,),
-        )
-        cur.execute("DELETE FROM agent_self_wake WHERE agent_id=%s", (aid,))
-
-        released = []
-        for task_id in active_task_ids:
-            cur.execute(
-                """SELECT 1 FROM agent_tasks
-                   WHERE task_id=%s AND assignment_status IN ('assigned','accepted','working')
-                   LIMIT 1""",
-                (task_id,),
-            )
-            if cur.fetchone() is None:
-                cur.execute(
-                    "UPDATE tasks SET status='ready', started_at=NULL "
-                    "WHERE id=%s AND status='in_progress' AND is_root=false RETURNING id",
-                    (task_id,),
-                )
-                if cur.fetchone():
-                    released.append(task_id)
-
-        cur.execute(
-            "UPDATE agents SET terminated_at=now(), status='terminated' WHERE id=%s",
-            (aid,),
-        )
+        released = retire_agent_record(cur, aid)
         log_event(
             cur,
             agent["container_id"],

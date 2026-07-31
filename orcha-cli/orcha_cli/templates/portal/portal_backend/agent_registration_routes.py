@@ -51,10 +51,22 @@ def register_agent(cid: str, body: AgentCreate):
                 f"model '{model}' is not a known model; choose one of {sorted(_model_ids())}",
             )
         try:
+            # Collab v1: a container's FIRST live human is its owner (the same invariant
+            # migration 036 backfills for pre-existing rows) — otherwise a fresh container
+            # would have nobody who can pass the owner gates (members, reviewer). Later
+            # humans join as plain members; owners promote them deliberately.
             cur.execute(
-                """INSERT INTO agents (container_id, alias, role, kind, system_prompt, model)
-                   VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-                (cid, body.alias, body.role, body.kind, body.prompt, model),
+                """INSERT INTO agents (container_id, alias, role, kind, system_prompt, model,
+                                       member_role)
+                   VALUES (%s, %s, %s, %s, %s, %s,
+                           CASE WHEN %s = 'human' AND NOT EXISTS (
+                                    SELECT 1 FROM agents
+                                     WHERE container_id=%s AND kind='human'
+                                       AND terminated_at IS NULL)
+                                THEN 'owner' ELSE 'member' END)
+                   RETURNING id""",
+                (cid, body.alias, body.role, body.kind, body.prompt, model,
+                 body.kind, cid),
             )
         except psycopg.errors.UniqueViolation:
             raise HTTPException(

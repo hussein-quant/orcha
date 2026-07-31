@@ -20,6 +20,13 @@ missing.
   GitHub repo (or a Connect-repo modal listing the GitHub App installation's repos)
   and persists the binding; self-hosters without the App see a graceful off state
   (`docs/github-dashboard.md`).
+- Collab v1: the portal's acting human is now a verified GitHub identity behind the
+  cloud OAuth proxy (opt-in `ORCHA_TRUST_PROXY_USER=1`; the first arrival claims the
+  founding "root" human), owners invite/manage project members from Settings →
+  Members (roles, pending invites, retire-style removal), and owners can name a
+  task's reviewer — surfaced on the task detail and de-emphasized for everyone else
+  in the home queue. Self-hosters without a proxy see no behavior change
+  (`docs/collab.md`).
 
 ## [0.5.0] - 2026-07-20
 

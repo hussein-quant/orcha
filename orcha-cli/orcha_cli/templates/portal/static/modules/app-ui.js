@@ -9,6 +9,18 @@ function avatar(alias, kind, size) {
   const init = (alias || "?").trim().charAt(0).toUpperCase();
   return `<span class="${cls}" style="background:${grad}">${esc(init)}</span>`;
 }
+// Collab v1: a GitHub member's avatar — the well-known github.com/<login>.png image
+// over the SAME deterministic letter tile, which stays visible (onerror drops the img)
+// when the login has no avatar / the viewer is offline. Circular via .av.human.
+function ghAvatar(login, size) {
+  const h = hue(login);
+  const grad = `linear-gradient(140deg, hsl(${h} 70% 62%), hsl(${(h + 38) % 360} 72% 54%))`;
+  const cls = "av gh" + (size ? " " + size : "") + " human";
+  const init = (login || "?").trim().charAt(0).toUpperCase();
+  return `<span class="${cls}" style="background:${grad}">${esc(init)}<img class="gh-face" ` +
+    `src="https://github.com/${esc(encodeURIComponent(login || ""))}.png?size=96" alt="" ` +
+    `loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
+}
 
 /* ---- icons ----------------------------------------------------------- */
 const I = {
