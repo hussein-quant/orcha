@@ -157,4 +157,15 @@
 .pair-warn-title { display: flex; align-items: center; gap: 9px; color: var(--warn); font-size: 14px; font-weight: 720; }
 .pair-warn-title svg { width: 18px; height: 18px; }
 .pair-warning p { margin: 10px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.55; }
+/* NB: the file-split (#191) truncated this file mid-rule here — the .pair-remedy tail,
+   .pair-remedy code, and the pairing media query below are restored from the pre-split
+   styles.css (af7cc5f). Without the closing brace, any rule appended after it is
+   swallowed by the unclosed declaration block. */
 .pair-remedy { margin-top: 13px; padding: 11px 12px; border-radius: 9px; background: var(--surface); border: 1px solid var(--border);
+  color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.pair-remedy code { white-space: normal; word-break: break-word; }
+@media (max-width: 720px) {
+  .pair-grid { grid-template-columns: 1fr; }
+  .pair-qr { width: min(304px, 100%); height: auto; aspect-ratio: 1; margin: 0 auto; }
+  .pair-url { text-align: left; }
+}

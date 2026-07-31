@@ -1,11 +1,12 @@
 /* Portal conversation and terminal pairing styles. */
-  color: var(--text-2); font-size: 12px; line-height: 1.5; }
-.pair-remedy code { white-space: normal; word-break: break-word; }
-@media (max-width: 720px) {
-  .pair-grid { grid-template-columns: 1fr; }
-  .pair-qr { width: min(304px, 100%); height: auto; aspect-ratio: 1; margin: 0 auto; }
-  .pair-url { text-align: left; }
-}
+/* NB: the file-split (#191) left a severed fragment here — the .pair-remedy tail,
+   .pair-remedy code, and the pairing media query. All three were already restored
+   into overlays.css (which owns the pairing modal); the duplicates are removed so
+   this file parses standalone. The Swiss skin block that used to dangle UNCLOSED at
+   the end of this file moved to responsive.css ("skin overrides") for the same
+   reason — its severed second half there ate html[data-skin="swiss"][data-theme=
+   "light"] via CSS error recovery, which is what made the theme toggle look dead
+   whenever the Swiss skin was active. */
 
 /* toast */
 .toast { position: fixed; right: 22px; bottom: 22px; z-index: 90; background: var(--surface);
@@ -94,42 +95,3 @@
 .ncenter .c-violet { color: var(--violet); background: var(--violet-soft); border: 1px solid var(--violet-line); }
 .ncenter .c-info { color: var(--info); background: var(--info-soft); border: 1px solid var(--info-line); }
 .ncenter .c-idle { color: var(--idle); background: var(--idle-soft); border: 1px solid var(--idle-line); }
-
-/* ============================================================================
-   Skin: "Swiss" — opt-in design, selectable from Settings → Appearance.
-   Direction 1b of the redesign explorations: Space Grotesk + mono accents,
-   hairline grid, electric indigo, sharp corners, no shadows.
-   Applied as [data-skin="swiss"] on <html>, orthogonal to [data-theme]
-   (dark / light / auto all keep working). Default (no attribute) = classic teal.
-   ========================================================================== */
-
-html[data-skin="swiss"],
-html[data-skin="swiss"][data-theme="dark"] {
-  /* surfaces — warm near-blacks, hairline borders */
-  --bg:        #0e0e10;
-  --bg-grad-1: transparent;
-  --bg-grad-2: transparent;
-  --surface:   #151517;
-  --surface-2: #1c1c1f;
-  --surface-3: #242428;
-  --raised:    #242428;
-  --border:    #3a3a40;
-  --border-2:  #4a4a52;
-  --hover:     #242428;
-
-  --text:   #f2f2ee;
-  --text-2: #c9c9c2;
-  --muted:  #a2a29a;
-  --faint:  #6a6a64;
-
-  /* brand accent — electric indigo replaces teal */
-  --accent:      #5a72ff;
-  --accent-ink:  #ffffff;
-  --accent-soft: rgba(90, 114, 255, .13);
-  --accent-line: rgba(90, 114, 255, .42);
-  --accent-glow: rgba(90, 114, 255, .25);
-
-  /* maker / human accent — coral replaces amber */
-  --amber: #ff7a52;
-
-  --ok:     #42b877; --ok-soft:     rgba(66, 184, 119, .15); --ok-line:     rgba(66, 184, 119, .40);

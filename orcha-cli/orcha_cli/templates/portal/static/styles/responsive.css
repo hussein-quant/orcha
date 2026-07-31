@@ -1,4 +1,43 @@
 /* Portal responsive layout and skin overrides. */
+
+/* ============================================================================
+   Skin: "Swiss" — opt-in design, selectable from Settings → Appearance.
+   Direction 1b of the redesign explorations: Space Grotesk + mono accents,
+   hairline grid, electric indigo, sharp corners, no shadows.
+   Applied as [data-skin="swiss"] on <html>, orthogonal to [data-theme]
+   (dark / light / auto all keep working). Default (no attribute) = classic teal.
+   ========================================================================== */
+
+html[data-skin="swiss"],
+html[data-skin="swiss"][data-theme="dark"] {
+  /* surfaces — warm near-blacks, hairline borders */
+  --bg:        #0e0e10;
+  --bg-grad-1: transparent;
+  --bg-grad-2: transparent;
+  --surface:   #151517;
+  --surface-2: #1c1c1f;
+  --surface-3: #242428;
+  --raised:    #242428;
+  --border:    #3a3a40;
+  --border-2:  #4a4a52;
+  --hover:     #242428;
+
+  --text:   #f2f2ee;
+  --text-2: #c9c9c2;
+  --muted:  #a2a29a;
+  --faint:  #6a6a64;
+
+  /* brand accent — electric indigo replaces teal */
+  --accent:      #5a72ff;
+  --accent-ink:  #ffffff;
+  --accent-soft: rgba(90, 114, 255, .13);
+  --accent-line: rgba(90, 114, 255, .42);
+  --accent-glow: rgba(90, 114, 255, .25);
+
+  /* maker / human accent — coral replaces amber */
+  --amber: #ff7a52;
+
+  --ok:     #42b877; --ok-soft:     rgba(66, 184, 119, .15); --ok-line:     rgba(66, 184, 119, .40);
   --info:   #5a72ff; --info-soft:   rgba(90, 114, 255, .15); --info-line:   rgba(90, 114, 255, .40);
   --warn:   #e0a13a; --warn-soft:   rgba(224, 161, 58, .16); --warn-line:   rgba(224, 161, 58, .46);
   --danger: #ff5a5f; --danger-soft: rgba(255, 90, 95, .15);  --danger-line: rgba(255, 90, 95, .46);
