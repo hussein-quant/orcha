@@ -49,6 +49,10 @@ struct AgentDto: Decodable, Identifiable {
     var activeRun: ActiveRunDto?
     var lastActive: String?
     var terminatedAt: String?
+    /// Collab v1 — the GitHub identity a human member is mapped to (nil for AI agents
+    /// and unmapped humans) + their project role (owner | member | viewer).
+    var githubLogin: String?
+    var memberRole: String?
 
     enum CodingKeys: String, CodingKey {
         case id, alias, role, kind, status, model
@@ -59,6 +63,8 @@ struct AgentDto: Decodable, Identifiable {
         case activeRun = "active_run"
         case lastActive = "last_active"
         case terminatedAt = "terminated_at"
+        case githubLogin = "github_login"
+        case memberRole = "member_role"
     }
 }
 
@@ -116,9 +122,13 @@ struct TaskDto: Decodable, Identifiable {
     var planMessage: TaskMessageDto?
     var planDecision: String?
     var dependsOn: [String] = []
+    /// Collab v1 — the owner-assigned human reviewer (nil = anyone), plus the resolved
+    /// `{agent_id, alias, github_login}` chip the server rides on the task list.
+    var reviewerAgentId: String?
+    var reviewer: TaskReviewerDto?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description, status, priority, result, assignees
+        case id, title, description, status, priority, result, assignees, reviewer
         case definitionOfDone = "definition_of_done"
         case isRoot = "is_root"
         case createdByAgentId = "created_by_agent_id"
@@ -131,6 +141,7 @@ struct TaskDto: Decodable, Identifiable {
         case planMessage = "plan_message"
         case planDecision = "plan_decision"
         case dependsOn = "depends_on"
+        case reviewerAgentId = "reviewer_agent_id"
     }
 
     init(from decoder: Decoder) throws {
@@ -170,11 +181,14 @@ struct TaskDto: Decodable, Identifiable {
             planDecision = nil
         }
         dependsOn = try c.decodeIfPresent([String].self, forKey: .dependsOn) ?? []
+        reviewerAgentId = try c.decodeIfPresent(String.self, forKey: .reviewerAgentId)
+        reviewer = try c.decodeIfPresent(TaskReviewerDto.self, forKey: .reviewer)
     }
 
     init(
         id: String, title: String, status: String = "unknown", priority: Int? = nil,
-        result: String? = nil, planMessage: TaskMessageDto? = nil, planDecision: String? = nil
+        result: String? = nil, planMessage: TaskMessageDto? = nil, planDecision: String? = nil,
+        reviewer: TaskReviewerDto? = nil
     ) {
         self.id = id
         self.title = title
@@ -183,6 +197,35 @@ struct TaskDto: Decodable, Identifiable {
         self.result = result
         self.planMessage = planMessage
         self.planDecision = planDecision
+        self.reviewer = reviewer
+        self.reviewerAgentId = reviewer?.agentId
+    }
+}
+
+/// The resolved reviewer chip riding a task row (`task_list_query.py`) and the
+/// `PUT /api/tasks/{tid}/reviewer` echo.
+struct TaskReviewerDto: Decodable, Equatable {
+    let agentId: String
+    var alias: String?
+    var githubLogin: String?
+
+    enum CodingKeys: String, CodingKey {
+        case alias
+        case agentId = "agent_id"
+        case githubLogin = "github_login"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agentId = try c.decode(String.self, forKey: .agentId)
+        alias = try c.decodeIfPresent(String.self, forKey: .alias)
+        githubLogin = try c.decodeIfPresent(String.self, forKey: .githubLogin)
+    }
+
+    init(agentId: String, alias: String? = nil, githubLogin: String? = nil) {
+        self.agentId = agentId
+        self.alias = alias
+        self.githubLogin = githubLogin
     }
 }
 
@@ -560,5 +603,133 @@ struct GenericIdResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case status
         case taskId = "task_id"
+    }
+}
+
+/// `GET /api/me?cid=` — who is the acting human, per the trusted proxy identity
+/// (identity_routes.py). `trusted:false` is the self-host / trust-off lane: the app
+/// keeps its permissive paired-human behavior. `trusted:true` with a nil identity is
+/// the honest "signed in, but not a member of this project" state.
+struct MeResponse: Decodable {
+    var identity: ActingIdentity?
+    var trusted = false
+
+    enum CodingKeys: String, CodingKey {
+        case identity, trusted
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        identity = try c.decodeIfPresent(ActingIdentity.self, forKey: .identity)
+        trusted = try c.decodeIfPresent(Bool.self, forKey: .trusted) ?? false
+    }
+
+    init(identity: ActingIdentity? = nil, trusted: Bool = false) {
+        self.identity = identity
+        self.trusted = trusted
+    }
+}
+
+/// The acting member's identity payload: role + grants gate affordances off the same
+/// source the server enforces (owners hold every grant implicitly — see `Access`).
+struct ActingIdentity: Decodable, Equatable {
+    let agentId: String
+    var alias: String = ""
+    var githubLogin: String?
+    var memberRole: String = "member"
+    var grants: [String] = []
+    var avatarUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case alias, grants
+        case agentId = "agent_id"
+        case githubLogin = "github_login"
+        case memberRole = "member_role"
+        case avatarUrl = "avatar_url"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agentId = try c.decode(String.self, forKey: .agentId)
+        alias = try c.decodeIfPresent(String.self, forKey: .alias) ?? ""
+        githubLogin = try c.decodeIfPresent(String.self, forKey: .githubLogin)
+        memberRole = try c.decodeIfPresent(String.self, forKey: .memberRole) ?? "member"
+        grants = try c.decodeIfPresent([String].self, forKey: .grants) ?? []
+        avatarUrl = try c.decodeIfPresent(String.self, forKey: .avatarUrl)
+    }
+
+    init(
+        agentId: String, alias: String = "", githubLogin: String? = nil,
+        memberRole: String = "member", grants: [String] = [], avatarUrl: String? = nil
+    ) {
+        self.agentId = agentId
+        self.alias = alias
+        self.githubLogin = githubLogin
+        self.memberRole = memberRole
+        self.grants = grants
+        self.avatarUrl = avatarUrl
+    }
+}
+
+/// `GET /api/containers/{cid}/members` — the roster. `restricted:true` means roster
+/// privacy applies: `members` holds ONLY the caller's own row (member_routes.py).
+struct MembersResponse: Decodable {
+    var members: [MemberDto] = []
+    var restricted = false
+
+    enum CodingKeys: String, CodingKey {
+        case members, restricted
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        members = try c.decodeIfPresent([MemberDto].self, forKey: .members) ?? []
+        restricted = try c.decodeIfPresent(Bool.self, forKey: .restricted) ?? false
+    }
+
+    init(members: [MemberDto] = [], restricted: Bool = false) {
+        self.members = members
+        self.restricted = restricted
+    }
+}
+
+/// One roster row. `pending` = invited (github_login set) but never signed in.
+struct MemberDto: Decodable, Identifiable, Equatable {
+    let agentId: String
+    var alias: String = ""
+    var githubLogin: String?
+    var memberRole: String = "member"
+    var grants: [String] = []
+    var pending = false
+
+    var id: String { agentId }
+
+    enum CodingKeys: String, CodingKey {
+        case alias, grants, pending
+        case agentId = "agent_id"
+        case githubLogin = "github_login"
+        case memberRole = "member_role"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agentId = try c.decode(String.self, forKey: .agentId)
+        alias = try c.decodeIfPresent(String.self, forKey: .alias) ?? ""
+        githubLogin = try c.decodeIfPresent(String.self, forKey: .githubLogin)
+        memberRole = try c.decodeIfPresent(String.self, forKey: .memberRole) ?? "member"
+        grants = try c.decodeIfPresent([String].self, forKey: .grants) ?? []
+        pending = try c.decodeIfPresent(Bool.self, forKey: .pending) ?? false
+    }
+
+    init(
+        agentId: String, alias: String = "", githubLogin: String? = nil,
+        memberRole: String = "member", grants: [String] = [], pending: Bool = false
+    ) {
+        self.agentId = agentId
+        self.alias = alias
+        self.githubLogin = githubLogin
+        self.memberRole = memberRole
+        self.grants = grants
+        self.pending = pending
     }
 }
