@@ -4,7 +4,11 @@
 # containers only ever see the 1-hour tokens via the workspace mount.
 #
 # Wired by a systemd timer (github-token-refresh.timer, every 40 min). Reads
-# the workspace list from $ORCHA_WORKSPACES (space-separated project dirs).
+# the workspace list from the provisioner's registry file (lines "<cid> <dir>",
+# $ORCHA_WORKSPACES_FILE, default /opt/orcha-work/workspaces.list — maintained
+# by provision-projects.sh). When the registry doesn't exist yet (pre-provisioner
+# boxes), falls back to the legacy $ORCHA_WORKSPACES env var (space-separated
+# project dirs).
 #
 # Multi-org: the app may be installed on SEVERAL orgs/users. Per workspace this
 # writes TWO files into <ws>/.orcha:
@@ -28,7 +32,7 @@ set -eu
 
 SECRETS="${ORCHA_SECRETS_DIR:-/opt/orcha-secrets}"
 APP_ID=$(python3 -c "import json;print(json.load(open('$SECRETS/github-app.json'))['id'])")
-MINT="$(dirname "$0")/github-app-token.py"
+MINT="${ORCHA_MINT:-$(dirname "$0")/github-app-token.py}"
 PORTAL="${ORCHA_PORTAL_URL:-http://127.0.0.1:8001}"
 
 # install_token_file <dest> <content> — atomic write (tmp + rename) with the
@@ -64,7 +68,16 @@ print(json.dumps(tokens))
 PYEOF
 ) || TOKENS_JSON="{}"
 
-for WS in ${ORCHA_WORKSPACES:-/opt/orcha-work/dogfood}; do
+# Workspace list: the provisioner's registry when present (2nd column of
+# "<cid> <dir>" lines), else the legacy env var.
+WSFILE="${ORCHA_WORKSPACES_FILE:-/opt/orcha-work/workspaces.list}"
+if [ -f "$WSFILE" ]; then
+    WORKSPACES=$(awk 'NF >= 2 {print $2}' "$WSFILE")
+else
+    WORKSPACES="${ORCHA_WORKSPACES:-/opt/orcha-work/dogfood}"
+fi
+
+for WS in $WORKSPACES; do
     [ -d "$WS/.orcha" ] || continue
 
     # Which repo (if any) is this workspace's container bound to? cid comes from

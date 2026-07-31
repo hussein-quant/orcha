@@ -49,4 +49,9 @@ the control-plane spec: target arbitrary customer VMs, not only our pool.
 
 - `orcha-cli/` — the CLI + portal templates (Orcha proper, incl. sandbox mode)
 - `docs/` — specs, plans, operator docs, cloud design docs
-- `deploy/` — (forthcoming) per-box deployment: compose, Caddy, oauth2-proxy
+- `deploy/` — per-box deployment: bootstrap, auth perimeter (Caddy +
+  oauth2-proxy), and the box-side systemd timers — `github-token-refresh`
+  (workspace App tokens), `sync-members` (portal roster → OAuth allowlist), and
+  `provision-projects` (portal-created projects get a workspace + notifier
+  runtime; registry at `/opt/orcha-work/workspaces.list`). See
+  `deploy/README.md` for setup and the provisioning behavior.
