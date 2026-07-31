@@ -11,6 +11,14 @@ missing.
 ## [Unreleased]
 
 ### Added
+- Per-device bearer tokens for Orcha Cloud: the iOS app pairs via GitHub OAuth in a
+  browser sheet (`/auth/device` mints a token tied to the signed-in member and hands
+  it over through the `orcha://` URL scheme), and the perimeter's new wildcard bearer
+  lane validates tokens against the portal (`GET /api/auth/check`) and forwards the
+  member's verified GitHub identity upstream — phone requests are attributed to the
+  human who paired the device. Tokens are stored hash-only, listable, and revocable
+  (owner: anyone's; member: their own); the exact-match team token stays first in the
+  Caddyfile as the break-glass lane (`docs/device-tokens.md`).
 - Sandbox wake mode (opt-in via `orcha sandbox on`): agent wakes run inside
   isolated, resource-capped Docker containers instead of directly on the host,
   and survive daemon restarts instead of being orphaned by them. Per-run
