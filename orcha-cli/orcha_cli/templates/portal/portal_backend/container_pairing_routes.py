@@ -117,7 +117,8 @@ def get_container_pairing(
         # is refused (403), and any other requested human id is overridden to the
         # member's own row (you pair a phone for yourself, never as someone else).
         human_agent_id = (
-            trusted_actor(cur, request, cid, human_agent_id) or human_agent_id
+            trusted_actor(cur, request, cid, human_agent_id, write=False)
+            or human_agent_id
         )
         cur.execute(
             "SELECT id, alias FROM agents WHERE container_id=%s AND kind='human' "

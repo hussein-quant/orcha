@@ -1,5 +1,6 @@
 """Serve compatibility snapshots and static dashboard pages."""
 
+from fastapi import Request
 from fastapi.responses import HTMLResponse
 
 from portal_backend.application import app
@@ -8,13 +9,25 @@ from portal_backend.static_pages import serve_page
 
 
 @app.get("/api/snapshot/{cid}")
-def snapshot(cid: str):
-    return get_container(cid)
+def snapshot(cid: str, request: Request):
+    return get_container(cid, request)
 
 
 @app.get("/", response_class=HTMLResponse)
 def home():
     return serve_page("home.html")
+
+
+@app.get("/projects", response_class=HTMLResponse)
+def projects_page():
+    """The post-login PROJECTS landing (access model): a grid of the signed-in
+    user's projects, one card each — name, repo chip, agents/tasks counts, a
+    needs-you badge, member preview (roster-privacy aware), Open + per-project
+    phone pairing. Pure client-side like every page: reads GET /api/containers
+    (already membership-filtered under the trusted lane) and renders. The home
+    page's boot redirects a bare "/" here whenever the stack isn't the
+    single-project case; in-project links carry ?cid= and never bounce."""
+    return serve_page("projects.html")
 
 
 @app.get("/settings", response_class=HTMLResponse)
