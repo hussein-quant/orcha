@@ -128,9 +128,16 @@ def write_api_config(project_dir: str | pathlib.Path, name: str) -> str:
 def build_docker_argv(inner_argv: "Sequence[str]", *, cfg: SandboxConfig, name: str,
                       workspace: str, network: Optional[str],
                       api_config_mount: str,
-                      extra_labels: "Sequence[str]" = ()) -> "list[str]":
-    argv = [
-        "docker", "run",
+                      extra_labels: "Sequence[str]" = (),
+                      interactive: bool = False) -> "list[str]":
+    argv = ["docker", "run"]
+    if interactive:
+        # Resident lane: `docker run -i` keeps the CLIENT's stdin piped through to
+        # the container, so the notifier's stdin=PIPE Popen contract (the warm
+        # stream-json turn feed) survives the docker wrap unchanged. One-shot
+        # wakes never pass it (their stdin is DEVNULL).
+        argv.append("-i")
+    argv += [
         "--name", name,
         "--label", LABEL_MANAGED,
         "--label", f"orcha.container_name={name}",
