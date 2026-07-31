@@ -21,6 +21,7 @@ function renderCtx() {
     <div style="min-width:0">
       <div class="nm">${HomO.esc(c.name)}</div>
       <div class="desc">${HomO.esc(c.description || "—")}</div>
+      ${typeof ghRepoHtml === "function" ? ghRepoHtml(c) : ""}
     </div>
     <div class="grow"></div>
     <div class="stat"><span class="n">${HomO.agents().length}</span><span class="l">Agents</span></div>

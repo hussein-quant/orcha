@@ -4,6 +4,7 @@ from .agents import AgentCreate, AgentCreateResponse, InitialTask
 from .containers import (
     ContainerCreate,
     ContainerCreateResponse,
+    ContainerGithubBinding,
     ContainerReset,
     ContainerStatusUpdate,
     LlmKeyActor,
@@ -21,6 +22,7 @@ __all__ = [
     "AgentCreateResponse",
     "ContainerCreate",
     "ContainerCreateResponse",
+    "ContainerGithubBinding",
     "ContainerReset",
     "ContainerStatusUpdate",
     "InitialTask",

@@ -23,6 +23,21 @@ class ContainerReset(BaseModel):
     confirm: str
 
 
+class ContainerGithubBinding(BaseModel):
+    """PUT /api/containers/{cid}/github — bind the container to a GitHub repo.
+
+    `repo` is the plain owner/name of a repository the GitHub App is installed on
+    (the portal's Connect-repo modal offers exactly that list); null unbinds. The
+    pattern rejects anything that is not one owner segment + one name segment."""
+
+    repo: Optional[str] = Field(
+        default=None,
+        pattern=r"^[\w.-]+/[\w.-]+$",
+        max_length=MAX_NAME_LEN,
+        description="GitHub repo as owner/name; null = unbind",
+    )
+
+
 class ContainerStatusUpdate(BaseModel):
     status: str = Field(..., description="active|paused|completed|cancelled|failed")
     actor_agent_id: str = Field(
