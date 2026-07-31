@@ -20,6 +20,8 @@ def cmd_notifier(args, *, services) -> None:
     _probe_container = services._probe_container
     _pid_path = services._pid_path
     _write_global_pid = services._write_global_pid
+    _write_heartbeat = services._write_heartbeat
+    _hb_path = services._hb_path
     reconcile_codex_conversation_runs = services.reconcile_codex_conversation_runs
     reap_workers = services.reap_workers
     reap_orphan_leases = services.reap_orphan_leases
@@ -147,6 +149,10 @@ def cmd_notifier(args, *, services) -> None:
     last_liveness = time.monotonic()
     try:
         while not stop["flag"]:
+            # ISS-22 round 3: proof-of-life FIRST, every pass — --ensure's self-heal
+            # treats a stale stamp as dead-or-wedged and replaces this daemon, so the
+            # stamp must land even when a tick below runs long or throws.
+            _write_heartbeat(cwd)
             # Issue #36: the daemon resolved (api_base, cid) ONCE at startup and never re-checks.
             # When its container is later REPLACED (`orcha up` / `init --force`) or its orcha.json
             # goes stale, it would poll a now-404 container forever — an orphan that still reads as
@@ -230,6 +236,13 @@ def cmd_notifier(args, *, services) -> None:
             gp = _global_pid_path(cid)
             if gp.read_text().splitlines()[0].strip() == str(os.getpid()):
                 gp.unlink()
+        except (FileNotFoundError, ValueError, IndexError, OSError):
+            pass
+        # heartbeat file likewise — ours only (same replacement-daemon caveat)
+        try:
+            hb = _hb_path(cwd)
+            if hb.read_text().split()[0] == str(os.getpid()):
+                hb.unlink()
         except (FileNotFoundError, ValueError, IndexError, OSError):
             pass
     if not args.quiet:
