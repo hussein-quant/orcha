@@ -23,11 +23,15 @@ struct ContainerDto: Decodable {
     /// GH #148 — the wake kill-switch, distinct from `status` (the laptop-level container
     /// lifecycle). Pre-SPEC-1 snapshots may omit this; treat missing as Running (spec §6.3).
     var wakesEnabled: Bool?
+    /// The GitHub repo bound to this workspace as "owner/name" (portal Connect-repo
+    /// parity, `home-github.js`). Nil = unbound, or a pre-binding server.
+    var githubRepo: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, description, status
         case autonomyLevel = "autonomy_level"
         case wakesEnabled = "wakes_enabled"
+        case githubRepo = "github_repo"
     }
 }
 
@@ -484,6 +488,69 @@ struct OutboxResponse: Decodable {
     enum CodingKeys: String, CodingKey {
         case outgoingRequests = "outgoing_requests"
     }
+}
+
+/// `GET /api/github/repos` — the GitHub App installation's repo list.
+/// `available:false` is a graceful off state (the App isn't wired on the server),
+/// deliberately NOT an error; `detail` optionally says why (github_routes.py).
+struct GithubReposResponse: Decodable {
+    var available = false
+    var repos: [GithubRepoDto] = []
+    var detail: String?
+
+    enum CodingKeys: String, CodingKey {
+        case available, repos, detail
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        available = try c.decodeIfPresent(Bool.self, forKey: .available) ?? false
+        repos = try c.decodeIfPresent([GithubRepoDto].self, forKey: .repos) ?? []
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
+    }
+
+    init(available: Bool, repos: [GithubRepoDto] = [], detail: String? = nil) {
+        self.available = available
+        self.repos = repos
+        self.detail = detail
+    }
+}
+
+struct GithubRepoDto: Decodable, Identifiable, Equatable {
+    /// "owner/name" — the binding key the PUT sends back.
+    let fullName: String
+    var isPrivate = false
+    var description: String?
+    var htmlUrl: String?
+
+    var id: String { fullName }
+
+    enum CodingKeys: String, CodingKey {
+        case description
+        case fullName = "full_name"
+        case isPrivate = "private"
+        case htmlUrl = "html_url"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fullName = try c.decode(String.self, forKey: .fullName)
+        isPrivate = try c.decodeIfPresent(Bool.self, forKey: .isPrivate) ?? false
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        htmlUrl = try c.decodeIfPresent(String.self, forKey: .htmlUrl)
+    }
+
+    init(fullName: String, isPrivate: Bool = false, description: String? = nil, htmlUrl: String? = nil) {
+        self.fullName = fullName
+        self.isPrivate = isPrivate
+        self.description = description
+        self.htmlUrl = htmlUrl
+    }
+}
+
+/// `PUT /api/containers/{cid}/github` echoes the persisted binding: `{"repo": "owner/name" | null}`.
+struct GithubBindingResponse: Decodable {
+    var repo: String?
 }
 
 struct GenericIdResponse: Decodable {

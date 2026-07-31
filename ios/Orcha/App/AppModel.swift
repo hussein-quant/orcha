@@ -7,6 +7,8 @@ struct ContainerHealth: Equatable {
     var agents: Int = 0
     var tasks: Int = 0
     var needsYou: Int = 0
+    /// The bound GitHub repo ("owner/name"), shown on the card's secondary line.
+    var githubRepo: String?
 }
 
 /// Flow 09: lazily-fetched agent-detail sections (each best-effort).
@@ -411,7 +413,8 @@ final class AppModel {
                 let reqs = snap.requests.filter { $0.status == "open" && ($0.targetId == stored.humanAgentId || $0.targetId == nil) }
                 containerHealth[stored.id] = ContainerHealth(
                     state: "polling", agents: snap.agents.count, tasks: snap.tasks.count,
-                    needsYou: plans.count + verifs.count + reqs.count
+                    needsYou: plans.count + verifs.count + reqs.count,
+                    githubRepo: snap.container.githubRepo
                 )
             } catch {
                 containerHealth[stored.id] = ContainerHealth(state: "unreachable")
@@ -764,6 +767,39 @@ final class AppModel {
         return await humanAction("Autonomy set to \(MobileUx.autonomyLabel(level))") { base, actor in
             try await api.setAutonomy(base, cid, actor: actor, level: level)
             await refresh()
+        }
+    }
+
+    /// GitHub repo-connect (portal `home-github.js` parity): fetch the App
+    /// installation's repos and map straight to the sheet's phase. Fetch errors
+    /// land in `.failed`, never in the app-wide error banner — the sheet owns them.
+    func loadGithubRepos() async -> RepoConnectPhase {
+        guard let sel = selectedContainer else {
+            return .failed("No workspace is open — close this and try again.")
+        }
+        do {
+            return RepoConnect.phase(from: try await api.githubRepos(sel.baseUrl))
+        } catch {
+            return .failed(friendly(error))
+        }
+    }
+
+    /// Bind (`repo` = "owner/name") or unbind (nil) the workspace's GitHub repo.
+    /// No actor id: the server treats this like the portal's plain PUT. The
+    /// refresh pulls the snapshot whose container now carries the new binding.
+    func setGithubRepo(_ repo: String?) async -> Bool {
+        guard let sel = selectedContainer else { return false }
+        actionInFlight = true
+        error = nil
+        defer { actionInFlight = false }
+        do {
+            let saved = try await api.setGithubRepo(sel.baseUrl, sel.id, repo: repo).repo
+            toast = saved.map { "Repo connected — \($0)" } ?? "Repo unbound"
+            await refresh()
+            return true
+        } catch {
+            self.error = friendly(error)
+            return false
         }
     }
 
