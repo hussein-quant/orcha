@@ -16,6 +16,16 @@ const convCache = {};
 const CONV_CACHE_TTL_MS = 60000;
 let slashOpen = false, slashItems = [], slashIdx = 0;
 let awaiting = false;        // optimistic: true from "human turn sent" until the reply lands
+// Send-UX state (dup-send fix): ONE turn per user action. `sending` gates the single send
+// path (click + Enter + key-repeat all funnel into it); `pendingLocal` is the optimistic
+// bubble — {content, atts, keepStaged, authorId, at, status:'sending'|'failed', err} —
+// which lives until the SERVER's copy of the turn owns the thread (POST response or poll).
+let sending = false;
+let pendingLocal = null;
+let pollBusy = false;        // a slow/restarting portal must not stack same-cursor /turns fetches
+// how long a polled human turn with identical author+content still reconciles the
+// optimistic bubble (covers "POST landed but its response was lost" during a restart).
+const PENDING_MATCH_MS = 20000;
 let presence = null, presenceReason = null;   // Vault presence contract (req 6de81ae3), null until live
 let mountTok = 0;            // bumped on every (re)mount/teardown; stale in-flight responses no-op
 let paired = false;          // S3: a terminal panel is docked here
