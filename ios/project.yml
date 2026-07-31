@@ -46,6 +46,13 @@ targets:
           - io.openorcha.mobile.refresh
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # The orcha:// scheme: the GitHub device-token flow's callback
+        # (orcha://auth/callback — intercepted by ASWebAuthenticationSession,
+        # guarded as a no-op in onOpenURL if it ever reaches the app).
+        CFBundleURLTypes:
+          - CFBundleURLName: io.openorcha.mobile.ios
+            CFBundleURLSchemes:
+              - orcha
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.openorcha.mobile.ios
