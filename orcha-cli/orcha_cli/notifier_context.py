@@ -47,6 +47,7 @@ from .notifier_host import (
 from .notifier_persona import (
     CONVERSATION_LANE_DIRECTIVE,
     HUMAN_COMMS_GUARDRAIL,
+    MULTI_HUMAN_STEERING,
     _wrap_conversation_turn,
     format_persona,
 )

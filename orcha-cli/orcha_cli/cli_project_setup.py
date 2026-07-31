@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import os
 import pathlib
+import re
 import secrets
 import socket
 import subprocess
@@ -13,6 +14,42 @@ from typing import Callable, Optional
 
 MASTER_KEY_ENV = "ORCHA_SECRET_KEY"
 PAIRING_HOST_ENV = "ORCHA_PAIRING_HOST"
+
+# GitHub auto-bind (project-runtime epic): recognise origin remotes that point at
+# github.com in every shape git writes them — https (with optional creds/`.git`),
+# scp-style ssh (git@github.com:o/r.git), and ssh://git@github.com/o/r. The captured
+# owner/name must satisfy the portal's ContainerGithubBinding pattern
+# (^[\w.-]+/[\w.-]+$), so the segments here use the same character class.
+_GITHUB_ORIGIN_RE = re.compile(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
+
+
+def parse_github_origin(url: str) -> Optional[str]:
+    """Return ``owner/name`` when a git remote URL points at github.com, else None."""
+    match = _GITHUB_ORIGIN_RE.search((url or "").strip())
+    if not match:
+        return None
+    owner, name = match.group(1), match.group(2)
+    return f"{owner}/{name}" if owner and name else None
+
+
+def detect_github_repo(project_root: pathlib.Path) -> Optional[str]:
+    """Read the checkout's ``origin`` remote and map it to owner/name (None if not GitHub).
+
+    Any failure — not a git repo, no origin remote, git missing — resolves to None:
+    auto-bind is best-effort sugar, never a reason for `orcha init` to fail.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_github_origin(result.stdout)
 
 
 def find_free_port(start: int, span: int = 100) -> int:

@@ -127,6 +127,46 @@ installation) which the portal reads to list repos across all orgs in the
 Connect-repo modal. `github-app-token.py --list-installations` prints the
 installations; `--repo owner/name` auto-selects the owner's installation.
 
+## Project runtime provisioning (portal-created projects get a real runtime)
+
+A project created from the portal (POST /api/containers) starts as a DB row
+only — no workspace, no notifier, so its agents never wake. The
+`provision-projects` timer (2-min) closes that gap on the box:
+
+```bash
+scp deploy/provision-projects.* <box>:/opt/orcha-cloud/deploy/
+ssh <box> 'cp /opt/orcha-cloud/deploy/provision-projects.{service,timer} /etc/systemd/system/ \
+  && systemctl daemon-reload && systemctl enable --now provision-projects.timer'
+```
+
+Each tick, for every container the portal lists that has no workspace yet, it:
+
+1. creates `/opt/orcha-work/<slug>` (slug from the project name). If the
+   container is **bound to a GitHub repo** (the portal's Connect-repo modal, or
+   `orcha init`'s auto-bind), the repo is cloned via a repo-scoped App token —
+   minted once for the clone, scrubbed from git config after, with the
+   credential helper wired to `.orcha/github-token` exactly like the section
+   above. Unbound projects get an empty workspace with a README saying so.
+2. writes `<ws>/.claude/orcha.json` — `current_container_id`, the loopback
+   portal as `api_base_url`, and sandbox ON with conservative caps
+   (`PROVISION_MEMORY`/`PROVISION_CPUS` env on the service, default 1536m / 1).
+3. chowns the workspace to uid 1000 (the sandbox user) and registers it in
+   **`/opt/orcha-work/workspaces.list`** (lines `<cid> <dir>`) — the box-wide
+   workspace registry. `github-token-refresh.sh` reads this file now (the
+   `$ORCHA_WORKSPACES` env var on its unit remains as fallback for boxes that
+   pre-date the registry), so freshly provisioned projects join the token
+   refresh automatically.
+4. starts a notifier for the workspace (`orcha notifier --ensure`, env sourced
+   from `/root/.orcha-daemon-env` — override with `ORCHA_DAEMON_ENV`). The
+   ensure is a per-container idempotent singleton (workspace pidfile + an
+   atomic `~/.orcha/notifier-<cid>.pid` claim), and it re-runs for every
+   registered workspace each tick, so notifiers also self-heal after a reboot.
+
+Idempotent throughout: registered containers are skipped, existing workspaces
+are never touched (a hand-built pre-registry workspace like `dogfood` is
+*adopted* into the list on the first run), and a failed clone/mint is retried
+on the next tick rather than leaving a half-provisioned workspace behind.
+
 ## Notes
 
 - Agents and sandbox containers inside the box reach `portal:8000` over the

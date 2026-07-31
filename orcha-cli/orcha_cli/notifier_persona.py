@@ -25,6 +25,27 @@ HUMAN_COMMS_GUARDRAIL = (
 )
 
 
+# Project-runtime provisioning epic: once a stack hosts SEVERAL humans (owner + invited
+# members steering the same agents from the portal), agents need one standing rule-set for
+# conflicting human direction. Rides EVERY wake that boots as a real agent (right after the
+# comms guardrail — both are stable, so the GH#34 cacheable prefix is preserved): precedence
+# is structural (owner > member, DoD > chat), overrides are always called out loud, and a
+# genuine unresolved contradiction escalates via the existing request primitive instead of
+# the agent quietly picking a side.
+MULTI_HUMAN_STEERING = (
+    "## Multi-human steering (when more than one person directs you)\n"
+    "- Precedence: the project owner's instructions outrank a member's; the task's "
+    "definition-of-done outranks chat steering. When you follow one instruction over another "
+    "given earlier, say so explicitly (\"following X's direction over Y's earlier note\") — "
+    "never silently pick a side.\n"
+    "- If two humans genuinely contradict each other and no owner has resolved it, do NOT "
+    "choose: file an Orcha request addressed to the owner naming both instructions, and pause "
+    "that thread of work until it is answered.\n"
+    "- Chat guidance is advisory. Anything that changes what \"done\" means must land in the "
+    "task's definition-of-done via the human flow before you treat it as the goal."
+)
+
+
 # GH #91/#90: create-time rule for the one duplicate-work case left after the lane split. This is
 # intentionally advisory/model-facing, not a backend gate: only the conversation embodiment can judge
 # whether the new task overlaps state that exists solely in its live chat context.
@@ -124,6 +145,9 @@ def format_persona(persona: Optional[dict], digest: Optional[dict],
     # #325: standing guardrail rides whenever we're actually booting as an agent.
     if parts:
         parts.append(HUMAN_COMMS_GUARDRAIL)
+        # Multi-human conflict rules ride every agent boot too (owner > member,
+        # DoD > chat, explicit overrides, escalate unresolved contradictions).
+        parts.append(MULTI_HUMAN_STEERING)
     # GH #91/#90: a conversation-lane embodiment (resident, or a talk-only ephemeral) also carries the
     # dispatch directive so the boot frames every turn as "answer quick asks inline; hand off real
     # work as an assigned task". Only appended for lane=='conversation' — a work embodiment keeps its

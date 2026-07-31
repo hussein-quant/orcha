@@ -57,6 +57,12 @@ def register_project_commands(
         default=None,
         help="alias for the first human agent (default: $USER or 'operator')",
     )
+    init.add_argument(
+        "--no-github",
+        action="store_true",
+        help="skip the GitHub auto-bind (by default, a github.com `origin` remote in "
+        "this checkout is bound to the new container automatically)",
+    )
     init.set_defaults(func=handlers["init"])
 
     up = sub.add_parser(
