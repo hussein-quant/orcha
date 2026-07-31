@@ -43,8 +43,21 @@ def wake_scan(
     """
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
-    with db_cursor() as (_, cur):
+    with db_cursor() as (conn, cur):
         container = require_container(cur, cid)
+        # Multi-project (mig 037): stamp the notifier's poll, so the portal knows WHICH
+        # container a host-side daemon actually serves (containers.last_wake_scan_at —
+        # the project switcher's honest wakes-capability signal). Only the daemon calls
+        # this endpoint on a cadence. Throttled to one write/15s (and committed alone,
+        # before the read work below) so the scan stays effectively read-only.
+        cur.execute(
+            """UPDATE containers SET last_wake_scan_at = now()
+                WHERE id=%s AND (last_wake_scan_at IS NULL
+                                 OR last_wake_scan_at < now() - interval '15 seconds')""",
+            (cid,),
+        )
+        if cur.rowcount:
+            conn.commit()
         cur.execute(
             "SELECT wakes_enabled, autonomy_level FROM containers WHERE id=%s", (cid,)
         )

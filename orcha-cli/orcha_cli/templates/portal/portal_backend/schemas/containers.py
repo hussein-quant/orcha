@@ -10,11 +10,24 @@ from portal_backend.limits import MAX_DESC_LEN, MAX_NAME_LEN, MAX_PAYLOAD_LEN
 class ContainerCreate(BaseModel):
     name: str = Field(..., max_length=MAX_NAME_LEN)
     description: Optional[str] = Field(default=None, max_length=MAX_DESC_LEN)
+    # Multi-project (mig 037): the portal's "New project" flow passes additional=true to
+    # create ANOTHER container in this stack (seeding its founding human owner). Without
+    # it the historical `orcha init` 1:1:1 contract holds: a second create is a 409.
+    additional: bool = Field(
+        default=False,
+        description="create an additional project even when one already exists "
+        "(portal multi-project); omitted/false keeps the 1:1:1 init contract",
+    )
 
 
 class ContainerCreateResponse(BaseModel):
     container_id: str
     root_task_id: str
+    # Multi-project additions (additive — CLI callers read container_id only).
+    name: Optional[str] = None
+    # The seeded founding human (additional=true only); null on the init path,
+    # where the CLI registers the human itself via POST .../agents.
+    human_agent_id: Optional[str] = None
 
 
 class ContainerReset(BaseModel):
