@@ -24,6 +24,7 @@ def cmd_notifier(args, *, services) -> None:
     reap_workers = services.reap_workers
     reap_orphan_leases = services.reap_orphan_leases
     reap_orphaned_runs = services.reap_orphaned_runs
+    live_sandbox_shield = services.live_sandbox_shield
     reap_terminal_task_worktrees = services.reap_terminal_task_worktrees
     service_residents = services.service_residents
     _container_vanished = services._container_vanished
@@ -185,13 +186,13 @@ def cmd_notifier(args, *, services) -> None:
                 ) | frozenset(
                     r["proc"].pid for r in live_residents.values() if r.get("proc") is not None
                 )
-                # Resident-lane sandbox shield: a warm sandboxed resident only owns a run
-                # row PER TURN, so between turns its live container has no open row —
-                # without this shield the orphan pass would stop it mid-conversation.
-                live_sandbox = frozenset(
-                    r["sandbox_container_id"] for r in live_residents.values()
-                    if r.get("sandbox_container_id")
-                )
+                # Sandbox shield (residents AND one-shot workers): a warm sandboxed
+                # resident only owns a run row PER TURN, so between turns its live
+                # container has no open row; a one-shot sandbox worker's container is
+                # spawned BEFORE its run-row POST, so a booting wake (or one whose row
+                # POST transiently failed) is row-less while genuinely alive. Without
+                # this shield the orphan pass would stop either mid-flight (M7).
+                live_sandbox = live_sandbox_shield(live_workers, live_residents)
                 reap_orphaned_runs(api_base, cid, live_pids,
                                    live_sandbox=live_sandbox, quiet=args.quiet)
                 # GH#110 §2c: reclaim durable per-(agent+task) worktrees whose task went terminal

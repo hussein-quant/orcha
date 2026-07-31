@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 from typing import Optional
 
@@ -9,6 +10,48 @@ from typing import Optional
 # Imported as a module so tests can monkeypatch `_sandbox.probe` etc. (attribute
 # lookup at call time).
 from . import sandbox as _sandbox
+
+# M7 (remote-runner deferred follow-up, field bug "first chat message dies as
+# 'sandbox container vanished'"): minimum age before the sweep may take a
+# DESTRUCTIVE verdict on a container-backed run it cannot fully observe.
+# `docker run` on a loaded daemon can take many seconds to actually CREATE the
+# container (live evidence: 15s between a run row's POST landing and the
+# container's network join) — during that window `docker inspect` answers "no
+# such container", which is "not born yet", never "vanished". The same window
+# covers the inverse race: a container that IS up whose run-row POST hasn't
+# landed (in flight / transiently failed) must not be stopped as an orphan.
+# Both checks are deferrals, not exemptions — past the grace, the existing
+# vanish/orphan-stop semantics apply unchanged.
+ORPHAN_BOOT_GRACE_SECS = 90.0
+
+
+def _age_secs(iso_ts) -> Optional[float]:
+    """Seconds since an RFC3339/ISO timestamp (docker inspect StartedAt or a run
+    row's started_at), or None when absent/unparseable — callers decide the
+    fail-safe direction explicitly."""
+    if not iso_ts:
+        return None
+    started = _sandbox._parse_started_at(str(iso_ts))
+    if started is None:
+        return None
+    return (datetime.datetime.now(datetime.timezone.utc) - started).total_seconds()
+
+
+def live_sandbox_shield(live_workers: dict, live_residents: dict) -> frozenset:
+    """Container names of THIS daemon's live in-memory sandbox embodiments — the
+    orphan pass must never stop them. Residents: a warm session owns a run row
+    only PER TURN, so between turns its (deliberately long-lived) container has
+    no open row. One-shot workers: the container is spawned BEFORE the run-row
+    POST, so a booting wake (or one whose row POST transiently failed) is
+    row-less while genuinely alive — previously only residents were shielded and
+    such a worker was stopped by the next sweep."""
+    return frozenset(
+        w["sandbox_container_id"] for w in live_workers.values()
+        if w.get("sandbox_container_id")
+    ) | frozenset(
+        r["sandbox_container_id"] for r in live_residents.values()
+        if r.get("sandbox_container_id")
+    )
 
 
 def reap_orphan_leases(api_base: str, cid: str, quiet: bool, services) -> None:
@@ -43,6 +86,18 @@ def _reconcile_sandbox_run(
     # worker_runs.output instead of finishing output=NULL (§5 criterion 3).
     log_path = r.get("log_path")
     if state is None:
+        # M7 boot grace: a YOUNG row whose container isn't probeable yet is the
+        # cold-boot race, not a vanish — `docker run` is still creating the
+        # container (observed 15s on a loaded box) while the row already landed.
+        # Defer the verdict; a genuinely vanished container is stamped once the
+        # row outlives the grace (so #342's "busy forever" stays bounded).
+        row_age = _age_secs(r.get("started_at"))
+        if row_age is not None and row_age < ORPHAN_BOOT_GRACE_SECS:
+            if not quiet:
+                print(f"[notifier] sandbox container {sbx} not probeable but run "
+                      f"{run_id} is only {row_age:.0f}s old (< {ORPHAN_BOOT_GRACE_SECS:.0f}s "
+                      f"boot grace) — deferring vanished verdict (M7)")
+            return 0
         # container gone without a trace (removed out-of-band; the C2 daemon gate in
         # the caller already ruled out "docker down", so None here means GONE) —
         # finish the row so the agent stops reading as busy forever (#342 semantics).
@@ -129,8 +184,12 @@ def reap_orphaned_runs(
     references (drain sidecars are label-exempt via managed_containers). `live_sandbox`
     shields THIS daemon's live in-memory sandbox containers from that orphan pass — a warm
     sandboxed RESIDENT records a run row only per-turn, so between turns its (deliberately
-    long-lived) container has NO open row and would otherwise read as an orphan.
-    Returns the number of dead runs reaped."""
+    long-lived) container has NO open row and would otherwise read as an orphan; one-shot
+    sandbox WORKERS ride the same shield for their row-POST window. Both destructive
+    verdicts (vanished-stamp on a probe-less row, orphan-stop on a row-less container)
+    additionally honor ORPHAN_BOOT_GRACE_SECS — during a cold boot the container and its
+    run row become visible at independent times, and neither half may be reaped while the
+    other is still being born. Returns the number of dead runs reaped."""
     data = services._get_json(f"{api_base}/api/containers/{cid}/running-runs")
     if data is None:
         # API unreachable/booting — decide NOTHING this tick. Especially not the orphan
@@ -235,7 +294,23 @@ def reap_orphaned_runs(
                     continue             # an open run row references it — not an orphan
                 if name in live_sandbox:
                     continue             # THIS daemon's live handle (an idle warm
-                                         # resident between turns) — not an orphan
+                                         # resident / booting worker) — not an orphan
+                # M7 boot grace: a row-less container younger than the grace is a
+                # BOOTING wake whose run-row POST hasn't landed (in flight, or a
+                # transient failure the spawner already warned about) — stopping it
+                # kills the run's first turn mid-boot. One inspect per candidate;
+                # candidates are rare. Probe/parse failure → skip this sweep
+                # (fail-safe: never stop what we cannot age — retried next sweep).
+                cstate = _sandbox.probe(name)
+                age = _age_secs(cstate.started_at) if cstate is not None else None
+                if age is None or age < ORPHAN_BOOT_GRACE_SECS:
+                    if not quiet:
+                        why = ("unprobeable" if cstate is None or age is None
+                               else f"only {age:.0f}s old")
+                        print(f"[notifier] row-less managed container {name} is {why} "
+                              f"(< {ORPHAN_BOOT_GRACE_SECS:.0f}s boot grace) — orphan "
+                              f"stop deferred to a later sweep (M7)")
+                    continue
                 _sandbox.stop(name)
                 if not quiet:
                     print(f"[notifier] stopped ORPHAN sandbox container {name} — no open "

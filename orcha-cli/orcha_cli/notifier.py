@@ -100,6 +100,7 @@ from .notifier_worker_facade import (
     _saved_human_line,
     _saved_ref,
     _synthesize_task_digest,
+    live_sandbox_shield,
     reap_orphan_leases,
     reap_orphaned_runs,
     reap_terminal_task_worktrees,
