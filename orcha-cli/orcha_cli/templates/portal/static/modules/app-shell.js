@@ -1,5 +1,53 @@
 /* Orcha shared portal module: sidebar, topbar, global search, and navigation chrome. */
 
+/* ---- shared floating menu (house dropdown idiom, mirrors ncFloat) ----- *
+ * One floating host per menu id, appended to <body> so the 3s shell re-render never
+ * clobbers an OPEN menu (mountShell rebuilds the sidebar/topbar markup wholesale);
+ * positioned from the trigger's rect on open. Outside-click + Escape close, with the
+ * anchor looked up FRESH by id so the re-rendered trigger still counts as "inside". */
+const _menus = {};
+function menuFloat(id) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = id; el.className = "pmenu float";
+    document.body.appendChild(el);
+    document.addEventListener("click", (e) => {
+      const st = _menus[id];
+      if (!st || !st.open || el.contains(e.target)) return;
+      const anchor = st.anchorId ? document.getElementById(st.anchorId) : null;
+      if (anchor && anchor.contains(e.target)) return;
+      closeMenu(id);
+    });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(id); });
+  }
+  return el;
+}
+function openMenu(id, anchor, html, align) {
+  const el = menuFloat(id);
+  _menus[id] = { open: true, anchorId: anchor ? anchor.id : null };
+  el.innerHTML = html;
+  const r = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
+  if (r) {
+    el.style.top = Math.round(r.bottom + 8) + "px";
+    if (align === "right") {
+      el.style.right = Math.round(Math.max(8, window.innerWidth - r.right)) + "px";
+      el.style.left = "auto";
+    } else {
+      el.style.left = Math.round(Math.max(8, r.left)) + "px";
+      el.style.right = "auto";
+    }
+  }
+  el.classList.add("show");
+  return el;
+}
+function closeMenu(id) {
+  if (_menus[id]) _menus[id].open = false;
+  const el = document.getElementById(id);
+  if (el) el.classList.remove("show");
+}
+function menuIsOpen(id) { return !!(_menus[id] && _menus[id].open); }
+
 /* ---- shell ----------------------------------------------------------- */
 /* ---- collapsible sidebar (icon rail) --------------------------------- *
  * Browser-local, same contract as the theme/skin picks: persisted in
@@ -38,6 +86,35 @@ function actingChipHtml() {
   return who
     ? `${avatar(who.alias, "human", "sm")}${esc(who.alias)}`
     : `<span class="muted">no human registered</span>`;
+}
+
+/* ---- collab: the acting-as account menu (sign out) -------------------- *
+ * The portal sits behind oauth2-proxy; GET /oauth2/sign_out clears the proxy session
+ * (Caddy proxies the path) and rd= sends the signed-out user to the public landing
+ * page. Plain <a> navigation on purpose — no fetch, the proxy owns the redirect. */
+const SIGN_OUT_HREF = "/oauth2/sign_out?rd=%2Fwelcome";
+// Pure builder (harness-pinned): the menu body — login header + the one action.
+function actingMenuHtml() {
+  const ident = identity();
+  if (!ident || !ident.github_login) return "";
+  return `<div class="pm-head">${ghAvatar(ident.github_login, "sm")}
+      <div class="b"><div class="t1">${esc(ident.github_login)}</div>
+      <div class="t2">${esc(ident.member_role || "member")} · GitHub</div></div></div>
+    <a class="pm-row signout" href="${SIGN_OUT_HREF}">${icon("arrow", "")}<span>Sign out</span></a>`;
+}
+// The chip is interactive ONLY with a proxy-verified identity; self-host (identity
+// null) keeps the informational chip untouched — there is no proxy session to clear.
+function wireActingChip() {
+  const chip = document.getElementById("actingChip");
+  if (!chip || !identity()) return;
+  chip.classList.add("menu-trigger");
+  chip.setAttribute("role", "button");
+  chip.setAttribute("aria-haspopup", "true");
+  chip.title = "Signed in via GitHub — account menu";
+  chip.addEventListener("click", () => {
+    if (menuIsOpen("amFloat")) closeMenu("amFloat");
+    else openMenu("amFloat", chip, actingMenuHtml(), "right");
+  });
 }
 
 function mountShell(page, opts) {
@@ -129,7 +206,7 @@ function mountShell(page, opts) {
             <div class="aut" id="autTop" role="radiogroup" aria-label="Container autonomy level"></div>
           </div>
         </div>
-        <div class="acting" title="You are the human authority on this container">
+        <div class="acting" id="actingChip" title="You are the human authority on this container">
           <span class="lbl">acting as</span>
           <span class="who" id="actingWho">${actingHTML}</span>
         </div>
@@ -151,6 +228,9 @@ function mountShell(page, opts) {
     paintAutonomy();
     // SPEC-3: turn the "Needs you" pill into the notification-center dropdown trigger.
     wireNotifPill();
+    // Collab: with a proxy-verified identity the acting chip opens the account menu
+    // (sign out); identity null (self-host) leaves it informational, untouched.
+    wireActingChip();
     const gs = document.getElementById("globalSearch");
     if (gs) document.addEventListener("keydown", (e) => {
       // the "/" shortcut focuses search — but NOT while the user is typing in a field
