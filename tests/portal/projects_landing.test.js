@@ -267,12 +267,142 @@ async function redirectTests() {
     "?cid= deep links always stay — in-project nav carries cid and never bounces");
 }
 
+/* ---------------- PART E — the hub theme toggle is WIRED ----------------- *
+ * Field bug: the /projects moon toggle looked dead. The JS wiring was always
+ * present (projects-boot renders projTopHtml then binds #projTheme →
+ * Orcha.cycleTheme); this part pins that wiring functionally — the REAL
+ * projects-boot.js runs against a fake DOM, and a click on #projTheme must
+ * invoke cycleTheme. (The visual deadness was CSS — see PART F.) */
+function bootSandbox() {
+  const reg = {};
+  const calls = { cycleTheme: 0 };
+  function bootNode(id) {
+    const n = {
+      _id: id || "", _html: "", _listeners: {},
+      get id() { return n._id; },
+      set id(v) { n._id = v; reg[v] = n; },
+      get innerHTML() { return n._html; },
+      set innerHTML(v) {
+        n._html = v == null ? "" : String(v);
+        // register child ids like a real DOM would, so getElementById finds
+        // the freshly rendered #projTheme
+        (n._html.match(/id="([^"]+)"/g) || []).forEach((x) => {
+          const cid = x.slice(4, -1);
+          if (!reg[cid]) bootNode(cid);
+        });
+      },
+      set textContent(v) { n._text = v; }, get textContent() { return n._text || ""; },
+      classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+      setAttribute() {}, getAttribute: () => null,
+      addEventListener(ev, fn) { (n._listeners[ev] = n._listeners[ev] || []).push(fn); },
+      click() { (n._listeners.click || []).forEach((f) => { if (typeof f === "function") f(); }); },
+      appendChild() {}, contains: () => false,
+      querySelector: () => null, querySelectorAll: () => [],
+    };
+    if (id) reg[id] = n;
+    return n;
+  }
+  bootNode("projGrid"); bootNode("projTop"); bootNode("projSub");
+  const sandbox = {
+    window: {}, console, encodeURIComponent,
+    localStorage: { getItem: () => null, setItem() {} },
+    location: { pathname: "/projects", search: "", assign() {} },
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 0, clearTimeout() {},
+    fetch: (url) => {
+      if (String(url) === "/api/containers") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ containers: LIST }) });
+      }
+      if (String(url).indexOf("/api/me") === 0) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({
+          identity: { github_login: "octocat", member_role: "owner" }, trusted: true }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    },
+    document: {
+      documentElement: { setAttribute() {}, getAttribute: () => null },
+      body: bootNode("body"),
+      addEventListener() {},
+      createElement: () => bootNode(""),
+      getElementById: (id) => reg[id] || null,
+    },
+  };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  sandbox.window.Orcha = {
+    esc,
+    icon: (name, cls) => `<svg class="${cls || "ico"}" data-icon="${name}"></svg>`,
+    avatar: () => "<span></span>", ghAvatar: () => "<span></span>",
+    orcaSVG: () => "<svg></svg>",
+    cycleTheme: () => { calls.cycleTheme += 1; },
+    openPairingModal() {}, modal() {}, closeModal() {}, toast() {},
+  };
+  vm.runInContext(read("pages", "projects-state.js"), sandbox, { filename: "projects-state.js" });
+  vm.runInContext(read("pages", "projects-boot.js"), sandbox, { filename: "projects-boot.js" });
+  return { reg, calls };
+}
+
+async function toggleWiringTests() {
+  console.log("\nPART E — the hub theme toggle is wired (real projects-boot.js)\n");
+  const { reg, calls } = bootSandbox();
+  await flush(); await flush(); await flush();
+  assert(/id="projTheme"/.test(reg.projTop.innerHTML),
+    "boot renders the top chrome with the #projTheme toggle");
+  const tb = reg.projTheme;
+  assert(!!tb && (tb._listeners.click || []).length === 1,
+    "#projTheme carries exactly one click listener after boot");
+  tb.click();
+  assert(calls.cycleTheme === 1, "clicking the toggle invokes Orcha.cycleTheme");
+}
+
+/* ---------------- PART F — stylesheet integrity (the ACTUAL field bug) --- *
+ * Root cause of "the theme toggle does nothing": the #191 file-split severed
+ * styles.css MID-RULE. responsive.css began with orphan declarations + a stray
+ * "}", and CSS error recovery consumed everything up to the first "{" as an
+ * invalid selector — swallowing the ENTIRE html[data-skin="swiss"]
+ * [data-theme="light"] rule. With the Swiss skin active, an explicit light
+ * theme then had no tokens: data-theme flipped but the page stayed dark.
+ * This part makes that class of damage impossible to reintroduce silently:
+ * every shared stylesheet must parse standalone — balanced braces, and no
+ * top-level content before the first "{" that could only be a severed
+ * fragment (a ";" or "}" in a selector prelude). */
+function cssIntegrityTests() {
+  console.log("\nPART F — shared stylesheets parse standalone (split-fragment guard)\n");
+  const SHEETS = ["tokens.css", "shell.css", "components.css", "overlays.css",
+    "conversation.css", "responsive.css"];
+  const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ");
+  for (const name of SHEETS) {
+    const css = stripComments(read("styles", name));
+    let depth = 0, minDepth = 0;
+    for (const ch of css) {
+      if (ch === "{") depth += 1;
+      else if (ch === "}") { depth -= 1; if (depth < minDepth) minDepth = depth; }
+    }
+    assert(depth === 0, `styles/${name}: braces balance (no rule severed at EOF)`);
+    assert(minDepth === 0, `styles/${name}: no stray top-level "}" (no severed head)`);
+    // A ";" before the first "{" can only be an orphaned declaration tail —
+    // the exact fragment shape that eats the next rule via error recovery.
+    const head = css.slice(0, css.indexOf("{") >= 0 ? css.indexOf("{") : css.length);
+    assert(head.indexOf(";") < 0 && head.indexOf("}") < 0,
+      `styles/${name}: nothing declaration-like before the first rule`);
+  }
+  // and the rule the field bug lost must exist as a REACHABLE top-level rule
+  const resp = stripComments(read("styles", "responsive.css"));
+  const lightAt = resp.indexOf('html[data-skin="swiss"][data-theme="light"]');
+  assert(lightAt >= 0, "responsive.css carries the Swiss LIGHT theme rule");
+  const before = resp.slice(0, lightAt);
+  let d = 0;
+  for (const ch of before) { if (ch === "{") d += 1; else if (ch === "}") d -= 1; }
+  assert(d === 0, "…at the top level, where the parser can actually reach it");
+}
+
 async function run() {
   console.log("projects_landing.test.js\n");
   staticTests();
   builderTests();
   await pairingScopeTests();
   await redirectTests();
+  await toggleWiringTests();
+  cssIntegrityTests();
   console.log("\n" + (failures === 0 ? "ALL PASSED" : failures + " FAILED"));
   process.exit(failures === 0 ? 0 : 1);
 }
