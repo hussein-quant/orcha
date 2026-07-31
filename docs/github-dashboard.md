@@ -10,8 +10,11 @@ rides the container snapshot the home page already polls, so the card updates in
 ## API
 
 - `GET /api/github/repos` → `{"available": true, "repos": [{full_name, private,
-  description, html_url}]}` — the GitHub App installation's repositories
-  (`GET https://api.github.com/installation/repositories`, first 100).
+  description, html_url}]}` — the GitHub App's repositories
+  (`GET https://api.github.com/installation/repositories`, first 100 per
+  installation). With the multi-org token map (below) this spans **all**
+  installations: merged, deduped, sorted by `full_name`; `available` is true if
+  any installation answered and per-owner failures ride a `detail` string.
 - `GET /api/containers/{cid}/github` → `{"repo": "owner/name" | null}`.
 - `PUT /api/containers/{cid}/github` body `{"repo": "owner/name" | null}` — validates
   the owner/name shape (422 otherwise), persists, returns the binding.
@@ -26,8 +29,21 @@ mints a short-lived **installation token** from the App's PEM and writes it to
 `<project>/.orcha/github-token`. The PEM stays on the host, always; only the 1-hour
 token ever reaches a container.
 
+**Multi-org**: the App can be installed on several orgs/users (e.g. `quantal-health`
+and `Quantal-Labs-AI`). The refresh timer discovers every installation and writes a
+second, portal-facing file `<project>/.orcha/github-tokens.json` — a JSON map
+`{"<owner-lowercase>": "<token>", ...}` with one installation token per owner —
+which `ORCHA_GITHUB_TOKENS_FILE` points the portal at. When that map is present and
+non-empty the repos endpoint queries each token and merges the results; when it is
+absent/unreadable/empty the legacy single-token file below is used unchanged. The
+legacy `<project>/.orcha/github-token` is what agents keep using for git credentials:
+for a repo-bound container it is minted from the **owner-matched** installation and
+scoped to the bound repo; unbound workspaces get the first installation's token as
+before.
+
 The compose template mounts the stack dir read-only (`./:/app/stack-dir:ro`) and points
-`ORCHA_GITHUB_TOKEN_FILE` at `/app/stack-dir/github-token`. It deliberately does NOT
+`ORCHA_GITHUB_TOKEN_FILE` at `/app/stack-dir/github-token` (and
+`ORCHA_GITHUB_TOKENS_FILE` at `/app/stack-dir/github-tokens.json`). It deliberately does NOT
 bind-mount the token file itself: a missing file would make Docker create a root-owned
 *directory* at the source (breaking `docker compose up` and every later refresh), and a
 single-file mount pins the inode so the timer's atomic write-then-rename refresh would
