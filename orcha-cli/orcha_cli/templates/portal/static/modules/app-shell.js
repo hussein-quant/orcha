@@ -25,6 +25,21 @@ function toggleSidebar() {
   }
 }
 
+/* Collab v1: the topbar "acting as" chip. When /api/me resolved a verified GitHub
+ * identity, the actor IS that user — circular GitHub avatar (letter-tile fallback on
+ * image error) + the login. Otherwise keep the pre-collab fallback: the picked local
+ * human, or the "no human registered" nudge. Extracted so the harness can pin it. */
+function actingChipHtml() {
+  const ident = identity();
+  if (ident && ident.github_login) {
+    return `${ghAvatar(ident.github_login, "sm")}<span class="gh-login">${esc(ident.github_login)}</span>`;
+  }
+  const who = actingHuman();
+  return who
+    ? `${avatar(who.alias, "human", "sm")}${esc(who.alias)}`
+    : `<span class="muted">no human registered</span>`;
+}
+
 function mountShell(page, opts) {
   opts = opts || {};
   const a = attnItems();
@@ -81,10 +96,7 @@ function mountShell(page, opts) {
 
   const topbar = document.getElementById("topbar");
   if (topbar) {
-    const who = actingHuman();
-    const actingHTML = who
-      ? `${avatar(who.alias, "human", "sm")}${esc(who.alias)}`
-      : `<span class="muted">no human registered</span>`;
+    const actingHTML = actingChipHtml();
     // Two logical lines: identity/search/alerts, then the controls. They sit on one row when
     // the topbar is wide and collapse to two balanced rows when it's too narrow to fit (CSS).
     topbar.innerHTML = `

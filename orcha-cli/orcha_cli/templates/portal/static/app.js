@@ -64,6 +64,7 @@ if (typeof D === "undefined") {
     applyTheme: (t) => document.documentElement.setAttribute("data-theme", t), currentTheme: F_currentTheme, cycleTheme: F_cycleTheme, orcaSVG: () => "<svg></svg>",
     agents: F_agents, tasks: F_tasks, requests: F_requests, agentByAlias: F_agentByAlias, agentById: F_agentById, aliasFor: (id) => ((F_agentById(id) || {}).alias || null), taskById: (id) => F_tasks().find((t) => String(t.id) === String(id)) || null, humans: F_humans, isToHuman: F_isToHuman,
     actingHuman: F_actingHuman, setActingHuman: F_noop, patch: F_patch, selectionWithin: F_false, inputActiveWithin: F_inputActiveWithin, leaseOf,
+    identity: () => F_D.identity || null, actingOwner: () => !!F_actingHuman(), ghAvatar: (login, size) => F_avatar(login, "human", size),
   };
   function F_inputActiveWithin(el) {
     if (!el || !el.querySelectorAll) return false;
@@ -235,5 +236,6 @@ if (typeof D === "undefined") {
     applyTheme, currentTheme, cycleTheme, orcaSVG,
     agents, tasks, requests, agentByAlias, agentById, aliasFor, taskById, humans, isToHuman,
     actingHuman, setActingHuman, patch, selectionWithin, inputActiveWithin, leaseOf,
+    identity, identityHuman, actingOwner, ghAvatar,
   };
 }

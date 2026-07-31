@@ -80,6 +80,9 @@ function wire(t) {
   wireProtocol(t);
   const aw = Tas$("assignWrap");
   if (aw) aw.querySelector('[data-act="assign"]').addEventListener("click", () => doAssign(t));
+  // collab v1: the reviewer chip's owner-only change affordance (header card)
+  const rv = Tas$("detailMain").querySelector('[data-act="reviewer"]');
+  if (rv) rv.addEventListener("click", () => doReviewer(t));
   const cw = Tas$("cancelWrap");
   if (cw) cw.querySelector('[data-act="cancel"]').addEventListener("click", () => {
     const h = actorOrWarn(); if (!h) return;

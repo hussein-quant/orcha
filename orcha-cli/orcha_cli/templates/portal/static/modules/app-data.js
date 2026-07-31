@@ -68,9 +68,35 @@ function isToHuman(r) {
   return !!(a && a.kind === "human");         // ...or an alias that is a human
 }
 
+/* ---- collab v1: the proxy-resolved GitHub identity (GET /api/me) ------- *
+ * data.js stashes the /api/me answer on D.identity:
+ *   {agent_id, alias, github_login, member_role, avatar_url} | null
+ * null = untrusted header / unmapped visitor / trust env off — every consumer
+ * falls back to the pre-collab behavior, so self-hosters see no change. */
+function identity() { return D.identity || null; }
+function identityHuman() {
+  const id = identity();
+  if (!id || !id.agent_id) return null;
+  return humans().find((h) => String(h.id) === String(id.agent_id)) || null;
+}
+// Owner check for owner-gated affordances (invite, role menus, reviewer picker).
+// With an identity, its member_role decides; without one (trust off) the acting
+// human's snapshot member_role decides — permissive when the field is absent
+// (old snapshot in flight), mirroring the backend's trust-off fallback.
+function actingOwner() {
+  const id = identity();
+  if (id) return id.member_role === "owner";
+  const h = actingHuman();
+  return !!(h && (h.member_role === "owner" || h.member_role == null));
+}
+
 /* ---- acting-as: the real human authority, persisted (NOT hardcoded) --- */
 function actingKey() { const c = D.container && D.container.id; return "orcha:actingHuman:" + (c || "_"); }
 function actingHuman() {
+  // collab v1: the verified GitHub identity IS the actor whenever the proxy
+  // resolved one — verify/approve/decisions all attribute to this agent.
+  const bound = identityHuman();
+  if (bound) return bound;
   const hs = humans();
   if (!hs.length) return null;
   let saved = null; try { saved = localStorage.getItem(actingKey()); } catch (e) {}

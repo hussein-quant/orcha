@@ -88,8 +88,18 @@ function renderQueue() {
   });
   verifs.forEach((t) => {
     const who = (t.assignees || [])[0], a = HomO.agentByAlias(who) || {};
-    cards.push(`<div class="aq verify">
-      <span class="type">${HomO.icon("check", "")}Verify task</span>
+    // Collab v1: a task with an owner-assigned reviewer is SOMEONE's review. The
+    // assigned reviewer (or any owner, or anyone when no identity resolved — trust
+    // off) sees the card normally; everyone else gets it de-emphasized + labeled.
+    // Frontend-only: the backend verify gate stays permissive (any human CAN verify).
+    const ident = HomD().identity || null;
+    const theirs = !!(t.reviewer && ident
+      && String(ident.agent_id) !== String(t.reviewer.agent_id)
+      && ident.member_role !== "owner");
+    const revTag = theirs
+      ? `<span class="tag review-for">review: ${HomO.esc(t.reviewer.github_login || t.reviewer.alias)}</span>` : "";
+    cards.push(`<div class="aq verify${theirs ? " other-review" : ""}">
+      <span class="type">${HomO.icon("check", "")}Verify task${revTag}</span>
       <div class="ttl">${HomO.esc(t.title)}</div>
       <div class="who">${who ? HomO.agentLink(who) : "—"}<span>·</span><span class="tag model">${HomO.esc(a.model || "—")}</span><span>·</span><span>${HomO.relTime(t.started_at)}</span></div>
       <div class="ctx"><span class="lbl">Definition of done</span>${HomO.esc(t.definition_of_done || "—")}</div>
