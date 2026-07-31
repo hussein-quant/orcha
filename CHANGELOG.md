@@ -11,6 +11,16 @@ missing.
 ## [Unreleased]
 
 ### Added
+- Agent→PR: sandboxed agents can branch, commit, push, and open GitHub PRs as
+  the `orcha-cloud-app[bot]` App installation — never a human account. The
+  runner image now ships the `gh` CLI plus a `/usr/local/bin/gh` wrapper that
+  re-reads the workspace's rotating 1-hour installation token on every
+  invocation (long resident sessions never hold a stale token); the box
+  provisioner stamps the bot commit identity (workspace-local
+  `user.name`/`user.email`) on cloned repos; and repo-credentialed workspaces
+  get a standing "Working with the repository" persona block (branch
+  `orcha/<task-slug>` → push → `gh pr create`; merge is always human). See
+  `docs/agent-prs.md`.
 - Metrics page (`/metrics`, in the portal nav): usage and estimated spend per
   agent — stat cards (est. cost with an honest "estimated, N of M runs reported
   cost" caption, runs, humanized sandbox compute, tasks completed/verified), a

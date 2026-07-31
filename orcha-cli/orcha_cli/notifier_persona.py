@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 from typing import Optional
 
 from .notifier_protocol import _render_protocol, _render_resume_context, _render_task_body
@@ -44,6 +45,41 @@ MULTI_HUMAN_STEERING = (
     "- Chat guidance is advisory. Anything that changes what \"done\" means must land in the "
     "task's definition-of-done via the human flow before you treat it as the goal."
 )
+
+
+# Agent→PR (docs/agent-prs.md): the branch→PR contract for workspaces that carry a cloned
+# repo + bot credentials. Static text; whether it rides at all is gated per-workspace by
+# _repo_credentials_present() — the cheapest accurate signal is the workspace itself
+# (a git checkout plus the rotating .orcha/github-token the box timers maintain). Rides
+# right after MULTI_HUMAN_STEERING so it stays inside the GH#34 stable cacheable prefix
+# (stable per-workspace: the gate flips at most once, when a repo is first connected).
+REPO_WORKFLOW_GUIDANCE = (
+    "## Working with the repository (branch → PR; merge is always human)\n"
+    "This workspace is a clone of the project's GitHub repository with bot credentials "
+    "already wired into git and the `gh` CLI — you act as the Orcha app bot, never a "
+    "human account. Do not change git user.name/user.email.\n"
+    "- NEVER commit to the default branch (main/master). Start every piece of work on "
+    "its own branch: `git checkout -b orcha/<task-slug>`.\n"
+    "- Commit your work there, then publish it: `git push -u origin <branch>`.\n"
+    "- Open a pull request: `gh pr create --title \"...\" --body \"...\"`. End the body "
+    "with a reference to your Orcha work log (the task/thread the work belongs to) and "
+    "a note that a human reviews it.\n"
+    "- PRs are proposals. Merging is ALWAYS a human decision — never merge, never "
+    "self-approve, and never push to the default branch to \"finish\" a task."
+)
+
+
+def _repo_credentials_present(workdir: Optional[str] = None) -> bool:
+    """Cheapest accurate gate for REPO_WORKFLOW_GUIDANCE: the workspace root carries BOTH
+    a git checkout AND the rotating installation-token file the box timers maintain
+    (deploy/github-token-refresh.sh). Token-without-repo (an unbound provisioned
+    workspace) or repo-without-token (a plain local project) → no repo-workflow block.
+    Defaults to cwd — the notifier daemon always runs from the workspace root."""
+    ws = pathlib.Path(workdir) if workdir else pathlib.Path.cwd()
+    try:
+        return (ws / ".git").exists() and (ws / ".orcha" / "github-token").is_file()
+    except OSError:
+        return False
 
 
 # GH #91/#90: create-time rule for the one duplicate-work case left after the lane split. This is
@@ -112,7 +148,8 @@ def _wrap_conversation_turn(content: str) -> str:
 
 def format_persona(persona: Optional[dict], digest: Optional[dict],
                    protocol: Optional[dict] = None, lane: str = "work",
-                   render_resume: bool = False) -> Optional[str]:
+                   render_resume: bool = False,
+                   workdir: Optional[str] = None) -> Optional[str]:
     """Pure: assemble the --append-system-prompt text so a headless worker boots AS the
     agent. `persona` is GET /persona ({system_prompt,...}); `digest` is GET /digest
     ({digest: {...}|null}); `protocol` is GET /agents/{aid}/protocol ({protocol:{...}|null});
@@ -134,6 +171,7 @@ def format_persona(persona: Optional[dict], digest: Optional[dict],
     GH #34 (scoped): sections are assembled STABLE-first so consecutive wakes of the same agent
     share the longest possible byte-identical prefix (a provider-side prompt cache hits on a
     stable prefix, not on the whole string). `persona` / `HUMAN_COMMS_GUARDRAIL` /
+    `REPO_WORKFLOW_GUIDANCE` (workspace-gated, stable per-workspace) /
     `CONVERSATION_LANE_DIRECTIVE` never vary per-wake; `body_section` / `proto_section` vary only
     when the resolved task or its protocol changes (rare relative to wake frequency); the resume
     context and the digest vary on nearly every wake (a fresh self-wake wait-point, or the agent's
@@ -148,6 +186,12 @@ def format_persona(persona: Optional[dict], digest: Optional[dict],
         # Multi-human conflict rules ride every agent boot too (owner > member,
         # DoD > chat, explicit overrides, escalate unresolved contradictions).
         parts.append(MULTI_HUMAN_STEERING)
+        # Agent→PR: the branch→PR contract rides only when the workspace actually
+        # carries a repo + bot credentials (`workdir` override for tests; default
+        # cwd — the daemon runs from the workspace root). Stable per-workspace, so
+        # it stays inside the GH#34 cacheable prefix.
+        if _repo_credentials_present(workdir):
+            parts.append(REPO_WORKFLOW_GUIDANCE)
     # GH #91/#90: a conversation-lane embodiment (resident, or a talk-only ephemeral) also carries the
     # dispatch directive so the boot frames every turn as "answer quick asks inline; hand off real
     # work as an assigned task". Only appended for lane=='conversation' — a work embodiment keeps its

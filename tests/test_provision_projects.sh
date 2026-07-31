@@ -157,6 +157,11 @@ assert_contains "$GIT_LOG" "clone -q https://x-access-token:ghs_FAKETOKEN123@git
 assert_contains "$GIT_LOG" "-C $WORK/my-site remote set-url origin https://github.com/acme/site.git"
 assert_contains "$GIT_LOG" "config credential.helper"
 assert_contains "$GIT_LOG" "/workspace/.orcha/github-token"
+# agent→PR bot identity: workspace-local git config authors commits as the app
+# bot (stub secrets carry no slug → the orcha-cloud-app fallback), email built
+# from the secrets' APP_ID (999 in the stub).
+assert_contains "$GIT_LOG" "-C $WORK/my-site config user.name orcha-cloud-app[bot]"
+assert_contains "$GIT_LOG" "-C $WORK/my-site config user.email 999+orcha-cloud-app[bot]@users.noreply.github.com"
 assert_contains "$MINT_LOG" "--repo acme/site"
 [ "$(cat "$WORK/my-site/.orcha/github-token")" = "ghs_FAKETOKEN123" ] || fail "seed token not installed"
 assert_contains "$REGISTRY" "cid-1111 $WORK/my-site"

@@ -145,6 +145,12 @@ provision_one() { # provision_one <cid> <slug> <repo-or-empty>
         # shellcheck disable=SC2016  # the $(cat ...) must expand at CREDENTIAL time, not now
         git -C "$WS" config credential.helper \
             '!f() { echo username=x-access-token; echo "password=$(cat /workspace/.orcha/github-token)"; }; f'
+        # Commits/PRs are authored by the app BOT, never a human account
+        # (docs/agent-prs.md). Workspace-local config so agents inherit it.
+        BOT_SLUG=$(python3 -c "import json;print(json.load(open('$SECRETS/github-app.json')).get('slug') or 'orcha-cloud-app')" 2>/dev/null) \
+            || BOT_SLUG="orcha-cloud-app"
+        git -C "$WS" config user.name "${BOT_SLUG}[bot]"
+        git -C "$WS" config user.email "${APP_ID}+${BOT_SLUG}[bot]@users.noreply.github.com"
         mkdir -p "$WS/.orcha"
         # Seed the token we already minted so agents work before the first refresh tick.
         install_token_file "$WS/.orcha/github-token" "$TOKEN"
