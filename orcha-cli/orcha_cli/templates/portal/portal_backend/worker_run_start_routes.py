@@ -117,8 +117,12 @@ def list_resident_runs(aid: str, status: Optional[str] = None):
         raise HTTPException(400, "agent_id is not a valid UUID")
     with db_cursor() as (_, cur):
         require_agent(cur, aid)
+        # Resident-lane sandbox (remote-runner un-deferral): sandbox_container_id
+        # rides along so the host reaper can tell a container-backed resident row
+        # (whose liveness is docker's, not the host pid's) from a host-pid one.
         query = (
-            "SELECT run_id, pid, status, started_at FROM worker_runs "
+            "SELECT run_id, pid, status, started_at, sandbox_container_id "
+            "FROM worker_runs "
             "WHERE agent_id=%s AND wake_kind='resident'"
         )
         params: list = [aid]
@@ -135,6 +139,7 @@ def list_resident_runs(aid: str, status: Optional[str] = None):
                 "run_id": str(row["run_id"]),
                 "pid": row["pid"],
                 "status": row["status"],
+                "sandbox_container_id": row["sandbox_container_id"],
                 "started_at": (
                     row["started_at"].isoformat() if row["started_at"] else None
                 ),

@@ -60,6 +60,13 @@ def _reconcile_sandbox_run(
     # sweep uses — the run's recorded worktree (its spawn cwd) else its base_cwd.
     cwd = r.get("worktree") or r.get("base_cwd")
     if state.running:
+        if r.get("wake_kind") == "resident":
+            # Resident lane un-deferral: a warm resident session is long-lived BY
+            # DESIGN (it idles between conversation turns for hours) — the one-shot
+            # max-runtime deadline does not apply. A RUNNING resident container is
+            # always the adoption case: leave it be. Vanished (above) and exited
+            # (below) handling still applies unchanged.
+            return 0
         max_secs = (_sandbox.SandboxConfig.load(cwd).max_runtime_secs if cwd
                     else _sandbox.DEFAULT_MAX_RUNTIME_SECS)
         if _sandbox.past_deadline(state, max_runtime_secs=max_secs):
@@ -106,6 +113,7 @@ def reap_orphaned_runs(
     cid: str,
     live_pids=frozenset(),
     *,
+    live_sandbox=frozenset(),
     quiet: bool = True,
     services,
 ) -> int:
@@ -118,7 +126,10 @@ def reap_orphaned_runs(
     (vanished → finish killed; running past the workspace deadline → docker stop, stamped next
     sweep; running within it → leave alone; exited → stamp exit code/OOM THEN rm — volumes never).
     After the per-run loop an orphan pass stops any live managed container no open run row
-    references (drain sidecars are label-exempt via managed_containers).
+    references (drain sidecars are label-exempt via managed_containers). `live_sandbox`
+    shields THIS daemon's live in-memory sandbox containers from that orphan pass — a warm
+    sandboxed RESIDENT records a run row only per-turn, so between turns its (deliberately
+    long-lived) container has NO open row and would otherwise read as an orphan.
     Returns the number of dead runs reaped."""
     data = services._get_json(f"{api_base}/api/containers/{cid}/running-runs")
     if data is None:
@@ -222,6 +233,9 @@ def reap_orphaned_runs(
             for name in _sandbox.managed_containers(cid):
                 if name in seen_sandbox:
                     continue             # an open run row references it — not an orphan
+                if name in live_sandbox:
+                    continue             # THIS daemon's live handle (an idle warm
+                                         # resident between turns) — not an orphan
                 _sandbox.stop(name)
                 if not quiet:
                     print(f"[notifier] stopped ORPHAN sandbox container {name} — no open "

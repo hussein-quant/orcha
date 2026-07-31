@@ -451,6 +451,63 @@ def test_sandbox_deadline_reads_workspace_config(monkeypatch, tmp_path):
     assert calls["stop"] == ["orcha-run-slow"]           # 600s old > the workspace's 60s cap
 
 
+def test_resident_sandbox_row_never_deadline_stopped(monkeypatch):
+    """Resident lane (un-deferral): a warm resident session is long-lived BY DESIGN —
+    a RUNNING resident-kind container is ALWAYS the adoption case, even when it is
+    ancient (way past the one-shot max-runtime deadline). No stop, no finish."""
+    posts = _patch_io(monkeypatch, [
+        {"run_id": "R", "agent_id": "A1", "pid": _DEAD_PID, "wake_kind": "resident",
+         "lane": "conversation", "sandbox_container_id": "orcha-run-warm"}])
+    calls = _fake_sandbox(monkeypatch, states={
+        "orcha-run-warm": _state(running=True, started_at="2020-01-01T00:00:00+00:00")})
+
+    n = notifier.reap_orphaned_runs("http://x", "C1")
+    assert n == 0
+    assert calls["stop"] == [] and calls["remove"] == []     # NOT a runaway
+    assert posts == []                                       # no finish, no wake-ack
+    assert calls["probe"] == ["orcha-run-warm"]
+
+
+def test_resident_sandbox_vanished_and_exited_still_reconciled(monkeypatch, tmp_path):
+    """The deadline skip is surgical: a resident row whose container VANISHED is
+    finished killed, and an EXITED one is stamped from its real exit code then
+    removed — exactly like any other sandbox row."""
+    posts = _patch_io(monkeypatch, [
+        {"run_id": "GONE", "agent_id": "A1", "pid": _DEAD_PID, "wake_kind": "resident",
+         "lane": "conversation", "sandbox_container_id": "orcha-run-gone"},
+        {"run_id": "DONE", "agent_id": "A2", "pid": _DEAD_PID, "wake_kind": "resident",
+         "lane": "conversation", "sandbox_container_id": "orcha-run-done",
+         "base_cwd": str(tmp_path)}])
+    calls = _fake_sandbox(monkeypatch, states={
+        "orcha-run-done": _state(running=False, exit_code=0)})
+
+    n = notifier.reap_orphaned_runs("http://x", "C1")
+    assert n == 2
+    gone = [(u, b) for u, b in posts if "/runs/GONE/finish" in u]
+    assert gone and gone[0][1]["status"] == "killed"
+    assert "sandbox container vanished" in (gone[0][1].get("kill_reason") or "")
+    done = [(u, b) for u, b in posts if "/runs/DONE/finish" in u]
+    assert done and done[0][1]["status"] == "exited" and done[0][1]["exit_code"] == 0
+    assert calls["remove"] == ["orcha-run-done"]
+    assert calls["remove_api_config"] == [(str(tmp_path), "orcha-run-done")]
+
+
+def test_live_resident_container_shielded_from_orphan_pass(monkeypatch):
+    """Resident lane: between turns a warm sandboxed resident owns NO open run row
+    (rows are per-turn), so the orphan pass would read its live container as an
+    orphan and stop it mid-conversation. The daemon passes its in-memory residents'
+    container names as `live_sandbox` — those are never stopped; a genuinely
+    unreferenced container still is."""
+    _patch_io(monkeypatch, [])
+    calls = _fake_sandbox(monkeypatch,
+                          managed=["orcha-run-warm", "orcha-run-orphan"])
+
+    n = notifier.reap_orphaned_runs("http://x", "C1",
+                                    live_sandbox=frozenset({"orcha-run-warm"}))
+    assert n == 0
+    assert calls["stop"] == ["orcha-run-orphan"]     # shielded resident untouched
+
+
 def test_orphan_container_with_no_open_run_row_is_stopped(monkeypatch):
     """Orphan pass (spec §3.5): a live managed container that NO open run row references
     is stopped — while a container an open row DOES reference is left alone. Runs even
@@ -606,9 +663,11 @@ def test_daemon_tick_invokes_reaper_before_tick(monkeypatch, tmp_path):
     order = []
     seen = {}
 
-    def _fake_reap(api_base, cid, live_pids=frozenset(), quiet=True):
+    def _fake_reap(api_base, cid, live_pids=frozenset(), live_sandbox=frozenset(),
+                   quiet=True):
         order.append("reap")
         seen["args"] = (api_base, cid, live_pids)
+        seen["live_sandbox"] = live_sandbox
         return 0
 
     def _fake_tick(*a, **k):
@@ -642,3 +701,4 @@ def test_daemon_tick_invokes_reaper_before_tick(monkeypatch, tmp_path):
     assert order == ["reap", "tick"]      # reaper ran, and BEFORE the wake scan — not dead code
     assert seen["args"][:2] == ("http://x", "C1")
     assert seen["args"][2] == frozenset()  # live-pid shield wired (no live workers/residents this tick)
+    assert seen["live_sandbox"] == frozenset()  # resident-container shield wired too

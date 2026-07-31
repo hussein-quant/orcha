@@ -185,7 +185,15 @@ def cmd_notifier(args, *, services) -> None:
                 ) | frozenset(
                     r["proc"].pid for r in live_residents.values() if r.get("proc") is not None
                 )
-                reap_orphaned_runs(api_base, cid, live_pids, quiet=args.quiet)
+                # Resident-lane sandbox shield: a warm sandboxed resident only owns a run
+                # row PER TURN, so between turns its live container has no open row —
+                # without this shield the orphan pass would stop it mid-conversation.
+                live_sandbox = frozenset(
+                    r["sandbox_container_id"] for r in live_residents.values()
+                    if r.get("sandbox_container_id")
+                )
+                reap_orphaned_runs(api_base, cid, live_pids,
+                                   live_sandbox=live_sandbox, quiet=args.quiet)
                 # GH#110 §2c: reclaim durable per-(agent+task) worktrees whose task went terminal
                 # (completed/cancelled) so orcha/task-* trees don't accumulate forever — conservative
                 # (never touches a live worktree, preserves any dirty tree, keeps committed/PR

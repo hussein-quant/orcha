@@ -217,14 +217,21 @@ def _handle_exited(
     services, api_base, conv_id, resident, live_residents, quiet
 ) -> None:
     process = resident["proc"]
+    finished = True
     if resident.get("current_run_id"):
-        services._finish_run(
+        finished = services._finish_run(
             api_base,
             resident["current_run_id"],
             "killed",
             process.returncode,
             resident.get("log_path"),
         )
+    # I4 (resident lane): the docker client exited → the sandboxed session is
+    # over; reap its container + api-config once the stamp landed (or when no
+    # turn row was open). A failed stamp keeps the exited container as evidence
+    # for the container-liveness sweep (I5). No-op for host mode.
+    if finished:
+        services._reap_sandbox_artifacts(resident)
     if (
         not resident.get("cold")
         and time.time() - resident.get("booted_ts", 0)

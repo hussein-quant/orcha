@@ -33,15 +33,27 @@ def _close_resident(
     sidecar = resident.get("sidecar")
     if isinstance(sidecar, dict) and sidecar.get("proc") is not None:
         compat._kill_worker(sidecar["proc"], graceful=True)
+        # I4 (resident lane): the sidecar is row-less by design AND label-exempt
+        # from the orphan pass — killing its docker client here without reaping
+        # would leak its sandbox container forever. No-op for host mode.
+        compat._reap_sandbox_artifacts(sidecar)
         resident["sidecar"] = None
+    finished = True
     if resident.get("current_run_id"):
-        compat._finish_run(
+        finished = compat._finish_run(
             api_base,
             resident["current_run_id"],
             "exited",
             0,
             resident.get("log_path"),
         )
+    # I4 (resident lane): the warm session's container is spawned without --rm by
+    # design — every close path must reap it (container + per-run api-config) or
+    # each retired resident leaks a container. Only after the stamp landed (or
+    # with no open row at all); a failed finish leaves the exited container as
+    # evidence for the container-liveness sweep to stamp + rm next tick (I5).
+    if finished:
+        compat._reap_sandbox_artifacts(resident)
     if teardown_worktree:
         compat._safe_teardown_worktree(
             resident.get("base_cwd"),
