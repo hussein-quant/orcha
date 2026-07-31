@@ -5,7 +5,7 @@ import os
 import re
 from typing import Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
@@ -25,6 +25,7 @@ from portal_backend.provider_keys import (
 from portal_backend.provider_keys import (
     provider_stored_row as _provider_stored_row,
 )
+from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.schemas import LlmKeyActor, LlmKeyTest, LlmKeyUpdate
 
 try:
@@ -79,7 +80,7 @@ def get_container_llm_key(cid: str):
 
 
 @app.put("/api/containers/{cid}/settings/llm-key", status_code=200)
-def put_container_llm_key(cid: str, body: LlmKeyUpdate):
+def put_container_llm_key(cid: str, body: LlmKeyUpdate, request: Request):
     """Seal + store a per-container Anthropic key. HUMAN-AUTHORITY gated + audit-logged. Returns
     the masked hint, never the plaintext. 503 if ORCHA_SECRET_KEY is unset (encrypted persistence
     disabled — the operator can still use the ORCHA_LLM_API_KEY env override instead)."""
@@ -89,10 +90,12 @@ def put_container_llm_key(cid: str, body: LlmKeyUpdate):
     if not key:
         raise HTTPException(400, "api_key must not be blank")
     with db_cursor() as (conn, cur):
+        _require_container(cur, cid)
+        # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_kind(
             cur, body.actor_agent_id, ("human",)
         )  # writing a credential is a human action
-        _require_container(cur, cid)
         if not secret_box.master_key_present():
             raise HTTPException(
                 503,
@@ -124,14 +127,16 @@ def put_container_llm_key(cid: str, body: LlmKeyUpdate):
 
 
 @app.delete("/api/containers/{cid}/settings/llm-key", status_code=200)
-def delete_container_llm_key(cid: str, body: LlmKeyActor):
+def delete_container_llm_key(cid: str, body: LlmKeyActor, request: Request):
     """Remove the stored key (resolution falls back to the env override, else none). HUMAN-AUTHORITY
     gated + audit-logged. Carries a JSON body for the actor (no other body fields)."""
     if not _valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (conn, cur):
-        _require_kind(cur, body.actor_agent_id, ("human",))
         _require_container(cur, cid)
+        # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
+        _require_kind(cur, body.actor_agent_id, ("human",))
         cur.execute(
             "DELETE FROM container_provider_keys WHERE container_id=%s AND provider='anthropic'",
             (cid,),
@@ -175,7 +180,7 @@ def _llm_error_public_detail(provider_label: str, e: Exception) -> str:
 
 
 @app.post("/api/containers/{cid}/settings/llm-key/test", status_code=200)
-def test_container_llm_key(cid: str, body: LlmKeyTest):
+def test_container_llm_key(cid: str, body: LlmKeyTest, request: Request):
     """Server-side credential ping against the Anthropic API. HUMAN-AUTHORITY gated. With `api_key`
     -> test that candidate (the pre-save setup flow); without -> test the currently-resolved key
     (env override > stored). Returns {ok, detail} — a 401 from Anthropic is ok=False (bad key),
@@ -183,8 +188,10 @@ def test_container_llm_key(cid: str, body: LlmKeyTest):
     if not _valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (conn, cur):
-        _require_kind(cur, body.actor_agent_id, ("human",))
         _require_container(cur, cid)
+        # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        body.actor_agent_id = _trusted_actor(cur, request, cid, body.actor_agent_id)
+        _require_kind(cur, body.actor_agent_id, ("human",))
         if body.api_key and body.api_key.strip():
             candidate: Optional[str] = body.api_key.strip()
         else:

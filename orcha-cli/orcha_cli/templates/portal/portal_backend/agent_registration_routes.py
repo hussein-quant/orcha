@@ -1,13 +1,14 @@
 """Agent registration route and optional first-task creation."""
 
 import psycopg
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from portal_backend.agent_status import bump_agent, log_event, recompute_agent_status
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container as _require_container
 from portal_backend.guards import valid_uuid as _valid_uuid
+from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.model_policy import DEFAULT_MODEL
 from portal_backend.schemas import AgentCreate, AgentCreateResponse
 
@@ -27,7 +28,7 @@ def configure_model_ids(model_ids):
     response_model=AgentCreateResponse,
     status_code=201,
 )
-def register_agent(cid: str, body: AgentCreate):
+def register_agent(cid: str, body: AgentCreate, request: Request):
     if not _valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     if body.kind == "ai" and not (body.prompt and body.prompt.strip()):
@@ -40,6 +41,11 @@ def register_agent(cid: str, body: AgentCreate):
         )
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
+        # Per-project identity: once this container has a mapped member, only members
+        # may create agents through the trusted browser lane (403 otherwise). The
+        # fresh-container bootstrap (no mapped human yet — `orcha init` / onboarding)
+        # passes through, mirroring the binding rule's NOT-EXISTS guard.
+        _trusted_actor(cur, request, cid, None)
         model = body.model
         if body.kind == "human":
             model = None

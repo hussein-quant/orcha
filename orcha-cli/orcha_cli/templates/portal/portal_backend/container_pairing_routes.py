@@ -11,6 +11,7 @@ from fastapi import HTTPException, Query, Request
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import valid_uuid
+from portal_backend.identity_routes import trusted_actor
 
 PAIRING_TTL_SECONDS = 5 * 60
 PAIRING_TOKEN_EXCHANGE_FOLLOWUP = {
@@ -111,6 +112,13 @@ def get_container_pairing(
         container = cur.fetchone()
         if not container:
             raise HTTPException(404, f"container {cid} not found")
+        # Per-project identity: the pairing payload is a capability for a SPECIFIC
+        # human. Under proxy trust that human IS the verified member — a non-member
+        # is refused (403), and any other requested human id is overridden to the
+        # member's own row (you pair a phone for yourself, never as someone else).
+        human_agent_id = (
+            trusted_actor(cur, request, cid, human_agent_id) or human_agent_id
+        )
         cur.execute(
             "SELECT id, alias FROM agents WHERE container_id=%s AND kind='human' "
             "AND terminated_at IS NULL ORDER BY created_at, alias",

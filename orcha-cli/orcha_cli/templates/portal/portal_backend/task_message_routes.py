@@ -3,7 +3,7 @@
 import json
 from typing import Any, Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from portal_backend.agent_status import bump_agent, log_event
 from portal_backend.application import app
@@ -18,18 +18,25 @@ from portal_backend.guards import (
     require_task as _require_task,
     valid_uuid as _valid_uuid,
 )
+from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.provider_keys import container_llm_key as _container_llm_key
 from portal_backend.schemas.task_operations import TaskMessage
 
 
 @app.post("/api/tasks/{tid}/messages", status_code=201)
-def post_message(tid: str, body: TaskMessage):
+def post_message(tid: str, body: TaskMessage, request: Request):
     if not _valid_uuid(tid):
         raise HTTPException(400, "task_id is not a valid UUID")
     if body.author_agent_id is not None and not _valid_uuid(body.author_agent_id):
         raise HTTPException(400, "author_agent_id is not a valid UUID")
     with db_cursor() as (conn, cur):
         t = _require_task(cur, tid)
+        # Per-project identity: a trusted proxy login IS the author (403 non-member) —
+        # a browser-lane post is attributed to the verified member, never to a
+        # client-chosen id (and never anonymously: the trusted lane always attributes).
+        body.author_agent_id = _trusted_actor(
+            cur, request, str(t["container_id"]), body.author_agent_id
+        )
         _reject_if_retired(cur, body.author_agent_id)  # ISS-51 [P1]
         _require_container_active(
             cur, str(t["container_id"]), body.author_agent_id

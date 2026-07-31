@@ -7,7 +7,7 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_kind, valid_uuid
-from portal_backend.identity_routes import proxy_login
+from portal_backend.identity_routes import proxy_login, trusted_actor
 from portal_backend.schemas import (
     ContainerCreate,
     ContainerCreateResponse,
@@ -134,7 +134,7 @@ def create_container(body: ContainerCreate, request: Request):
 
 
 @app.post("/api/containers/{cid}/reset", status_code=200)
-def reset_container(cid: str, body: ContainerReset):
+def reset_container(cid: str, body: ContainerReset, request: Request):
     """Wipe ALL data in this (1:1:1) container — agents, tasks, requests, decisions,
     conversations, worker runs, memory digests, events — and recreate a single empty
     root task. The `containers` row itself is KEPT (so `current_container_id` and the
@@ -156,6 +156,8 @@ def reset_container(cid: str, body: ContainerReset):
         cont = cur.fetchone()
         if not cont:
             raise HTTPException(404, "container not found")
+        # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         require_kind(cur, body.actor_agent_id, ("human",))
         if body.confirm != cont["name"]:
             raise HTTPException(
