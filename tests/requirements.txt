@@ -12,3 +12,7 @@ qrcode>=8
 # styled pairing SVG and decode it back — tests/test_pairing_api.py round-trip.
 pillow>=10
 zxing-cpp>=2.2
+# Push-relay unit tests (tests/test_push_relay.py): the relay's APNs JWT signing
+# deps (deploy/push-relay/requirements.txt) — never shipped in the portal image.
+pyjwt>=2.8
+cryptography>=42

@@ -20,6 +20,7 @@ from portal_backend.guards import (
 )
 from portal_backend.identity_routes import require_member_read as _require_member_read
 from portal_backend.identity_routes import trusted_actor as _trusted_actor
+from portal_backend.push_outbox import push_plan_approval as _push_plan_approval
 from portal_backend.provider_keys import container_llm_key as _container_llm_key
 from portal_backend.schemas.task_operations import TaskMessage
 
@@ -117,6 +118,13 @@ def post_message(tid: str, body: TaskMessage, request: Request):
                 },
             )
         conn.commit()
+    # Push pipeline (mig 041): an agent-authored post may be the task's OPENING
+    # plan — the moment the approval gate becomes a needs-you item. AFTER the
+    # commit, best-effort; the hook itself verifies "earliest agent-authored
+    # message + in_progress + undecided" in its own transaction and no-ops on
+    # every later post.
+    if author_kind is not None and author_kind != "human":
+        _push_plan_approval(str(t["container_id"]), tid, mid)
     return {"message_id": mid, "task_id": tid}
 
 

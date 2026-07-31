@@ -16,6 +16,7 @@ from portal_backend.guards import (
     require_task as _require_task,
     valid_uuid as _valid_uuid,
 )
+from portal_backend.push_outbox import push_task_verify as _push_task_verify
 from portal_backend.schemas.task_operations import TaskDone
 from portal_backend.worker_auth import require_work_lane as _require_work_lane
 
@@ -166,4 +167,7 @@ def mark_done(
             {"to": "needs_verification", "autonomy_level": level},
         )
         conn.commit()
+    # Push pipeline (mig 041): the task just became a needs-you item. AFTER the
+    # commit, best-effort — the hook never raises and never touches this txn.
+    _push_task_verify(str(t["container_id"]), tid)
     return {"task_id": tid, "status": "needs_verification"}
