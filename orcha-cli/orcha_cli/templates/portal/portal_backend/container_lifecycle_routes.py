@@ -218,7 +218,7 @@ def list_containers():
     """
     with db_cursor() as (_, cur):
         cur.execute(
-            """SELECT id, name, description, status, root_task_id,
+            """SELECT id, name, description, status, root_task_id, github_repo,
                       created_at, completed_at
                FROM containers
                ORDER BY created_at DESC""",

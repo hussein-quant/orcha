@@ -26,7 +26,7 @@ def get_container(cid: str, task_limit: int = 1000, request_limit: int = 1000):
         cur.execute(
             """SELECT id, name, description, status, root_task_id,
                       max_auto_agents, max_tasks, execution_mode, wakes_enabled,
-                      autonomy_level,
+                      autonomy_level, github_repo,
                       created_at, completed_at
                FROM containers WHERE id=%s""",
             (cid,),
