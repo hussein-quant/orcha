@@ -115,10 +115,12 @@ is never something that happens silently on your behalf.
 
 ## Notes
 
-- **Containers run as root** inside the sandbox. On Linux hosts this means
-  files the agent creates in the workspace are root-owned on the host
-  filesystem. UID-mapping so workspace files come back owned by your normal
-  user is a tracked follow-up, not yet shipped.
+- **Containers run as a non-root user (uid 1000, the image's `node` user)** —
+  Claude Code hard-refuses `--dangerously-skip-permissions` under root, and
+  least-privilege is the right default anyway. On Linux hosts the bind-mounted
+  workspace must therefore be **writable by uid 1000** (chown it, as the BYOC
+  provisioner does); Docker Desktop on macOS/Windows maps ownership
+  transparently, so laptop self-hosters need no chown.
 - **The runner image bundles the latest Claude Code and Codex CLIs as of
   build time** (`npm install -g @anthropic-ai/claude-code @openai/codex` in
   the Dockerfile) — it does not auto-update. Re-run `orcha sandbox

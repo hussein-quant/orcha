@@ -16,6 +16,11 @@ backing service (FastAPI + Postgres), and the slash-command skill templates
 that ship with it. End users don't read this repo; they install it once and run
 `orcha init` in their own projects.
 
+> **Deploying Orcha Cloud on your own VM (BYOC)?** Start with
+> [`docs/byoc-guide.md`](docs/byoc-guide.md) — the complete guide: tiers,
+> architecture, the automated-vs-manual matrix, the full setup walkthrough,
+> operations, and the honest security posture.
+
 ---
 
 ## Tech stack
