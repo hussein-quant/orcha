@@ -55,8 +55,8 @@
 :root {
   --ink:#1A1414; --paper:#F4EEE6; --canvas:#F7F4EE;
   --surface:#FFFFFF; --surface-subtle:#F8F9FA;
-  --crimson:#E63946; --crimson-press:#C32B38; --crimson-soft:rgba(230,57,70,.10);
-  --accent-strong:#C32B38; --accent-strong-press:#A8232D; --on-accent-strong:#FFFFFF;
+  --navy:#1D4ED8; --navy-press:#1E40AF; --navy-soft:rgba(29,78,216,.10);
+  --accent-strong:#1D4ED8; --accent-strong-press:#1E40AF; --on-accent-strong:#FFFFFF;
   --success:#10b981; --success-text:#047857; --warning-text:#B45309;
   --danger:#ef4444;
   --text-primary:#1A1414; --text-secondary:#4A5568; --text-tertiary:#5F6B7C;
@@ -87,7 +87,7 @@ body {
 img, svg { display: block; max-width: 100%; }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; color: inherit; }
-::selection { background: var(--crimson); color: var(--paper); }
+::selection { background: var(--navy); color: var(--paper); }
 
 /* content column */
 .mk-wrap { width: 100%; max-width: 1120px; margin-inline: auto; padding-inline: 24px; }
@@ -102,7 +102,7 @@ button { font: inherit; color: inherit; }
   letter-spacing: .08em; text-transform: uppercase;
   color: var(--accent-strong);
 }
-.mk-eyebrow .mk-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--crimson); flex: none; }
+.mk-eyebrow .mk-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--navy); flex: none; }
 
 /* section rhythm — fragments carry .mk-section; shell sets the vertical rhythm */
 .mk-section { padding-block: 96px; scroll-margin-top: 72px; position: relative; }
@@ -130,7 +130,7 @@ button { font: inherit; color: inherit; }
 .mk-btn-ghost:active { transform: translateY(0); }
 .mk-btn svg, .mk-btn-ghost svg { width: 18px; height: 18px; }
 
-/* focus-visible rings — consistent 2px crimson everywhere */
+/* focus-visible rings — consistent 2px navy everywhere */
 a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--accent-strong); outline-offset: 2px; border-radius: 6px;
 }
@@ -162,7 +162,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   letter-spacing: -.02em; color: var(--text-primary);
   flex: none;
 }
-.mk-wordmark .mk-brand-dot { color: var(--crimson); }
+.mk-wordmark .mk-brand-dot { color: var(--navy); }
 
 /* tabs */
 .mk-tabs {
@@ -184,7 +184,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-tab.is-active { color: var(--text-primary); }
 .mk-tab.is-active::after {
   content: ""; position: absolute; left: 12px; right: 12px; bottom: 3px;
-  height: 2px; border-radius: 2px; background: var(--crimson);
+  height: 2px; border-radius: 2px; background: var(--navy);
 }
 
 .mk-nav-right { flex: none; display: flex; align-items: center; gap: 10px; }
@@ -207,7 +207,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-hero-bg::before {
   content: ""; position: absolute; inset: 0;
   background:
-    radial-gradient(760px 460px at 82% -12%, var(--crimson-soft), transparent 60%),
+    radial-gradient(760px 460px at 82% -12%, var(--navy-soft), transparent 60%),
     radial-gradient(680px 560px at -8% 108%, rgb(26 20 20 / .05), transparent 55%),
     linear-gradient(180deg, #F9F6F0 0%, var(--canvas) 62%);
 }
@@ -230,7 +230,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-hero h1 .mk-hero-accent { position: relative; white-space: nowrap; }
 .mk-hero h1 .mk-hero-accent::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: .06em; height: .09em;
-  background: var(--crimson); border-radius: 2px;
+  background: var(--navy); border-radius: 2px;
 }
 .mk-hero-sub {
   margin-top: 22px; max-width: 620px;
@@ -246,7 +246,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-hero-ticker .mk-tick { display: inline-flex; align-items: center; gap: 8px; }
 .mk-hero-ticker .mk-tick::before {
   content: ""; width: 5px; height: 5px; border-radius: 50%;
-  background: var(--crimson); flex: none;
+  background: var(--navy); flex: none;
 }
 .mk-hero-ticker .mk-tick-sep { color: var(--border-strong); }
 
@@ -264,7 +264,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   padding-bottom: 44px; border-bottom: 1px solid rgb(244 238 230 / .12);
 }
 .mk-footer-brand .mk-wordmark { color: var(--paper); font-size: 24px; }
-.mk-footer-brand .mk-brand-dot { color: var(--crimson); }
+.mk-footer-brand .mk-brand-dot { color: var(--navy); }
 .mk-footer-tagline {
   margin-top: 14px; max-width: 320px;
   font-size: 14px; line-height: 1.55; color: rgb(244 238 230 / .62);
@@ -646,7 +646,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   /* =========================================================================
      PRODUCT DEMO CINEMATIC (dm-) — a light-theme port of the portal cinematic.
      Mechanics from the existing welcome/index.html scene engine; restyled to
-     the Quantal paper/crimson design system. Tokens only (var()), no raw hex.
+     the warm paper design system with the navy interactive accent. Tokens only (var()), no raw hex.
      ========================================================================= */
   .dm-root {
     /* local status semantics mapped onto contract tokens */
@@ -657,7 +657,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     --dm-vio: #7B54D6;            /* PR "merged" purple — GitHub convention, decorative */
     --dm-vio-soft: rgba(123,84,214,.11);
     --dm-crm: var(--accent-strong);
-    --dm-crm-soft: var(--crimson-soft);
+    --dm-crm-soft: var(--navy-soft);
     padding: 96px 24px;
     background: var(--canvas);
     color: var(--text-primary);
@@ -720,7 +720,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     position: relative; overflow: hidden;
     min-height: 452px;
     background:
-      radial-gradient(560px 300px at 84% -10%, var(--crimson-soft), transparent 60%),
+      radial-gradient(560px 300px at 84% -10%, var(--navy-soft), transparent 60%),
       var(--surface);
   }
   .dm-scene {
@@ -759,7 +759,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-cbtn:hover { color: var(--text-primary); border-color: var(--accent-strong); }
   .dm-cbtn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
   .dm-cbtn svg { width: 14px; height: 14px; }
-  .dm-cbtn.dm-play-t[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--crimson-soft); }
+  .dm-cbtn.dm-play-t[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--navy-soft); }
   .dm-cbtn .dm-ic-pause { display: none; }
   .dm-cbtn.dm-play-t[aria-pressed="true"] .dm-ic-pause { display: block; }
   .dm-cbtn.dm-play-t[aria-pressed="true"] .dm-ic-play { display: none; }
@@ -844,7 +844,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     width: 26px; height: 26px; border-radius: 50%; flex: none;
     display: grid; place-items: center;
     font-size: 11px; font-weight: 800; color: var(--on-accent-strong);
-    background: linear-gradient(135deg, var(--crimson), var(--accent-strong));
+    background: linear-gradient(135deg, var(--navy), var(--accent-strong));
   }
   .dm-av-you { background: linear-gradient(135deg, var(--text-secondary), var(--text-primary)); }
   .dm-av-sm { width: 18px; height: 18px; font-size: 9px; }
@@ -885,7 +885,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-chat { align-self: center; }
   .dm-chatbody { padding: 12px 12px 12px; }
   .dm-bubble {
-    background: var(--crimson-soft); border: 1px solid rgba(195,43,56,.24);
+    background: var(--navy-soft); border: 1px solid rgba(195,43,56,.24);
     color: var(--text-primary); border-radius: 12px 12px 4px 12px;
     padding: 9px 11px; font-size: 12px; line-height: 1.4;
     margin-left: 24px; overflow: hidden;
@@ -915,7 +915,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-sc-task .dm-comet .dm-cdot {
     position: absolute; top: 50%; left: 0; margin-top: -4px;
     width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent-strong); box-shadow: 0 0 12px var(--crimson);
+    background: var(--accent-strong); box-shadow: 0 0 12px var(--navy);
     opacity: 0;
   }
   .dm-scene.dm-play .dm-sc-task .dm-comet .dm-cdot { animation: dm-comet 1s ease-in-out 2.9s forwards; }
@@ -929,7 +929,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dm-trow:last-child { border-bottom: 0; }
   .dm-tid { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
   .dm-tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dm-trow.dm-new { background: var(--crimson-soft); }
+  .dm-trow.dm-new { background: var(--navy-soft); }
   .dm-trow.dm-new .dm-tt { color: var(--text-primary); font-weight: 600; }
 
   /* ---- scene 2 · sandbox -------------------------------------------------- */
@@ -964,11 +964,11 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   /* A terminal stays a terminal in daylight: it sits on --ink (a dark surface),
      so its foregrounds use the design system's OWN dark-theme token values —
      light-mode tokens would be illegible here. These mirror .dark's
-     --text-secondary / --text-tertiary / crimson / success-text / warning-text. */
+     --text-secondary / --text-tertiary / navy / success-text / warning-text. */
   .dm-term {
     --dm-t-fg:  #C9C0B4;  /* = .dark --text-secondary */
     --dm-t-mut: #A39A8E;  /* = .dark --text-tertiary */
-    --dm-t-crm: #FF5A66;  /* = .dark --crimson */
+    --dm-t-crm: #FF5A66;  /* = .dark --navy */
     --dm-t-ok:  #4ADE80;  /* = .dark --success-text */
     --dm-t-warn:#FBBF24;  /* = .dark --warning-text */
   }
@@ -1474,7 +1474,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .pr-glyph {
     display: inline-grid; place-items: center;
     width: 44px; height: 44px; border-radius: var(--radius-xl);
-    background: var(--crimson-soft); color: var(--accent-strong);
+    background: var(--navy-soft); color: var(--accent-strong);
     margin-bottom: 18px;
   }
   .pr-glyph svg { width: 22px; height: 22px; }
@@ -1667,7 +1667,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
                       </g>
                       <!-- Orcha dot center mark -->
                       <circle cx="37" cy="37" r="7" fill="var(--surface)"></circle>
-                      <circle cx="37" cy="37" r="4.4" fill="var(--crimson)"></circle>
+                      <circle cx="37" cy="37" r="4.4" fill="var(--navy)"></circle>
                     </svg>
                   </div>
                 </div>
@@ -1847,7 +1847,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     letter-spacing: .08em; text-transform: uppercase; color: var(--accent-strong);
     margin: 0 0 16px;
   }
-  .ph-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--crimson); }
+  .ph-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--navy); }
   .ph-title {
     font-family: var(--font-serif); font-weight: 400;
     font-size: clamp(30px, 4vw, 46px); line-height: 1.05; letter-spacing: -.02em;
@@ -1885,7 +1885,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     border-radius: 99px; background: var(--border); overflow: hidden;
   }
   .ph-cap-fill {
-    display: block; width: 100%; height: 100%; background: var(--crimson);
+    display: block; width: 100%; height: 100%; background: var(--navy);
     transform: scaleY(0); transform-origin: top center;
   }
   .ph-cap[aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow-card); }
@@ -1980,7 +1980,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-appbar-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ph-appbar-tag {
     font-family: var(--font-mono); font-size: 10px; font-weight: 500;
-    color: var(--accent-strong); background: var(--crimson-soft);
+    color: var(--accent-strong); background: var(--navy-soft);
     border-radius: 99px; padding: 3px 8px; white-space: nowrap;
   }
 
@@ -2031,7 +2031,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     background: var(--surface-subtle); border: 1px solid var(--border);
     border-radius: 99px; padding: 4px 10px; white-space: nowrap;
   }
-  .ph-proj.on { color: var(--accent-strong); background: var(--crimson-soft); border-color: transparent; }
+  .ph-proj.on { color: var(--accent-strong); background: var(--navy-soft); border-color: transparent; }
   .ph-msg { font-family: var(--font-sans); font-size: 13px; line-height: 1.5; border-radius: 16px; padding: 9px 12px; max-width: 88%; }
   .ph-msg.you { align-self: flex-end; background: var(--accent-strong); color: var(--on-accent-strong); border-bottom-right-radius: 5px; }
   .ph-msg.bot { align-self: flex-start; background: var(--surface-subtle); border: 1px solid var(--border); color: var(--text-primary); border-bottom-left-radius: 5px; }
@@ -2111,7 +2111,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-appbar.dark { border-color: color-mix(in srgb, var(--paper) 16%, var(--ink)); color: color-mix(in srgb, var(--paper) 92%, var(--ink)); }
   .ph-appbar.light { border-color: var(--border); color: var(--text-primary); }
   .ph-appbar-tag.dark { color: var(--paper); background: color-mix(in srgb, var(--paper) 16%, transparent); }
-  .ph-appbar-tag.light { color: var(--accent-strong); background: var(--crimson-soft); }
+  .ph-appbar-tag.light { color: var(--accent-strong); background: var(--navy-soft); }
   .ph-theme-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
   .ph-theme-row { height: 34px; border-radius: 12px; }
   .ph-theme-row.short { width: 66%; }
@@ -2140,7 +2140,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .ph-cbtn:hover { color: var(--text-primary); border-color: var(--text-primary); }
   .ph-cbtn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 2px; }
   .ph-cbtn svg { width: 15px; height: 15px; }
-  .ph-play[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--crimson-soft); }
+  .ph-play[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--navy-soft); }
   .ph-ic-pause { display: none; }
   .ph-play[aria-pressed="true"] .ph-ic-pause { display: block; }
   .ph-play[aria-pressed="true"] .ph-ic-play { display: none; }
@@ -2556,7 +2556,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dp-ea {
     margin-top: 4px; font-size: 10px; font-weight: 700; line-height: 1;
     letter-spacing: .04em; text-transform: uppercase;
-    color: var(--accent-strong); background: var(--crimson-soft);
+    color: var(--accent-strong); background: var(--navy-soft);
     border-radius: 999px; padding: 3px 8px;
   }
 
@@ -2571,7 +2571,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     position: relative; overflow: hidden;
     min-height: 384px;
     background:
-      radial-gradient(560px 300px at 84% -12%, var(--crimson-soft), transparent 62%),
+      radial-gradient(560px 300px at 84% -12%, var(--navy-soft), transparent 62%),
       var(--surface);
   }
   @media (max-width: 720px) { .dp-stage { min-height: 460px; } }
@@ -2597,7 +2597,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   }
   .dp-pill .dp-pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .dp-p-ok   { color: var(--success-text); background: color-mix(in srgb, var(--success) 12%, transparent); border-color: color-mix(in srgb, var(--success) 30%, transparent); }
-  .dp-p-teal { color: var(--accent-strong); background: var(--crimson-soft); border-color: color-mix(in srgb, var(--crimson) 26%, transparent); }
+  .dp-p-teal { color: var(--accent-strong); background: var(--navy-soft); border-color: color-mix(in srgb, var(--navy) 26%, transparent); }
   .dp-p-teal .dp-pdot { animation: dp-pulse 2s infinite; }
   @keyframes dp-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
@@ -2635,7 +2635,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dp-term-t { margin-left: 8px; font-size: 11px; color: color-mix(in srgb, var(--paper) 62%, transparent); }
   .dp-term-b { padding: 14px 14px 16px; font-family: var(--font-mono); font-size: 12.5px; line-height: 1.9; }
   .dp-line { margin: 0; color: color-mix(in srgb, var(--paper) 82%, transparent); white-space: nowrap; overflow: hidden; }
-  .dp-line .dp-prompt { color: var(--crimson); }
+  .dp-line .dp-prompt { color: var(--navy); }
   .dp-cmd { color: var(--paper); }
   .dp-out { color: var(--success); }
   /* typing + staged reveal under play */
@@ -2661,7 +2661,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     padding: 10px 12px; border-radius: var(--radius-xl);
     background: var(--surface-subtle); border: 1px solid var(--border);
   }
-  .dp-cont-ic { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; color: var(--accent-strong); background: var(--crimson-soft); }
+  .dp-cont-ic { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: 8px; color: var(--accent-strong); background: var(--navy-soft); }
   .dp-cont-ic svg { width: 15px; height: 15px; }
   .dp-cont-t { font-size: 12.5px; font-weight: 600; color: var(--text-primary); }
   .dp-cont .dp-pill { margin-left: auto; }
@@ -2698,7 +2698,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dp-panel.play .dp-ghapp-ck { transform: scale(0); animation: dp-pop .42s cubic-bezier(.16,1,.3,1) 1.5s forwards; }
   .dp-ghapp-note {
     margin-left: auto; font-size: 11px; font-weight: 650; color: var(--accent-strong);
-    background: var(--crimson-soft); border-radius: 999px; padding: 3px 10px;
+    background: var(--navy-soft); border-radius: 999px; padding: 3px 10px;
   }
   .dp-boot {
     margin: 0; font-family: var(--font-mono); font-size: 12.5px; color: var(--text-secondary);
@@ -2721,7 +2721,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   .dp-lock {
     display: flex; align-items: center; gap: 11px;
     padding: 12px 14px; border-radius: var(--radius-xl);
-    background: var(--crimson-soft); border: 1px solid color-mix(in srgb, var(--crimson) 24%, transparent);
+    background: var(--navy-soft); border: 1px solid color-mix(in srgb, var(--navy) 24%, transparent);
   }
   .dp-lock-ic { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 9px; color: var(--on-accent-strong); background: var(--accent-strong); }
   .dp-lock-ic svg { width: 17px; height: 17px; }
@@ -2778,7 +2778,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     font-size: 10.5px; font-weight: 750; color: var(--on-accent-strong);
     background: var(--accent-strong); box-shadow: 0 0 0 2px var(--surface);
   }
-  .dp-av.dp-a1 { margin-left: 0; background: var(--crimson); }
+  .dp-av.dp-a1 { margin-left: 0; background: var(--navy); }
   .dp-av.dp-a2 { background: var(--accent-strong); }
   .dp-av.dp-a3 { background: var(--accent-strong-press); }
   .dp-team-t { margin-left: 12px; font-size: 12.5px; font-weight: 600; color: var(--text-secondary); }
@@ -3504,7 +3504,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
     }
     .os-inline-link {
       color: var(--accent-strong); font-weight: 600;
-      text-decoration: underline; text-decoration-color: var(--crimson-soft);
+      text-decoration: underline; text-decoration-color: var(--navy-soft);
       text-underline-offset: 3px; text-decoration-thickness: 2px;
     }
     .os-inline-link:hover { text-decoration-color: var(--accent-strong); }

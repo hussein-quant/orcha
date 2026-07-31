@@ -268,7 +268,7 @@
   /* =========================================================================
      PRODUCT DEMO CINEMATIC (dm-) — a light-theme port of the portal cinematic.
      Mechanics from the existing welcome/index.html scene engine; restyled to
-     the Quantal paper/crimson design system. Tokens only (var()), no raw hex.
+     the warm paper design system with the navy interactive accent. Tokens only (var()), no raw hex.
      ========================================================================= */
   .dm-root {
     /* local status semantics mapped onto contract tokens */
@@ -279,7 +279,7 @@
     --dm-vio: #7B54D6;            /* PR "merged" purple — GitHub convention, decorative */
     --dm-vio-soft: rgba(123,84,214,.11);
     --dm-crm: var(--accent-strong);
-    --dm-crm-soft: var(--crimson-soft);
+    --dm-crm-soft: var(--navy-soft);
     padding: 96px 24px;
     background: var(--canvas);
     color: var(--text-primary);
@@ -342,7 +342,7 @@
     position: relative; overflow: hidden;
     min-height: 452px;
     background:
-      radial-gradient(560px 300px at 84% -10%, var(--crimson-soft), transparent 60%),
+      radial-gradient(560px 300px at 84% -10%, var(--navy-soft), transparent 60%),
       var(--surface);
   }
   .dm-scene {
@@ -381,7 +381,7 @@
   .dm-cbtn:hover { color: var(--text-primary); border-color: var(--accent-strong); }
   .dm-cbtn:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: 1px; }
   .dm-cbtn svg { width: 14px; height: 14px; }
-  .dm-cbtn.dm-play-t[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--crimson-soft); }
+  .dm-cbtn.dm-play-t[aria-pressed="true"] { color: var(--accent-strong); border-color: var(--accent-strong); background: var(--navy-soft); }
   .dm-cbtn .dm-ic-pause { display: none; }
   .dm-cbtn.dm-play-t[aria-pressed="true"] .dm-ic-pause { display: block; }
   .dm-cbtn.dm-play-t[aria-pressed="true"] .dm-ic-play { display: none; }
@@ -466,7 +466,7 @@
     width: 26px; height: 26px; border-radius: 50%; flex: none;
     display: grid; place-items: center;
     font-size: 11px; font-weight: 800; color: var(--on-accent-strong);
-    background: linear-gradient(135deg, var(--crimson), var(--accent-strong));
+    background: linear-gradient(135deg, var(--navy), var(--accent-strong));
   }
   .dm-av-you { background: linear-gradient(135deg, var(--text-secondary), var(--text-primary)); }
   .dm-av-sm { width: 18px; height: 18px; font-size: 9px; }
@@ -507,7 +507,7 @@
   .dm-chat { align-self: center; }
   .dm-chatbody { padding: 12px 12px 12px; }
   .dm-bubble {
-    background: var(--crimson-soft); border: 1px solid rgba(195,43,56,.24);
+    background: var(--navy-soft); border: 1px solid rgba(195,43,56,.24);
     color: var(--text-primary); border-radius: 12px 12px 4px 12px;
     padding: 9px 11px; font-size: 12px; line-height: 1.4;
     margin-left: 24px; overflow: hidden;
@@ -537,7 +537,7 @@
   .dm-sc-task .dm-comet .dm-cdot {
     position: absolute; top: 50%; left: 0; margin-top: -4px;
     width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent-strong); box-shadow: 0 0 12px var(--crimson);
+    background: var(--accent-strong); box-shadow: 0 0 12px var(--navy);
     opacity: 0;
   }
   .dm-scene.dm-play .dm-sc-task .dm-comet .dm-cdot { animation: dm-comet 1s ease-in-out 2.9s forwards; }
@@ -551,7 +551,7 @@
   .dm-trow:last-child { border-bottom: 0; }
   .dm-tid { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
   .dm-tt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dm-trow.dm-new { background: var(--crimson-soft); }
+  .dm-trow.dm-new { background: var(--navy-soft); }
   .dm-trow.dm-new .dm-tt { color: var(--text-primary); font-weight: 600; }
 
   /* ---- scene 2 · sandbox -------------------------------------------------- */
@@ -586,11 +586,11 @@
   /* A terminal stays a terminal in daylight: it sits on --ink (a dark surface),
      so its foregrounds use the design system's OWN dark-theme token values —
      light-mode tokens would be illegible here. These mirror .dark's
-     --text-secondary / --text-tertiary / crimson / success-text / warning-text. */
+     --text-secondary / --text-tertiary / navy / success-text / warning-text. */
   .dm-term {
     --dm-t-fg:  #C9C0B4;  /* = .dark --text-secondary */
     --dm-t-mut: #A39A8E;  /* = .dark --text-tertiary */
-    --dm-t-crm: #FF5A66;  /* = .dark --crimson */
+    --dm-t-crm: #FF5A66;  /* = .dark --navy */
     --dm-t-ok:  #4ADE80;  /* = .dark --success-text */
     --dm-t-warn:#FBBF24;  /* = .dark --warning-text */
   }
