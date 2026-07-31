@@ -84,3 +84,16 @@ class MemberRemove(BaseModel):
         default=None,
         description="acting human's UUID when no trusted proxy identity is present",
     )
+
+
+class DeviceTokenCreate(BaseModel):
+    """POST /api/device-tokens — mint a per-device bearer token (Orcha Cloud).
+
+    The acting identity comes exclusively from the trusted proxy header (there is
+    no actor_agent_id fallback: device tokens only exist behind the cloud proxy)."""
+
+    label: Optional[str] = Field(
+        default=None,
+        max_length=120,
+        description="human-readable device label (e.g. \"Hussein's iPhone\")",
+    )
