@@ -82,6 +82,12 @@ final class AppModel {
     var models: [ModelDto] = []
     var conversation: ConversationDto?
     var turns: [TurnDto] = []
+    /// Chat send-UX — the composer's optimistic-send machine (pure; see ChatSendFlow).
+    var sendFlow = ChatSendFlow()
+    /// Chat send-UX — the bounded post-send poll awaiting the echo + the reply.
+    private var replyWatchTask: Task<Void, Never>?
+    /// The agent whose conversation `conversation`/`turns`/`sendFlow` belong to.
+    private var conversationAgentId: String?
 
     // ui state
     var loading = false
@@ -361,6 +367,8 @@ final class AppModel {
 
     func closeWorkspace() {
         pollTask?.cancel()
+        stopReplyWatch()
+        sendFlow.reset()
         selectedContainer = nil
         snapshot = nil
         probeContainers()
@@ -661,10 +669,20 @@ final class AppModel {
     /// older turns client-side. Refreshes delta-append via `after_seq` (see below).
     func loadConversation(_ agentId: String) async {
         guard let sel = selectedContainer else { return }
+        // Send-UX: the held conversation/turns/send state belong to ONE agent — switching
+        // agents must never let a stale `conversation` swallow a send for the wrong peer.
+        if conversationAgentId != agentId {
+            conversationAgentId = agentId
+            stopReplyWatch()
+            sendFlow.reset()
+            conversation = nil
+            turns = []
+        }
         do {
             let response = try await api.conversation(sel.baseUrl, agentId, limit: 80)
             conversation = response.conversation
             turns = response.turns
+            sendFlow.observe(turns, humanId: humanId)
         } catch {
             self.error = friendly(error)
         }
@@ -672,7 +690,9 @@ final class AppModel {
 
     /// Issue 4: append only the turns created after the last-held seq, instead of full-replacing
     /// the transcript (web parity, `conversation.js:586`). Falls back to a full load if unmounted.
-    func refreshConversationDelta(_ agentId: String) async {
+    /// `quiet` (the reply watch) swallows transient poll errors instead of flashing the banner —
+    /// exactly the cold-start window where a slow server drops a poll or two.
+    func refreshConversationDelta(_ agentId: String, quiet: Bool = false) async {
         guard let sel = selectedContainer, let conv = conversation else {
             await loadConversation(agentId)
             return
@@ -681,8 +701,9 @@ final class AppModel {
             let lastSeq = turns.map(\.seq).max() ?? 0
             let delta = try await api.conversationTurns(sel.baseUrl, conv.id, afterSeq: lastSeq, limit: 50).turns
             turns = MobileUx.appendTurns(turns, delta: delta)
+            sendFlow.observe(turns, humanId: humanId)
         } catch {
-            self.error = friendly(error)
+            if !quiet { self.error = friendly(error) }
         }
     }
 
@@ -892,19 +913,79 @@ final class AppModel {
         }
     }
 
+    /// Chat send-UX: optimistic one-shot send. `sendFlow.begin` guards re-entry (button
+    /// mashing) and renders the pending bubble immediately; success hands off to the
+    /// bounded reply watch; failure keeps the content in the tap-to-retry bubble. The
+    /// POST is NEVER auto-retried — a timed-out POST may still land server-side, and
+    /// a blind resend is exactly the duplicate-turn bug this flow exists to prevent.
+    @discardableResult
     func sendTurn(_ agentId: String, content: String) async -> Bool {
-        await humanAction("Message sent") { base, actor in
+        guard let sel = selectedContainer else { return false }
+        guard let actor = sel.humanAgentId else {
+            error = "Pairing is missing the human identity. Reconnect this Orcha first."
+            return false
+        }
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard sendFlow.begin(
+            content: trimmed,
+            baselineSeq: turns.map(\.seq).max() ?? 0,
+            isFirstTurn: turns.isEmpty
+        ) else { return false }
+        error = nil
+        do {
             if conversation == nil {
-                conversation = try await api.startConversation(base, agentId, actor: actor).conversation
+                conversation = try await api.startConversation(sel.baseUrl, agentId, actor: actor).conversation
             }
             guard let conv = conversation else { throw URLError(.badServerResponse) }
-            try await api.sendTurn(base, conv.id, actor: actor, content: content)
-            await refreshConversationDelta(agentId)
+            try await api.sendTurn(sel.baseUrl, conv.id, actor: actor, content: trimmed)
+            sendFlow.postSucceeded()
+            startReplyWatch(agentId)
+            return true
+        } catch {
+            sendFlow.postFailed(friendly(error))
+            return false
         }
+    }
+
+    /// Tap-to-retry: pull the failed send's text back for the composer (clears the bubble).
+    func takeFailedSendContent() -> String? {
+        sendFlow.takeFailedContent()
+    }
+
+    /// Chat send-UX: after a successful POST, poll the turns delta until the poll echoes
+    /// our turn and the agent replies — there is no conversation SSE yet, and the 30s
+    /// snapshot poll never touches `turns`. Bounded: 2.5s cadence for 3 minutes (a cold
+    /// first wake can take a minute+), then the flow flips to the overdue note. The watch
+    /// survives a push to a detail screen (it owns no view state) and a fresh send
+    /// replaces it.
+    private func startReplyWatch(_ agentId: String) {
+        replyWatchTask?.cancel()
+        replyWatchTask = Task {
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(180))
+            while !Task.isCancelled {
+                await refreshConversationDelta(agentId, quiet: true)
+                if Task.isCancelled { return }
+                // Resolved (reply observed) or superseded (a new send began) — done.
+                if !sendFlow.showsAwaitingReply { return }
+                if clock.now > deadline {
+                    sendFlow.replyOverdue()
+                    return
+                }
+                try? await Task.sleep(for: .seconds(2.5))
+            }
+        }
+    }
+
+    private func stopReplyWatch() {
+        replyWatchTask?.cancel()
+        replyWatchTask = nil
     }
 
     func endConversation(_ agentId: String) async -> Bool {
         guard let conv = conversation else { return false }
+        stopReplyWatch()
+        sendFlow.reset()
         return await humanAction("Conversation ended") { base, actor in
             try await api.endConversation(base, conv.id, actor: actor)
             await loadConversation(agentId)
