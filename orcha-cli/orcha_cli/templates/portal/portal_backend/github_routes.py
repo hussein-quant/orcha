@@ -39,6 +39,33 @@ def _read_token():
     return token or None
 
 
+def _read_token_map():
+    """Read the multi-installation token map the refresh timer maintains (multi-org).
+
+    ORCHA_GITHUB_TOKENS_FILE points at a JSON object {"<owner-lowercase>": "<token>"}
+    with one installation token per org/user the App is installed on
+    (<project>/.orcha/github-tokens.json on the host). Env unset, file
+    missing/unreadable, not a JSON object, or an empty/valueless map all resolve to
+    None — the caller then falls back to the legacy single-token file. Never an error.
+    """
+    path = (os.environ.get("ORCHA_GITHUB_TOKENS_FILE") or "").strip()
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    tokens = {
+        str(owner).lower(): str(token).strip()
+        for owner, token in data.items()
+        if isinstance(token, str) and token.strip()
+    }
+    return tokens or None
+
+
 def _fetch_installation_repos(token: str) -> list:
     """Fetch the repos this installation token can see (the App's installed repos).
 
@@ -71,14 +98,48 @@ def _fetch_installation_repos(token: str) -> list:
     return payload.get("repositories") or []
 
 
+def _repo_entry(repo: dict) -> dict:
+    return {
+        "full_name": repo.get("full_name"),
+        "private": bool(repo.get("private")),
+        "description": repo.get("description"),
+        "html_url": repo.get("html_url"),
+    }
+
+
 @app.get("/api/github/repos")
 def list_github_repos():
-    """List the GitHub App installation's repos for the Connect-repo modal.
+    """List the GitHub App's repos across ALL installations for the Connect-repo modal.
 
-    No token file (self-hosters without the App) → 200 {"available": false, "repos": []}
-    — a graceful off state, deliberately NOT an error. A GitHub-side failure is likewise
-    available:false plus a short `detail` string so the modal can say why.
+    Multi-org: when the token map (ORCHA_GITHUB_TOKENS_FILE) is present, every
+    installation's repos are fetched and merged (deduped, sorted by full_name);
+    `available` is true if ANY installation answered, and per-owner failures ride a
+    `detail` string. Without the map, the legacy single-token file is used unchanged.
+
+    No token at all (self-hosters without the App) → 200 {"available": false,
+    "repos": []} — a graceful off state, deliberately NOT an error. A GitHub-side
+    failure is likewise available:false plus a short `detail` string.
     """
+    token_map = _read_token_map()
+    if token_map:
+        merged: dict = {}
+        failures = []
+        for owner in sorted(token_map):
+            try:
+                raw = _fetch_installation_repos(token_map[owner])
+            except RuntimeError as exc:
+                failures.append(f"{owner}: {exc}")
+                continue
+            for repo in raw:
+                merged.setdefault(repo.get("full_name"), _repo_entry(repo))
+        result = {
+            "available": len(failures) < len(token_map),
+            "repos": [merged[name] for name in sorted(merged, key=lambda n: n or "")],
+        }
+        if failures:
+            result["detail"] = "; ".join(failures)
+        return result
+
     token = _read_token()
     if not token:
         return {"available": False, "repos": []}
@@ -86,18 +147,7 @@ def list_github_repos():
         raw = _fetch_installation_repos(token)
     except RuntimeError as exc:
         return {"available": False, "repos": [], "detail": str(exc)}
-    return {
-        "available": True,
-        "repos": [
-            {
-                "full_name": repo.get("full_name"),
-                "private": bool(repo.get("private")),
-                "description": repo.get("description"),
-                "html_url": repo.get("html_url"),
-            }
-            for repo in raw
-        ],
-    }
+    return {"available": True, "repos": [_repo_entry(repo) for repo in raw]}
 
 
 @app.get("/api/containers/{cid}/github")

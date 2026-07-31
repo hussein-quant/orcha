@@ -54,6 +54,12 @@ services:
       # App's PEM stays on the host, always. Missing/empty file → GET /api/github/repos
       # answers {"available": false} (the dashboard's graceful off state), never an error.
       ORCHA_GITHUB_TOKEN_FILE: /app/stack-dir/github-token
+      # Multi-org: per-owner installation token map the same host timer writes at
+      # <project>/.orcha/github-tokens.json — JSON {"<owner-lowercase>": "<token>"} with
+      # one token per org/user the App is installed on. When present the portal lists
+      # repos across ALL installations (merged, deduped); missing/empty → the single
+      # token file above is used as before.
+      ORCHA_GITHUB_TOKENS_FILE: /app/stack-dir/github-tokens.json
       # Collab v1: opt-in trust for the OAuth proxy's X-Auth-Request-User identity header
       # (set to "1" ONLY when the portal is loopback-bound behind the cloud's GitHub OAuth
       # proxy). Unset/empty for self-hosters → the header is ignored entirely. Passed
