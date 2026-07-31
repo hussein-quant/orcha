@@ -71,6 +71,32 @@ on the workspace actually carrying a git checkout **and** the token file:
 4. `gh pr create --title ... --body ...` — the body ends with a reference to
    the Orcha work log (task/thread) and a note that a human reviews it.
 
+### Human attribution (who *triggered* the bot)
+
+The bot stays the PR author (the App-token headless flow), but every
+agent-opened PR names the human who triggered the work, two ways:
+
+1. **PR body, first line** — a highlighted blockquote, then a blank line:
+
+   > 🧑 Triggered by @\<github-handle\> via Orcha task \<task-id\>
+
+   The @mention makes GitHub link and notify the person. Fallback when the
+   human has no recorded handle: their display name, no @, task id kept —
+   attribution is never dropped silently.
+
+2. **`Co-authored-by: <name> <email>`** trailer on the final commit, so the
+   human shows in the commit graph. Email preference order: their recorded
+   `git_email` → `<github-login>@users.noreply.github.com` → no trailer (body
+   line still carries attribution).
+
+The plumbing: humans register their handle/email (`/orcha-register-human
+--github <login> --email <addr>`, stored on `agents.github_login` /
+`agents.git_email`, migration 042); `GET /api/agents/{aid}/protocol` resolves
+the task's requesting human as `requested_by` (the task's stamped human
+creator, else the container's earliest live owner); the wake's "Your task"
+section renders it as a `Requested by:` line; `REPO_WORKFLOW_GUIDANCE` and
+`/orcha-done` (step 4) carry the exact formats and the fix-up commands.
+
 ### What humans do
 
 Review and merge. Nothing in this pipeline can self-approve: the bot has no

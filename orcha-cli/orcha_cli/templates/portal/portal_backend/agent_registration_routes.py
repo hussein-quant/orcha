@@ -60,6 +60,12 @@ def register_agent(cid: str, body: AgentCreate, request: Request):
                 400,
                 f"model '{model}' is not a known model; choose one of {sorted(_model_ids())}",
             )
+        # PR attribution (docs/agent-prs.md): a human may register with their GitHub
+        # handle + preferred git author email so agent-opened PRs on their tasks can
+        # @mention them and carry a Co-authored-by trailer. Humans only — an AI row
+        # carrying a handle would masquerade as a person in the attribution chain.
+        github_login = body.github_login if body.kind == "human" else None
+        git_email = body.git_email if body.kind == "human" else None
         try:
             # Collab v1: a container's FIRST live human is its owner (the same invariant
             # migration 036 backfills for pre-existing rows) — otherwise a fresh container
@@ -67,8 +73,8 @@ def register_agent(cid: str, body: AgentCreate, request: Request):
             # humans join as plain members; owners promote them deliberately.
             cur.execute(
                 """INSERT INTO agents (container_id, alias, role, kind, system_prompt, model,
-                                       member_role)
-                   VALUES (%s, %s, %s, %s, %s, %s,
+                                       github_login, git_email, member_role)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s,
                            CASE WHEN %s = 'human' AND NOT EXISTS (
                                     SELECT 1 FROM agents
                                      WHERE container_id=%s AND kind='human'
@@ -76,9 +82,18 @@ def register_agent(cid: str, body: AgentCreate, request: Request):
                                 THEN 'owner' ELSE 'member' END)
                    RETURNING id""",
                 (cid, body.alias, body.role, body.kind, body.prompt, model,
-                 body.kind, cid),
+                 github_login, git_email, body.kind, cid),
             )
-        except psycopg.errors.UniqueViolation:
+        except psycopg.errors.UniqueViolation as exc:
+            # Two unique surfaces can trip here: (container_id, alias) and the
+            # 036 partial index on (container_id, lower(github_login)).
+            constraint = (exc.diag.constraint_name or "") if exc.diag else ""
+            if "github_login" in constraint:
+                raise HTTPException(
+                    409,
+                    f"github_login '{github_login}' already maps to another member "
+                    "of this container",
+                )
             raise HTTPException(
                 409, f"alias '{body.alias}' already registered in this container"
             )

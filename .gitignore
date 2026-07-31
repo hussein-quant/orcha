@@ -261,3 +261,4 @@ deploy/auth/github-app.pem
 deploy/auth/github-app.json
 deploy/auth/github-app.webhook-secret
 ios/project.local.yml
+ios/dd/

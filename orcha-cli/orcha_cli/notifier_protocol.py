@@ -60,6 +60,18 @@ def _render_task_body(protocol: Optional[dict]) -> Optional[str]:
             if not isinstance(v, str):
                 v = json.dumps(v, ensure_ascii=False)
             lines.append(f"- {label}: {v}")
+    # PR attribution (docs/agent-prs.md): surface WHO triggered this task so a PR the
+    # worker opens can @mention them and carry a Co-authored-by trailer (the exact
+    # formats live in the repository-workflow rules section of the system prompt).
+    req = p.get("requested_by") or {}
+    if req.get("alias") or req.get("github_login"):
+        who = req.get("alias") or req.get("github_login")
+        if req.get("github_login"):
+            who += f" (@{req['github_login']})"
+        if req.get("git_email"):
+            who += f" <{req['git_email']}>"
+        lines.append(f"- Requested by: {who} — attribute any PR/commit for this task "
+                     "to them per the repository workflow rules.")
     # Title alone (no description/DoD) adds nothing over what the worker already knows — skip.
     return "\n".join(lines) if len(lines) > 2 else None
 
