@@ -582,6 +582,7 @@ apps created before 2026-08-01 need the manual fixes below.
 | Webhook | Inactive (none needed) | App settings → Webhook | — |
 | **Installation** | App installed on EVERY org/account whose repos agents touch | App page → Install App → *Only select repositories* | Repos absent from the Connect-repo list; token mint fails "installed on nothing"; multi-org is supported (tokens are minted per-owner) |
 | **Permission-update approval** | Org admin accepts pending request after any permission change | Org → Settings → GitHub Apps → Configure | New scopes silently absent from freshly minted tokens until accepted — pushes keep 403ing after you "fixed" the permission |
+| **App rename** | Update `slug` in `/opt/orcha-secrets/github-app.json` to the new `github.com/apps/<slug>` | box secrets file | Bot commits stop linking to the bot account (unknown author, no avatar) — the provisioner stamps identity from the stored slug |
 
 Credentials placement (never in a container, never in git): client id/secret →
 `deploy/auth/.env` (0600); private key + app metadata → `/opt/orcha-secrets/`
