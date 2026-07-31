@@ -95,6 +95,47 @@ def _repo_credentials_present(workdir: Optional[str] = None) -> bool:
         return False
 
 
+# Remote-portal awareness (field bug: a "local" workspace whose orcha.json pointed at a
+# cloud portal created tasks THERE while its human believed everything was local). The
+# notice is GENERIC — any non-loopback api_base host counts as remote and the text echoes
+# whatever host is configured (a BYOC IP, a self-hosted domain, or a managed cloud) — no
+# deployment's domain is ever special-cased. Stable per-workspace (api_base is fixed at
+# daemon boot), so it rides inside the GH#34 cacheable prefix.
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0", "[::1]"}
+
+
+def _portal_host(api_base: Optional[str]) -> Optional[str]:
+    """Hostname (no port/scheme) of the portal api_base, or None if unparseable."""
+    if not api_base:
+        return None
+    from urllib.parse import urlsplit
+    try:
+        host = urlsplit(api_base).hostname
+    except ValueError:
+        return None
+    return host or None
+
+
+def remote_portal_notice(api_base: Optional[str]) -> Optional[str]:
+    """A persona section for workspaces whose portal is NOT on this machine.
+
+    Loopback (localhost/127.x/::1) → None: a local portal needs no notice. Anything
+    else — LAN IP, BYOC domain, managed cloud — gets named plainly so the agent
+    tells its human where created work actually lives."""
+    host = _portal_host(api_base)
+    if host is None:
+        return None
+    if host in _LOOPBACK_HOSTS or host.startswith("127."):
+        return None
+    return (
+        "## Remote portal notice\n"
+        f"This workspace's Orcha portal is REMOTE: {host}. Every task, message, and "
+        "conversation you create lands on THAT deployment — not on a local instance. "
+        "When you create or hand off a task, say plainly in your reply that it lives "
+        f"on {host}, so a human who expects local work is never surprised."
+    )
+
+
 # GH #91/#90: create-time rule for the one duplicate-work case left after the lane split. This is
 # intentionally advisory/model-facing, not a backend gate: only the conversation embodiment can judge
 # whether the new task overlaps state that exists solely in its live chat context.
@@ -167,7 +208,8 @@ def _wrap_conversation_turn(content: str) -> str:
 def format_persona(persona: Optional[dict], digest: Optional[dict],
                    protocol: Optional[dict] = None, lane: str = "work",
                    render_resume: bool = False,
-                   workdir: Optional[str] = None) -> Optional[str]:
+                   workdir: Optional[str] = None,
+                   api_base: Optional[str] = None) -> Optional[str]:
     """Pure: assemble the --append-system-prompt text so a headless worker boots AS the
     agent. `persona` is GET /persona ({system_prompt,...}); `digest` is GET /digest
     ({digest: {...}|null}); `protocol` is GET /agents/{aid}/protocol ({protocol:{...}|null});
@@ -210,6 +252,12 @@ def format_persona(persona: Optional[dict], digest: Optional[dict],
         # it stays inside the GH#34 cacheable prefix.
         if _repo_credentials_present(workdir):
             parts.append(REPO_WORKFLOW_GUIDANCE)
+        # Remote-portal awareness: stable per-workspace (api_base fixed at daemon
+        # boot) so it stays inside the GH#34 cacheable prefix. Generic — echoes
+        # whatever non-loopback host is configured, never a special-cased domain.
+        portal_notice = remote_portal_notice(api_base)
+        if portal_notice:
+            parts.append(portal_notice)
     # GH #91/#90: a conversation-lane embodiment (resident, or a talk-only ephemeral) also carries the
     # dispatch directive so the boot frames every turn as "answer quick asks inline; hand off real
     # work as an assigned task". Only appended for lane=='conversation' — a work embodiment keeps its

@@ -132,6 +132,11 @@ from .notifier_resident_lifecycle import (
     _close_resident,
     _spawn_drain_sidecar,
 )
+from .notifier_persona import (
+    _LOOPBACK_HOSTS,
+    _portal_host,
+    remote_portal_notice,
+)
 from .notifier_daemon_facade import (
     HEARTBEAT_STALE_SECS,
     _api_base_for,
