@@ -57,6 +57,18 @@ def requests_page():
     return serve_page("requests.html")
 
 
+@app.get("/metrics", response_class=HTMLResponse)
+def metrics_page():
+    """Usage/cost visibility per agent — stat cards, per-agent cost table, daily bars.
+
+    Pure client-side, same pattern as the other pages: serves the static shell,
+    which loads the D0 assets + pages/metrics-*.js. The page resolves the container
+    (OrchaData) and reads GET /api/containers/{cid}/metrics?days=7|30 — the one
+    aggregate endpoint added for this page (container_metrics_routes).
+    """
+    return serve_page("metrics.html")
+
+
 @app.get("/tasks", response_class=HTMLResponse)
 def tasks_page():
     """Per-task detail view (owned by agent "D").
