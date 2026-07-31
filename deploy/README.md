@@ -116,6 +116,17 @@ Agents clone/pull/push over https as the app bot, and open PRs with
 commits/PRs are attributed to the app bot; the human PR review remains the
 authority gate, same as the Orcha task flow.
 
+**Multi-org**: install the app on each org/user whose repos Orcha should reach
+(app page → Install App, once per org). The refresh timer discovers all
+installations automatically: a workspace whose container is bound to a repo
+(portal `GET /api/containers/{cid}/github`) gets its `github-token` minted from
+the matching owner's installation, scoped to that repo; unbound workspaces keep
+getting the first installation's token. The timer also writes
+`<ws>/.orcha/github-tokens.json` (`{"<owner-lowercase>": "<token>"}` for every
+installation) which the portal reads to list repos across all orgs in the
+Connect-repo modal. `github-app-token.py --list-installations` prints the
+installations; `--repo owner/name` auto-selects the owner's installation.
+
 ## Notes
 
 - Agents and sandbox containers inside the box reach `portal:8000` over the
