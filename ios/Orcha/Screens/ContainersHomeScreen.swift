@@ -44,7 +44,8 @@ struct ContainersHomeScreen: View {
                 },
                 onTokenRequired: {
                     // Scan hit the auth perimeter: the address is captured, only
-                    // the team token is missing — ask for exactly that.
+                    // a credential is missing — offer GitHub sign-in (primary)
+                    // with pasted-token entry as the advanced fallback.
                     showScanner = false
                     showTokenPrompt = true
                 }
@@ -54,7 +55,7 @@ struct ContainersHomeScreen: View {
             ManualConnectSheet()
         }
         .sheet(isPresented: $showTokenPrompt) {
-            AccessTokenPromptSheet()
+            AuthOptionsSheet()
         }
         .sheet(isPresented: $showSettings) {
             SettingsScreen()
