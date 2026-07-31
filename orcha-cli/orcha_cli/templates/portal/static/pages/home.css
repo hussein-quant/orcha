@@ -12,6 +12,25 @@
   .ctxbar .stat .n { font-size: 16px; font-weight: 750; font-variant-numeric: tabular-nums; line-height: 1; }
   .ctxbar .stat .l { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
 
+  /* GitHub repo binding on the context card — bound: a mono owner/name tag linking to
+     the repo; unbound: a subtle dashed "Connect repo" affordance. Same 24px row either
+     way so toggling the binding never shifts the card. Tokens only — themes + Swiss ok. */
+  .gh-row { display: flex; align-items: center; gap: 6px; margin-top: 7px; min-height: 24px; }
+  .gh-row .gh-mark { width: 13px; height: 13px; flex: none; }
+  .tag.gh { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; padding: 3px 9px 3px 7px; color: var(--text-2); cursor: pointer;
+    transition: color .12s, border-color .12s, background .12s; }
+  a.tag.gh:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+  .tag.gh.gh-connect { font: inherit; font-size: 11.5px; font-weight: 600; color: var(--muted);
+    background: transparent; border-style: dashed; }
+  .tag.gh.gh-connect:hover { color: var(--accent); border-color: var(--accent-line);
+    border-style: solid; background: var(--accent-soft); }
+  .gh-edit { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+    border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--faint);
+    cursor: pointer; padding: 0; transition: color .12s, border-color .12s, background .12s; }
+  .gh-edit:hover { color: var(--text); border-color: var(--border-2); background: var(--hover); }
+  .gh-edit svg { width: 12px; height: 12px; }
+
   /* first-run get-started CTA (empty workspace — no AI agents) */
   .onb-cta { display: flex; align-items: center; gap: 16px; padding: 18px 20px; margin-bottom: 22px; border-radius: 15px;
     background: linear-gradient(180deg, var(--accent-soft), transparent); border: 1px solid var(--accent-line); box-shadow: var(--shadow-sm); }
