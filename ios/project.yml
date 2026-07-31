@@ -1,6 +1,13 @@
 # Orcha iOS companion — XcodeGen project definition (GH #30, design package
 # docs/design/mobile). Generate with `xcodegen generate`; no Xcode GUI needed.
 name: Orcha
+# Device signing: create gitignored ios/project.local.yml with your team
+# (targets: Orcha/OrchaWidgetsExt? -> settings: base: {DEVELOPMENT_TEAM: X,
+# CODE_SIGNING_ALLOWED: "YES"}) then re-run `xcodegen generate`.
+include:
+  - path: project.local.yml
+    enable: true
+    optional: true
 options:
   bundleIdPrefix: io.openorcha
   deploymentTarget:
