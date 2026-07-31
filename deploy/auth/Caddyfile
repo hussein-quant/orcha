@@ -1,14 +1,38 @@
 # Auth perimeter (spec: docs/superpowers/specs/2026-07-30-auth-perimeter-design.md)
-# Browsers -> GitHub OAuth (oauth2-proxy). iOS app + agent API -> bearer lane.
+# Browsers -> GitHub OAuth (oauth2-proxy). iOS app + agent API -> bearer lanes.
 # The portal itself never binds a public port.
 {
     email {$ACME_EMAIL}
 }
 
 {$ORCHA_DOMAIN} {
-    # ── Bearer lane: exact team-token match skips OAuth entirely ──────────
-    @bearer header Authorization "Bearer {$ORCHA_TEAM_TOKEN}"
+    # ── Bearer lane 1: exact team-token match skips OAuth entirely ────────
+    # Break-glass: works even if the portal's device-token validator is down.
+    # MUST stay ahead of the wildcard bearer lane below — handle blocks match
+    # in order, and the team token is also "Bearer *".
+    @team header Authorization "Bearer {$ORCHA_TEAM_TOKEN}"
+    handle @team {
+        reverse_proxy portal:8000
+    }
+
+    # ── Bearer lane 2: any other bearer token is a per-DEVICE token ───────
+    # The portal validates it (202 + X-Auth-Request-User, see
+    # portal_backend/device_token_routes.py) and copy_headers carries the
+    # verified GitHub login upstream — phone requests are attributed to the
+    # human who paired the device. Invalid/revoked tokens get a plain 401,
+    # never the browser sign-in redirect (API clients need a clean status).
+    # Host-Caddy deployments (portal loopback-published) target
+    # 127.0.0.1:8001 instead of portal:8000 for both directives.
+    @bearer header Authorization "Bearer *"
     handle @bearer {
+        forward_auth portal:8000 {
+            uri /api/auth/check
+            copy_headers X-Auth-Request-User
+            @error status 401
+            handle_response @error {
+                respond "unauthorized: invalid or revoked token" 401
+            }
+        }
         reverse_proxy portal:8000
     }
 
