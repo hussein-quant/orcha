@@ -3,6 +3,7 @@
 from .agents import (
     AgentCreate,
     AgentCreateResponse,
+    DeviceTokenCreate,
     InitialTask,
     MemberCreate,
     MemberRemove,
@@ -32,6 +33,7 @@ __all__ = [
     "ContainerGithubBinding",
     "ContainerReset",
     "ContainerStatusUpdate",
+    "DeviceTokenCreate",
     "InitialTask",
     "LlmKeyActor",
     "LlmKeyTest",
