@@ -156,7 +156,11 @@ assert_contains "$REGISTRY" "cid-dogfood-0000 $WORK/dogfood"
 assert_contains "$GIT_LOG" "clone -q https://x-access-token:ghs_FAKETOKEN123@github.com/acme/site.git $WORK/my-site"
 assert_contains "$GIT_LOG" "-C $WORK/my-site remote set-url origin https://github.com/acme/site.git"
 assert_contains "$GIT_LOG" "config credential.helper"
-assert_contains "$GIT_LOG" "/workspace/.orcha/github-token"
+# path-identical mounting: the helper resolves the token via the sandbox-stamped
+# ORCHA_WORKSPACE_ROOT (with a $PWD walk-up fallback) — never a /workspace remap
+assert_contains "$GIT_LOG" 'ORCHA_WORKSPACE_ROOT'
+assert_contains "$GIT_LOG" '/.orcha/github-token'
+assert_not_contains "$GIT_LOG" "/workspace/.orcha/github-token"
 # agent→PR bot identity: workspace-local git config authors commits as the app
 # bot (stub secrets carry no slug → the orcha-cloud-app fallback), email built
 # from the secrets' APP_ID (999 in the stub).

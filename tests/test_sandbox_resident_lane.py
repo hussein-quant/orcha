@@ -101,10 +101,11 @@ def test_sandbox_spawn_keeps_stdin_pipe_and_needs_no_host_claude(tmp_path, monke
     tail = argv[argv.index(sandbox.DEFAULT_IMAGE) + 1:]
     assert tail[:2] == ["claude", "-p"]
     assert "--input-format" in tail and "stream-json" in tail
-    # the sandbox-scoped api config was written and is mounted over orcha.json
+    # the sandbox-scoped api config was written and is mounted over the spawn
+    # cwd's orcha.json (path-identical mounting: cwd == the root here)
     api_cfg = str(proj / ".orcha" / "sandbox" / f"{info['sandbox_container_id']}.json")
     assert (proj / ".orcha" / "sandbox" / f"{info['sandbox_container_id']}.json").exists()
-    assert f"{api_cfg}:/workspace/.claude/orcha.json:ro" in argv
+    assert f"{api_cfg}:{proj}/.claude/orcha.json:ro" in argv
 
 
 def test_preflight_failure_fails_resident_loudly_without_popen(tmp_path, monkeypatch):

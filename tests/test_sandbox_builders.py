@@ -102,14 +102,60 @@ def test_build_docker_argv_shape(tmp_path):
     assert "--label orcha.managed=1" in joined
     assert "--label orcha.container_name=orcha-run-abc" in joined
     assert "--memory 4g" in joined and "--cpus 2" in joined and "--pids-limit 512" in joined
-    assert f"-v {proj}:/workspace" in joined and "-w /workspace" in joined
+    # PATH-IDENTICAL mounting: host path == container path, workdir = the root —
+    # git-worktree pointer files and .orcha/github-token paths stay valid.
+    assert f"-v {proj}:{proj}" in joined and f"-w {proj}" in joined
+    assert "/workspace" not in joined               # the old remap is GONE
+    # the spawner-stamped root env the gh wrapper / credential helper read:
+    assert f"-e ORCHA_WORKSPACE_ROOT={proj}" in joined
     # secrets ride the client env, never argv:
     assert "-e ORCHA_RUN_TOKEN" in joined and "ORCHA_RUN_TOKEN=" not in joined
     assert "--network orcha-myproj_default" in joined
-    # the api-base override file masks the host-addressed orcha.json in the workspace:
-    assert f"-v {proj}/.orcha/sandbox/orcha-run-abc.json:/workspace/.claude/orcha.json:ro" in joined
+    # the api-base override file masks the host-addressed orcha.json the agent reads:
+    assert f"-v {proj}/.orcha/sandbox/orcha-run-abc.json:{proj}/.claude/orcha.json:ro" in joined
     assert argv[-3:] == ["claude", "-p", "hi"]
     assert argv[-4] == cfg.image
+
+
+def test_build_docker_argv_worktree_workdir(tmp_path):
+    # A worktree spawn: the ROOT is mounted path-identically, -w is the WORKTREE,
+    # and the api-config override masks BOTH the worktree's and the root's
+    # orcha.json (the root is visible in-container and its api_base_url points
+    # at an unreachable host port).
+    proj = _project(tmp_path, {"enabled": True})
+    cfg = sandbox.SandboxConfig.load(proj)
+    wt = proj / ".orcha-worktrees" / "resident-C1"
+    api_cfg = str(proj / ".orcha" / "sandbox" / "orcha-run-abc.json")
+    argv = sandbox.build_docker_argv(
+        ["claude", "-p"], cfg=cfg, name="orcha-run-abc",
+        workspace=str(proj), workdir=str(wt), network=None,
+        api_config_mount=api_cfg,
+    )
+    joined = " ".join(argv)
+    assert f"-v {proj}:{proj}" in joined            # the root mount covers the worktree
+    assert f"-w {wt}" in joined                     # ...but the session runs IN the worktree
+    assert f"-e ORCHA_WORKSPACE_ROOT={proj}" in joined      # root, not the worktree
+    assert f"-v {api_cfg}:{wt}/.claude/orcha.json:ro" in joined
+    assert f"-v {api_cfg}:{proj}/.claude/orcha.json:ro" in joined
+    assert f"-v {wt}:{wt}" not in joined            # inside the root — no extra mount
+
+
+def test_build_docker_argv_workdir_outside_root_gets_own_mount(tmp_path):
+    # Defensive: a spawn cwd OUTSIDE the mounted root (not the current worktree
+    # layout) must still resolve in-container — it gets its own path-identical
+    # mount rather than a dangling -w.
+    (tmp_path / "proj").mkdir()
+    proj = _project(tmp_path / "proj", {"enabled": True})
+    cfg = sandbox.SandboxConfig.load(proj)
+    outside = tmp_path / "elsewhere" / "wt"
+    argv = sandbox.build_docker_argv(
+        ["claude", "-p"], cfg=cfg, name="orcha-run-abc",
+        workspace=str(proj), workdir=str(outside), network=None,
+        api_config_mount=str(proj / ".orcha" / "sandbox" / "orcha-run-abc.json"),
+    )
+    joined = " ".join(argv)
+    assert f"-v {outside}:{outside}" in joined
+    assert f"-w {outside}" in joined
 
 
 def test_build_docker_argv_extra_labels(tmp_path):
@@ -127,6 +173,71 @@ def test_build_docker_argv_extra_labels(tmp_path):
         ["claude", "-p", "hi"], **kw, extra_labels=(sandbox.LABEL_SIDECAR,)))
     assert "--label orcha.sidecar=1" in labeled
     assert "--label orcha.managed=1" in labeled          # managed label still present
+
+
+def test_build_docker_argv_mounts_agent_home(tmp_path):
+    # Session-persistence: every sandboxed wake (one-shot AND resident) mounts
+    # the durable per-workspace agent home over the container's ~/.claude —
+    # without it each container boots with an empty ~/.claude and a resident's
+    # `--resume <pinned session>` always fails after a container restart.
+    proj = _project(tmp_path, {"enabled": True})
+    cfg = sandbox.SandboxConfig.load(proj)
+    kw = dict(cfg=cfg, name="orcha-run-abc", workspace=str(proj), network=None,
+              api_config_mount=str(proj / ".orcha" / "sandbox" / "orcha-run-abc.json"))
+    one_shot = " ".join(sandbox.build_docker_argv(["claude", "-p", "hi"], **kw))
+    assert f"-v {proj}/.orcha/agent-home:/home/node/.claude" in one_shot
+    resident = " ".join(sandbox.build_docker_argv(
+        ["claude", "-p"], **kw, interactive=True))
+    assert f"-v {proj}/.orcha/agent-home:/home/node/.claude" in resident
+
+
+def test_workspace_root_for_plain_checkout_and_non_git(tmp_path):
+    assert sandbox.workspace_root_for(tmp_path) == tmp_path        # non-git dir
+    (tmp_path / ".git").mkdir()
+    assert sandbox.workspace_root_for(tmp_path) == tmp_path        # normal checkout
+
+
+def test_workspace_root_for_resolves_worktree_pointer(tmp_path):
+    # The live-evidence layout: a resident worktree whose .git is a POINTER
+    # FILE with a host-absolute gitdir into the root checkout.
+    wt = tmp_path / ".orcha-worktrees" / "resident-C1"
+    wt.mkdir(parents=True)
+    (wt / ".git").write_text(f"gitdir: {tmp_path}/.git/worktrees/resident-C1\n")
+    assert sandbox.workspace_root_for(wt) == tmp_path
+
+
+def test_workspace_root_for_tolerates_malformed_pointer(tmp_path):
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    (wt / ".git").write_text("not a gitdir pointer\n")
+    assert sandbox.workspace_root_for(wt) == wt                    # fail-safe: itself
+    (wt / ".git").write_text("gitdir: /somewhere/odd\n")           # not */.git/worktrees/*
+    assert sandbox.workspace_root_for(wt) == wt
+
+
+def test_agent_home_dir_is_workspace_scoped(tmp_path):
+    assert sandbox.agent_home_dir(tmp_path) == tmp_path / ".orcha" / "agent-home"
+
+
+def test_ensure_agent_home_creates_dir_idempotently(tmp_path):
+    path = sandbox.ensure_agent_home(tmp_path)
+    assert pathlib.Path(path) == tmp_path / ".orcha" / "agent-home"
+    assert (tmp_path / ".orcha" / "agent-home").is_dir()
+    assert sandbox.ensure_agent_home(tmp_path) == path      # second call: no-op
+
+
+def test_ensure_agent_home_mkdir_failure_propagates(tmp_path):
+    # write_api_config convention: the caller catches OSError and fails the
+    # wake LOUDLY — ensure_agent_home must not swallow a mkdir failure (a
+    # silently-skipped mount would quietly re-break resumes).
+    (tmp_path / ".orcha").mkdir()
+    (tmp_path / ".orcha" / "agent-home").write_text("a file in the way")
+    try:
+        sandbox.ensure_agent_home(tmp_path)
+    except OSError:
+        pass
+    else:
+        raise AssertionError("expected OSError when the agent-home path is a file")
 
 
 def test_sandbox_api_config_rewrites_base_url(tmp_path):

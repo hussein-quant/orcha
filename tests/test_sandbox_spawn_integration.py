@@ -175,6 +175,169 @@ def test_api_config_write_failure_fails_wake_without_popen(tmp_path, monkeypatch
     assert "sandbox unavailable" in repr_ and "api config" in repr_
 
 
+def test_spawn_creates_agent_home_before_popen(tmp_path, monkeypatch):
+    # Session-persistence: the host dir backing the container's ~/.claude must
+    # exist BEFORE docker run — docker creates a missing bind-mount source
+    # ROOT-owned, and the uid-1000 runner could then never write its session
+    # state. The Popen spy checks the dir at spawn time.
+    proj = _sandbox_project(tmp_path)
+    monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    seen = {}
+
+    def _spy_popen(argv, **kw):
+        seen["home_exists_at_popen"] = (proj / ".orcha" / "agent-home").is_dir()
+        seen["argv"] = argv
+        return _FakeProc(exited=False)
+
+    monkeypatch.setattr(notifier.subprocess, "Popen", _spy_popen)
+    sent, repr_, proc = notifier.spawn_headless(str(proj), "task", None, False)
+    assert sent is True and proc is not None
+    assert seen["home_exists_at_popen"] is True
+    assert f"{proj}/.orcha/agent-home:/home/node/.claude" in " ".join(seen["argv"])
+
+
+def test_resident_spawn_creates_agent_home_before_popen(tmp_path, monkeypatch):
+    # Resident lane rides the same builder + the same preflight ordering — this
+    # is the lane the continuity bug actually bit (resumes across restarts).
+    proj = _sandbox_project(tmp_path)
+    monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    seen = {}
+
+    def _spy_popen(argv, **kw):
+        seen["home_exists_at_popen"] = (proj / ".orcha" / "agent-home").is_dir()
+        seen["argv"] = argv
+        return _FakeProc(exited=False)
+
+    monkeypatch.setattr(notifier.subprocess, "Popen", _spy_popen)
+    sent, repr_, proc = notifier.spawn_resident(str(proj), alias="Vox")
+    assert sent is True and proc is not None
+    assert seen["home_exists_at_popen"] is True
+    assert f"{proj}/.orcha/agent-home:/home/node/.claude" in " ".join(seen["argv"])
+
+
+def _worktree_of(proj, name="resident-C1"):
+    """A per-conversation git worktree exactly as the notifier provisions it:
+    under <root>/.orcha-worktrees, .git a POINTER FILE into the root checkout,
+    .claude/orcha.json overlaid (what SandboxConfig.load / write_api_config
+    read at spawn time)."""
+    wt = proj / ".orcha-worktrees" / name
+    (wt / ".claude").mkdir(parents=True)
+    (wt / ".git").write_text(f"gitdir: {proj}/.git/worktrees/{name}\n")
+    (wt / ".claude" / "orcha.json").write_text(
+        (proj / ".claude" / "orcha.json").read_text())
+    return wt
+
+
+def test_worktree_spawn_mounts_root_path_identically(tmp_path, monkeypatch):
+    # THE live blocker: a resident/task wake runs in a git WORKTREE whose .git
+    # pointer references the ROOT by host-absolute path. The sandbox must mount
+    # the ROOT at its real path (worktree rides along inside it), run -w in the
+    # worktree, and stamp ORCHA_WORKSPACE_ROOT=<root> for the gh wrapper /
+    # credential helper. The agent home stays ROOT-scoped.
+    proj = _sandbox_project(tmp_path)
+    wt = _worktree_of(proj)
+    monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    seen = {}
+
+    def _spy_popen(argv, **kw):
+        seen["argv"] = argv
+        seen["root_home_exists"] = (proj / ".orcha" / "agent-home").is_dir()
+        return _FakeProc(exited=False)
+
+    monkeypatch.setattr(notifier.subprocess, "Popen", _spy_popen)
+    sent, repr_, proc = notifier.spawn_headless(str(wt), "task", None, False)
+    assert sent is True
+    joined = " ".join(seen["argv"])
+    assert f"-v {proj}:{proj}" in joined                    # ROOT, path-identical
+    assert f"-w {wt}" in joined                             # session runs IN the worktree
+    assert f"-e ORCHA_WORKSPACE_ROOT={proj}" in joined      # root env for token readers
+    assert "/workspace" not in joined                       # the old remap is gone
+    # api-config masks BOTH configs the agent could read
+    assert f":{wt}/.claude/orcha.json:ro" in joined
+    assert f":{proj}/.claude/orcha.json:ro" in joined
+    # agent home is ROOT-scoped (continuity shared across the workspace)...
+    assert f"-v {proj}/.orcha/agent-home:/home/node/.claude" in joined
+    # ...created under the ROOT before docker run, not under the worktree
+    assert seen["root_home_exists"] is True
+    assert not (wt / ".orcha" / "agent-home").exists()
+
+
+def test_worktree_resident_spawn_mounts_root_path_identically(tmp_path, monkeypatch):
+    proj = _sandbox_project(tmp_path)
+    wt = _worktree_of(proj)
+    monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    seen = {}
+
+    def _spy_popen(argv, **kw):
+        seen["argv"] = argv
+        return _FakeProc(exited=False)
+
+    monkeypatch.setattr(notifier.subprocess, "Popen", _spy_popen)
+    sent, repr_, proc = notifier.spawn_resident(str(wt), alias="Vox")
+    assert sent is True
+    joined = " ".join(seen["argv"])
+    assert f"-v {proj}:{proj}" in joined
+    assert f"-w {wt}" in joined
+    assert f"-e ORCHA_WORKSPACE_ROOT={proj}" in joined
+    assert f"-v {proj}/.orcha/agent-home:/home/node/.claude" in joined
+    assert (proj / ".orcha" / "agent-home").is_dir()
+
+
+def test_agent_home_create_failure_fails_wake_without_popen(tmp_path, monkeypatch):
+    # Fail-LOUD (§3.2): an uncreatable agent-home dir must fail the wake with a
+    # visible reason — silently skipping the mount would quietly re-break
+    # resumes (the exact bug this mount fixes).
+    proj = _sandbox_project(tmp_path)
+    monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+
+    def _oserr(ws):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(sandbox, "ensure_agent_home", _oserr)
+
+    def _boom(*a, **k):
+        raise AssertionError("must not spawn any process")
+
+    monkeypatch.setattr(notifier.subprocess, "Popen", _boom)
+    sent, repr_, proc = notifier.spawn_headless(str(proj), "task", None, False)
+    assert sent is False and proc is None
+    assert "sandbox unavailable" in repr_ and "agent home" in repr_
+
+
+def test_resident_agent_home_create_failure_fails_boot_without_popen(tmp_path, monkeypatch):
+    proj = _sandbox_project(tmp_path)
+    monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+
+    def _oserr(ws):
+        raise OSError("read-only filesystem")
+
+    monkeypatch.setattr(sandbox, "ensure_agent_home", _oserr)
+
+    def _boom(*a, **k):
+        raise AssertionError("must not spawn any process")
+
+    monkeypatch.setattr(notifier.subprocess, "Popen", _boom)
+    sent, repr_, proc = notifier.spawn_resident(str(proj), alias="Vox")
+    assert sent is False and proc is None
+    assert "sandbox unavailable" in repr_ and "agent home" in repr_
+
+
+def test_agent_home_path_blocked_by_file_fails_loudly_end_to_end(tmp_path, monkeypatch):
+    # No patching of ensure_agent_home: a real filesystem obstruction (a FILE
+    # where the dir must go) surfaces through the same loud-failure contract.
+    proj = _sandbox_project(tmp_path)
+    (proj / ".orcha" / "agent-home").write_text("a file in the way")
+    monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+
+    def _boom(*a, **k):
+        raise AssertionError("must not spawn any process")
+
+    monkeypatch.setattr(notifier.subprocess, "Popen", _boom)
+    sent, repr_, proc = notifier.spawn_headless(str(proj), "task", None, False)
+    assert sent is False and proc is None
+    assert "sandbox unavailable" in repr_ and "agent home" in repr_
+
+
 class _FakeProc:
     """Popen stand-in: poll() returns the exit code once exited (mirrors the
     daemon's reap detection)."""

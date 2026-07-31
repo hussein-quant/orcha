@@ -24,10 +24,12 @@
 #                         (ORCHA_GITHUB_TOKENS_FILE).
 #
 # Inside a workspace's repo, agents authenticate through the standard git
-# credential helper installed by setup (see deploy/README.md):
+# credential helper installed by setup (see deploy/README.md; the sandbox
+# mounts the workspace path-identically and stamps ORCHA_WORKSPACE_ROOT):
 #   git config credential.helper \
-#     '!f() { echo username=x-access-token; echo "password=$(cat /workspace/.orcha/github-token)"; }; f'
-# and can open PRs with:  curl -H "Authorization: Bearer $(cat /workspace/.orcha/github-token)" ...
+#     '!f() { d="${ORCHA_WORKSPACE_ROOT:-$PWD}"; while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -f "$d/.orcha/github-token" ]; do d=$(dirname "$d"); done; echo username=x-access-token; echo "password=$(cat "$d/.orcha/github-token")"; }; f'
+# and can open PRs with:
+#   curl -H "Authorization: Bearer $(cat "$ORCHA_WORKSPACE_ROOT/.orcha/github-token")" ...
 set -eu
 
 SECRETS="${ORCHA_SECRETS_DIR:-/opt/orcha-secrets}"
