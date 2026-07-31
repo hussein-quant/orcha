@@ -61,6 +61,8 @@ function sidebarCollapsed() {
 function toggleSidebar() {
   const collapsed = !sidebarCollapsed();
   try { localStorage.setItem("orcha:sidebar", collapsed ? "collapsed" : "expanded"); } catch (e) {}
+  // per-user prefs (mig 040): mirror the pick to the account (debounced PUT).
+  if (window.OrchaPrefs) window.OrchaPrefs.queuePut();
   const d = document.documentElement;
   if (collapsed) d.setAttribute("data-sidebar", "collapsed");
   else d.removeAttribute("data-sidebar");

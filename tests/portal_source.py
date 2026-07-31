@@ -28,6 +28,7 @@ _SCRIPT_MODULES = {
         "modules/app-run-classify.js",
         "modules/app-run-stream.js",
         "modules/app-sort.js",
+        "modules/app-prefs.js",
     ],
     "conversation.js": [
         "modules/conversation-state.js",
