@@ -12,11 +12,22 @@ set -eu
 PORTAL="${ORCHA_PORTAL_URL:-http://127.0.0.1:8001}"
 AUTH="${ORCHA_AUTH_DIR:-/opt/orcha-cloud/deploy/auth}"
 
-CID=$(curl -sf "$PORTAL/api/containers" | python3 -c "import json,sys;print(json.load(sys.stdin)[\"containers\"][0][\"id\"])")
-LOGINS=$(curl -sf "$PORTAL/api/containers/$CID/members" | python3 -c "
-import json,sys
-ms=json.load(sys.stdin)[\"members\"]
-print(\",\".join(sorted({m[\"github_login\"].lower() for m in ms if m.get(\"github_login\")})))")
+# Union the rosters of ALL projects in the stack — an invite on any project
+# must open the door (field bug: reading only containers[0] stranded invitees).
+LOGINS=$(python3 - "$PORTAL" <<'PYEOF'
+import json, sys, urllib.request
+portal = sys.argv[1]
+def get(path):
+    with urllib.request.urlopen(portal + path, timeout=10) as r:
+        return json.loads(r.read())
+logins = set()
+for c in get("/api/containers")["containers"]:
+    for m in get(f"/api/containers/{c['id']}/members")["members"]:
+        if m.get("github_login"):
+            logins.add(m["github_login"].lower())
+print(",".join(sorted(logins)))
+PYEOF
+)
 [ -z "$LOGINS" ] && { echo "no member logins yet — leaving allowlist untouched"; exit 0; }
 
 CURRENT=$(grep "^ALLOWED_GITHUB_USERS=" "$AUTH/.env" | cut -d= -f2- || true)
