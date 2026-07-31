@@ -44,7 +44,9 @@ def build_manifest(args) -> dict:
         "url": f"https://{args.domain}",
         "redirect_url": f"http://localhost:{args.port}/callback",
         "callback_urls": [f"https://{args.domain}/oauth2/callback"],
-        "public": False,
+        # MUST be public: a private GitHub App 404s the OAuth authorize step for
+        # every account except its owner — invited members could never sign in.
+        "public": True,
         # Sign-in works with just the client credentials; these permissions
         # pre-provision the same app for repo access (sub-project 3: clone
         # tokens + PR-as-bot) so ONE app serves both.
