@@ -578,6 +578,7 @@ apps created before 2026-08-01 need the manual fixes below.
 | Account permissions → Email addresses | **Read-only** | App settings → Permissions & events | OAuth callback 500s: oauth2-proxy fetches `/user/emails` to mint the session → GitHub 403 "Resource not accessible by integration" |
 | Repository permissions → Contents | **Read and write** | App settings → Permissions & events | Read-only: clone and repo listing work, but the agent's `git push` 403s — no branches, no PRs |
 | Repository permissions → Pull requests | **Read and write** | App settings → Permissions & events | `gh pr create` fails as the bot |
+| Repository permissions → Issues | **Read and write** | App settings → Permissions & events | `gh issue create` 403s — agents cannot file findings as issues |
 | Repository permissions → Metadata | Read-only (automatic) | — | — |
 | Webhook | Inactive (none needed) | App settings → Webhook | — |
 | **Installation** | App installed on EVERY org/account whose repos agents touch | App page → Install App → *Only select repositories* | Repos absent from the Connect-repo list; token mint fails "installed on nothing"; multi-org is supported (tokens are minted per-owner) |

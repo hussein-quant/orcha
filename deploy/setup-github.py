@@ -56,6 +56,9 @@ def build_manifest(args) -> dict:
             "contents": "write",
             "metadata": "read",
             "pull_requests": "write",
+            # agents file findings as GitHub issues too ("create issues for what
+            # you found") — absent, `gh issue create` 403s (field-found).
+            "issues": "write",
         },
         "default_events": [],
     }
