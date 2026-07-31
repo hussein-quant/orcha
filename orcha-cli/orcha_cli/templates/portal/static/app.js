@@ -64,7 +64,7 @@ if (typeof D === "undefined") {
     applyTheme: (t) => document.documentElement.setAttribute("data-theme", t), currentTheme: F_currentTheme, cycleTheme: F_cycleTheme, orcaSVG: () => "<svg></svg>",
     agents: F_agents, tasks: F_tasks, requests: F_requests, agentByAlias: F_agentByAlias, agentById: F_agentById, aliasFor: (id) => ((F_agentById(id) || {}).alias || null), taskById: (id) => F_tasks().find((t) => String(t.id) === String(id)) || null, humans: F_humans, isToHuman: F_isToHuman,
     actingHuman: F_actingHuman, setActingHuman: F_noop, patch: F_patch, selectionWithin: F_false, inputActiveWithin: F_inputActiveWithin, leaseOf,
-    identity: () => F_D.identity || null, actingOwner: () => !!F_actingHuman(), ghAvatar: (login, size) => F_avatar(login, "human", size),
+    identity: () => F_D.identity || null, identityTrusted: () => false, viewerOnly: () => false, actingOwner: () => !!F_actingHuman(), ghAvatar: (login, size) => F_avatar(login, "human", size),
     // standalone fallback: report wakes as served so the multi-project notice never
     // renders for embedders without the responsibility modules (no false alarms).
     wakesServed: () => true,
@@ -239,7 +239,7 @@ if (typeof D === "undefined") {
     applyTheme, currentTheme, cycleTheme, orcaSVG,
     agents, tasks, requests, agentByAlias, agentById, aliasFor, taskById, humans, isToHuman,
     actingHuman, setActingHuman, patch, selectionWithin, inputActiveWithin, leaseOf,
-    identity, identityHuman, actingOwner, ghAvatar,
+    identity, identityHuman, identityTrusted, viewerOnly, actingOwner, ghAvatar,
     // multi-project: the notifier-binding capability signal (app-data.js)
     wakesServed,
   };

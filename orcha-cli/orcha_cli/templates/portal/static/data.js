@@ -199,15 +199,18 @@ window.OrchaData = (function () {
   // The call is also what runs the server-side binding rule the first time a verified
   // GitHub user reaches a fresh container (root-human → GitHub name); it's idempotent,
   // so a single fetch is enough — the 3s poll doesn't need to re-ask. Stashed on
-  // D.identity (applySnapshot only overwrites the snapshot's own keys). Failure or an
-  // unmapped/untrusted visitor leaves identity null → every consumer falls back.
+  // D.identity + D.identityTrusted (applySnapshot only overwrites the snapshot's own
+  // keys). The envelope's `trusted` flag is what separates "trust off / no header —
+  // fall back to the local human" (self-host, unchanged) from "trusted proxy resolved
+  // NO member of THIS project" — the honest viewer state: identity null AND trusted
+  // true means the signed-in user must never inherit another member's identity.
   let _mePromise = null;
   function fetchMe() {
-    if (!_cid) return Promise.resolve(null);
+    if (!_cid) return Promise.resolve({ identity: null, trusted: false });
     if (!_mePromise) {
       _mePromise = getJSON("/api/me?cid=" + encodeURIComponent(_cid))
-        .then((d) => ((d && d.identity) || null))
-        .catch(() => null);
+        .then((d) => ({ identity: (d && d.identity) || null, trusted: !!(d && d.trusted) }))
+        .catch(() => ({ identity: null, trusted: false }));
     }
     return _mePromise;
   }
@@ -219,7 +222,8 @@ window.OrchaData = (function () {
     const raw = await getJSON("/api/containers/" + encodeURIComponent(_cid));
     if (window.Orcha) window.Orcha.applySnapshot(mapSnapshot(raw));
     else window.ORCHA = mapSnapshot(raw);
-    window.ORCHA.identity = me;
+    window.ORCHA.identity = me.identity;
+    window.ORCHA.identityTrusted = me.trusted;
     return window.ORCHA;
   }
 

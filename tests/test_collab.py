@@ -35,7 +35,7 @@ async def test_me_untrusted_header_ignored(client, container, make_agent, no_tru
     await make_agent("root", "operator", kind="human")
     r = await client.get(f"/api/me?cid={cid}", headers=OCTO)
     assert r.status_code == 200, r.text
-    assert r.json() == {"identity": None}
+    assert r.json() == {"identity": None, "trusted": False}
     # nothing was bound: the human keeps its unix-y alias and stays unmapped
     m = (await _members(client, cid))[0]
     assert m["alias"] == "root" and m["github_login"] is None
@@ -108,7 +108,7 @@ async def test_me_second_distinct_user_is_unmapped(client, container, make_agent
     await make_agent("root", "operator", kind="human")
     await client.get(f"/api/me?cid={cid}", headers=OCTO)
     r = await client.get(f"/api/me?cid={cid}", headers={"X-Auth-Request-User": "hubot"})
-    assert r.status_code == 200 and r.json() == {"identity": None}
+    assert r.status_code == 200 and r.json() == {"identity": None, "trusted": True}
     members = await _members(client, cid)
     assert len(members) == 1 and members[0]["github_login"] == "octocat"
 
@@ -127,7 +127,7 @@ async def test_me_binding_keeps_alias_on_collision(client, container, make_agent
 async def test_me_no_humans_and_bad_cid(client, container, trust_proxy):
     cid = container["id"]  # fresh container: no humans registered yet
     r = await client.get(f"/api/me?cid={cid}", headers=OCTO)
-    assert r.status_code == 200 and r.json() == {"identity": None}
+    assert r.status_code == 200 and r.json() == {"identity": None, "trusted": True}
     assert (await client.get("/api/me?cid=not-a-uuid", headers=OCTO)).status_code == 400
     assert (await client.get(f"/api/me?cid={uuid.uuid4()}", headers=OCTO)).status_code == 404
 

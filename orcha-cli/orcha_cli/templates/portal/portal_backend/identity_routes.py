@@ -80,11 +80,18 @@ def bind_first_unmapped_human(cur, container_id, login):
     return cur.fetchone()
 
 
-def _stamp_presence(cur, agent_id) -> bool:
+def _stamp_presence(cur, login) -> bool:
     """First-sign-in mark: set last_heartbeat_at once so the members list's `pending`
     flag (github_login set ∧ last_heartbeat_at IS NULL) means "invited but has never
     signed in" — humans never run workers, so without this a bound/invited user who
     only ever browsed would read pending forever.
+
+    Stamps EVERY container's live human row carrying this github_login, not just the
+    one /api/me happened to resolve against: the portal boots on ONE project (often the
+    first), so an invitee whose membership lives in another project would otherwise
+    read `pending` there forever — their /api/me never ran against that container
+    (field bug: a member of a non-first project stayed pending after signing in).
+    Signing in is a property of the GitHub account, not of the viewed project.
 
     Reusing last_heartbeat_at (no new column) is safe by consumer audit:
       - bump_agent already stamps HUMANS on every message/request turn, so the column
@@ -96,14 +103,74 @@ def _stamp_presence(cur, agent_id) -> bool:
       - pick_human (guards) prefers the freshest heartbeat, which a sign-in stamp
         makes MORE correct ("most recently active human"), and the snapshot's
         last_active/heartbeat_age_secs simply report the sign-in as activity.
-    Guarded WHERE ... IS NULL: stamped exactly once; later activity is bump_agent's.
-    Returns True when this call did the stamping (caller commits)."""
+    Guarded WHERE ... IS NULL: stamped exactly once per row; later activity is
+    bump_agent's. Returns True when this call stamped anything (caller commits)."""
     cur.execute(
-        "UPDATE agents SET last_heartbeat_at = now() "
-        "WHERE id = %s AND last_heartbeat_at IS NULL",
-        (agent_id,),
+        """UPDATE agents SET last_heartbeat_at = now()
+           WHERE kind='human' AND terminated_at IS NULL
+             AND lower(github_login)=lower(%s)
+             AND last_heartbeat_at IS NULL""",
+        (login,),
     )
     return cur.rowcount > 0
+
+
+def trusted_actor(cur, request: Request, container_id, claimed_actor_id=None):
+    """Bind the actor of a human-authoritative write to the proxy-verified identity.
+
+    THE per-project identity rule (cloud, multi-user): under proxy trust a signed-in
+    GitHub user must never inherit another member's identity — in particular never a
+    project's default/founding human. Returns the EFFECTIVE actor agent id; callers
+    use it in place of any client-supplied actor (body/query/path param).
+
+    - Trust off (env unset), or trust on with NO header (the break-glass team-token
+      lane, which legitimately carries no user): `claimed_actor_id` unchanged — the
+      self-host convention (permissive body actor + require_kind) stays intact.
+    - Trusted header present → resolve the login IN THE TARGET CONTAINER
+      (case-insensitive match ONLY — the binding rule is /api/me's side effect,
+      never a write's):
+        * resolved member ⇒ that agent IS the actor. A mismatched client-supplied
+          actor is not an error — it is overridden (audited once via the house
+          event log, riding the handler's own commit).
+        * no match, but the container is still UNMAPPED (no live human carries a
+          github_login — the fresh pre-binding bootstrap state) ⇒ claimed actor
+          unchanged, mirroring bind_first_unmapped_human's NOT-EXISTS guard.
+        * otherwise ⇒ 403 — a non-member can look, never act.
+    """
+    login = proxy_login(request)
+    if not login:
+        return claimed_actor_id
+    member = find_member_by_login(cur, container_id, login)
+    if member is None:
+        cur.execute(
+            """SELECT 1 FROM agents
+               WHERE container_id=%s AND kind='human' AND terminated_at IS NULL
+                 AND github_login IS NOT NULL LIMIT 1""",
+            (container_id,),
+        )
+        if cur.fetchone() is None:
+            return claimed_actor_id  # bootstrap: nobody is mapped yet
+        raise HTTPException(
+            403,
+            f"your GitHub account ('{login}') is not a member of this project "
+            "— ask an owner for an invite",
+        )
+    resolved = str(member["id"])
+    if claimed_actor_id and str(claimed_actor_id) != resolved:
+        log_event(
+            cur,
+            str(container_id),
+            "human",
+            resolved,
+            "agent",
+            resolved,
+            "actor_overridden_by_proxy_identity",
+            {
+                "claimed_actor_agent_id": str(claimed_actor_id),
+                "github_login": member["github_login"],
+            },
+        )
+    return resolved
 
 
 def require_owner(cur, request: Request, container_id, actor_agent_id):
@@ -153,13 +220,20 @@ def _identity_payload(member):
 
 @app.get("/api/me")
 def get_me(request: Request, cid: str):
-    """Who is the acting human, per the trusted proxy identity? {"identity": {...}|null}.
+    """Who is the acting human, per the trusted proxy identity?
+    {"identity": {...}|null, "trusted": bool}.
+
+    `trusted` says whether a proxy-verified login was present on THIS request — it is
+    what lets the frontend tell "trust off / no header: fall back to the local human"
+    (self-host, unchanged) apart from "trusted but NOT a member of this project": in
+    that second state the UI must show an honest viewer state, never someone else's
+    identity (the per-project identity rule).
 
     Resolution for the container: a live human with a matching github_login is the
     actor. Else the BINDING RULE runs as a side effect (see bind_first_unmapped_human) —
     this call is what flips a fresh container's "root" human into the GitHub user. Else
-    (mapped humans exist but none match, or the header is untrusted/absent) identity is
-    null — the perimeter allowlist stays the hard gate; endpoints decide what null means.
+    (mapped humans exist but none match) identity is null — the perimeter allowlist
+    stays the hard gate; endpoints decide what null means.
     Idempotent: re-polling returns the same identity without re-binding.
     """
     if not valid_uuid(cid):
@@ -168,7 +242,7 @@ def get_me(request: Request, cid: str):
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
         if not login:
-            return {"identity": None}
+            return {"identity": None, "trusted": False}
         member = find_member_by_login(cur, cid, login)
         if member is None:
             member = bind_first_unmapped_human(cur, cid, login)
@@ -187,10 +261,13 @@ def get_me(request: Request, cid: str):
             else:
                 # Lost a concurrent bind for the SAME login? Re-read before giving up.
                 member = find_member_by_login(cur, cid, login)
-        # Both resolution paths (match AND bind) count as "signed in": clear the
-        # invited-but-never-seen state the members list renders as `pending`.
-        if member is not None and _stamp_presence(cur, member["id"]):
+        # A verified sign-in counts EVERYWHERE the account is a member, whichever
+        # project the portal happened to boot on: stamp every container's human row
+        # carrying this login (guarded, once per row) so no membership stays
+        # "pending" just because /api/me ran against a different cid. Runs even when
+        # this cid resolved no identity — the viewer may be a member elsewhere.
+        if _stamp_presence(cur, login):
             conn.commit()
     if member is None:
-        return {"identity": None}
-    return {"identity": _identity_payload(member)}
+        return {"identity": None, "trusted": True}
+    return {"identity": _identity_payload(member), "trusted": True}

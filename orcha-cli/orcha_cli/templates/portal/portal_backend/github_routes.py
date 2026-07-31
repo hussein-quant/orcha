@@ -5,12 +5,13 @@ import os
 import urllib.error
 import urllib.request
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
+from portal_backend.identity_routes import trusted_actor
 from portal_backend.schemas import ContainerGithubBinding
 
 # One page of 100 covers every realistic single-project installation; a >100-repo
@@ -162,7 +163,7 @@ def get_container_github(cid: str):
 
 
 @app.put("/api/containers/{cid}/github")
-def put_container_github(cid: str, body: ContainerGithubBinding):
+def put_container_github(cid: str, body: ContainerGithubBinding, request: Request):
     """Bind (or with repo=null, unbind) a container's GitHub repo.
 
     The owner/name shape is enforced by the ContainerGithubBinding schema (422 on
@@ -173,6 +174,8 @@ def put_container_github(cid: str, body: ContainerGithubBinding):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
+        # Per-project identity: binding a repo is a member action (403 non-member).
+        trusted_actor(cur, request, cid, None)
         cur.execute(
             "UPDATE containers SET github_repo=%s WHERE id=%s RETURNING github_repo",
             (body.repo, cid),

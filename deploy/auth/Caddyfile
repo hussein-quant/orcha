@@ -12,7 +12,15 @@
     # in order, and the team token is also "Bearer *".
     @team header Authorization "Bearer {$ORCHA_TEAM_TOKEN}"
     handle @team {
-        reverse_proxy portal:8000
+        reverse_proxy portal:8000 {
+            # The break-glass lane has NO user by definition — the portal treats a
+            # header-less request as trust-off (permissive body actor). Strip any
+            # client-forged identity header so this lane can never impersonate a
+            # member now that X-Auth-Request-User BINDS the actor on writes (the
+            # OAuth and device lanes are safe: forward_auth copy_headers always
+            # overwrites the header from the validator's response).
+            header_up -X-Auth-Request-User
+        }
     }
 
     # ── Bearer lane 2: any other bearer token is a per-DEVICE token ───────

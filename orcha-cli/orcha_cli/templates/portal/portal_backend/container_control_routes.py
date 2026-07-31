@@ -1,18 +1,19 @@
 """Manage container wake and autonomy controls."""
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, require_kind, valid_uuid
+from portal_backend.identity_routes import trusted_actor
 from portal_backend.schemas.wakes import AutonomyUpdate, WakesToggle
 
 AUTONOMY_LEVELS = ("plan", "pr", "full")
 
 
 @app.post("/api/containers/{cid}/wakes", status_code=200)
-def set_wakes_enabled(cid: str, body: WakesToggle):
+def set_wakes_enabled(cid: str, body: WakesToggle, request: Request):
     """R2.4: flip the global wake kill-switch (the one-switch halt for a runaway).
 
     Unlike /orcha-pause (which pauses the whole container — agents, tasks, everything),
@@ -24,6 +25,8 @@ def set_wakes_enabled(cid: str, body: WakesToggle):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (connection, cur):
         require_container(cur, cid)
+        # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         cur.execute(
             "UPDATE containers SET wakes_enabled=%s WHERE id=%s RETURNING wakes_enabled",
             (body.enabled, cid),
@@ -44,7 +47,7 @@ def set_wakes_enabled(cid: str, body: WakesToggle):
 
 
 @app.post("/api/containers/{cid}/autonomy", status_code=200)
-def set_autonomy_level(cid: str, body: AutonomyUpdate):
+def set_autonomy_level(cid: str, body: AutonomyUpdate, request: Request):
     """#298: move the autonomy SLIDER for a container — the single source of truth for how much a
     human stays in the loop.
 
@@ -67,6 +70,8 @@ def set_autonomy_level(cid: str, body: AutonomyUpdate):
         raise HTTPException(400, f"level must be one of {AUTONOMY_LEVELS}")
     with db_cursor() as (connection, cur):
         require_container(cur, cid)
+        # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         require_kind(cur, body.actor_agent_id, ("human",))
         cur.execute(
             "UPDATE containers SET autonomy_level=%s WHERE id=%s RETURNING autonomy_level",

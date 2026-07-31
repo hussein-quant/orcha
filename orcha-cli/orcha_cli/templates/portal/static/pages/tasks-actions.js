@@ -2,7 +2,13 @@
 function actor() { return TasO.actingHuman(); }
 function actorName() { const h = actor(); return h ? h.alias : ""; }
 function humanAvatar() { const h = actor(); return h ? TasO.avatar(h.alias, "human", "sm") : ""; }
-function actorOrWarn() { const h = actor(); if (!h) TasO.toast("Pick an acting human (top-right) first.", "danger"); return h; }
+function actorOrWarn() {
+  const h = actor();
+  if (!h) TasO.toast(TasO.viewerOnly && TasO.viewerOnly()
+    ? "You're not a member of this project — ask an owner for an invite."
+    : "Pick an acting human (top-right) first.", "danger");
+  return h;
+}
 
 /* ---------- wiring + real POSTs ---------- */
 function postJSON(url, body) {

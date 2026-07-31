@@ -52,7 +52,12 @@ function wire(r) {
 }
 function onAction(act, r) {
   const h = ReqO.actingHuman();
-  if (!h) { ReqO.toast("Pick an acting human (top-right) first.", "danger"); return; }
+  if (!h) {
+    ReqO.toast(ReqO.viewerOnly && ReqO.viewerOnly()
+      ? "You're not a member of this project — ask an owner for an invite."
+      : "Pick an acting human (top-right) first.", "danger");
+    return;
+  }
   if (act === "answer") { answering = true; renderDetail(); return; }
   if (act === "cancel-answer") {
     // clear+blur the box so the ISS-53 dirty-input guard doesn't block the cancel repaint
