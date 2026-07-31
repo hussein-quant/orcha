@@ -48,6 +48,7 @@ from .notifier_persona import (
     CONVERSATION_LANE_DIRECTIVE,
     HUMAN_COMMS_GUARDRAIL,
     MULTI_HUMAN_STEERING,
+    REPO_WORKFLOW_GUIDANCE,
     _wrap_conversation_turn,
     format_persona,
 )

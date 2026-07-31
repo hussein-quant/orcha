@@ -996,6 +996,81 @@ def test_multi_human_steering_rides_conversation_lane_too():
     assert out2.index("Multi-human steering") < out2.index("Where you left off")
 
 
+# ---------- Agent→PR: repo-workflow guidance (docs/agent-prs.md) ----------
+
+def _repo_workspace(root):
+    """A workspace that looks repo-credentialed: git checkout + rotating token file."""
+    (root / ".git").mkdir()
+    (root / ".orcha").mkdir()
+    (root / ".orcha" / "github-token").write_text("ghs_fake")
+    return root
+
+
+def test_format_persona_repo_workflow_rides_on_credentialed_workspace(tmp_path):
+    """Agent→PR (docs/agent-prs.md): a workspace with a cloned repo + bot token gets the
+    standing branch→PR contract — never the default branch, orcha/<task-slug> branches,
+    push, `gh pr create`, and merge stays human."""
+    ws = _repo_workspace(tmp_path)
+    out = notifier.format_persona({"system_prompt": "You are Tim."}, None, workdir=str(ws))
+    assert "Working with the repository" in out
+    assert "NEVER commit to the default branch" in out
+    assert "orcha/<task-slug>" in out
+    assert "git push -u origin" in out
+    assert "gh pr create" in out
+    assert "Merging is ALWAYS a human decision" in out
+    assert "a human reviews it" in out
+
+
+def test_format_persona_repo_workflow_gated_out_without_credentials(tmp_path):
+    """The block is workspace-gated: bare dir, repo-without-token (plain local project),
+    and token-without-repo (unbound provisioned workspace) all render WITHOUT it."""
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    out = notifier.format_persona({"system_prompt": "P"}, None, workdir=str(bare))
+    assert "Working with the repository" not in out
+
+    repo_only = tmp_path / "repo-only"
+    repo_only.mkdir()
+    (repo_only / ".git").mkdir()
+    out = notifier.format_persona({"system_prompt": "P"}, None, workdir=str(repo_only))
+    assert "Working with the repository" not in out
+
+    token_only = tmp_path / "token-only"
+    token_only.mkdir()
+    (token_only / ".orcha").mkdir()
+    (token_only / ".orcha" / "github-token").write_text("ghs_fake")
+    out = notifier.format_persona({"system_prompt": "P"}, None, workdir=str(token_only))
+    assert "Working with the repository" not in out
+
+    # like the other standing blocks it rides the PERSONA, never a persona-less render
+    full = tmp_path / "full"
+    full.mkdir()
+    ws = _repo_workspace(full)
+    persona_less = notifier.format_persona(None, {"digest": {"current_focus": "X"}},
+                                           workdir=str(ws))
+    assert "Working with the repository" not in persona_less
+
+
+def test_format_persona_repo_workflow_defaults_to_cwd(tmp_path, monkeypatch):
+    """No workdir arg → the gate checks cwd, which is the workspace root for the daemon
+    (provision-projects.sh starts the notifier with `cd <ws>`)."""
+    _repo_workspace(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    out = notifier.format_persona({"system_prompt": "P"}, None)
+    assert "Working with the repository" in out
+
+
+def test_format_persona_repo_workflow_stays_in_stable_prefix(tmp_path):
+    """GH #34: the block is stable per-workspace, so it renders with the other standing
+    sections — after multi-human steering, ahead of the volatile digest tail."""
+    ws = _repo_workspace(tmp_path)
+    out = notifier.format_persona({"system_prompt": "P"},
+                                  {"digest": {"current_focus": "wake epic"}},
+                                  workdir=str(ws))
+    assert out.index("Multi-human steering") < out.index("Working with the repository")
+    assert out.index("Working with the repository") < out.index("Where you left off")
+
+
 def test_format_persona_surfaces_audience_register_ahead_of_facts():
     """#325: the digest's `audience` slice renders as 'Who you're talking to', and lands
     BEFORE the 'Where you left off' facts so the conversational register frames the work."""
