@@ -492,6 +492,7 @@ async def test_non_member_reads_403(client, container, make_agent, make_task, tr
         f"/api/containers/{cid}/settings/llm-key",
         f"/api/containers/{cid}/settings/provider-keys",
         f"/api/containers/{cid}/settings/models",
+        f"/api/containers/{cid}/metrics",
         f"/api/tasks/{t['id']}/messages",
     ):
         r = await client.get(path, headers=MALLORY)

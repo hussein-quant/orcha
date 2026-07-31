@@ -285,7 +285,7 @@ function mountShell(page, opts) {
       count: requests().filter((r) => r.status === "open").length },
     // Metrics page — usage/cost visibility per agent. No count badge (an
     // aggregate page has no "N waiting" semantics).
-    { key: "metrics", href: "/metrics", ico: "metrics", label: "Metrics" },
+    { key: "metrics", href: withCid("/metrics"), ico: "metrics", label: "Metrics" },
     // SPEC-SETTINGS §5: 5th control-room entry — the Settings page (API key +,
     // later, per-use-case model selection). No count badge.
     { key: "settings", href: withCid("/settings"), ico: "sliders", label: "Settings" },
