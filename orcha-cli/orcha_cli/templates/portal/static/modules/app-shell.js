@@ -404,7 +404,62 @@ function mountShell(page, opts) {
       if (e.key === "Escape") gs.blur();
     });
   }
+  // seamless-nav: persist this render so the NEXT page load can primeShell()
+  // the chrome synchronously, before its first snapshot round trip returns.
+  saveShellCache();
 }
+
+/* ---- seamless nav: perceived continuity (primed shell) ---------------- *
+ * mountShell only runs once the FIRST /api snapshot returns, so on a remote
+ * server every navigation showed a themed-but-chromeless page for a full
+ * network round trip. Cache the last rendered sidebar/topbar markup per
+ * (cid, page) in localStorage and restore it synchronously at script load —
+ * the chrome paints together with the page; the live snapshot then re-renders
+ * (and re-wires) it wholesale, exactly like every 3s poll tick already does.
+ * Pre-data we wire only the two controls that are pure browser-local state
+ * (sidebar collapse, theme cycle); everything data-bearing waits for the real
+ * mount. The cached markup is this page's own previous render (same-origin
+ * localStorage), so injecting it adds no surface beyond the render it copies. */
+let _shellCacheSaved = "";
+function shellCacheKey() {
+  let cid = "", page = "home";
+  try {
+    const search = (typeof location !== "undefined" && location.search) || "";
+    cid = new URLSearchParams(search).get("cid") || localStorage.getItem("orcha:cid") || "";
+  } catch (e) {}
+  try {
+    const p = ((typeof location !== "undefined" && location.pathname) || "/").replace(/^\/+/, "").split("/")[0];
+    if (p) page = p;
+  } catch (e) {}
+  return "orcha:shellHtml:" + cid + ":" + page;
+}
+function saveShellCache() {
+  const side = document.getElementById("sidebar"), top = document.getElementById("topbar");
+  if (!side || !top) return;
+  try {
+    const payload = JSON.stringify({ side: side.innerHTML, top: top.innerHTML });
+    if (payload === _shellCacheSaved) return;   // 3s re-renders: skip identical writes
+    _shellCacheSaved = payload;
+    localStorage.setItem(shellCacheKey(), payload);
+  } catch (e) {}
+}
+function primeShell() {
+  try {
+    const side = document.getElementById("sidebar"), top = document.getElementById("topbar");
+    if (!side || !top || side.firstChild || top.firstChild) return;   // no shell here / already mounted
+    const raw = localStorage.getItem(shellCacheKey());
+    if (!raw) return;
+    const c = JSON.parse(raw);
+    if (!c || typeof c.side !== "string" || typeof c.top !== "string") return;
+    side.innerHTML = c.side;
+    top.innerHTML = c.top;
+    const sbT = document.getElementById("sbToggle");
+    if (sbT) sbT.addEventListener("click", toggleSidebar);
+    const tb = document.getElementById("themeBtn");
+    if (tb) tb.addEventListener("click", cycleTheme);
+  } catch (e) {}
+}
+primeShell();
 
 /* ---- GH #148: two orthogonal topbar controls ------------------------- */
 // The topbar carries TWO independent controls, NOT one fused slider:
