@@ -1,0 +1,531 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orcha — AI agents that ship. Humans who decide.</title>
+<meta name="description" content="Open-source multi-agent orchestration. Persistent Claude agents work in your repos, open pull requests as a bot, and stop at needs-verification — a human always makes the merge call. Self-host, bring your own cloud, or Orcha Cloud.">
+
+<!-- Open Graph / social -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Orcha">
+<meta property="og:title" content="Orcha — AI agents that ship. Humans who decide.">
+<meta property="og:description" content="Open-source multi-agent orchestration. Sandboxed agents open bot-authored pull requests; a human holds the merge gate. Runs anywhere Docker runs.">
+<meta property="og:url" content="https://orcha.nursoftai.com/welcome">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Orcha — AI agents that ship. Humans who decide.">
+<meta name="twitter:description" content="Open-source multi-agent orchestration. Sandboxed agents, bot-authored PRs, and a human merge gate.">
+
+<!-- Existing brand favicon (Orcha wordmark) — preserved verbatim -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20100%20100%22%3E%0A%20%20%3Crect%20width%3D%22100%22%20height%3D%22100%22%20rx%3D%2222%22%20fill%3D%22%230b1216%22/%3E%0A%20%20%3Cpath%20d%3D%22M27%2C83%20C28%2C55%2033%2C32%2045.5%2C22.5%20C51.5%2C18%2057.5%2C19.5%2060%2C27%20C64.5%2C46%2070.5%2C67%2073%2C83%20Z%22%20fill%3D%22%23f3fbfb%22/%3E%0A%20%20%3Cg%20stroke%3D%22%2306171c%22%20stroke-width%3D%222.4%22%20stroke-linecap%3D%22round%22%3E%0A%20%20%20%20%3Cline%20x1%3D%2249%22%20y1%3D%2238%22%20x2%3D%2240%22%20y2%3D%2262%22/%3E%3Cline%20x1%3D%2249%22%20y1%3D%2238%22%20x2%3D%2256%22%20y2%3D%2262%22/%3E%3Cline%20x1%3D%2249%22%20y1%3D%2238%22%20x2%3D%2250%22%20y2%3D%2274%22/%3E%3C/g%3E%0A%20%20%3Cg%20fill%3D%22%2306171c%22%3E%3Ccircle%20cx%3D%2239%22%20cy%3D%2264%22%20r%3D%224%22/%3E%3Ccircle%20cx%3D%2257%22%20cy%3D%2264%22%20r%3D%224%22/%3E%3Ccircle%20cx%3D%2250%22%20cy%3D%2276%22%20r%3D%224%22/%3E%3C/g%3E%0A%20%20%3Ccircle%20cx%3D%2249%22%20cy%3D%2235%22%20r%3D%226%22%20fill%3D%22%231fc7cd%22/%3E%0A%20%20%3Cpath%20d%3D%22M13%2C86%20C28%2C82%2038%2C82%2050%2C82.5%20C62%2C82%2072%2C82%2087%2C86%22%20stroke%3D%22%231fc7cd%22%20stroke-width%3D%225%22%20stroke-linecap%3D%22round%22%20fill%3D%22none%22/%3E%0A%3C/svg%3E">
+
+<style>
+/* ==========================================================================
+   Orcha marketing landing — SHELL (nav · hero · footer · shared runtime).
+   Self-hosted fonts, tokens ported from the Quantal Health design system.
+   Everything is self-contained: no external network requests.
+   Section fragments (demo/product/mobile/deploy/themes/opensource) are inlined
+   by build.py at their @section markers; they read ONLY these tokens.
+   ========================================================================== */
+
+/* ---- self-hosted fonts (variable; one file per family, whole weight axis) -- */
+@font-face {
+  font-family: "Fraunces";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/welcome/fonts/fraunces-var.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/welcome/fonts/hanken-var.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("/welcome/fonts/geistmono-var.woff2") format("woff2");
+}
+
+/* ---- design tokens (exact — every fragment reads these via var()) --------- */
+:root {
+  --ink:#1A1414; --paper:#F4EEE6; --canvas:#F7F4EE;
+  --surface:#FFFFFF; --surface-subtle:#F8F9FA;
+  --crimson:#E63946; --crimson-press:#C32B38; --crimson-soft:rgba(230,57,70,.10);
+  --accent-strong:#C32B38; --accent-strong-press:#A8232D; --on-accent-strong:#FFFFFF;
+  --success:#10b981; --success-text:#047857; --warning-text:#B45309;
+  --danger:#ef4444;
+  --text-primary:#1A1414; --text-secondary:#4A5568; --text-tertiary:#5F6B7C;
+  --border:#E2E8F0; --border-strong:#CBD5E0;
+  --font-serif:"Fraunces","Newsreader",Georgia,serif;
+  --font-sans:"Hanken Grotesk",system-ui,-apple-system,sans-serif;
+  --font-mono:"Geist Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --shadow-card:0 1px 2px rgb(26 20 20 / .05), 0 8px 24px -12px rgb(26 20 20 / .12);
+  --shadow-float:0 24px 60px -24px rgb(26 20 20 / .25);
+  --radius-xl:.875rem; --radius-2xl:1.25rem; --radius-3xl:1.75rem;
+}
+
+/* ---- reset / base --------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+html { scroll-padding-top: 76px; } /* clears the sticky nav on anchor jumps */
+body {
+  background: var(--canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+img, svg { display: block; max-width: 100%; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; }
+::selection { background: var(--crimson); color: var(--paper); }
+
+/* content column */
+.mk-wrap { width: 100%; max-width: 1120px; margin-inline: auto; padding-inline: 24px; }
+
+/* typography defaults */
+.mk-serif { font-family: var(--font-serif); font-weight: 400; letter-spacing: -.02em; line-height: 1.05; }
+.mk-mono  { font-family: var(--font-mono); }
+.mk-eyebrow {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-family: var(--font-sans);
+  font-size: 12px; font-weight: 700; line-height: 1;
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--accent-strong);
+}
+.mk-eyebrow .mk-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--crimson); flex: none; }
+
+/* section rhythm — fragments carry .mk-section; shell sets the vertical rhythm */
+.mk-section { padding-block: 96px; scroll-margin-top: 72px; position: relative; }
+.mk-section-alt { background: var(--paper); }
+
+/* ---- buttons -------------------------------------------------------------- */
+.mk-btn, .mk-btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  font-family: var(--font-sans); font-size: 15px; font-weight: 600; line-height: 1;
+  padding: 13px 20px; border-radius: 10px;
+  border: 1px solid transparent; cursor: pointer; white-space: nowrap;
+  transition: transform .06s ease, box-shadow .16s ease, background .16s ease, border-color .16s ease, color .16s ease;
+}
+.mk-btn {
+  background: var(--accent-strong); color: var(--on-accent-strong);
+  box-shadow: 0 1px 2px rgb(26 20 20 / .12);
+}
+.mk-btn:hover { background: var(--accent-strong-press); transform: translateY(-1px); box-shadow: var(--shadow-card); }
+.mk-btn:active { transform: translateY(0); }
+.mk-btn-ghost {
+  background: var(--surface); color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.mk-btn-ghost:hover { border-color: var(--text-tertiary); transform: translateY(-1px); box-shadow: var(--shadow-card); }
+.mk-btn-ghost:active { transform: translateY(0); }
+.mk-btn svg, .mk-btn-ghost svg { width: 18px; height: 18px; }
+
+/* focus-visible rings — consistent 2px crimson everywhere */
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--accent-strong); outline-offset: 2px; border-radius: 6px;
+}
+
+/* ==========================================================================
+   NAV — sticky, backdrop-blur over canvas, hairline appears on scroll
+   ========================================================================== */
+.mk-nav {
+  position: sticky; top: 0; z-index: 100;
+  background: color-mix(in srgb, var(--canvas) 82%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
+  border-bottom: 1px solid transparent;
+  transition: border-color .25s ease, box-shadow .25s ease, background .25s ease;
+}
+.mk-nav.is-scrolled {
+  border-bottom-color: var(--border);
+  box-shadow: 0 1px 0 rgb(26 20 20 / .02), 0 8px 24px -20px rgb(26 20 20 / .25);
+  background: color-mix(in srgb, var(--canvas) 90%, transparent);
+}
+.mk-nav-inner {
+  display: flex; align-items: center; gap: 20px;
+  height: 60px;
+}
+/* wordmark */
+.mk-wordmark {
+  display: inline-flex; align-items: baseline; gap: 1px;
+  font-family: var(--font-serif); font-weight: 600; font-size: 22px;
+  letter-spacing: -.02em; color: var(--text-primary);
+  flex: none;
+}
+.mk-wordmark .mk-brand-dot { color: var(--crimson); }
+
+/* tabs */
+.mk-tabs {
+  display: flex; align-items: center; gap: 2px;
+  margin-inline: auto;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none; -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  min-width: 0;
+}
+.mk-tabs::-webkit-scrollbar { display: none; }
+.mk-tab {
+  position: relative; flex: none;
+  padding: 8px 12px; border-radius: 8px;
+  font-size: 14px; font-weight: 500; color: var(--text-secondary);
+  transition: color .16s ease, background .16s ease;
+}
+.mk-tab:hover { color: var(--text-primary); background: color-mix(in srgb, var(--paper) 70%, transparent); }
+.mk-tab.is-active { color: var(--text-primary); }
+.mk-tab.is-active::after {
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: 3px;
+  height: 2px; border-radius: 2px; background: var(--crimson);
+}
+
+.mk-nav-right { flex: none; display: flex; align-items: center; gap: 10px; }
+/* sign-in is deliberately de-emphasized — ghost, quiet */
+.mk-signin {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 15px; border-radius: 9px;
+  font-size: 14px; font-weight: 600; color: var(--text-secondary);
+  border: 1px solid var(--border-strong); background: transparent;
+  transition: color .16s ease, border-color .16s ease, background .16s ease;
+}
+.mk-signin:hover { color: var(--text-primary); border-color: var(--text-tertiary); background: var(--surface); }
+
+/* ==========================================================================
+   HERO — compact; the demo below is the star
+   ========================================================================== */
+.mk-hero { position: relative; overflow: hidden; padding-block: 84px 72px; }
+/* ambient background: paper-tone radial washes + faint dotted grid */
+.mk-hero-bg { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.mk-hero-bg::before {
+  content: ""; position: absolute; inset: 0;
+  background:
+    radial-gradient(760px 460px at 82% -12%, var(--crimson-soft), transparent 60%),
+    radial-gradient(680px 560px at -8% 108%, rgb(26 20 20 / .05), transparent 55%),
+    linear-gradient(180deg, #F9F6F0 0%, var(--canvas) 62%);
+}
+.mk-hero-bg::after {
+  content: ""; position: absolute; inset: 0;
+  background-image: radial-gradient(rgb(26 20 20 / .05) 1px, transparent 1px);
+  background-size: 26px 26px;
+  -webkit-mask-image: radial-gradient(680px 480px at 50% 34%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(680px 480px at 50% 34%, #000 0%, transparent 78%);
+  opacity: .7;
+}
+.mk-hero-inner { position: relative; z-index: 1; max-width: 760px; }
+.mk-hero h1 {
+  font-family: var(--font-serif); font-weight: 400;
+  font-size: clamp(40px, 6vw, 68px); line-height: 1.03; letter-spacing: -.02em;
+  color: var(--text-primary);
+  margin-top: 20px;
+  text-wrap: balance;
+}
+.mk-hero h1 .mk-hero-accent { position: relative; white-space: nowrap; }
+.mk-hero h1 .mk-hero-accent::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: .06em; height: .09em;
+  background: var(--crimson); border-radius: 2px;
+}
+.mk-hero-sub {
+  margin-top: 22px; max-width: 620px;
+  font-size: clamp(17px, 2vw, 19px); line-height: 1.55; color: var(--text-secondary);
+}
+.mk-hero-ctas { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 12px; }
+.mk-hero-ticker {
+  margin-top: 26px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  font-family: var(--font-mono); font-size: 12.5px; color: var(--text-tertiary);
+  letter-spacing: .01em;
+}
+.mk-hero-ticker .mk-tick { display: inline-flex; align-items: center; gap: 8px; }
+.mk-hero-ticker .mk-tick::before {
+  content: ""; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--crimson); flex: none;
+}
+.mk-hero-ticker .mk-tick-sep { color: var(--border-strong); }
+
+/* ==========================================================================
+   FOOTER
+   ========================================================================== */
+.mk-footer {
+  background: var(--ink); color: var(--paper);
+  padding-block: 68px 40px;
+}
+.mk-footer a { color: rgb(244 238 230 / .78); transition: color .16s ease; }
+.mk-footer a:hover { color: var(--paper); }
+.mk-footer-cols {
+  display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 40px 32px;
+  padding-bottom: 44px; border-bottom: 1px solid rgb(244 238 230 / .12);
+}
+.mk-footer-brand .mk-wordmark { color: var(--paper); font-size: 24px; }
+.mk-footer-brand .mk-brand-dot { color: var(--crimson); }
+.mk-footer-tagline {
+  margin-top: 14px; max-width: 320px;
+  font-size: 14px; line-height: 1.55; color: rgb(244 238 230 / .62);
+}
+.mk-footer-col h4 {
+  font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: rgb(244 238 230 / .5); margin-bottom: 16px;
+}
+.mk-footer-col ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 11px; }
+.mk-footer-col a { font-size: 14.5px; }
+.mk-footer-signin {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14.5px; font-weight: 600; color: var(--paper) !important;
+}
+.mk-footer-signin svg { width: 16px; height: 16px; }
+.mk-footer-bottom {
+  padding-top: 24px;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  font-size: 13px; color: rgb(244 238 230 / .5);
+}
+.mk-footer-bottom .mk-mono { font-family: var(--font-mono); font-size: 12px; }
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+@media (max-width: 860px) {
+  .mk-section { padding-block: 72px; }
+  .mk-hero { padding-block: 56px 52px; }
+  .mk-footer-cols { grid-template-columns: 1fr 1fr; }
+  .mk-footer-brand { grid-column: 1 / -1; }
+}
+@media (max-width: 640px) {
+  .mk-wrap { padding-inline: 18px; }
+  .mk-nav-inner { gap: 12px; }
+  /* tabs stay a horizontal scroll row (no hamburger) */
+  .mk-tabs { margin-inline: 0; justify-content: flex-start; flex: 1; }
+  .mk-tab { padding: 8px 10px; }
+  .mk-signin span.mk-signin-label { display: none; }
+  .mk-signin { padding: 8px 11px; }
+  .mk-hero-ctas .mk-btn, .mk-hero-ctas .mk-btn-ghost { flex: 1 1 auto; }
+  .mk-footer-cols { grid-template-columns: 1fr; gap: 32px; }
+}
+
+/* reduced motion — kill smooth scroll + entrance transitions globally */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  * { transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+}
+</style>
+</head>
+<body>
+
+<!-- ========================= NAV ========================= -->
+<nav class="mk-nav" id="mk-nav" aria-label="Primary">
+  <div class="mk-wrap mk-nav-inner">
+    <a class="mk-wordmark" href="#top" aria-label="Orcha — home">Orcha<span class="mk-brand-dot">.</span></a>
+
+    <div class="mk-tabs" role="list" aria-label="Sections">
+      <a class="mk-tab" role="listitem" href="#demo" data-spy="demo">Demo</a>
+      <a class="mk-tab" role="listitem" href="#product" data-spy="product">Product</a>
+      <a class="mk-tab" role="listitem" href="#mobile" data-spy="mobile">Mobile</a>
+      <a class="mk-tab" role="listitem" href="#deploy" data-spy="deploy">Deploy</a>
+      <a class="mk-tab" role="listitem" href="#themes" data-spy="themes">Themes</a>
+      <a class="mk-tab" role="listitem" href="#opensource" data-spy="opensource">Open&nbsp;Source</a>
+    </div>
+
+    <div class="mk-nav-right">
+      <a class="mk-signin" href="/oauth2/start?rd=%2F">
+        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span class="mk-signin-label">Sign in</span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- ========================= HERO ========================= -->
+<header class="mk-hero" id="top">
+  <div class="mk-hero-bg" aria-hidden="true"></div>
+  <div class="mk-wrap mk-hero-inner">
+    <span class="mk-eyebrow"><span class="mk-eyebrow-dot"></span>Open-source agent orchestration</span>
+    <h1>
+      AI agents that <span class="mk-hero-accent">ship</span>.<br>
+      Humans who decide.
+    </h1>
+    <p class="mk-hero-sub">
+      Orcha runs persistent Claude agents inside your repositories. They branch, commit, and open pull requests
+      as a bot — then stop at <span class="mk-mono">needs&#8209;verification</span>. The merge is always yours to make.
+    </p>
+    <div class="mk-hero-ctas">
+      <a class="mk-btn" href="#demo">
+        Watch how it works
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6l5 5 5-5"/></svg>
+      </a>
+      <a class="mk-btn-ghost" href="https://github.com/open-orcha/orcha" rel="noopener">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        Star on GitHub
+      </a>
+    </div>
+    <p class="mk-hero-ticker" aria-label="What Orcha does">
+      <span class="mk-tick">sandboxed runs</span>
+      <span class="mk-tick-sep" aria-hidden="true">/</span>
+      <span class="mk-tick">bot-authored PRs</span>
+      <span class="mk-tick-sep" aria-hidden="true">/</span>
+      <span class="mk-tick">human merge gate</span>
+    </p>
+  </div>
+</header>
+
+<main>
+
+<!-- ================= SECTION FRAGMENTS (assembled by build.py) ================= -->
+<!-- @section:demo -->
+<!-- @section:product -->
+<!-- @section:mobile -->
+<!-- @section:deploy -->
+<!-- @section:themes -->
+<!-- @section:opensource -->
+
+</main>
+
+<!-- ========================= FOOTER ========================= -->
+<footer class="mk-footer">
+  <div class="mk-wrap">
+    <div class="mk-footer-cols">
+      <div class="mk-footer-brand">
+        <a class="mk-wordmark" href="#top" aria-label="Orcha — home">Orcha<span class="mk-brand-dot">.</span></a>
+        <p class="mk-footer-tagline">
+          Open-source multi-agent orchestration. Persistent agents work in your repos; you hold the pen on every decision that matters.
+        </p>
+      </div>
+
+      <div class="mk-footer-col">
+        <h4>Product</h4>
+        <ul>
+          <li><a href="#demo">How it works</a></li>
+          <li><a href="#product">Product</a></li>
+          <li><a href="#mobile">iOS app</a></li>
+          <li><a href="#deploy">Ways to run</a></li>
+          <li><a href="#themes">Themes</a></li>
+        </ul>
+      </div>
+
+      <div class="mk-footer-col">
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/open-orcha/orcha" rel="noopener">github.com/open-orcha/orcha</a></li>
+          <li><a href="https://github.com/open-orcha/orcha#readme" rel="noopener">Self-host guide</a></li>
+          <li><a href="https://github.com/open-orcha/orcha#readme" rel="noopener">Bring your own cloud</a></li>
+          <li><a href="#opensource">Three ways to run</a></li>
+          <li>
+            <a class="mk-footer-signin" href="/oauth2/start?rd=%2F">
+              <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+              Sign in with GitHub
+            </a>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mk-footer-bottom">
+      <span class="mk-mono">Powered by open-source Orcha · sandboxed agents · human final call</span>
+      <span>© 2026 Quantal Labs</span>
+    </div>
+  </div>
+</footer>
+
+<!-- ========================= SHARED JS RUNTIME ========================= -->
+<script>
+(function () {
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---- tiny IntersectionObserver helper fragments MAY use --------------- */
+  window.OrchaMk = {
+    // onVisible(el, cb, opts): calls cb(entry) the first time `el` crosses the
+    // threshold. Returns a disconnect() fn. Fragments must also work WITHOUT
+    // this (they can create their own observers / render statically).
+    onVisible: function (el, cb, opts) {
+      if (!el) return function () {};
+      opts = opts || {};
+      var once = opts.once !== false; // default: fire once
+      if (!("IntersectionObserver" in window)) { try { cb({ target: el, isIntersecting: true }); } catch (e) {} return function () {}; }
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) { try { cb(entry); } catch (e) {} if (once) io.unobserve(entry.target); }
+        });
+      }, { threshold: opts.threshold != null ? opts.threshold : 0.35, rootMargin: opts.rootMargin || "0px" });
+      io.observe(el);
+      return function () { io.disconnect(); };
+    },
+    reducedMotion: reduce
+  };
+
+  /* ---- smooth-scroll for in-page anchors (respects reduced motion) ------ */
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest('a[href^="#"]');
+    if (!a) return;
+    var id = a.getAttribute("href");
+    if (id === "#" || id.length < 2) return;
+    var target = document.querySelector(id);
+    if (!target) return;
+    e.preventDefault();
+    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    // move focus for a11y without a second jump
+    target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+    if (history.replaceState) history.replaceState(null, "", id);
+  });
+
+  /* ---- nav: hairline + shadow once the page scrolls --------------------- */
+  var nav = document.getElementById("mk-nav");
+  function onScroll() {
+    if (!nav) return;
+    if (window.scrollY > 8) nav.classList.add("is-scrolled");
+    else nav.classList.remove("is-scrolled");
+  }
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  /* ---- scroll-spy: highlight the active tab ----------------------------- */
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".mk-tab[data-spy]"));
+  var byId = {};
+  tabs.forEach(function (t) { byId[t.getAttribute("data-spy")] = t; });
+  var sections = tabs.map(function (t) { return document.getElementById(t.getAttribute("data-spy")); }).filter(Boolean);
+
+  function setActive(id) {
+    tabs.forEach(function (t) {
+      var on = t.getAttribute("data-spy") === id;
+      t.classList.toggle("is-active", on);
+      if (on) t.setAttribute("aria-current", "true"); else t.removeAttribute("aria-current");
+    });
+    // keep the active tab visible in the horizontal scroll row on mobile
+    var active = byId[id];
+    if (active && active.scrollIntoView) {
+      // only nudge horizontally; guard against layout thrash on desktop
+      var tabsRow = active.parentNode;
+      if (tabsRow && tabsRow.scrollWidth > tabsRow.clientWidth) {
+        var left = active.offsetLeft - (tabsRow.clientWidth - active.clientWidth) / 2;
+        tabsRow.scrollTo ? tabsRow.scrollTo({ left: left, behavior: reduce ? "auto" : "smooth" }) : (tabsRow.scrollLeft = left);
+      }
+    }
+  }
+
+  if ("IntersectionObserver" in window && sections.length) {
+    var visible = {};
+    var spy = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        visible[entry.target.id] = entry.isIntersecting ? entry.intersectionRatio : 0;
+      });
+      // pick the most-visible section
+      var best = null, bestRatio = 0;
+      sections.forEach(function (s) {
+        var r = visible[s.id] || 0;
+        if (r > bestRatio) { bestRatio = r; best = s.id; }
+      });
+      if (best) setActive(best);
+    }, { threshold: [0.15, 0.35, 0.6], rootMargin: "-45% 0px -45% 0px" });
+    sections.forEach(function (s) { spy.observe(s); });
+  }
+})();
+</script>
+
+</body>
+</html>
