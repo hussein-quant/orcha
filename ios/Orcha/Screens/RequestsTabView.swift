@@ -211,12 +211,18 @@ struct RequestRowCard: View {
         let toLabel = toIsYou ? "you" : (targetAlias ?? "agent")
         OrchaCard {
             HStack(spacing: 8) {
-                AgentAvatar(alias: requesterAlias ?? fromLabel, human: request.requesterId == humanId, size: 30)
+                AgentAvatar(
+                    alias: requesterAlias ?? fromLabel,
+                    human: request.requesterId == humanId,
+                    githubLogin: MobileUx.humanLogin(alias: requesterAlias, in: agents),
+                    size: 30
+                )
                 Text("→")
                     .foregroundStyle(p.faint)
                 AgentAvatar(
                     alias: request.targetId == nil ? "H" : (targetAlias ?? "A"),
                     human: toIsYou,
+                    githubLogin: MobileUx.humanLogin(alias: targetAlias, in: agents),
                     size: 30
                 )
                 Text("\(fromLabel) → \(toLabel)")

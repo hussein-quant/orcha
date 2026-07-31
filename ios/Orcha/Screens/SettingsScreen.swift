@@ -12,8 +12,10 @@ struct SettingsScreen: View {
             OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
+                        identitySection
                         appearanceSection
                         notificationsSection
+                        membersSection
                         containersSection
                         aboutSection
                     }
@@ -25,6 +27,63 @@ struct SettingsScreen: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .task {
+                if model.selectedContainer != nil { await model.loadMembers() }
+            }
+        }
+    }
+
+    // MARK: acting identity (collab v1)
+
+    /// Who the deployment sees acting from this phone: the proxy-verified GitHub
+    /// identity (avatar + login + role + grants), the honest "signed in but not a
+    /// member" state, or — self-host, trust off — the paired human, unchanged.
+    @ViewBuilder
+    private var identitySection: some View {
+        if model.selectedContainer != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                SectionH(title: "Acting as")
+                OrchaCard {
+                    if let identity = model.identity {
+                        HStack(spacing: 10) {
+                            AgentAvatar(alias: identity.alias, human: true, githubLogin: identity.githubLogin)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(identity.githubLogin.map { "@\($0)" } ?? identity.alias)
+                                    .font(p.uiFont(15, .semibold))
+                                    .foregroundStyle(p.text)
+                                Text("GitHub identity · verified by the deployment")
+                                    .font(p.uiFont(12))
+                                    .foregroundStyle(p.muted)
+                            }
+                            Spacer()
+                            MetaTag(text: identity.memberRole, tint: identity.memberRole == "owner" ? p.violet : nil)
+                        }
+                        if !model.access.isOwner, !identity.grants.isEmpty {
+                            HStack(spacing: 6) {
+                                ForEach(identity.grants, id: \.self) { grant in
+                                    MetaTag(text: grant.replacingOccurrences(of: "_", with: " "))
+                                }
+                            }
+                        }
+                    } else if model.identityTrusted {
+                        Text("Signed in via GitHub, but not a member of this project — ask an owner for an invite.")
+                            .font(p.uiFont(13))
+                            .foregroundStyle(p.muted)
+                    } else {
+                        HStack(spacing: 10) {
+                            AgentAvatar(alias: model.selectedContainer?.humanAlias ?? "H", human: true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(model.selectedContainer?.humanAlias ?? "Paired human")
+                                    .font(p.uiFont(15, .semibold))
+                                    .foregroundStyle(p.text)
+                                Text("Self-hosted — acting as the paired human")
+                                    .font(p.uiFont(12))
+                                    .foregroundStyle(p.muted)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -59,7 +118,79 @@ struct SettingsScreen: View {
                     .foregroundStyle(p.muted)
                     .contentTransition(.opacity)
             }
+            if model.prefsActive {
+                Text("Appearance follows your GitHub account — changes here sync to the portal and your other devices.")
+                    .font(p.uiFont(12))
+                    .foregroundStyle(p.faint)
+                    .padding(.horizontal, 2)
+            }
         }
+    }
+
+    // MARK: members (collab v1, read parity — no invite/role editing on iOS)
+
+    @ViewBuilder
+    private var membersSection: some View {
+        if model.selectedContainer != nil {
+            VStack(alignment: .leading, spacing: 6) {
+                switch model.membersState {
+                case .idle:
+                    EmptyView()
+                case .loading:
+                    SectionH(title: "Members")
+                    SkeletonBlock(height: 64)
+                case let .failed(reason):
+                    SectionH(title: "Members")
+                    OrchaCard {
+                        Text(reason)
+                            .font(p.uiFont(13))
+                            .foregroundStyle(p.muted)
+                    }
+                case let .loaded(members, restricted):
+                    SectionH(title: "Members", count: restricted ? nil : "\(members.count)")
+                    ForEach(members) { member in
+                        memberCard(member)
+                    }
+                    if restricted {
+                        Text("The roster is private on this project — you can see your own membership; owners see everyone.")
+                            .font(p.uiFont(12))
+                            .foregroundStyle(p.faint)
+                            .padding(.horizontal, 2)
+                    } else {
+                        Text("Invites and role changes are managed from the portal.")
+                            .font(p.uiFont(12))
+                            .foregroundStyle(p.faint)
+                            .padding(.horizontal, 2)
+                    }
+                }
+            }
+        }
+    }
+
+    private func memberCard(_ member: MemberDto) -> some View {
+        OrchaCard {
+            HStack(spacing: 10) {
+                AgentAvatar(alias: member.alias, human: true, githubLogin: member.githubLogin)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(member.githubLogin.map { "@\($0)" } ?? member.alias)
+                        .font(p.uiFont(15, .semibold))
+                        .foregroundStyle(p.text)
+                        .lineLimit(1)
+                    if member.githubLogin != nil, member.alias != member.githubLogin {
+                        Text(member.alias)
+                            .font(p.uiFont(12))
+                            .foregroundStyle(p.muted)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                if member.pending {
+                    MetaTag(text: "pending", tint: p.warn)
+                }
+                MetaTag(text: member.memberRole, tint: member.memberRole == "owner" ? p.violet : nil)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var themeBinding: Binding<ThemeMode> {

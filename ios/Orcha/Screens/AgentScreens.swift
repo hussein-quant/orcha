@@ -141,10 +141,10 @@ struct AgentDetailScreen: View {
     private func header(_ agent: AgentDto) -> some View {
         OrchaCard {
             HStack(spacing: 12) {
-                AgentAvatar(alias: agent.alias, human: agent.kind == "human", size: 56)
+                AgentAvatar(alias: agent.alias, human: agent.kind == "human", githubLogin: agent.githubLogin, size: 56)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(agent.alias).font(p.uiFont(20, .heavy)).foregroundStyle(p.text)
-                    Text(agent.role ?? (agent.kind == "human" ? "Human authority" : "agent"))
+                    Text(humanSubtitle(agent))
                         .font(p.uiFont(13)).foregroundStyle(p.muted).lineLimit(1)
                 }
                 Spacer(minLength: 4)
@@ -159,6 +159,15 @@ struct AgentDetailScreen: View {
             }
         }
         .opacity(dead ? 0.55 : 1)
+    }
+
+    /// Collab v1 — a human member reads as their GitHub identity + role.
+    private func humanSubtitle(_ agent: AgentDto) -> String {
+        guard agent.kind == "human" else { return agent.role ?? "agent" }
+        var parts: [String] = []
+        if let login = agent.githubLogin { parts.append("@\(login)") }
+        parts.append(agent.memberRole.map { $0.capitalized } ?? "Human authority")
+        return parts.joined(separator: " · ")
     }
 
     // MARK: Now (flow 09 §4)
@@ -226,18 +235,22 @@ struct AgentDetailScreen: View {
     // MARK: Controls (flow 09 §5 — human authority; AI only, disabled once retired)
 
     private func controls(_ agent: AgentDto) -> some View {
-        VStack(spacing: 10) {
+        // Collab v1: honest grant gating — the same gates the server enforces
+        // (model/effort = manage_agents, auto-wake = manage_autonomy).
+        let canAgents = model.access.canManage(Grant.manageAgents)
+        let canAutonomy = model.access.canManage(Grant.manageAutonomy)
+        return VStack(spacing: 10) {
             SectionH(title: "Controls", count: "human authority")
             OrchaCard {
                 controlRow(
-                    title: "Model", sub: "Applies at the next wake",
+                    title: "Model", sub: canAgents ? "Applies at the next wake" : "Needs the 'manage agents' permission",
                     tag: MetaTag(text: agent.model ?? "default", mono: true),
-                    enabled: !dead
+                    enabled: !dead && canAgents
                 ) { showModelPicker = true }
                 controlRow(
-                    title: "Auto-wake", sub: "Clock-driven wakes while idle",
+                    title: "Auto-wake", sub: canAutonomy ? "Clock-driven wakes while idle" : "Needs the 'manage autonomy' permission",
                     tag: MetaTag(text: agent.autoWakeIntervalSecs.map(cadence) ?? "Off"),
-                    enabled: !dead
+                    enabled: !dead && canAutonomy
                 ) { showWakePicker = true }
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -365,7 +378,9 @@ struct AgentDetailScreen: View {
     @ToolbarContentBuilder
     private var toolbarMenu: some ToolbarContent {
         ToolbarItem(placement: .topBarTrailing) {
-            if let agent, agent.kind == "ai", !dead {
+            // Collab v1: rename/retire are manage_agents writes — hidden when the
+            // acting member doesn't hold the gate (server enforces regardless).
+            if let agent, agent.kind == "ai", !dead, model.access.canManage(Grant.manageAgents) {
                 Menu {
                     Button("Rename") { newAlias = agent.alias; renaming = true }
                     Button("Retire agent…", role: .destructive) { confirmRetire = true }
@@ -598,9 +613,13 @@ struct ConversationScreen: View {
                             Text("No conversation yet. Send a message to wake \(agent?.alias ?? "the agent").")
                                 .foregroundStyle(p.muted)
                         }
-                        HStack(spacing: 8) {
-                            ForEach(hints, id: \.self) { hint in
-                                PillChip(label: hint, selected: false) { draft = hint }
+                        // The hint chips feed the composer — hidden for read-only
+                        // roles right along with it (collab v1).
+                        if model.access.canWrite {
+                            HStack(spacing: 8) {
+                                ForEach(hints, id: \.self) { hint in
+                                    PillChip(label: hint, selected: false) { draft = hint }
+                                }
                             }
                         }
                     }
@@ -672,7 +691,9 @@ struct ConversationScreen: View {
             // captured) must never render as an empty bubble — show a muted notice.
             emptyReplyNotice(turn, alias: alias)
         } else {
-            Bubble(.theirs, turn.content, author: alias, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 }) {
+            // Web parity: agent turn content renders as chat-scale markdown
+            // (headings, bold/italic, code, lists, links, rules).
+            Bubble(.theirs, turn.content, author: alias, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 }, markdown: true) {
                 if let rid = turn.runId {
                     workLogLink(rid, alias: alias)
                 }
@@ -770,7 +791,21 @@ struct ConversationScreen: View {
 
     // MARK: composer
 
+    /// Collab v1: a read-only role (viewer / trusted non-member) gets the honest
+    /// note instead of the composer — the server would 403 the turn anyway.
+    @ViewBuilder
     private var composer: some View {
+        if let reason = model.access.writeDenialReason {
+            Banner(kind: .info, text: reason)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(p.bg)
+        } else {
+            composerField
+        }
+    }
+
+    private var composerField: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Chat with \(agent?.alias ?? "the agent")…", text: $draft, axis: .vertical)
                 .lineLimit(1...4)

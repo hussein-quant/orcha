@@ -77,7 +77,7 @@ struct SearchTabView: View {
                 NavigationLink(value: WorkspaceRoute.agent(agent.id)) {
                     OrchaCard {
                         HStack(spacing: 10) {
-                            AgentAvatar(alias: agent.alias, human: agent.kind == "human", size: 30)
+                            AgentAvatar(alias: agent.alias, human: agent.kind == "human", githubLogin: agent.githubLogin, size: 30)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(agent.alias)
                                     .font(p.uiFont(15, .semibold))

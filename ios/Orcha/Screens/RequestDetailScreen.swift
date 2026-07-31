@@ -324,9 +324,17 @@ private struct RequestFlowHeader: View {
         let expiry = MobileUx.expiryChip(request.expiresAt)
         OrchaCard {
             HStack(spacing: 10) {
-                AgentAvatar(alias: requesterAlias ?? (isRequester ? "you" : "A"), human: isRequester)
+                AgentAvatar(
+                    alias: requesterAlias ?? (isRequester ? "you" : "A"),
+                    human: isRequester,
+                    githubLogin: MobileUx.humanLogin(alias: requesterAlias, in: agents)
+                )
                 Text("→").font(p.uiFont(17)).foregroundStyle(p.faint)
-                AgentAvatar(alias: request.targetId == nil ? "H" : (targetAlias ?? "A"), human: isTarget)
+                AgentAvatar(
+                    alias: request.targetId == nil ? "H" : (targetAlias ?? "A"),
+                    human: isTarget,
+                    githubLogin: MobileUx.humanLogin(alias: targetAlias, in: agents)
+                )
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(isRequester ? "you" : (requesterAlias ?? "agent")) → \(isTarget ? "you" : (targetAlias ?? "agent"))")
                         .font(p.uiFont(15, .semibold))

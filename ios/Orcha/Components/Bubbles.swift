@@ -16,6 +16,9 @@ struct Bubble<Trailing: View>: View {
     /// Left empty/nil for bubbles that don't need linkification (e.g. day dividers).
     var tasks: [TaskDto] = []
     var onTapTask: ((String) -> Void)?
+    /// Web parity — agent turn content renders as chat-scale markdown. Only `theirs`
+    /// bubbles honor this; mine/system (and pending/failed) stay plain.
+    var markdown = false
     @ViewBuilder var trailing: Trailing
 
     init(
@@ -25,6 +28,7 @@ struct Bubble<Trailing: View>: View {
         time: String? = nil,
         tasks: [TaskDto] = [],
         onTapTask: ((String) -> Void)? = nil,
+        markdown: Bool = false,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) {
         self.kind = kind
@@ -33,6 +37,7 @@ struct Bubble<Trailing: View>: View {
         self.time = time
         self.tasks = tasks
         self.onTapTask = onTapTask
+        self.markdown = markdown
         self.trailing = trailing()
     }
 
@@ -77,7 +82,9 @@ struct Bubble<Trailing: View>: View {
                             .foregroundStyle(p.accent)
                     }
                     Group {
-                        if let onTapTask {
+                        if !mine, markdown {
+                            ChatMarkdownView(text: body_, tasks: tasks, onTapTask: onTapTask)
+                        } else if let onTapTask {
                             LinkedMessageText(text: body_, tasks: tasks, onTapTask: onTapTask)
                         } else {
                             Text(body_)

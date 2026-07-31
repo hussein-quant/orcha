@@ -40,6 +40,11 @@ struct CreateTaskSheet: View {
             OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        // Collab v1: honest gating — a viewer / trusted non-member
+                        // sees WHY Create is off (the server 403s the write anyway).
+                        if let denial = model.access.writeDenialReason {
+                            Banner(kind: .info, text: denial)
+                        }
                         titleField
                         descriptionField
                         dodField
@@ -62,7 +67,7 @@ struct CreateTaskSheet: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Create") { submit() }
                         .font(p.uiFont(16, .heavy))
-                        .disabled(!valid)
+                        .disabled(!valid || !model.access.canWrite)
                 }
             }
             .confirmationDialog(
