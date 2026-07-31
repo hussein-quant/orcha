@@ -20,6 +20,30 @@
 <link rel="stylesheet" href="/assets/styles/conversation.css">
 <link rel="stylesheet" href="/assets/styles/responsive.css">
 <link rel="stylesheet" href="/assets/pages/requests.css">
+<!-- seamless nav (Chromium 121+): prerender same-origin link targets when the user
+     hovers / presses a link ("moderate" eagerness), so the next page is already
+     fetched, styled and scripted at click time. Document-rule ("where") form
+     because every in-project nav link carries a per-project ?cid= query string —
+     URL-list rules can't template queries, while href_matches "/*" leaves search
+     params wildcarded. Excluded: /device* (that GET mints a device token),
+     /oauth2/* (hovering sign-out must never sign out), /api/* and /assets/*
+     (not navigable pages). Non-Chromium engines ignore this block entirely. -->
+<script type="speculationrules">
+{
+  "prerender": [{
+    "where": {
+      "and": [
+        { "href_matches": "/*" },
+        { "not": { "href_matches": "/device*" } },
+        { "not": { "href_matches": "/oauth2/*" } },
+        { "not": { "href_matches": "/api/*" } },
+        { "not": { "href_matches": "/assets/*" } }
+      ]
+    },
+    "eagerness": "moderate"
+  }]
+}
+</script>
 </head>
 <body>
 <div class="app">
