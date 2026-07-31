@@ -51,7 +51,9 @@ def build_manifest(args) -> dict:
         # pre-provision the same app for repo access (sub-project 3: clone
         # tokens + PR-as-bot) so ONE app serves both.
         "default_permissions": {
-            "contents": "read",
+            # write: agents push branches and open PRs as the app bot — read-only
+            # stops at the push (field-found).
+            "contents": "write",
             "metadata": "read",
             "pull_requests": "write",
         },
