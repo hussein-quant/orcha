@@ -294,7 +294,10 @@ struct ConnChip: View {
     var body: some View {
         let (color, word): (Color, String) = switch state.lowercased() {
         case "live", "active": (p.ok, "live")
-        case "polling": (p.warn, "polling")
+        // A successful probe = healthy; "polling" is the refresh MECHANISM,
+        // not a degraded state (SSE remains the listed follow-up) — render it
+        // as the good state so reachable workspaces read green "connected".
+        case "polling": (p.ok, "connected")
         case "paused": (p.warn, "paused")
         case "unreachable", "off": (p.danger, "unreachable")
         default: (p.idle, state.lowercased())
