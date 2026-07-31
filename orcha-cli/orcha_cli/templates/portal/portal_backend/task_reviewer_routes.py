@@ -6,13 +6,14 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_task, valid_uuid
-from portal_backend.identity_routes import require_owner
+from portal_backend.identity_routes import require_grant
 from portal_backend.schemas.task_operations import TaskReviewerUpdate
 
 
 @app.put("/api/tasks/{tid}/reviewer", status_code=200)
 def set_task_reviewer(tid: str, body: TaskReviewerUpdate, request: Request):
-    """Owner-only: name the human who should verify this task (null = anyone).
+    """Owner-or-assign_reviewers: name the human who should verify this task
+    (null = anyone).
 
     ADVISORY, deliberately: /verify keeps its existing permissive state machine (any
     human CAN verify) — the portal only de-emphasizes review items that belong to
@@ -23,7 +24,9 @@ def set_task_reviewer(tid: str, body: TaskReviewerUpdate, request: Request):
     with db_cursor() as (conn, cur):
         t = require_task(cur, tid)
         cid = str(t["container_id"])
-        owner = require_owner(cur, request, cid, body.actor_agent_id)
+        owner = require_grant(
+            cur, request, cid, body.actor_agent_id, "assign_reviewers"
+        )
 
         reviewer = None
         if body.reviewer_agent_id is not None:

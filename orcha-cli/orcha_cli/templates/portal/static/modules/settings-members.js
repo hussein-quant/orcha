@@ -1,24 +1,41 @@
 /* Settings page module: the collab-v1 Members card — who's on this project.
  *
- * Data:  GET    /api/containers/{cid}/members         -> {members:[{agent_id, alias,
- *                github_login, member_role, pending}]}
- *        POST   .../members {github_login, role}       (owner-only invite)
- *        PATCH  .../members/{aid} {role}               (owner-only re-role)
- *        DELETE .../members/{aid}                      (owner-only remove = retire)
- * The acting identity comes from /api/me via data.js (D.identity); owner-only
- * affordances key off Orcha.actingOwner() — non-owners see the list read-only.
- * The LAST owner's row never offers demote/remove (the backend 400s both), which
- * covers the common sole-owner-managing-themselves case.
+ * Data:  GET    /api/containers/{cid}/members -> {members:[{agent_id, alias,
+ *                github_login, member_role, grants, pending}], restricted:bool}
+ *        POST   .../members {github_login, role}       (owner-or-manage_members)
+ *        PATCH  .../members/{aid} {role}               (owner-or-manage_members;
+ *                to/from owner stays owner-only)
+ *        PATCH  .../members/{aid} {grants:[...]}       (owner-only)
+ *        DELETE .../members/{aid}                      (owner-or-manage_members;
+ *                removing an owner stays owner-only)
+ * The acting identity comes from /api/me via data.js (D.identity); management
+ * affordances key off Orcha.actingGrant("manage_members"), the owner-only extras
+ * (role→owner, the Permissions expander, owner removal) off Orcha.actingOwner().
+ * ROSTER PRIVACY: a non-manage_members member receives ONLY their own row plus
+ * restricted:true — the card renders their membership + an explanatory note.
+ * The LAST owner's row never offers demote/remove (the backend 400s both).
  * actor_agent_id rides every mutation as the trust-off fallback actor; with a
  * trusted proxy identity the server resolves the actor from the header instead. */
 
 const MemO = window.Orcha;
 const Mem$ = (id) => document.getElementById(id);
 
-let MEMBERS = null;      // [{agent_id, alias, github_login, member_role, pending}] | null
+// The grantable permissions (mirror identity_routes.GRANTS) + human labels.
+const MEM_GRANTS = [
+  ["manage_keys", "API keys & model settings"],
+  ["manage_members", "Members — invite, remove, see the roster"],
+  ["manage_repo", "GitHub repo binding"],
+  ["manage_autonomy", "Autonomy, notifier & wake switches"],
+  ["manage_agents", "Agents — create, edit, retire"],
+  ["assign_reviewers", "Assign task reviewers"],
+];
+
+let MEMBERS = null;      // [{agent_id, alias, github_login, member_role, grants, pending}] | null
+let RESTRICTED = false;  // roster privacy: server sent only the viewer's own row
 let memErr = false;
 let memBusy = false;
 let MEM_CID = null;
+const memOpenPerms = new Set();   // aids with the Permissions expander open
 
 async function memApi(method, path, body) {
   const init = { method, headers: { "Content-Type": "application/json" } };
@@ -39,37 +56,92 @@ async function loadMembers() {
   if (!MEM_CID) return;
   memErr = false;
   const res = await memApi("GET", memUrl());
-  if (res.ok && res.body && Array.isArray(res.body.members)) MEMBERS = res.body.members;
-  else { MEMBERS = null; memErr = true; }
+  if (res.ok && res.body && Array.isArray(res.body.members)) {
+    MEMBERS = res.body.members;
+    RESTRICTED = !!res.body.restricted;
+  } else { MEMBERS = null; RESTRICTED = false; memErr = true; }
   renderMembers(true);
 }
 
 /* ---- render ----------------------------------------------------------- */
-function memberRowHtml(m, canManage, meId, ownerCount) {
+function memFace(m) {
   const login = m.github_login;
-  const face = login
+  return login
     ? (typeof ghAvatar === "function" ? ghAvatar(login, "") : MemO.avatar(login, "human", ""))
     : MemO.avatar(m.alias, "human", "");
+}
+
+// The role control: a <select> over owner/member/viewer. Promoting TO owner (and
+// touching an owner row at all) is owner-only server-side, so the option/control
+// only renders where the actor could succeed.
+function memRoleControl(m, isOwnerActor) {
+  const ownerOpt = isOwnerActor
+    ? `<option value="owner"${m.member_role === "owner" ? " selected" : ""}>owner</option>` : "";
+  return `<select class="sc-inp mem-role-sel" data-mem-role="${MemO.esc(m.agent_id)}"
+      title="Project role">${ownerOpt}
+    <option value="member"${m.member_role === "member" ? " selected" : ""}>member</option>
+    <option value="viewer"${m.member_role === "viewer" ? " selected" : ""}>viewer</option>
+  </select>`;
+}
+
+function memPermsPanel(m) {
+  const held = m.grants || [];
+  const boxes = MEM_GRANTS.map(([g, label]) => `<label class="mem-grant">
+      <input type="checkbox" data-grant="${g}" data-grant-of="${MemO.esc(m.agent_id)}"
+        ${held.indexOf(g) >= 0 ? "checked" : ""}>
+      <span>${MemO.esc(label)}</span></label>`).join("");
+  return `<div class="mem-perms" data-perms-panel="${MemO.esc(m.agent_id)}">
+      <div class="sc-hint">Extra permissions on top of the ${MemO.esc(m.member_role)} role
+        (viewers stay read-only regardless — only the roster grant affects them).</div>
+      ${boxes}
+      <button class="btn sm" data-perms-save="${MemO.esc(m.agent_id)}" type="button">Save permissions</button>
+    </div>`;
+}
+
+function memberRowHtml(m, ctx) {
+  const login = m.github_login;
   const roleChip = `<span class="tag role-${MemO.esc(m.member_role)}">${MemO.esc(m.member_role)}</span>`;
   const pending = m.pending ? '<span class="tag mem-pending">pending</span>' : "";
-  const you = meId && String(meId) === String(m.agent_id)
+  const grants = (m.grants || []).length && m.member_role !== "owner"
+    ? `<span class="tag mem-grants" title="${MemO.esc((m.grants || []).join(", "))}">+${(m.grants || []).length}</span>` : "";
+  const you = ctx.meId && String(ctx.meId) === String(m.agent_id)
     ? '<span class="mem-you">you</span>' : "";
-  // NEVER offer demote/remove on the LAST owner's row (the backend 400s both; the
-  // UI must not dangle a dead control) — including the common case: yourself as the
-  // sole owner. With another owner around, every row (self included) is manageable.
-  const lastOwner = m.member_role === "owner" && ownerCount <= 1;
-  const acts = canManage && !lastOwner ? `<span class="mem-acts">
-      <button class="btn sm ghost" data-mem-role="${MemO.esc(m.agent_id)}" data-to="${m.member_role === "owner" ? "member" : "owner"}"
-        title="${m.member_role === "owner" ? "Demote to member" : "Promote to owner"}">${m.member_role === "owner" ? "Make member" : "Make owner"}</button>
+  // NEVER offer demote/remove on the LAST owner's row (the backend 400s both);
+  // owner rows are only manageable by another OWNER (server carve-out mirrored).
+  const lastOwner = m.member_role === "owner" && ctx.ownerCount <= 1;
+  const rowManageable = ctx.canManage && !lastOwner
+    && (m.member_role !== "owner" || ctx.isOwner);
+  const acts = rowManageable ? `<span class="mem-acts">
+      ${memRoleControl(m, ctx.isOwner)}
+      ${ctx.isOwner && m.member_role !== "owner"
+        ? `<button class="btn sm ghost" data-mem-perms="${MemO.esc(m.agent_id)}" type="button"
+            title="Granular permissions">Permissions</button>` : ""}
       <button class="iconbtn" data-mem-remove="${MemO.esc(m.agent_id)}" title="Remove access">${MemO.icon("x", "")}</button>
     </span>` : "";
+  const perms = rowManageable && ctx.isOwner && m.member_role !== "owner"
+    && memOpenPerms.has(String(m.agent_id)) ? memPermsPanel(m) : "";
   return `<div class="mem-row">
-    ${face}
+    ${memFace(m)}
     <div class="grow" style="min-width:0">
       <div class="mem-name">${MemO.esc(login || m.alias)}${you}</div>
       ${login && login !== m.alias ? `<div class="mem-sub">${MemO.esc(m.alias)}</div>` : ""}
     </div>
-    ${pending}${roleChip}${acts}</div>`;
+    ${pending}${grants}${roleChip}${acts}</div>${perms}`;
+}
+
+// Roster privacy: the server sent only your own membership — render it as a card
+// plus the explanation (no invite bar, no roster, no controls).
+function restrictedRosterHtml(m) {
+  return `<div class="mem-row">
+      ${memFace(m)}
+      <div class="grow" style="min-width:0">
+        <div class="mem-name">${MemO.esc(m.github_login || m.alias)}<span class="mem-you">you</span></div>
+      </div>
+      ${m.pending ? '<span class="tag mem-pending">pending</span>' : ""}
+      <span class="tag role-${MemO.esc(m.member_role)}">${MemO.esc(m.member_role)}</span>
+    </div>
+    <div class="sc-hint mem-restricted">Your membership on this project. The full member
+      list is visible to owners and to members with the members permission.</div>`;
 }
 
 function renderMembers(force) {
@@ -86,15 +158,30 @@ function renderMembers(force) {
     MemO.patch(host, '<div class="none">Loading members…</div>', force);
     return;
   }
-  const canManage = !!(MemO.actingOwner && MemO.actingOwner()) && !memBusy;
+  if (RESTRICTED) {
+    MemO.patch(host, MEMBERS.length
+      ? restrictedRosterHtml(MEMBERS[0])
+      : '<div class="none">No membership found.</div>', force);
+    return;
+  }
+  const isOwner = !!(MemO.actingOwner && MemO.actingOwner());
+  const canManage = !memBusy && !((MemO.viewerRole && MemO.viewerRole()))
+    && !!(isOwner || (MemO.actingGrant && MemO.actingGrant("manage_members")));
   const ident = MemO.identity ? MemO.identity() : null;
-  const meId = ident ? ident.agent_id : null;
-  const ownerCount = MEMBERS.filter((m) => m.member_role === "owner").length;
-  const rows = MEMBERS.map((m) => memberRowHtml(m, canManage, meId, ownerCount)).join("");
+  const ctx = {
+    canManage, isOwner,
+    meId: ident ? ident.agent_id : null,
+    ownerCount: MEMBERS.filter((m) => m.member_role === "owner").length,
+  };
+  const rows = MEMBERS.map((m) => memberRowHtml(m, ctx)).join("");
   const invite = canManage ? `<div class="mem-invite">
       <input id="memLogin" class="sc-inp" spellcheck="false" autocomplete="off"
         placeholder="GitHub username to invite…" maxlength="39">
-      <select id="memRole" class="sc-inp mem-role-sel"><option value="member" selected>member</option><option value="owner">owner</option></select>
+      <select id="memRole" class="sc-inp mem-role-sel">
+        <option value="member" selected>member</option>
+        <option value="viewer">viewer</option>
+        ${isOwner ? '<option value="owner">owner</option>' : ""}
+      </select>
       <button class="btn sm" id="memInvite" type="button">${MemO.icon("plus", "")}Invite</button>
     </div>
     <div class="sc-hint">Invited members appear as <b>pending</b> until they first sign in.
@@ -104,7 +191,7 @@ function renderMembers(force) {
   wireMembers();
 }
 
-/* ---- mutations (owner-only; server re-validates) ---------------------- */
+/* ---- mutations (server re-validates every gate) ----------------------- */
 function memActor() { return MemO.actingHuman ? MemO.actingHuman() : null; }
 
 function wireMembers() {
@@ -114,8 +201,15 @@ function wireMembers() {
   if (inv) inv.addEventListener("click", doInvite);
   const li = Mem$("memLogin");
   if (li && li.addEventListener) li.addEventListener("keydown", (e) => { if (e.key === "Enter") doInvite(); });
-  host.querySelectorAll("[data-mem-role]").forEach((b) => b.addEventListener("click", () =>
-    doRole(b.getAttribute("data-mem-role"), b.getAttribute("data-to"))));
+  host.querySelectorAll("[data-mem-role]").forEach((s) => s.addEventListener("change", () =>
+    doRole(s.getAttribute("data-mem-role"), s.value)));
+  host.querySelectorAll("[data-mem-perms]").forEach((b) => b.addEventListener("click", () => {
+    const aid = String(b.getAttribute("data-mem-perms"));
+    if (memOpenPerms.has(aid)) memOpenPerms.delete(aid); else memOpenPerms.add(aid);
+    renderMembers(true);
+  }));
+  host.querySelectorAll("[data-perms-save]").forEach((b) => b.addEventListener("click", () =>
+    doGrants(b.getAttribute("data-perms-save"))));
   host.querySelectorAll("[data-mem-remove]").forEach((b) => b.addEventListener("click", () =>
     doRemove(b.getAttribute("data-mem-remove"))));
 }
@@ -153,7 +247,33 @@ async function doRole(aid, to) {
   });
   memBusy = false;
   if (res.ok) { MemO.toast("Role updated — " + to + ".", "ok"); loadMembers(); }
-  else MemO.toast("Role change failed (" + res.status + ")" + (res.body && res.body.detail ? ": " + res.body.detail : ""), "danger");
+  else {
+    MemO.toast("Role change failed (" + res.status + ")" + (res.body && res.body.detail ? ": " + res.body.detail : ""), "danger");
+    loadMembers();   // reset the select to the server truth
+  }
+}
+
+async function doGrants(aid, grantsOverride) {
+  if (memBusy) return;
+  const h = memActor();
+  if (!h) { MemO.toast("Pick an acting human first.", "warn"); return; }
+  let grants = grantsOverride;
+  if (!Array.isArray(grants)) {
+    grants = [];
+    const host = Mem$("membersCard");
+    if (host && host.querySelectorAll) {
+      host.querySelectorAll('[data-grant-of="' + aid + '"]').forEach((c) => {
+        if (c.checked) grants.push(c.getAttribute("data-grant"));
+      });
+    }
+  }
+  memBusy = true;
+  const res = await memApi("PATCH", memUrl("/" + encodeURIComponent(aid)), {
+    grants: grants, actor_agent_id: h.id,
+  });
+  memBusy = false;
+  if (res.ok) { MemO.toast("Permissions saved.", "ok"); loadMembers(); }
+  else MemO.toast("Permissions change failed (" + res.status + ")" + (res.body && res.body.detail ? ": " + res.body.detail : ""), "danger");
 }
 
 function doRemove(aid) {
@@ -176,7 +296,7 @@ function doRemove(aid) {
   });
 }
 
-/* ---- boot: members fetched once; the light repaint keeps owner-only
+/* ---- boot: members fetched once; the light repaint keeps management
  * affordances in sync once /api/me resolves (identity can land after the
  * first paint — patch() dedupes, so an unchanged card is a no-op). ------- */
 (async function memInit() {

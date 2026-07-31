@@ -4,11 +4,12 @@ import json
 from datetime import timedelta, timezone
 from decimal import Decimal
 
-from fastapi import HTTPException, Query
+from fastapi import HTTPException, Query, Request
 
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
+from portal_backend.identity_routes import require_member_read
 
 # Cap how much captured stream-json we haul out of the DB per run row. The terminal
 # `result` record rides the very END of the log (notifier_process._usage_from_log
@@ -123,7 +124,9 @@ def _is_failed(row):
 
 
 @app.get("/api/containers/{cid}/metrics")
-def container_metrics(cid: str, days: int = Query(default=7, ge=1, le=90)):
+def container_metrics(
+    cid: str, request: Request, days: int = Query(default=7, ge=1, le=90)
+):
     """Usage/cost visibility per agent for the portal /metrics page.
 
     One windowed pass over worker_runs (joined to agents for the container) with the
@@ -149,6 +152,8 @@ def container_metrics(cid: str, days: int = Query(default=7, ge=1, le=90)):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (_, cur):
         require_container(cur, cid)
+        # Access model: reads are project-isolated (trusted non-member 403).
+        require_member_read(cur, request, cid)
         cur.execute(
             """SELECT wr.run_id, wr.agent_id, wr.wake_kind, wr.status, wr.exit_code,
                       wr.started_at, wr.ended_at,

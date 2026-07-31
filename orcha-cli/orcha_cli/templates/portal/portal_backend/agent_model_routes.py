@@ -6,6 +6,7 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_agent as _require_agent
+from portal_backend.identity_routes import enforce_grant as _enforce_grant
 from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.guards import valid_uuid as _valid_uuid
 from portal_backend.schemas.agent_state import (
@@ -48,6 +49,8 @@ def set_agent_model(aid: str, body: AgentModelUpdate, request: Request):
         agent = _require_agent(cur, aid)
         # Per-project identity: a model swap is a member action (403 non-member).
         _trusted_actor(cur, request, str(agent["container_id"]), None)
+        # Access model: model/effort swaps are owner-or-manage_agents.
+        _enforce_grant(cur, request, str(agent["container_id"]), "manage_agents")
         cur.execute("SELECT kind, model FROM agents WHERE id=%s", (aid,))
         row = cur.fetchone()
         if row["kind"] == "human":
@@ -107,6 +110,8 @@ def set_agent_reasoning_effort(aid: str, body: AgentReasoningEffortUpdate, reque
         agent = _require_agent(cur, aid)
         # Per-project identity: an effort change is a member action (403 non-member).
         _trusted_actor(cur, request, str(agent["container_id"]), None)
+        # Access model: model/effort swaps are owner-or-manage_agents.
+        _enforce_grant(cur, request, str(agent["container_id"]), "manage_agents")
         cur.execute("SELECT kind, reasoning_effort FROM agents WHERE id=%s", (aid,))
         row = cur.fetchone()
         if row["kind"] == "human":

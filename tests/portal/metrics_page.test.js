@@ -61,8 +61,8 @@ function staticTests() {
   assert(!/cdn|unpkg|jsdelivr|chart\.js|d3\./i.test(HTML), "no external chart libs");
 
   // registration: nav entry + icon everywhere pages are enumerated
-  assert(/href: "\/metrics", ico: "metrics", label: "Metrics"/.test(SHELL_JS),
-    "app-shell nav registers the Metrics entry");
+  assert(/href: withCid\("\/metrics"\), ico: "metrics", label: "Metrics"/.test(SHELL_JS),
+    "app-shell nav registers the Metrics entry (cid-carrying, like every in-project link)");
   assert(/metrics: '<path/.test(UI_JS), "app-ui icon set carries the metrics glyph");
 
   // chart CSS: token-driven (theme safe), bar mark specs

@@ -17,16 +17,24 @@ from portal_backend.guards import (
     require_kind,
     valid_uuid,
 )
-from portal_backend.identity_routes import trusted_actor
+from portal_backend.identity_routes import (
+    enforce_grant,
+    require_member_read,
+    trusted_actor,
+)
 
 
 @app.get("/api/containers/{cid}/events")
-async def container_events(cid: str, since_ts: float = Query(default=0.0)):
+async def container_events(
+    cid: str, request: Request, since_ts: float = Query(default=0.0)
+):
     """SSE stream of container-wide events (escalations, suggestions) for dashboards / humans."""
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (_, cur):
         require_container(cur, cid)
+        # Access model: reads are project-isolated (trusted non-member 403).
+        require_member_read(cur, request, cid)
     key = f"c:{cid}"
 
     async def event_stream():
@@ -50,6 +58,9 @@ def sweep_expired(cid: str, http_request: Request, actor_agent_id: str = Query(.
     with db_cursor() as (connection, cur):
         require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: forcing the escalation sweep is owner-or-manage_autonomy
+        # (the daemon's headerless lane passes through unchanged).
+        enforce_grant(cur, http_request, cid, "manage_autonomy")
         actor_agent_id = trusted_actor(cur, http_request, cid, actor_agent_id)
         require_kind(cur, actor_agent_id, ("human",))
         cur.execute(

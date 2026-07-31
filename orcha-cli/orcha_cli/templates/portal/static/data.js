@@ -184,13 +184,17 @@ window.OrchaData = (function () {
     return cid;
   }
 
-  // Switch the portal to another project: persist the pick, then reload at the BARE
-  // path — the poll, /api/me, and the event stream all boot fresh on the new cid, and
-  // page-level caches (threads, run streams) can't leak across projects. Query/hash
-  // deep-links (?task=/?req=/?cid=) refer to the OLD project, so they are dropped.
+  // Switch the portal to another project: persist the pick, then reload the SAME
+  // page with ?cid=<new> — the poll, /api/me, and the event stream all boot fresh on
+  // the new cid, and page-level caches (threads, run streams) can't leak across
+  // projects. Query/hash deep-links (?task=/?req=/?cid=) refer to the OLD project,
+  // so they are dropped; the explicit cid also keeps a bare "/" reserved for the
+  // /projects landing (its redirect never fires on a cid-carrying URL).
   function switchProject(cid) {
     persistCid(cid);
-    if (typeof location !== "undefined") location.assign(location.pathname);
+    if (typeof location !== "undefined") {
+      location.assign(location.pathname + "?cid=" + encodeURIComponent(cid));
+    }
   }
 
   let _cid = null;

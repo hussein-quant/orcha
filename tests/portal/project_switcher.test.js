@@ -169,6 +169,8 @@ function builderTests() {
   assert(/api &lt;b&gt;/.test(menu), "project names are HTML-escaped");
   assert(/data-proj-new="1"/.test(menu) && /New project/.test(menu),
     "the menu ends with the + New project row");
+  assert(/class="pm-row all" href="\/projects"/.test(menu) && /All projects/.test(menu),
+    "the menu links to the /projects landing (All projects)");
 }
 
 /* ---------------- PART B — openProjectMenu flow ------------------------ */
@@ -354,8 +356,9 @@ async function dataLayerTests() {
   d = dataSandbox({ path: "/tasks", search: "?task=t1" });
   d.sandbox.window.OrchaData.switchProject("c3");
   assert(d.store["orcha:cid"] === "c3", "switchProject persists the new cid");
-  assert(d.assigns.length === 1 && d.assigns[0] === "/tasks",
-    "…and reloads the BARE path (old-project deep-link params dropped)");
+  assert(d.assigns.length === 1 && d.assigns[0] === "/tasks?cid=c3",
+    "…and reloads the SAME page with ?cid=<new> (old deep-link params dropped; "
+    + "an explicit cid keeps the bare '/' reserved for the /projects landing)");
 }
 
 /* ---------------- PART E — wakesServed (notifier-binding stamp) --------- */

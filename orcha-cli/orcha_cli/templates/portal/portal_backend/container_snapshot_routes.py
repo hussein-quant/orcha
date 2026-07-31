@@ -1,16 +1,19 @@
 """Assemble the compact container snapshot polled by the portal."""
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import valid_uuid as _valid_uuid
+from portal_backend.identity_routes import require_member_read as _require_member_read
 from portal_backend.request_ownership import _annotate_request_ownership
 from portal_backend.task_list_query import _task_list_sql
 
 
 @app.get("/api/containers/{cid}")
-def get_container(cid: str, task_limit: int = 1000, request_limit: int = 1000):
+def get_container(
+    cid: str, request: Request, task_limit: int = 1000, request_limit: int = 1000
+):
     """The portal's 5s poll. ISS-68 (#167): the snapshot no longer ships each task's full
     message THREAD (~277KB re-sent every poll) — tasks carry a compact `message_summary`
     {count,last} + `plan_message` (the approval card renders the plan thread-free), and the
@@ -23,6 +26,9 @@ def get_container(cid: str, task_limit: int = 1000, request_limit: int = 1000):
     task_limit = max(1, min(task_limit, 1000))
     request_limit = max(1, min(request_limit, 1000))
     with db_cursor() as (_, cur):
+        # Access model: reads are project-isolated — a trusted non-member is 403'd
+        # (trust off / no header, and the unmapped bootstrap state, unchanged).
+        _require_member_read(cur, request, cid)
         cur.execute(
             """SELECT id, name, description, status, root_task_id,
                       max_auto_agents, max_tasks, execution_mode, wakes_enabled,

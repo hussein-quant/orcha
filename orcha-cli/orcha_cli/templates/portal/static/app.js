@@ -65,6 +65,7 @@ if (typeof D === "undefined") {
     agents: F_agents, tasks: F_tasks, requests: F_requests, agentByAlias: F_agentByAlias, agentById: F_agentById, aliasFor: (id) => ((F_agentById(id) || {}).alias || null), taskById: (id) => F_tasks().find((t) => String(t.id) === String(id)) || null, humans: F_humans, isToHuman: F_isToHuman,
     actingHuman: F_actingHuman, setActingHuman: F_noop, patch: F_patch, selectionWithin: F_false, inputActiveWithin: F_inputActiveWithin, leaseOf,
     identity: () => F_D.identity || null, identityTrusted: () => false, viewerOnly: () => false, actingOwner: () => !!F_actingHuman(), ghAvatar: (login, size) => F_avatar(login, "human", size),
+    actingGrant: () => !!F_actingHuman(), viewerRole: () => false, actingReadOnly: () => false,
     // standalone fallback: report wakes as served so the multi-project notice never
     // renders for embedders without the responsibility modules (no false alarms).
     wakesServed: () => true,
@@ -240,6 +241,9 @@ if (typeof D === "undefined") {
     agents, tasks, requests, agentByAlias, agentById, aliasFor, taskById, humans, isToHuman,
     actingHuman, setActingHuman, patch, selectionWithin, inputActiveWithin, leaseOf,
     identity, identityHuman, identityTrusted, viewerOnly, actingOwner, ghAvatar,
+    // access model (mig 039): grant checks + the read-only superset (non-member
+    // viewer state OR the 'viewer' member role)
+    actingGrant, viewerRole, actingReadOnly,
     // multi-project: the notifier-binding capability signal (app-data.js)
     wakesServed,
   };

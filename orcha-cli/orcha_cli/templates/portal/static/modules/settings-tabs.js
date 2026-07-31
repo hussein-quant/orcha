@@ -7,7 +7,12 @@
  * and on hashchange; clicking a tab rewrites the hash via replaceState (no
  * history spam). Markup mirrors the topbar's .aut/.seg pill idiom (shell.css)
  * so dark/light and the swiss skin hold with no new tokens. Without JS no
- * data-tab is ever set and every card remains visible. */
+ * data-tab is ever set and every card remains visible.
+ *
+ * Access model: the WORKSPACE tab (API keys + model settings) is hidden for a
+ * trusted identity without the manage_keys permission (owners implicitly hold
+ * it) — the server enforces regardless; this only removes a dead tab. Identity
+ * lands async (/api/me), so visibility is re-applied on a light interval. */
 (function () {
   const wrap = document.querySelector(".set-wrap");
   const bar = document.getElementById("setTabs");
@@ -15,9 +20,42 @@
   const tabs = Array.prototype.slice.call(bar.querySelectorAll("[data-tab]"));
   const names = tabs.map((t) => t.getAttribute("data-tab"));
 
+  function hiddenTabs() {
+    const O = window.Orcha;
+    // Hide keys/models ONLY when a trusted identity resolved and lacks the grant —
+    // trust-off/self-host (no identity) keeps every tab.
+    if (O && O.identity && O.identity() && O.actingGrant && !O.actingGrant("manage_keys")) {
+      return ["workspace"];
+    }
+    return [];
+  }
+
+  function visibleNames() {
+    const hidden = hiddenTabs();
+    return names.filter((n) => hidden.indexOf(n) === -1);
+  }
+
+  function applyTabVisibility() {
+    const hidden = hiddenTabs();
+    tabs.forEach((t) => {
+      const off = hidden.indexOf(t.getAttribute("data-tab")) !== -1;
+      if (t.style) t.style.display = off ? "none" : "";
+      t.classList.toggle("hidden", off);
+    });
+    // If the selected tab just vanished, fall to the first visible one.
+    const current = wrap.getAttribute("data-tab");
+    if (current && hidden.indexOf(current) !== -1) {
+      const first = visibleNames()[0];
+      if (first) select(first, true);
+    }
+  }
+
   function fromHash() {
     const m = /(?:^#|[#&])tab=([\w-]+)/.exec(window.location.hash || "");
-    return m && names.indexOf(m[1]) !== -1 ? m[1] : names[0];
+    const want = m && names.indexOf(m[1]) !== -1 ? m[1] : null;
+    const vis = visibleNames();
+    if (want && vis.indexOf(want) !== -1) return want;
+    return vis[0] || names[0];
   }
 
   function select(name, writeHash) {
@@ -42,4 +80,7 @@
   });
   window.addEventListener("hashchange", () => select(fromHash(), false));
   select(fromHash(), false);
+  applyTabVisibility();
+  // /api/me resolves after first paint; keep visibility honest without a reload.
+  if (typeof setInterval !== "undefined") setInterval(applyTabVisibility, 3000);
 })();

@@ -107,6 +107,27 @@ function actingOwner() {
   const h = actingHuman();
   return !!(h && (h.member_role === "owner" || h.member_role == null));
 }
+// Access model (mig 039): does the acting identity hold a permission grant?
+// Mirrors the server's has_grant(): owners implicitly hold everything; members
+// need it in their grants list (/api/me now carries the viewer's own set).
+// Trust off falls back to actingOwner()'s permissive convention — the server
+// stays the enforcer either way; this only gates AFFORDANCES.
+function actingGrant(grant) {
+  const id = identity();
+  if (id) {
+    if (id.member_role === "owner") return true;
+    return (id.grants || []).indexOf(grant) >= 0;
+  }
+  return actingOwner();
+}
+// The read-only states: a trusted NON-member (viewerOnly) OR a member whose project
+// role is 'viewer' (mig 039 — can look at everything, every write 403s). Action
+// senders/disabled states key off this superset; the banner distinguishes the copy.
+function viewerRole() {
+  const id = identity();
+  return !!(id && id.member_role === "viewer");
+}
+function actingReadOnly() { return viewerOnly() || viewerRole(); }
 
 /* ---- acting-as: the real human authority, persisted (NOT hardcoded) --- */
 function actingKey() { const c = D.container && D.container.id; return "orcha:actingHuman:" + (c || "_"); }

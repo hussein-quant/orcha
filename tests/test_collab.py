@@ -54,6 +54,9 @@ async def test_me_binds_first_unmapped_human(client, container, make_agent, trus
         "alias": "octocat",
         "github_login": "octocat",
         "member_role": "owner",
+        # access model (mig 039): the identity carries the member's own grant set so
+        # the frontend gates affordances off the same source the server enforces
+        "grants": [],
         "avatar_url": "https://github.com/octocat.png",
     }
     # idempotent: a re-poll (and a case-variant login) resolves, never re-binds

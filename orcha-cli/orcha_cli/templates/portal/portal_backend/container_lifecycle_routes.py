@@ -7,7 +7,12 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_kind, valid_uuid
-from portal_backend.identity_routes import proxy_login, trusted_actor
+from portal_backend.identity_routes import (
+    enforce_grant,
+    has_grant,
+    proxy_login,
+    trusted_actor,
+)
 from portal_backend.schemas import (
     ContainerCreate,
     ContainerCreateResponse,
@@ -157,6 +162,9 @@ def reset_container(cid: str, body: ContainerReset, request: Request):
         if not cont:
             raise HTTPException(404, "container not found")
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: the destructive reset is owner-or-manage_autonomy (plus the
+        # typed-confirmation gate below).
+        enforce_grant(cur, request, cid, "manage_autonomy")
         body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         require_kind(cur, body.actor_agent_id, ("human",))
         if body.confirm != cont["name"]:
@@ -265,27 +273,122 @@ def reset_container(cid: str, body: ContainerReset, request: Request):
 
 
 @app.get("/api/containers")
-def list_containers():
-    """List this stack's projects (containers).
+def list_containers(request: Request):
+    """List this stack's projects (containers) — the switcher AND the /projects
+    landing page read this.
+
+    PROJECT ISOLATION (access model): under the trusted proxy lane the list is
+    FILTERED to containers where the signed-in GitHub login is a live human member —
+    a member of nothing sees nothing. Containers still in the UNMAPPED bootstrap
+    state (no live human carries a github_login) stay visible to every trusted user:
+    a fresh stack must show its founder the world, or the binding rule could never
+    run. Trust off / no header (self-host, CLI, daemon) lists everything, unchanged.
 
     Zero rows = empty stack (run `orcha init`); since mig 037 the portal can add
     MORE projects (POST /api/containers, additional=true), so several rows are
     possible. Ordered FOUNDING-FIRST (created_at ASC): CLI consumers (`orcha
     connect`/`orcha status`) take [0], and the founding container is the one a
-    host workspace + notifier daemon are bound to. Per row, for the switcher:
+    host workspace + notifier daemon are bound to. Per row, for the switcher and
+    the landing-page cards:
       * agents            — live (non-terminated) agent count;
+      * tasks             — non-root task count;
+      * needs_you         — tasks at needs_verification + open human-facing
+                            requests (target a human or escalated) — the card badge;
+      * member_count      — live human members;
+      * members           — the human roster ({alias, github_login, member_role}),
+                            ONLY where the caller may see it (trust off, unmapped
+                            bootstrap, or owner/manage_members in THAT container);
+                            null otherwise — roster privacy holds here too;
       * last_wake_scan_at — the notifier's most recent wake-scan poll (stamped by
         GET .../wake-scan). Recent ⇒ a host-side daemon serves this project's
         wakes; NULL/stale ⇒ portal-only (CRUD works, nothing wakes).
     """
+    login = proxy_login(request)
     with db_cursor() as (_, cur):
+        member_filter = ""
+        params: tuple = ()
+        if login:
+            member_filter = """
+               WHERE EXISTS (SELECT 1 FROM agents m
+                              WHERE m.container_id = containers.id
+                                AND m.kind='human' AND m.terminated_at IS NULL
+                                AND lower(m.github_login)=lower(%s))
+                  OR NOT EXISTS (SELECT 1 FROM agents b
+                                  WHERE b.container_id = containers.id
+                                    AND b.kind='human' AND b.terminated_at IS NULL
+                                    AND b.github_login IS NOT NULL)"""
+            params = (login,)
         cur.execute(
-            """SELECT id, name, description, status, root_task_id, github_repo,
+            f"""SELECT id, name, description, status, root_task_id, github_repo,
                       created_at, completed_at, last_wake_scan_at,
                       (SELECT count(*) FROM agents a
                         WHERE a.container_id = containers.id
-                          AND a.terminated_at IS NULL) AS agents
+                          AND a.terminated_at IS NULL) AS agents,
+                      (SELECT count(*) FROM tasks t
+                        WHERE t.container_id = containers.id
+                          AND NOT t.is_root) AS tasks,
+                      (SELECT count(*) FROM tasks t
+                        WHERE t.container_id = containers.id
+                          AND t.status = 'needs_verification')
+                      + (SELECT count(*) FROM requests r
+                          WHERE r.container_id = containers.id
+                            AND (r.status = 'escalated' OR (r.status = 'open'
+                                 AND (r.target_id IS NULL OR EXISTS (
+                                      SELECT 1 FROM agents h WHERE h.id = r.target_id
+                                        AND h.kind='human'))))) AS needs_you,
+                      (SELECT count(*) FROM agents h
+                        WHERE h.container_id = containers.id
+                          AND h.kind='human' AND h.terminated_at IS NULL)
+                        AS member_count,
+                      EXISTS (SELECT 1 FROM agents b2
+                               WHERE b2.container_id = containers.id
+                                 AND b2.kind='human' AND b2.terminated_at IS NULL
+                                 AND b2.github_login IS NOT NULL) AS mapped
                FROM containers
+               {member_filter}
                ORDER BY created_at ASC""",
+            params,
         )
-        return {"containers": cur.fetchall()}
+        rows = cur.fetchall()
+
+        # Roster previews for the landing cards, privacy-gated per container.
+        cur.execute(
+            """SELECT container_id, id, alias, github_login, member_role, grants
+               FROM agents
+               WHERE kind='human' AND terminated_at IS NULL
+               ORDER BY created_at ASC, id ASC""",
+        )
+        humans_by_cid: dict = {}
+        for h in cur.fetchall():
+            humans_by_cid.setdefault(str(h["container_id"]), []).append(h)
+
+    def may_see_roster(row) -> bool:
+        if not login:
+            return True  # trust off / no header: pre-collab behavior
+        if not row["mapped"]:
+            return True  # bootstrap container: nothing to hide yet
+        me = next(
+            (h for h in humans_by_cid.get(str(row["id"]), [])
+             if (h["github_login"] or "").lower() == login.lower()),
+            None,
+        )
+        return has_grant(me, "manage_members")
+
+    out = []
+    for row in rows:
+        entry = dict(row)
+        del entry["mapped"]
+        entry["members"] = (
+            [
+                {
+                    "alias": h["alias"],
+                    "github_login": h["github_login"],
+                    "member_role": h["member_role"],
+                }
+                for h in humans_by_cid.get(str(row["id"]), [])
+            ]
+            if may_see_roster(row)
+            else None
+        )
+        out.append(entry)
+    return {"containers": out}

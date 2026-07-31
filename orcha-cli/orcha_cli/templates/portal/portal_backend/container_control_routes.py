@@ -6,7 +6,7 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, require_kind, valid_uuid
-from portal_backend.identity_routes import trusted_actor
+from portal_backend.identity_routes import enforce_grant, trusted_actor
 from portal_backend.schemas.wakes import AutonomyUpdate, WakesToggle
 
 AUTONOMY_LEVELS = ("plan", "pr", "full")
@@ -26,6 +26,8 @@ def set_wakes_enabled(cid: str, body: WakesToggle, request: Request):
     with db_cursor() as (connection, cur):
         require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: the wake/autonomy switches are owner-or-manage_autonomy.
+        enforce_grant(cur, request, cid, "manage_autonomy")
         body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         cur.execute(
             "UPDATE containers SET wakes_enabled=%s WHERE id=%s RETURNING wakes_enabled",
@@ -71,6 +73,8 @@ def set_autonomy_level(cid: str, body: AutonomyUpdate, request: Request):
     with db_cursor() as (connection, cur):
         require_container(cur, cid)
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: the wake/autonomy switches are owner-or-manage_autonomy.
+        enforce_grant(cur, request, cid, "manage_autonomy")
         body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         require_kind(cur, body.actor_agent_id, ("human",))
         cur.execute(

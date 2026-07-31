@@ -1,20 +1,27 @@
-"""List, invite, re-role, and remove a container's human members (collab v1)."""
+"""List, invite, re-role, grant, and remove a container's human members (collab v1
++ the access model: viewer role, granular grants, roster privacy)."""
 
 from typing import Optional
 
 import psycopg
 from fastapi import HTTPException, Request
+from psycopg.types.json import Jsonb
 
 from portal_backend.agent_profile_routes import retire_agent_record
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
-from portal_backend.identity_routes import require_owner
+from portal_backend.identity_routes import (
+    container_mapped,
+    has_grant,
+    proxy_login,
+    require_grant,
+)
 from portal_backend.schemas import MemberCreate, MemberRemove, MemberRoleUpdate
 
 _MEMBER_FIELDS = (
-    "id AS agent_id, alias, github_login, member_role, "
+    "id AS agent_id, alias, github_login, member_role, grants, "
     # pending = invited (github_login set) but has NEVER SIGNED IN. /api/me stamps
     # last_heartbeat_at once on first identity resolution (match or bind —
     # identity_routes._stamp_presence), and bump_agent stamps humans on turns, so a
@@ -46,27 +53,62 @@ def _other_owner_exists(cur, cid, aid) -> bool:
     return cur.fetchone() is not None
 
 
+def _require_owner_actor(actor, action: str):
+    """Escalation guard: the sensitive member mutations stay owner-only even for a
+    manage_members holder — role changes to/from owner, owner removal, and grant
+    edits (a grant editor could otherwise mint their own escalations)."""
+    if actor["member_role"] != "owner":
+        raise HTTPException(403, f"{action} requires the owner role")
+
+
 @app.get("/api/containers/{cid}/members")
-def list_members(cid: str):
-    """The container's live human members, founding-first (same order the binding
-    rule and the owner backfill use), each with a `pending` invited-but-never-seen
-    flag. Read-only and ungated — the roster is already public on the snapshot."""
+def list_members(cid: str, request: Request):
+    """The container's live human members, founding-first, each with `pending` and
+    their grant set.
+
+    ROSTER PRIVACY (access model): under the trusted proxy lane the full roster is
+    visible only to owners and manage_members holders (a viewer holding the grant
+    included — it is a read). Any other member gets ONLY their own row plus
+    `restricted: true`, so a collaborator can see their own standing but never who
+    else is on the project. A trusted NON-member is refused outright (403) — reads
+    are project-isolated. Trust off / no header, and a still-unmapped bootstrap
+    container, keep the pre-collab full listing."""
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (_, cur):
         require_container(cur, cid)
+        login = proxy_login(request)
+        own_row = None
+        if login:
+            cur.execute(
+                f"""SELECT {_MEMBER_FIELDS} FROM agents
+                   WHERE container_id=%s AND kind='human' AND terminated_at IS NULL
+                     AND lower(github_login)=lower(%s)""",
+                (cid, login),
+            )
+            own_row = cur.fetchone()
+            if own_row is None:
+                if container_mapped(cur, cid):
+                    raise HTTPException(
+                        403,
+                        f"your GitHub account ('{login}') is not a member of this "
+                        "project — ask an owner for an invite",
+                    )
+            elif not has_grant(own_row, "manage_members"):
+                return {"members": [own_row], "restricted": True}
         cur.execute(
             f"""SELECT {_MEMBER_FIELDS} FROM agents
                WHERE container_id=%s AND kind='human' AND terminated_at IS NULL
                ORDER BY created_at ASC, id ASC""",
             (cid,),
         )
-        return {"members": cur.fetchall()}
+        return {"members": cur.fetchall(), "restricted": False}
 
 
 @app.post("/api/containers/{cid}/members", status_code=201)
 def invite_member(cid: str, body: MemberCreate, request: Request):
-    """Owner-only: invite a GitHub user as a human member (alias = the login).
+    """Owner-or-manage_members: invite a GitHub user as a human member (alias = the
+    login). Inviting straight to OWNER stays owner-only (a role-to-owner change).
 
     The invited row is a kind='human' agent with github_login pre-set, so the moment
     that user arrives through the proxy /api/me matches them directly (no binding-rule
@@ -78,7 +120,11 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
-        owner = require_owner(cur, request, cid, body.actor_agent_id)
+        actor = require_grant(
+            cur, request, cid, body.actor_agent_id, "manage_members"
+        )
+        if body.role == "owner":
+            _require_owner_actor(actor, "inviting an owner")
         cur.execute(
             """SELECT 1 FROM agents
                WHERE container_id=%s AND lower(github_login)=lower(%s)
@@ -108,7 +154,7 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
             cur,
             cid,
             "human",
-            str(owner["id"]),
+            str(actor["id"]),
             "agent",
             str(member["agent_id"]),
             "member_invited",
@@ -120,36 +166,63 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
 
 @app.patch("/api/containers/{cid}/members/{aid}", status_code=200)
 def update_member_role(cid: str, aid: str, body: MemberRoleUpdate, request: Request):
-    """Owner-only: change a member's role. Demoting the LAST owner is refused (400) —
-    a container without an owner could never manage itself again."""
+    """Owner-or-manage_members: change a member's role and/or grant set. PARTIAL —
+    only supplied fields change; at least one is required.
+
+    Owner-only carve-outs (escalation guards):
+      * a role change TO or FROM owner;
+      * any grants change (the "Permissions" expander is owner-only in the UI too).
+    Demoting the LAST owner is refused (400) — a container without an owner could
+    never manage itself again."""
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     if not valid_uuid(aid):
         raise HTTPException(400, "agent_id is not a valid UUID")
+    if body.role is None and body.grants is None:
+        raise HTTPException(400, "no updatable field supplied (role / grants)")
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
-        owner = require_owner(cur, request, cid, body.actor_agent_id)
+        actor = require_grant(
+            cur, request, cid, body.actor_agent_id, "manage_members"
+        )
         member = _require_member(cur, cid, aid)
-        if (
-            member["member_role"] == "owner"
-            and body.role != "owner"
-            and not _other_owner_exists(cur, cid, aid)
-        ):
-            raise HTTPException(400, "cannot demote the last owner")
+        sets, params, detail = [], [], {}
+        if body.role is not None and body.role != member["member_role"]:
+            if body.role == "owner" or member["member_role"] == "owner":
+                _require_owner_actor(actor, "a role change to/from owner")
+            if (
+                member["member_role"] == "owner"
+                and not _other_owner_exists(cur, cid, aid)
+            ):
+                raise HTTPException(400, "cannot demote the last owner")
+            sets.append("member_role=%s")
+            params.append(body.role)
+            detail["from"] = member["member_role"]
+            detail["to"] = body.role
+        if body.grants is not None:
+            _require_owner_actor(actor, "changing permissions")
+            deduped = sorted(set(body.grants))
+            sets.append("grants=%s")
+            params.append(Jsonb(deduped))
+            detail["grants"] = deduped
+        if not sets:
+            return member  # no-op (e.g. re-asserting the current role)
+        params.append(aid)
         cur.execute(
-            f"UPDATE agents SET member_role=%s WHERE id=%s RETURNING {_MEMBER_FIELDS}",
-            (body.role, aid),
+            f"UPDATE agents SET {', '.join(sets)} WHERE id=%s "
+            f"RETURNING {_MEMBER_FIELDS}",
+            params,
         )
         updated = cur.fetchone()
         log_event(
             cur,
             cid,
             "human",
-            str(owner["id"]),
+            str(actor["id"]),
             "agent",
             aid,
-            "member_role_changed",
-            {"from": member["member_role"], "to": body.role},
+            "member_role_changed" if "to" in detail else "member_grants_changed",
+            detail,
         )
         conn.commit()
     return updated
@@ -159,22 +232,25 @@ def update_member_role(cid: str, aid: str, body: MemberRoleUpdate, request: Requ
 def remove_member(
     cid: str, aid: str, request: Request, body: Optional[MemberRemove] = None
 ):
-    """Owner-only: remove a member — the existing agent-RETIRE semantics, never a hard
-    delete (the audit trail and thread attribution keep pointing at the row). Removing
-    the LAST owner is refused (400). Any task naming the removed member as its reviewer
-    reverts to reviewer=anyone."""
+    """Owner-or-manage_members: remove a member — the existing agent-RETIRE semantics,
+    never a hard delete (the audit trail and thread attribution keep pointing at the
+    row). Removing an OWNER stays owner-only, and removing the LAST owner is refused
+    (400). Any task naming the removed member as its reviewer reverts to
+    reviewer=anyone."""
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     if not valid_uuid(aid):
         raise HTTPException(400, "agent_id is not a valid UUID")
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
-        owner = require_owner(
-            cur, request, cid, body.actor_agent_id if body else None
+        actor = require_grant(
+            cur, request, cid, body.actor_agent_id if body else None, "manage_members"
         )
         member = _require_member(cur, cid, aid)
-        if member["member_role"] == "owner" and not _other_owner_exists(cur, cid, aid):
-            raise HTTPException(400, "cannot remove the last owner")
+        if member["member_role"] == "owner":
+            _require_owner_actor(actor, "removing an owner")
+            if not _other_owner_exists(cur, cid, aid):
+                raise HTTPException(400, "cannot remove the last owner")
         released = retire_agent_record(cur, aid)  # ISS-51 mechanics, reused
         cur.execute(
             "UPDATE tasks SET reviewer_agent_id=NULL "
@@ -186,7 +262,7 @@ def remove_member(
             cur,
             cid,
             "human",
-            str(owner["id"]),
+            str(actor["id"]),
             "agent",
             aid,
             "member_removed",

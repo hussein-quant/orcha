@@ -6,7 +6,7 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_kind, valid_uuid
-from portal_backend.identity_routes import trusted_actor
+from portal_backend.identity_routes import enforce_grant, trusted_actor
 from portal_backend.schemas.agent_state import AutoWakeUpdate
 
 
@@ -27,6 +27,8 @@ def update_agent_auto_wake(aid: str, body: AutoWakeUpdate, request: Request):
         if not row:
             raise HTTPException(404, f"agent {aid} not found")
         # Per-project identity: a trusted proxy login IS the actor (403 non-member).
+        # Access model: the per-agent wake switch is owner-or-manage_autonomy.
+        enforce_grant(cur, request, str(row["container_id"]), "manage_autonomy")
         body.actor_agent_id = trusted_actor(
             cur, request, str(row["container_id"]), body.actor_agent_id
         )

@@ -123,4 +123,23 @@ function render() {
   HomO.mountShell("home", { title: "Dashboard", ctx: HomD().container.name });
   renderProjNotice(); renderOnbCta(); renderCtx(); renderQueue(); renderAgents(); renderActivity(); renderKanban();
 }
-window.OrchaData.start(render, 3000);
+/* Multi-project landing: a BARE "/" (no ?cid deep link) belongs to the /projects hub
+ * unless this stack is the single-project case — the post-login proxy redirect and
+ * typed-in visits land on the hub; every in-project link (sidebar, switcher, cards)
+ * carries ?cid= (app-shell.withCid / data.switchProject) so project navigation never
+ * bounces. 0 projects also goes to the hub (its empty state + New project beats a
+ * load-error toast). The list is already membership-filtered server-side, so the
+ * count is the VIEWER's project count, not the stack's. */
+(function homeBoot() {
+  const qs = (typeof location !== "undefined" && location.search) || "";
+  const start = () => window.OrchaData.start(render, 3000);
+  if (/[?&]cid=/.test(qs) || typeof fetch === "undefined") { start(); return; }
+  fetch("/api/containers")
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      const n = d && Array.isArray(d.containers) ? d.containers.length : null;
+      if (n != null && n !== 1) { location.replace("/projects"); return; }
+      start();
+    })
+    .catch(start);
+})();

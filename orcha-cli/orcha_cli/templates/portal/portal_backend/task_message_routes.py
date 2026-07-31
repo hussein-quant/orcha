@@ -18,6 +18,7 @@ from portal_backend.guards import (
     require_task as _require_task,
     valid_uuid as _valid_uuid,
 )
+from portal_backend.identity_routes import require_member_read as _require_member_read
 from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.provider_keys import container_llm_key as _container_llm_key
 from portal_backend.schemas.task_operations import TaskMessage
@@ -122,6 +123,7 @@ def post_message(tid: str, body: TaskMessage, request: Request):
 @app.get("/api/tasks/{tid}/messages")
 def get_task_messages(
     tid: str,
+    request: Request,
     limit: int = 0,
     before: Optional[str] = None,
     before_id: Optional[str] = None,
@@ -168,7 +170,9 @@ def get_task_messages(
         "COALESCE(m.attachments, '[]'::jsonb) AS attachments, m.created_at"
     )
     with db_cursor() as (_, cur):
-        _require_task(cur, tid)
+        t = _require_task(cur, tid)
+        # Access model: thread content is project-isolated (trusted non-member 403).
+        _require_member_read(cur, request, str(t["container_id"]))
         # GH #33: surface the FULL task body in a `task` header so a worker woken by a task-thread
         # message — told to "read the thread" — reads description + definition_of_done before acting,
         # not just the message preview and the title.
