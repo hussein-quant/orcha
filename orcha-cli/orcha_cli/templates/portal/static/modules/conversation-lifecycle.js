@@ -3,12 +3,14 @@
 function mount(el, aid) {
   teardown();
   host = el; agentId = aid; convId = null; turns = []; lastSeq = 0; awaiting = false;
+  sending = false; pendingLocal = null; pollBusy = false;   // send-UX state never leaks across agents
   shown = 10;   // ISS-68 PR-3: start collapsed to the most-recent 10 turns on each mount
   staged = []; stagedSeq = 0;   // #337: a fresh composer per mount — drop any staged attachments
   presence = null; presenceReason = null; paired = false; termConnected = false;
   const a = O().agentById(aid);
   if (!a || a.kind === "human") { el.innerHTML = ""; return; }
   el.innerHTML = skeleton(a);
+  renderWakesBanner();   // portal-only project → the queue warning is up before the first poll
   const inp = document.getElementById("convInput");
   document.getElementById("convSend").addEventListener("click", send);
   inp.addEventListener("input", () => onInput(inp));
@@ -50,6 +52,7 @@ function teardown() {
   for (const k in streamed) delete streamed[k];
   if (host) host.innerHTML = "";
   host = null; agentId = null; convId = null; turns = []; lastSeq = 0; awaiting = false;
+  sending = false; pendingLocal = null; pollBusy = false;
   presence = null; presenceReason = null;
 }
 
