@@ -169,12 +169,14 @@ def reap_orphaned_runs(
     cid: str,
     live_pids=frozenset(),
     *,
+    live_sandbox=frozenset(),
     quiet: bool = True,
 ) -> int:
     return _orphan_cleanup.reap_orphaned_runs(
         api_base,
         cid,
         live_pids,
+        live_sandbox=live_sandbox,
         quiet=quiet,
         services=_compat(),
     )

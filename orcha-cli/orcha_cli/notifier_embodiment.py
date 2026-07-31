@@ -137,6 +137,13 @@ def reap_dead_resident_runs(
     runs = data.get("runs", [])
     if not runs:
         return 0
+    # Resident-lane sandbox (remote-runner §3.3c): a row with a sandbox_container_id
+    # is CONTAINER-backed — its docker-client pid dies with a daemon restart while
+    # the container (and its stamp-worthy exit state) lives on. Leave those rows to
+    # the container-liveness sweep (reap_orphaned_runs), and shield the lane's lease
+    # from this pid-keyed release while any such row is open.
+    sandbox_rows = [run for run in runs if run.get("sandbox_container_id")]
+    runs = [run for run in runs if not run.get("sandbox_container_id")]
 
     def alive(run):
         pid = run.get("pid")
@@ -145,7 +152,7 @@ def reap_dead_resident_runs(
     dead = [run for run in runs if not alive(run)]
     if not dead:
         return 0
-    live_sibling = any(alive(run) for run in runs)
+    live_sibling = any(alive(run) for run in runs) or bool(sandbox_rows)
     if live_sibling:
         for run in dead:
             finish_run(api_base, run.get("run_id"), "killed", -1, None)

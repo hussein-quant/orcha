@@ -111,7 +111,7 @@ def stop_turn(
         f"[turn stopped by {stopped_by}]",
         {"stopped": True, "by": renew.get("stop_requested_by")},
     )
-    services._finish_run(
+    if services._finish_run(
         api_base,
         resident.get("current_run_id"),
         "killed",
@@ -126,7 +126,10 @@ def stop_turn(
                 "by": renew.get("stop_requested_by"),
             }
         ),
-    )
+    ):
+        # I4 (resident lane): a human-stopped session's container, once stamped —
+        # the kill above only took down the docker client. No-op for host mode.
+        services._reap_sandbox_artifacts(resident)
     services._post_json(
         f"{api_base}/api/agents/{resident['agent_id']}/wake-ack",
         services._conversation_ack_body(
