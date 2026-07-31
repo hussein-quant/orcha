@@ -151,15 +151,21 @@ struct WorkspaceScreen: View {
                         .labelStyle(.iconOnly)
                 }
                 ToolbarItem(placement: .principal) {
-                    // Scale long workspace names down before truncating.
-                    Text(model.selectedContainer?.displayName ?? "Orcha")
-                        .font(p.uiFont(16, .bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .accessibilityAddTraits(.isHeader)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    ConnChip(state: model.snapshot == nil ? (model.loading ? "probing" : "unreachable") : connState, compact: true)
+                    // Presence-style status: a tiny colored dot folded into the
+                    // title (chat-app pattern) replaces the orphan toolbar chip —
+                    // green connected, amber paused, red unreachable. VoiceOver
+                    // reads name + state; long names scale before truncating.
+                    HStack(spacing: 6) {
+                        PulseDot(color: titleDotColor, animated: false)
+                            .scaleEffect(0.8)
+                        Text(model.selectedContainer?.displayName ?? "Orcha")
+                            .font(p.uiFont(16, .bold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(model.selectedContainer?.displayName ?? "Orcha"), \(titleDotState)")
+                    .accessibilityAddTraits(.isHeader)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     // GH #148 — entry point to the Notifier/Autonomy sheet; tinted by the
@@ -202,6 +208,20 @@ struct WorkspaceScreen: View {
 
     private var connState: String {
         (model.snapshot?.container.status ?? "active") != "active" ? "paused" : "polling"
+    }
+
+    /// Title presence dot: the toolbar ConnChip's states, dot-only.
+    private var titleDotState: String {
+        model.snapshot == nil ? (model.loading ? "probing" : "unreachable") : connState
+    }
+
+    private var titleDotColor: Color {
+        switch titleDotState {
+        case "polling", "live", "active": p.ok
+        case "paused": p.warn
+        case "unreachable": p.danger
+        default: p.idle
+        }
     }
 }
 
