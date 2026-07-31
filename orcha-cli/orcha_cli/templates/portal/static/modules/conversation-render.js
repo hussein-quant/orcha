@@ -13,16 +13,22 @@ function loadDraft(aid) { try { return sessionStorage.getItem(draftKey(aid)) || 
 /* ---------- render the message list (repaints on poll; composer untouched) ---------- */
 function renderList() {
   const list = document.getElementById("convList"); if (!list) return;
-  if (!turns.length) { list.innerHTML = '<div class="none" style="padding:18px">No messages yet — say hello to start the conversation.</div>'; return; }
+  if (!turns.length && !pendingLocal) { list.innerHTML = '<div class="none" style="padding:18px">No messages yet — say hello to start the conversation.</div>'; return; }
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   // ISS-68 PR-3: render only the most-recent `shown` turns; "Load earlier" reveals the rest.
   const startIdx = Math.max(0, turns.length - shown);
   const visible = turns.slice(startIdx);
   const earlier = startIdx > 0
     ? `<button class="btn sm ghost" style="display:block;margin:0 auto 12px" data-loadearlier>Load earlier · ${visible.length} of ${turns.length}</button>` : "";
-  list.innerHTML = earlier + visible.map(bubble).join("") + (awaitingReply() ? indicatorBubble() : "");
+  // the optimistic pending bubble suppresses the reply indicator — one honest state at a time
+  // (sending… / failed+Retry first; the thinking/queued indicator returns once the turn lands).
+  list.innerHTML = earlier + visible.map(bubble).join("")
+    + (pendingLocal ? pendingBubble() : "")
+    + (awaitingReply() && !pendingLocal ? indicatorBubble() : "");
   const le = list.querySelector("[data-loadearlier]");
   if (le) le.addEventListener("click", () => { shown += CONV_PAGE; renderList(); });
+  const rt = list.querySelector("[data-retrysend]");
+  if (rt) rt.addEventListener("click", retrySend);
   // wire each work-log <details> to stream its run on first expand
   list.querySelectorAll("details[data-run]").forEach((d) => {
     d.addEventListener("toggle", () => {
@@ -40,6 +46,12 @@ function renderList() {
 // lease → an honest "queued" notice (never fake "thinking…"). idle right after send is
 // the optimistic gap before presence resolves → show dots for instant feedback.
 function indicatorBubble() {
+  // portal-only project (no host workspace bound): NOTHING serves this project's wakes,
+  // so thinking dots would be a lie — the only honest state is "queued until a runtime
+  // exists" (same signal as the banner; see renderWakesBanner).
+  if (!convWakesServed()) {
+    return queuedBubble({ reason: "Message queued — this project has no agent runtime yet. It is delivered once a workspace binds on the host." });
+  }
   const p = presenceOf();
   if (p.k === "busy") return queuedBubble(p);
   if (p.k === "working" || p.k === "waking") return thinkingBubble();
@@ -48,11 +60,32 @@ function indicatorBubble() {
 }
 // a transient agent-side "thinking…" indicator shown after the human sends, until the
 // agent's reply turn lands (S1 polish — gives immediate feedback that the agent is working).
+// Cold-start honesty: when the thread has NO agent turn yet, this reply rides a full agent
+// session boot — say so instead of letting "thinking…" read as seconds-away.
 function thinkingBubble() {
   const a = O().agentById(agentId);
+  const cold = !turns.some((t) => t.role === "agent");
   return `<div class="turn agent">${O().avatar(a ? a.alias : "?", "ai", "sm")}
-    <div class="tb"><div class="tmeta">${O().esc(a ? a.alias : "agent")}<span class="tt">thinking…</span></div>
-      <div class="conv-thinking"><span></span><span></span><span></span></div></div></div>`;
+    <div class="tb"><div class="tmeta">${O().esc(a ? a.alias : "agent")}<span class="tt">${cold ? "starting…" : "thinking…"}</span></div>
+      <div class="conv-thinking"><span></span><span></span><span></span></div>
+      ${cold ? `<div class="conv-coldnote">starting the agent’s session — the first reply can take a minute</div>` : ""}</div></div>`;
+}
+// the optimistic human bubble: the just-sent text at reduced opacity until the server's
+// copy lands; on failure it carries an inline danger note + Retry (and the composer got
+// the text back) — a failed send is never silently dropped and never auto-reposted.
+function pendingBubble() {
+  const p = pendingLocal;
+  const failed = p.status === "failed";
+  const atts = (p.atts && p.atts.length)
+    ? `<div class="msg-atts">${p.atts.map((a) => `<span class="att-file">${FILE_ICON}<span>${O().esc(a.name || a.id)}</span></span>`).join("")}</div>` : "";
+  return `<div class="turn human pending${failed ? " failed" : ""}">
+    <div class="tb">
+      <div class="tmeta">you<span class="tt">${failed ? "not sent" : "sending…"}</span></div>
+      <div class="tx md">${O().mdText(p.content || "")}</div>
+      ${atts}
+      ${failed ? `<div class="conv-sendfail">${O().icon("alert", "")}<span>${O().esc(p.err || "Couldn't send.")}</span>
+        <button type="button" class="btn sm danger" data-retrysend>Retry</button></div>` : ""}
+    </div></div>`;
 }
 // honest "your message is queued" notice when the agent is busy on another task lease.
 // presence_reason is opaque human-readable text from the backend (don't parse) — fall
@@ -115,6 +148,20 @@ function renderPresence() {
   el.className = "presence p-" + p.k;
   el.innerHTML = `<span class="d"></span>${O().esc(p.l)}`;
   applyLock();
+  renderWakesBanner();
+}
+// Persistent warn banner over the thread while NO host-side notifier serves this project
+// (portal-only New-project flow). Mirrors the dashboard notice (home-state renderProjNotice)
+// but is not dismissible — as long as sends only queue, the chat must say so. Re-checked on
+// every presence tick, so it self-clears the moment a workspace binds and the daemon polls.
+function renderWakesBanner() {
+  const el = document.getElementById("convWakes"); if (!el) return;
+  const html = convWakesServed() ? "" : `<div class="conv-wakes">${O().icon("alert", "")}
+    <div class="body"><div class="t1">No agent runtime yet</div>
+    <div class="t2">This project has no agent runtime yet — messages will queue until a workspace binds on the host.</div></div></div>`;
+  if (el.__wakesHtml === html) return;
+  el.__wakesHtml = html;
+  el.innerHTML = html;
 }
 // S3 §3b vice-versa lock: while the agent holds a `live` lease (a human owns the embodiment
 // in a terminal), the conversation is READ-ONLY — typing here would race the live session.
@@ -133,7 +180,9 @@ function applyLock() {
   lock.hidden = !locked;
   if (locked) { const s = lock.querySelector("span"); if (s) s.textContent = (a ? a.alias : "Agent") + " is in a live terminal — conversation paused."; }
   if (inp) { inp.disabled = !!locked; }
-  if (send) { send.disabled = !!locked; }
+  // `sending` keeps the button down during an in-flight POST — this repaints on every
+  // presence tick, so without the OR it would re-enable the button mid-send (dup vector).
+  if (send) { send.disabled = !!locked || sending; }
   const att = document.getElementById("convAttach"); if (att) att.disabled = !!locked;   // #337
 }
 
@@ -162,19 +211,54 @@ function load() {
 function poll() {
   if (!convId) { renderPresence(); load(); return; }
   refreshPresence();
+  // Dup-bubble root cause #2: the 3s interval PLUS the manual poll() after a send could
+  // both fetch /turns with the SAME after_seq cursor (a slow/restarting portal makes the
+  // overlap likely); both responses then concat the same fresh turns — the message paints
+  // twice. Guard the fetch (no same-cursor stacking) AND dedupe the append by id/seq so
+  // even a stale overlapped response can never paint a duplicate.
+  if (pollBusy) return;
+  pollBusy = true;
   const tok = mountTok;
   getJSON("/api/conversations/" + encodeURIComponent(convId) + "/turns?after_seq=" + lastSeq + "&limit=50")
     .then((d) => {
+      pollBusy = false;
       if (tok !== mountTok) return;        // stale: a different conversation is mounted now
       const fresh = d.turns || [];
       if (!fresh.length) return;
       if (fresh.some((t) => t.role === "agent")) awaiting = false;   // reply landed -> stop "thinking"
-      turns = turns.concat(fresh);
-      lastSeq = turns[turns.length - 1].seq;
+      reconcilePending(fresh);
+      const seen = {};
+      turns.forEach((t) => { if (t.id != null) seen[String(t.id)] = 1; });
+      const add = fresh.filter((t) => !(t.id != null && seen[String(t.id)])
+        && !(typeof t.seq === "number" && t.seq <= lastSeq));
+      if (add.length) {
+        turns = turns.concat(add);
+        lastSeq = turns[turns.length - 1].seq;
+      }
       cacheConv();
       renderList();
     })
-    .catch(() => {});
+    .catch(() => { pollBusy = false; });
+}
+// The durable copy of the optimistic turn arrived via the poll — including the case where
+// the POST landed server-side but its RESPONSE was lost to a restart (the "failed" bubble
+// would otherwise invite a Retry that duplicates the message). Identical author+content
+// inside the pending window IS our turn: drop the local bubble, and take back the
+// failure-restored composer text so it can't be re-sent by habit.
+function reconcilePending(fresh) {
+  if (!pendingLocal) return;
+  const p = pendingLocal;
+  const hit = fresh.some((t) => t.role === "human"
+    && String(t.author_agent_id) === String(p.authorId)
+    && (t.content || "") === p.content
+    && (Date.now() - p.at) < PENDING_MATCH_MS);
+  if (!hit) return;
+  pendingLocal = null;
+  if (p.status === "failed") {
+    const inp = document.getElementById("convInput");
+    if (inp && (inp.value || "").trim() === p.content) { inp.value = ""; autosize(inp); saveDraft(""); }
+    if (staged === p.keepStaged) { staged = []; renderTray(); }
+  }
 }
 // presence + presence_reason ride on GET /api/conversations/{id} (NOT the /turns delta),
 // so refresh them on the same tick. If the endpoint/field isn't live yet this no-ops and

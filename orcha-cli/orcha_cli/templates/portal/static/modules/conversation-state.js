@@ -16,6 +16,16 @@ const convCache = {};
 const CONV_CACHE_TTL_MS = 60000;
 let slashOpen = false, slashItems = [], slashIdx = 0;
 let awaiting = false;        // optimistic: true from "human turn sent" until the reply lands
+// Send-UX state (dup-send fix): ONE turn per user action. `sending` gates the single send
+// path (click + Enter + key-repeat all funnel into it); `pendingLocal` is the optimistic
+// bubble — {content, atts, keepStaged, authorId, at, status:'sending'|'failed', err} —
+// which lives until the SERVER's copy of the turn owns the thread (POST response or poll).
+let sending = false;
+let pendingLocal = null;
+let pollBusy = false;        // a slow/restarting portal must not stack same-cursor /turns fetches
+// how long a polled human turn with identical author+content still reconciles the
+// optimistic bubble (covers "POST landed but its response was lost" during a restart).
+const PENDING_MATCH_MS = 20000;
 let presence = null, presenceReason = null;   // Vault presence contract (req 6de81ae3), null until live
 let mountTok = 0;            // bumped on every (re)mount/teardown; stale in-flight responses no-op
 let paired = false;          // S3: a terminal panel is docked here
@@ -80,6 +90,17 @@ function presenceOf() {
     default: return { k: "idle", l: "idle" };
   }
 }
+// Is a host-side notifier serving THIS project's wakes? Same signal as the dashboard's
+// "portal-only" notice (Orcha.wakesServed over the daemon's wake-scan stamp, mig 037).
+// Absent data — standalone harness without the helper, or snapshot not loaded yet —
+// reads as SERVED so the chat never false-alarms while booting.
+function convWakesServed() {
+  const o = O();
+  if (!o || typeof o.wakesServed !== "function") return true;
+  const c = o.D && o.D.container;
+  if (!c) return true;
+  return !!o.wakesServed(c);
+}
 // A reply is pending when the human's latest turn has no agent turn after it. Deriving
 // this from the DURABLE turns (req 1ccab87e) makes the indicator survive an agent-switch
 // + reload — the optimistic `awaiting` flag only covers the gap before the first poll.
@@ -106,6 +127,7 @@ function skeleton(a) {
         <button class="btn sm ghost" id="convPair" title="Pair in a live terminal as ${O().esc(a.alias)}">${O().icon("play", "")}<span>Pair in terminal</span></button>
         <button class="btn sm ghost conv-max" id="convMax" title="Maximize conversation" aria-label="Maximize conversation">${O().icon("maximize", "")}</button>
       </div>
+      <div id="convWakes"></div>
       <div class="conv-list" id="convList"><div class="none" style="padding:18px">Loading conversation…</div></div>
       <div class="conv-lock" id="convLock" hidden>${O().icon("shield", "")}<span></span></div>
       <div class="conv-composer">
