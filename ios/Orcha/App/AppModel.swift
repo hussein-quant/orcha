@@ -25,6 +25,15 @@ enum WorkspaceTab: Hashable {
     case home, tasks, requests, agents, search
 }
 
+/// Collab v1 — the Settings members-roster load state. `restricted` mirrors the
+/// server's roster privacy: the list holds only the caller's own row.
+enum MembersState: Equatable {
+    case idle
+    case loading
+    case loaded([MemberDto], restricted: Bool)
+    case failed(String)
+}
+
 /// The app's single source of truth — a 1:1 port of the Android `OrchaViewModel`
 /// (same state fields, same action surface), driving SwiftUI via @Observable.
 @MainActor
@@ -68,6 +77,16 @@ final class AppModel {
 
     // workspace data
     var snapshot: ContainerSnapshot?
+    /// Collab v1 — the acting GitHub identity for the SELECTED project (`/api/me`),
+    /// and whether a trusted proxy identity was present on that request. Drives
+    /// honest role/grant gating (`access`) and the acting-identity display.
+    var identity: ActingIdentity?
+    var identityTrusted = false
+    /// The container `identity` belongs to — a stale identity must never gate
+    /// another project's affordances.
+    private var identityContainerId: String?
+    /// Collab v1 — the Settings members roster (view-only on iOS v1).
+    var membersState: MembersState = .idle
     var containerHealth: [String: ContainerHealth] = [:]
     var taskMessages: [TaskMessageDto] = []
     var taskRuns: [RunDto] = []
@@ -102,6 +121,22 @@ final class AppModel {
 
     var humanId: String? { selectedContainer?.humanAgentId }
 
+    /// The pure role/grant gate for the selected project. Self-host (trust off)
+    /// stays fully permissive — identical to pre-collab behavior.
+    var access: Access {
+        guard let sel = selectedContainer, identityContainerId == sel.id else { return .selfHost }
+        return Access(identity: identity, trusted: identityTrusted)
+    }
+
+    // mig 040 — per-user prefs sync (server wins; local-only when prefs are null).
+    /// Whether server prefs are ACTIVE for the connected deployment.
+    var prefsActive = false
+    /// The last-fetched whole bag — PUTs merge over it so keys iOS doesn't manage
+    /// (sidebar, default_cid) survive the whole-bag replace.
+    private var serverPrefs: [String: Any]?
+    private var prefsSyncedBase: String?
+    private var prefsPushTask: Task<Void, Never>?
+
     init() {
         containers = store.load()
         themeMode = store.loadThemeMode()
@@ -130,11 +165,67 @@ final class AppModel {
     func setThemeMode(_ mode: ThemeMode) {
         themeMode = mode
         store.saveThemeMode(mode)
+        schedulePrefsPush()
     }
 
     func setSkinMode(_ skin: SkinMode) {
         skinMode = skin
         store.saveSkinMode(skin)
+        schedulePrefsPush()
+    }
+
+    // MARK: per-user prefs (mig 040 — follow the GitHub identity across devices)
+
+    /// On connect/open: GET /api/prefs once per base. Non-null → server prefs are
+    /// ACTIVE and the SERVER WINS — apply theme/skin (mirroring into the local
+    /// store) so the account's look follows onto this phone. Null → self-host /
+    /// trust-off: stay pure-local, byte-identical to today. Cosmetic only — a
+    /// failed fetch changes nothing.
+    func syncPrefs() async {
+        guard let base = selectedContainer?.baseUrl, prefsSyncedBase != base else { return }
+        prefsSyncedBase = base
+        let fetched: [String: Any]?
+        do {
+            fetched = try await api.getPrefs(base)
+        } catch {
+            // Unreachable — stay local-only now, retry on the next workspace open.
+            prefsActive = false
+            serverPrefs = nil
+            prefsSyncedBase = nil
+            return
+        }
+        guard let bag = fetched else {
+            // The deliberate null: self-host / trust-off / unmapped — pure local.
+            prefsActive = false
+            serverPrefs = nil
+            return
+        }
+        prefsActive = true
+        serverPrefs = bag
+        if let theme = PrefsSync.resolveTheme(bag), theme != themeMode {
+            themeMode = theme
+            store.saveThemeMode(theme)
+        }
+        if let skin = PrefsSync.resolveSkin(bag), skin != skinMode {
+            skinMode = skin
+            store.saveSkinMode(skin)
+        }
+    }
+
+    /// Debounced write-through after a local theme/skin change (web app-prefs.js
+    /// parity, 800ms): PUT the merged whole bag. Inactive ⇒ no network, ever.
+    private func schedulePrefsPush() {
+        guard prefsActive, let base = selectedContainer?.baseUrl else { return }
+        prefsPushTask?.cancel()
+        prefsPushTask = Task { [themeMode, skinMode] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled else { return }
+            let bag = PrefsSync.mergedBag(serverPrefs, theme: themeMode, skin: skinMode)
+            // Cosmetic: a lost mirror self-heals on the next change.
+            if (try? await api.putPrefs(base, bag)) != nil {
+                serverPrefs = bag
+            }
+        }
     }
 
     func setNotificationsEnabled(_ enabled: Bool) {
@@ -216,6 +307,9 @@ final class AppModel {
             snapshot = snap
             selectedTab = .home
             connectDraft = nil
+            resetIdentity()
+            Task { await refreshIdentity() }
+            Task { await syncPrefs() }
             startPolling()
             return true
         } catch {
@@ -337,8 +431,31 @@ final class AppModel {
         selectedTab = .home
         error = nil
         catchUp = nil
+        resetIdentity()
         Task { await refresh() }
+        Task { await syncPrefs() }
         startPolling()
+    }
+
+    /// Clear the per-project identity when the selection changes — a stale
+    /// identity must never gate (or label) another project.
+    private func resetIdentity() {
+        identity = nil
+        identityTrusted = false
+        identityContainerId = nil
+        membersState = .idle
+    }
+
+    /// Collab v1 — resolve the acting GitHub identity for the selected project
+    /// (`/api/me?cid=`). Best-effort: a failure (older server, transient network)
+    /// leaves the permissive self-host default rather than locking the UI.
+    private func refreshIdentity() async {
+        guard let sel = selectedContainer else { return }
+        guard let me = try? await api.me(sel.baseUrl, sel.id) else { return }
+        guard selectedContainer?.id == sel.id else { return }   // switched mid-flight
+        identity = me.identity
+        identityTrusted = me.trusted
+        identityContainerId = sel.id
     }
 
     /// "Catch me up" bookkeeping — GAP-based, not session-based: last-seen
@@ -371,6 +488,7 @@ final class AppModel {
         sendFlow.reset()
         selectedContainer = nil
         snapshot = nil
+        resetIdentity()
         probeContainers()
     }
 
@@ -458,6 +576,9 @@ final class AppModel {
             // fire later as a background needs-you notification.
             NotificationCoordinator.shared.markSeen(snap, container: selectedContainer ?? sel)
             noteSeen(snap, container: selectedContainer ?? sel)
+            // Collab v1: keep the acting identity fresh on the same cadence the
+            // snapshot polls (role/grant changes propagate within a poll).
+            await refreshIdentity()
         } catch {
             // Opt-in remote failover (Tailscale): if the active address didn't
             // answer and a second one is configured, try it and swap on success —
@@ -747,6 +868,28 @@ final class AppModel {
         await humanAction(approve ? "Task accepted · completed" : "Task sent back") { base, actor in
             try await api.verifyTask(base, taskId, actor: actor, approve: approve, feedback: feedback)
             await refresh()
+        }
+    }
+
+    /// Collab v1 — assign (or clear, nil = anyone) the human reviewer on a task.
+    /// Server-gated on owner-or-`assign_reviewers`; advisory (verify stays open).
+    func setTaskReviewer(_ taskId: String, reviewerAgentId: String?) async -> Bool {
+        await humanAction(reviewerAgentId == nil ? "Reviewer cleared — anyone can verify" : "Reviewer assigned") { base, actor in
+            try await api.setTaskReviewer(base, taskId, actor: actor, reviewerAgentId: reviewerAgentId)
+            await refresh()
+        }
+    }
+
+    /// Collab v1 — the Settings members roster (read-only). A 403 is the honest
+    /// "not a member" state, surfaced in place rather than the app-wide banner.
+    func loadMembers() async {
+        guard let sel = selectedContainer else { return }
+        membersState = .loading
+        do {
+            let response = try await api.members(sel.baseUrl, sel.id)
+            membersState = .loaded(response.members, restricted: response.restricted)
+        } catch {
+            membersState = .failed(friendly(error))
         }
     }
 

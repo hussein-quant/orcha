@@ -35,14 +35,20 @@ struct AgentsTabView: View {
                     ForEach(humans) { human in
                         OrchaCard {
                             HStack(spacing: 10) {
-                                AgentAvatar(alias: human.alias, human: true)
+                                // Collab v1: GitHub members render their real avatar.
+                                AgentAvatar(alias: human.alias, human: true, githubLogin: human.githubLogin)
                                 VStack(alignment: .leading) {
-                                    Text(human.alias)
+                                    Text(human.githubLogin ?? human.alias)
                                         .font(p.uiFont(15, .semibold))
                                         .foregroundStyle(p.text)
-                                    Text("Human authority")
+                                    Text(humanSubtitle(human))
                                         .font(p.uiFont(13))
                                         .foregroundStyle(p.muted)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                if let role = human.memberRole {
+                                    MetaTag(text: role, tint: role == "owner" ? p.violet : nil)
                                 }
                             }
                         }
@@ -58,6 +64,15 @@ struct AgentsTabView: View {
             .padding(16)
         }
         .refreshable { await model.refresh() }
+    }
+
+    /// Collab v1 — a mapped member reads "alias · Human authority"; the GitHub
+    /// login already leads the row, so the alias only repeats when it differs.
+    private func humanSubtitle(_ human: AgentDto) -> String {
+        if let login = human.githubLogin, login != human.alias {
+            return "\(human.alias) · Human authority"
+        }
+        return "Human authority"
     }
 }
 

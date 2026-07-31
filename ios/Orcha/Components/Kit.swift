@@ -139,11 +139,15 @@ private struct KitButtonSurface: ViewModifier {
     }
 }
 
-/// `.avatar` — square agent tile / round human dot with the initial.
+/// `.avatar` — square agent tile / round human dot with the initial. Collab v1:
+/// a human with a `githubLogin` renders their real GitHub avatar over the letter
+/// tile (web `ghAvatar` parity) — the tile stays visible while loading and when
+/// the image fails (offline / no avatar), so the fallback is structural.
 struct AgentAvatar: View {
     @Environment(\.palette) private var p
     let alias: String
     var human = false
+    var githubLogin: String? = nil
     var size: CGFloat = 40
 
     var body: some View {
@@ -153,8 +157,19 @@ struct AgentAvatar: View {
             .foregroundStyle(human ? p.violet : p.accent)
             .frame(width: size, height: size)
             .background(human ? p.violetSoft : p.accentSoft, in: shape)
+            .overlay {
+                if human, let url = MobileUx.githubAvatarURL(githubLogin) {
+                    AsyncImage(url: url) { image in
+                        image.resizable().scaledToFill()
+                    } placeholder: {
+                        Color.clear   // letter tile shows through until (unless) the face loads
+                    }
+                    .frame(width: size, height: size)
+                    .clipShape(shape)
+                }
+            }
             .overlay(shape.strokeBorder(human ? p.violetLine : p.accentLine, lineWidth: 1))
-            .accessibilityLabel(alias)
+            .accessibilityLabel(githubLogin ?? alias)
     }
 }
 

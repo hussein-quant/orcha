@@ -99,8 +99,14 @@ struct HomeTabView: View {
                         planSheetTask = task
                     }
                 }
+                // Collab v1: a task with an owner-assigned reviewer is SOMEONE's
+                // review — de-emphasized + tagged for everyone but the assignee and
+                // owners (web renderQueue parity; the verify gate stays permissive).
                 ForEach(verifs) { task in
-                    QueueCard(kicker: "VERIFY TASK", kickerColor: p.warn, task: task) {
+                    QueueCard(
+                        kicker: "VERIFY TASK", kickerColor: p.warn, task: task,
+                        reviewTag: MobileUx.reviewTag(for: task, identity: model.identity)
+                    ) {
                         verifySheetTask = task
                     }
                 }
@@ -149,7 +155,12 @@ struct HomeTabView: View {
                         NavigationLink(value: WorkspaceRoute.task(task.id)) {
                             OrchaCard {
                                 HStack(alignment: .top, spacing: 10) {
-                                    AgentAvatar(alias: msg.authorAlias ?? (msg.isHuman ? "H" : "?"), human: msg.isHuman, size: 30)
+                                    AgentAvatar(
+                                        alias: msg.authorAlias ?? (msg.isHuman ? "H" : "?"),
+                                        human: msg.isHuman,
+                                        githubLogin: MobileUx.humanLogin(alias: msg.authorAlias, in: snapshot.agents),
+                                        size: 30
+                                    )
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack {
                                             Text(msg.authorAlias ?? (msg.isHuman ? "you" : "system"))
@@ -182,11 +193,14 @@ struct HomeTabView: View {
 }
 
 /// A needs-you queue card for plan approvals / verifications (flow 04 H5).
+/// `reviewTag` (collab v1) marks a verify card assigned to ANOTHER member's
+/// review: the card dims and carries a "review: <login>" tag (web parity).
 private struct QueueCard: View {
     @Environment(\.palette) private var p
     let kicker: String
     let kickerColor: Color
     let task: TaskDto
+    var reviewTag: String? = nil
     let onAct: () -> Void
 
     var body: some View {
@@ -196,6 +210,10 @@ private struct QueueCard: View {
                     .font(p.uiFont(11, .bold))
                     .tracking(0.8)
                     .foregroundStyle(kickerColor)
+                if let reviewTag {
+                    MetaTag(text: "review: \(reviewTag)", tint: p.violet)
+                        .accessibilityLabel("Assigned to \(reviewTag) for review")
+                }
                 Spacer()
                 StatusPill(status: task.status, domain: .task)
             }
@@ -215,6 +233,7 @@ private struct QueueCard: View {
             }
             KitButton(title: "Review & decide", role: .tonal, small: true, action: onAct)
         }
+        .opacity(reviewTag == nil ? 1 : 0.65)
     }
 }
 

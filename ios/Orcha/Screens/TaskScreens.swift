@@ -21,6 +21,7 @@ struct TaskDetailScreen: View {
     @State private var closeReason = ""
     @State private var verifySheetTask: TaskDto?
     @State private var planSheetTask: TaskDto?
+    @State private var reviewerPickerTask: TaskDto?
 
     private var task: TaskDto? { model.snapshot?.tasks.first { $0.id == taskId } }
 
@@ -82,6 +83,7 @@ struct TaskDetailScreen: View {
         }
         .sheet(item: $verifySheetTask) { VerifySheet(task: $0) }
         .sheet(item: $planSheetTask) { PlanApprovalSheet(task: $0) }
+        .sheet(item: $reviewerPickerTask) { ReviewerPickerSheet(task: $0) }
         .task { await model.loadTaskDetail(taskId) }
         .refreshable {
             await model.refresh()
@@ -125,7 +127,13 @@ struct TaskDetailScreen: View {
                 .foregroundStyle(p.text)
             HStack(spacing: 8) {
                 if let assignee = task.assignees.first ?? task.ownerAlias {
-                    AgentAvatar(alias: assignee, size: 30)
+                    let agents = model.snapshot?.agents ?? []
+                    AgentAvatar(
+                        alias: assignee,
+                        human: MobileUx.isHumanAlias(assignee, in: agents),
+                        githubLogin: MobileUx.humanLogin(alias: assignee, in: agents),
+                        size: 30
+                    )
                     Text(assignee)
                         .font(p.uiFont(13))
                         .foregroundStyle(p.text2)
@@ -134,6 +142,41 @@ struct TaskDetailScreen: View {
                         .font(p.uiFont(13))
                         .foregroundStyle(p.faint)
                 }
+            }
+            reviewerRow(task)
+        }
+    }
+
+    /// Collab v1 — the assigned-reviewer chip (avatar + login, or "anyone").
+    /// Owners / `assign_reviewers` holders get the picker; everyone else reads it.
+    private func reviewerRow(_ task: TaskDto) -> some View {
+        HStack(spacing: 8) {
+            Text("REVIEWER")
+                .font(p.uiFont(10.5, .bold))
+                .tracking(0.6)
+                .foregroundStyle(p.muted)
+            if let reviewer = task.reviewer {
+                AgentAvatar(
+                    alias: reviewer.alias ?? reviewer.githubLogin ?? "?",
+                    human: true,
+                    githubLogin: reviewer.githubLogin,
+                    size: 22
+                )
+                Text(reviewer.githubLogin ?? reviewer.alias ?? "member")
+                    .font(p.uiFont(13, .semibold))
+                    .foregroundStyle(p.text2)
+                    .lineLimit(1)
+            } else {
+                Text("anyone")
+                    .font(p.uiFont(13))
+                    .foregroundStyle(p.faint)
+            }
+            Spacer()
+            if model.access.canManage(Grant.assignReviewers) {
+                Button(task.reviewer == nil ? "Assign…" : "Change…") { reviewerPickerTask = task }
+                    .font(p.uiFont(12, .semibold))
+                    .foregroundStyle(p.accent)
+                    .accessibilityLabel(task.reviewer == nil ? "Assign a reviewer" : "Change the reviewer")
             }
         }
     }
@@ -452,8 +495,22 @@ struct TaskThreadScreen: View {
         }
     }
 
-    /// `.composer` — rounded field + circular send button.
+    /// `.composer` — rounded field + circular send button. Collab v1: a read-only
+    /// role (viewer / trusted non-member) gets the honest note instead — the
+    /// server would 403 the post anyway.
+    @ViewBuilder
     private var composer: some View {
+        if let reason = model.access.writeDenialReason {
+            Banner(kind: .info, text: reason)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(p.bg)
+        } else {
+            composerField
+        }
+    }
+
+    private var composerField: some View {
         HStack(alignment: .bottom, spacing: 8) {
             TextField("Message \(assignee ?? "the thread")…", text: $draft, axis: .vertical)
                 .lineLimit(1...4)

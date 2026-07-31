@@ -43,6 +43,11 @@ struct PlanApprovalSheet: View {
                                     .foregroundStyle(p.text)
                             }
                         }
+                        // Collab v1: honest gating — a viewer / trusted non-member
+                        // sees WHY the decision buttons are off (server 403s anyway).
+                        if let denial = model.access.writeDenialReason {
+                            Banner(kind: .info, text: denial)
+                        }
                         if rejecting {
                             TextField("What should change?", text: $reason, axis: .vertical)
                                 .lineLimit(3...6)
@@ -52,17 +57,17 @@ struct PlanApprovalSheet: View {
                             Text("\(task.planMessage?.authorAlias ?? "The agent") sees this on the next wake — required.")
                                 .font(p.uiFont(13)).foregroundStyle(p.muted)
                             HStack(spacing: 8) {
-                                KitButton(title: "Send back with changes", role: .dangerTonal, enabled: !reason.isEmpty && !model.actionInFlight) {
+                                KitButton(title: "Send back with changes", role: .dangerTonal, enabled: !reason.isEmpty && !model.actionInFlight && model.access.canWrite) {
                                     Task { if await model.decidePlan(task, approve: false, reason: reason) { dismiss() } }
                                 }
                                 KitButton(title: "Cancel", role: .neutral) { rejecting = false }
                             }
                         } else {
                             HStack(spacing: 8) {
-                                KitButton(title: "Approve plan", role: .okTonal, enabled: !model.actionInFlight) {
+                                KitButton(title: "Approve plan", role: .okTonal, enabled: !model.actionInFlight && model.access.canWrite) {
                                     Task { if await model.decidePlan(task, approve: true, reason: nil) { dismiss() } }
                                 }
-                                KitButton(title: "Request changes…", role: .dangerTonal) { rejecting = true }
+                                KitButton(title: "Request changes…", role: .dangerTonal, enabled: model.access.canWrite) { rejecting = true }
                             }
                         }
                     }
@@ -108,6 +113,17 @@ struct VerifySheet: View {
                                     .font(p.uiFont(15)).foregroundStyle(p.text2).lineLimit(8)
                             }
                         }
+                        // Collab v1: the assigned-reviewer chip ("review: <login>")
+                        // when this verify belongs to someone else — informational,
+                        // never a lock (the verify gate stays permissive).
+                        if let tag = MobileUx.reviewTag(for: task, identity: model.identity) {
+                            Banner(kind: .info, text: "Assigned to \(tag) for review — you can still verify if needed.")
+                        }
+                        // Honest gating — a viewer / trusted non-member sees WHY the
+                        // buttons are off (the server 403s the write anyway).
+                        if let denial = model.access.writeDenialReason {
+                            Banner(kind: .info, text: denial)
+                        }
                         if rejecting {
                             TextField("What's missing?", text: $feedback, axis: .vertical)
                                 .lineLimit(3...6)
@@ -117,17 +133,17 @@ struct VerifySheet: View {
                             Text("Returns the task to in progress — required.")
                                 .font(p.uiFont(13)).foregroundStyle(p.muted)
                             HStack(spacing: 8) {
-                                KitButton(title: "Send back", role: .dangerTonal, enabled: !feedback.isEmpty && !model.actionInFlight) {
+                                KitButton(title: "Send back", role: .dangerTonal, enabled: !feedback.isEmpty && !model.actionInFlight && model.access.canWrite) {
                                     Task { if await model.verifyTask(task.id, approve: false, feedback: feedback) { dismiss() } }
                                 }
                                 KitButton(title: "Cancel", role: .neutral) { rejecting = false }
                             }
                         } else {
                             HStack(spacing: 8) {
-                                KitButton(title: "Approve & complete", role: .okTonal, enabled: !model.actionInFlight) {
+                                KitButton(title: "Approve & complete", role: .okTonal, enabled: !model.actionInFlight && model.access.canWrite) {
                                     Task { if await model.verifyTask(task.id, approve: true, feedback: nil) { dismiss() } }
                                 }
-                                KitButton(title: "Send back…", role: .neutral) { rejecting = true }
+                                KitButton(title: "Send back…", role: .neutral, enabled: model.access.canWrite) { rejecting = true }
                             }
                         }
                     }

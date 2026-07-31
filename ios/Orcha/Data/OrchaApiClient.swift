@@ -90,6 +90,30 @@ struct OrchaApiClient {
         try await get(base, "/api/models")
     }
 
+    /// Collab v1 — who is the acting human on this project, per the trusted proxy
+    /// identity (device-token requests carry it too; identity_routes.py).
+    func me(_ base: String, _ cid: String) async throws -> MeResponse {
+        try await get(base, "/api/me" + query(["cid": cid]))
+    }
+
+    /// Collab v1 — the project's human roster (`restricted:true` = own row only).
+    func members(_ base: String, _ cid: String) async throws -> MembersResponse {
+        try await get(base, "/api/containers/\(cid)/members")
+    }
+
+    /// mig 040 — the signed-in user's cosmetic prefs bag, or nil (the deliberate
+    /// self-host / trust-off / unmapped "stay local-only" signal — a 200, not an error).
+    func getPrefs(_ base: String) async throws -> [String: Any]? {
+        let (data, _) = try await raw(base, "/api/prefs")
+        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return obj?["prefs"] as? [String: Any]
+    }
+
+    /// mig 040 — whole-bag replace of the signed-in user's cosmetic prefs.
+    func putPrefs(_ base: String, _ prefs: [String: Any]) async throws {
+        _ = try await send(base, "/api/prefs", method: "PUT", ["prefs": prefs])
+    }
+
     /// The GitHub App installation's repo list for the Connect-repo sheet
     /// (portal `home-github.js` parity). `available:false` rides a 200 — a
     /// graceful off state, never thrown.
@@ -174,6 +198,16 @@ struct OrchaApiClient {
 
     func verifyTask(_ base: String, _ tid: String, actor: String, approve: Bool, feedback: String?) async throws {
         try await post(base, "/api/tasks/\(tid)/verify", ["approve": approve, "feedback": feedback, "actor_agent_id": actor])
+    }
+
+    /// Collab v1 — name the human who should verify this task (nil = anyone; the
+    /// absent key clears it, matching the server's Optional default). Owner-or-
+    /// `assign_reviewers` gated server-side; advisory — /verify stays permissive.
+    func setTaskReviewer(_ base: String, _ tid: String, actor: String, reviewerAgentId: String?) async throws {
+        _ = try await send(base, "/api/tasks/\(tid)/reviewer", method: "PUT", [
+            "actor_agent_id": actor,
+            "reviewer_agent_id": reviewerAgentId,
+        ])
     }
 
     func decidePlan(_ base: String, _ tid: String, actor: String, approve: Bool, reason: String?, target: String?) async throws {
@@ -412,7 +446,7 @@ struct OrchaApiError: LocalizedError {
 
     var errorDescription: String? {
         switch status {
-        case 403: "This action is not allowed for the paired human."
+        case 403: "You don't have access to do this in this project."
         case 409: "Orcha rejected this action because the item changed. Refresh and try again."
         case 422: "Orcha needs more information for this action."
         default: "Orcha answered with an error (\(status))."
