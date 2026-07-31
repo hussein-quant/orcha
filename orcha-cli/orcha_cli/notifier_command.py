@@ -133,6 +133,17 @@ def cmd_notifier(args, *, services) -> None:
     if not args.quiet:
         print(f"[notifier] daemon up (pid {os.getpid()}) — scanning {api_base} every {args.interval}s "
               f"(cooldown={args.cooldown}s, min-idle={args.min_idle}s). Ctrl-C to stop.")
+    # Remote-portal awareness (always, even --quiet — this is the one line that would
+    # have surfaced the field misconfig on day one): a non-loopback api_base means every
+    # task/message this daemon's agents create lands on ANOTHER deployment. Generic —
+    # names whatever host is configured (BYOC IP, self-hosted domain, managed cloud).
+    _remote_host = services._portal_host(api_base)
+    if _remote_host and _remote_host not in services._LOOPBACK_HOSTS \
+            and not _remote_host.startswith("127."):
+        print(f"[notifier] NOTE: this workspace talks to a REMOTE portal ({_remote_host}) — "
+              "tasks and conversations created here live on that deployment, not on this "
+              "machine. If you expected a local portal, fix api_base_url in .claude/orcha.json.",
+              file=sys.stderr)
     live_workers: dict = {}   # {agent_id: pid} — for releasing leases on worker exit
     live_residents: dict = {}  # {conversation_id: resident-state} — E3 warm conversation sessions
     # GH#110: DAEMON-SCOPE continuity state (survives the per-reap live_workers.pop, so it persists
