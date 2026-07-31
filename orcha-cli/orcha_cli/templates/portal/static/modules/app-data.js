@@ -83,9 +83,15 @@ function isToHuman(r) {
 /* ---- collab v1: the proxy-resolved GitHub identity (GET /api/me) ------- *
  * data.js stashes the /api/me answer on D.identity:
  *   {agent_id, alias, github_login, member_role, avatar_url} | null
- * null = untrusted header / unmapped visitor / trust env off — every consumer
- * falls back to the pre-collab behavior, so self-hosters see no change. */
+ * ...and the envelope's `trusted` flag on D.identityTrusted. identity null with
+ * trusted FALSE = untrusted header / trust env off — every consumer falls back to
+ * the pre-collab behavior, so self-hosters see no change. identity null with
+ * trusted TRUE = the verified GitHub user is NOT a member of THIS project — the
+ * honest VIEWER state: they can look but never act, and must never be shown as
+ * (or attributed to) another member, least of all the project's default human. */
 function identity() { return D.identity || null; }
+function identityTrusted() { return !!D.identityTrusted; }
+function viewerOnly() { return identityTrusted() && !identity(); }
 function identityHuman() {
   const id = identity();
   if (!id || !id.agent_id) return null;
@@ -107,6 +113,11 @@ function actingKey() { const c = D.container && D.container.id; return "orcha:ac
 function actingHuman() {
   // collab v1: the verified GitHub identity IS the actor whenever the proxy
   // resolved one — verify/approve/decisions all attribute to this agent.
+  // Per-project identity: when the TRUSTED proxy lane is live, the resolved
+  // member (or nothing) is the ONLY possible actor — a signed-in non-member of
+  // this project must NEVER fall through to the local/default human; action
+  // senders see null and disable instead.
+  if (identityTrusted()) return identityHuman();
   const bound = identityHuman();
   if (bound) return bound;
   const hs = humans();

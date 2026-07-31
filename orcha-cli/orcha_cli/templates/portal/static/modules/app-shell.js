@@ -82,6 +82,12 @@ function actingChipHtml() {
   if (ident && ident.github_login) {
     return `${ghAvatar(ident.github_login, "sm")}<span class="gh-login">${esc(ident.github_login)}</span>`;
   }
+  // Per-project identity: a TRUSTED sign-in that resolved no member of this project
+  // is a VIEWER — a neutral chip, never another member's avatar/name (and never the
+  // project's default human, the exact fallback this state exists to prevent).
+  if (viewerOnly()) {
+    return `<span class="muted viewer-chip">viewer · not a member</span>`;
+  }
   const who = actingHuman();
   return who
     ? `${avatar(who.alias, "human", "sm")}${esc(who.alias)}`
@@ -96,17 +102,26 @@ const SIGN_OUT_HREF = "/oauth2/sign_out?rd=%2Fwelcome";
 // Pure builder (harness-pinned): the menu body — login header + the one action.
 function actingMenuHtml() {
   const ident = identity();
-  if (!ident || !ident.github_login) return "";
+  if (!ident || !ident.github_login) {
+    // Viewer (trusted, non-member): there is still a proxy session to clear.
+    if (viewerOnly()) {
+      return `<div class="pm-head"><div class="b"><div class="t1">Not a member</div>
+      <div class="t2">viewing only · GitHub</div></div></div>
+    <a class="pm-row signout" href="${SIGN_OUT_HREF}">${icon("arrow", "")}<span>Sign out</span></a>`;
+    }
+    return "";
+  }
   return `<div class="pm-head">${ghAvatar(ident.github_login, "sm")}
       <div class="b"><div class="t1">${esc(ident.github_login)}</div>
       <div class="t2">${esc(ident.member_role || "member")} · GitHub</div></div></div>
     <a class="pm-row signout" href="${SIGN_OUT_HREF}">${icon("arrow", "")}<span>Sign out</span></a>`;
 }
-// The chip is interactive ONLY with a proxy-verified identity; self-host (identity
-// null) keeps the informational chip untouched — there is no proxy session to clear.
+// The chip is interactive with a proxy session — a resolved identity OR the trusted
+// viewer state (sign out must stay reachable); self-host (trust off, identity null)
+// keeps the informational chip untouched — there is no proxy session to clear.
 function wireActingChip() {
   const chip = document.getElementById("actingChip");
-  if (!chip || !identity()) return;
+  if (!chip || (!identity() && !viewerOnly())) return;
   chip.classList.add("menu-trigger");
   chip.setAttribute("role", "button");
   chip.setAttribute("aria-haspopup", "true");
@@ -115,6 +130,27 @@ function wireActingChip() {
     if (menuIsOpen("amFloat")) closeMenu("amFloat");
     else openMenu("amFloat", chip, actingMenuHtml(), "right");
   });
+}
+
+/* ---- per-project identity: the non-member VIEWER banner ---------------- *
+ * Shown under the topbar on every page when a trusted sign-in resolved NO
+ * membership in the current project (viewerOnly). Same idiom as the pausebar:
+ * a pure builder the harness can pin + an idempotent ensure that toggles a
+ * .show class, so the 3s shell re-render reconciles it cheaply. */
+function viewerBannerHtml() {
+  return `<span>You're viewing as a non-member — ask an owner for an invite to act.</span>`;
+}
+function ensureViewerBanner(topbar) {
+  if (!topbar || typeof topbar.insertAdjacentElement !== "function") return;
+  let bar = document.getElementById("viewerbar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.className = "viewerbar";
+    bar.id = "viewerbar";
+    bar.innerHTML = viewerBannerHtml();
+    topbar.insertAdjacentElement("afterend", bar);
+  }
+  bar.classList[viewerOnly() ? "add" : "remove"]("show");
 }
 
 /* ---- multi-project: the sidebar project switcher ---------------------- *
@@ -328,6 +364,8 @@ function mountShell(page, opts) {
     // then render the autonomy switch from the current snapshot. Injected here (not in
     // each *.html) so the control is identical on every page.
     ensurePausebar(topbar);
+    // Per-project identity: surface the honest non-member state on every page.
+    ensureViewerBanner(topbar);
     paintAutonomy();
     // SPEC-3: turn the "Needs you" pill into the notification-center dropdown trigger.
     wireNotifPill();

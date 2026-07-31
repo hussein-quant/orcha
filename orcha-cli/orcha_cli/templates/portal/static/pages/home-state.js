@@ -115,8 +115,8 @@ function renderQueue() {
       <div class="who">${HomO.agentLink(who)}<span>·</span><span class="tag model">${HomO.esc(a.model || "—")}</span></div>
       <div class="ctx"><span class="lbl">Proposed plan — full text</span>${HomO.linkify(planText(t))}</div>
       <div class="acts" data-kind="plan" data-task="${HomO.esc(t.id)}" data-author="${HomO.esc((HomO.agentByAlias(who) || {}).id || "")}">
-        <button class="btn sm approve" data-act="approve">${HomO.icon("shield", "")}Approve plan</button>
-        <button class="btn sm danger" data-act="reject">Reject…</button>
+        <button class="btn sm approve" data-act="approve" ${actDisabledAttr()}>${HomO.icon("shield", "")}Approve plan</button>
+        <button class="btn sm danger" data-act="reject" ${actDisabledAttr()}>Reject…</button>
         <a class="btn sm ghost" href="/tasks?task=${encodeURIComponent(t.id)}">Open task</a>
       </div></div>`);
   });
@@ -138,8 +138,8 @@ function renderQueue() {
       <div class="who">${who ? HomO.agentLink(who) : "—"}<span>·</span><span class="tag model">${HomO.esc(a.model || "—")}</span><span>·</span><span>${HomO.relTime(t.started_at)}</span></div>
       <div class="ctx"><span class="lbl">Definition of done</span>${HomO.esc(t.definition_of_done || "—")}</div>
       <div class="acts" data-kind="verify" data-task="${HomO.esc(t.id)}">
-        <button class="btn sm approve" data-act="approve">${HomO.icon("check", "")}Accept</button>
-        <button class="btn sm danger" data-act="reject">Reject…</button>
+        <button class="btn sm approve" data-act="approve" ${actDisabledAttr()}>${HomO.icon("check", "")}Accept</button>
+        <button class="btn sm danger" data-act="reject" ${actDisabledAttr()}>Reject…</button>
         <a class="btn sm ghost" href="/tasks?task=${encodeURIComponent(t.id)}">Open task</a>
       </div></div>`);
   });
@@ -164,9 +164,23 @@ async function postJSON(url, body) {
   let j = null; try { j = await r.json(); } catch (e) {}
   return { ok: r.ok, status: r.status, body: j };
 }
+// Per-project identity: no possible actor -> the queue's buttons render disabled.
+// For a trusted non-member the tooltip says exactly why (never a silent no-op,
+// never an action attributed to someone else's identity).
+function actDisabledAttr() {
+  if (HomO.actingHuman()) return "";
+  return HomO.viewerOnly && HomO.viewerOnly()
+    ? 'disabled title="Not a member of this project"'
+    : 'disabled title="No acting human"';
+}
 function actorOrWarn() {
   const h = HomO.actingHuman();
-  if (!h) { HomO.toast("Pick who you are (top-right) first.", "danger"); return null; }
+  if (!h) {
+    HomO.toast(HomO.viewerOnly && HomO.viewerOnly()
+      ? "You're not a member of this project — ask an owner for an invite."
+      : "Pick who you are (top-right) first.", "danger");
+    return null;
+  }
   return h;
 }
 function doPlan(taskId, authorId, approve) {

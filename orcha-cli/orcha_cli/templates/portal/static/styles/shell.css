@@ -245,6 +245,12 @@ html[data-sidebar="collapsed"] .content { max-width: none; }
   border-radius: 999px; padding: 3px 11px; font-size: 11.5px; font-weight: 600; }
 .pausebar .resume:hover { border-color: var(--accent-line); color: var(--accent); }
 
+/* per-project identity: the non-member viewer banner (pausebar idiom, info tone) */
+.viewerbar { display: none; align-items: center; gap: 8px; padding: 7px 26px; font-size: 12px; font-weight: 650;
+  color: var(--info, var(--accent)); background: var(--info-soft, var(--surface-2));
+  border-bottom: 1px solid var(--border-2); }
+.viewerbar.show { display: flex; }
+
 /* acting-as */
 .acting { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding: 5px 6px 5px 12px;
   border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }

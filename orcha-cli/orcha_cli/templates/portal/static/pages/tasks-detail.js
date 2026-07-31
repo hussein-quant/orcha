@@ -100,7 +100,13 @@ function gateSurface(t) {
   const isVerify = t.status === "needs_verification";
   if (!isPlan && !isVerify) return "";
   const pm = isPlan ? planMsgOf(t) : null;
-  const disabled = TasO.actingHuman() ? "" : "disabled";
+  // Per-project identity: with no possible actor the gate buttons render disabled —
+  // for a trusted non-member with the explicit "Not a member" tooltip (never a
+  // silent no-op, never attribution to someone else).
+  const disabled = TasO.actingHuman() ? ""
+    : (TasO.viewerOnly && TasO.viewerOnly()
+        ? 'disabled title="Not a member of this project"'
+        : 'disabled title="No acting human"');
   return `<div class="gate" id="gate-${TasO.esc(t.id)}" data-task="${TasO.esc(t.id)}" data-kind="${isPlan ? "plan" : "verify"}" data-author="${TasO.esc(isPlan && TasO.agentByAlias(pm.from) ? TasO.agentByAlias(pm.from).id : "")}" style="margin-bottom:18px">
     <div class="gh"><span class="badge">${TasO.icon(isPlan ? "shield" : "check", "")}${isPlan ? "Plan awaiting your approval" : "Awaiting verification"}</span>
       <span class="grow"></span>
