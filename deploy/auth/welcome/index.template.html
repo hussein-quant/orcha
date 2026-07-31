@@ -55,8 +55,8 @@
 :root {
   --ink:#1A1414; --paper:#F4EEE6; --canvas:#F7F4EE;
   --surface:#FFFFFF; --surface-subtle:#F8F9FA;
-  --crimson:#E63946; --crimson-press:#C32B38; --crimson-soft:rgba(230,57,70,.10);
-  --accent-strong:#C32B38; --accent-strong-press:#A8232D; --on-accent-strong:#FFFFFF;
+  --navy:#1D4ED8; --navy-press:#1E40AF; --navy-soft:rgba(29,78,216,.10);
+  --accent-strong:#1D4ED8; --accent-strong-press:#1E40AF; --on-accent-strong:#FFFFFF;
   --success:#10b981; --success-text:#047857; --warning-text:#B45309;
   --danger:#ef4444;
   --text-primary:#1A1414; --text-secondary:#4A5568; --text-tertiary:#5F6B7C;
@@ -87,7 +87,7 @@ body {
 img, svg { display: block; max-width: 100%; }
 a { color: inherit; text-decoration: none; }
 button { font: inherit; color: inherit; }
-::selection { background: var(--crimson); color: var(--paper); }
+::selection { background: var(--navy); color: var(--paper); }
 
 /* content column */
 .mk-wrap { width: 100%; max-width: 1120px; margin-inline: auto; padding-inline: 24px; }
@@ -102,7 +102,7 @@ button { font: inherit; color: inherit; }
   letter-spacing: .08em; text-transform: uppercase;
   color: var(--accent-strong);
 }
-.mk-eyebrow .mk-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--crimson); flex: none; }
+.mk-eyebrow .mk-eyebrow-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--navy); flex: none; }
 
 /* section rhythm — fragments carry .mk-section; shell sets the vertical rhythm */
 .mk-section { padding-block: 96px; scroll-margin-top: 72px; position: relative; }
@@ -130,7 +130,7 @@ button { font: inherit; color: inherit; }
 .mk-btn-ghost:active { transform: translateY(0); }
 .mk-btn svg, .mk-btn-ghost svg { width: 18px; height: 18px; }
 
-/* focus-visible rings — consistent 2px crimson everywhere */
+/* focus-visible rings — consistent 2px navy everywhere */
 a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--accent-strong); outline-offset: 2px; border-radius: 6px;
 }
@@ -162,7 +162,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   letter-spacing: -.02em; color: var(--text-primary);
   flex: none;
 }
-.mk-wordmark .mk-brand-dot { color: var(--crimson); }
+.mk-wordmark .mk-brand-dot { color: var(--navy); }
 
 /* tabs */
 .mk-tabs {
@@ -184,7 +184,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-tab.is-active { color: var(--text-primary); }
 .mk-tab.is-active::after {
   content: ""; position: absolute; left: 12px; right: 12px; bottom: 3px;
-  height: 2px; border-radius: 2px; background: var(--crimson);
+  height: 2px; border-radius: 2px; background: var(--navy);
 }
 
 .mk-nav-right { flex: none; display: flex; align-items: center; gap: 10px; }
@@ -207,7 +207,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-hero-bg::before {
   content: ""; position: absolute; inset: 0;
   background:
-    radial-gradient(760px 460px at 82% -12%, var(--crimson-soft), transparent 60%),
+    radial-gradient(760px 460px at 82% -12%, var(--navy-soft), transparent 60%),
     radial-gradient(680px 560px at -8% 108%, rgb(26 20 20 / .05), transparent 55%),
     linear-gradient(180deg, #F9F6F0 0%, var(--canvas) 62%);
 }
@@ -230,7 +230,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-hero h1 .mk-hero-accent { position: relative; white-space: nowrap; }
 .mk-hero h1 .mk-hero-accent::after {
   content: ""; position: absolute; left: 0; right: 0; bottom: .06em; height: .09em;
-  background: var(--crimson); border-radius: 2px;
+  background: var(--navy); border-radius: 2px;
 }
 .mk-hero-sub {
   margin-top: 22px; max-width: 620px;
@@ -246,7 +246,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
 .mk-hero-ticker .mk-tick { display: inline-flex; align-items: center; gap: 8px; }
 .mk-hero-ticker .mk-tick::before {
   content: ""; width: 5px; height: 5px; border-radius: 50%;
-  background: var(--crimson); flex: none;
+  background: var(--navy); flex: none;
 }
 .mk-hero-ticker .mk-tick-sep { color: var(--border-strong); }
 
@@ -264,7 +264,7 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   padding-bottom: 44px; border-bottom: 1px solid rgb(244 238 230 / .12);
 }
 .mk-footer-brand .mk-wordmark { color: var(--paper); font-size: 24px; }
-.mk-footer-brand .mk-brand-dot { color: var(--crimson); }
+.mk-footer-brand .mk-brand-dot { color: var(--navy); }
 .mk-footer-tagline {
   margin-top: 14px; max-width: 320px;
   font-size: 14px; line-height: 1.55; color: rgb(244 238 230 / .62);
