@@ -151,10 +151,17 @@ provision_one() { # provision_one <cid> <slug> <repo-or-empty>
             '!f() { d="${ORCHA_WORKSPACE_ROOT:-$PWD}"; while [ -n "$d" ] && [ "$d" != "/" ] && [ ! -f "$d/.orcha/github-token" ]; do d=$(dirname "$d"); done; echo username=x-access-token; echo "password=$(cat "$d/.orcha/github-token")"; }; f'
         # Commits/PRs are authored by the app BOT, never a human account
         # (docs/agent-prs.md). Workspace-local config so agents inherit it.
+        # The json slug is a creation-time snapshot — a later app RENAME makes it
+        # stale — and GitHub links commits to the bot only via the bot USER id,
+        # not the app id. Resolve both live; fall back to the snapshot/app id
+        # (commit still lands, just unlinked from the bot avatar).
         BOT_SLUG=$(python3 -c "import json;print(json.load(open('$SECRETS/github-app.json')).get('slug') or 'orcha-cloud-app')" 2>/dev/null) \
             || BOT_SLUG="orcha-cloud-app"
+        BOT_UID=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+            "https://api.github.com/users/${BOT_SLUG}%5Bbot%5D" 2>/dev/null \
+            | python3 -c "import json,sys;print(json.load(sys.stdin).get('id') or '')" 2>/dev/null) || BOT_UID=""
         git -C "$WS" config user.name "${BOT_SLUG}[bot]"
-        git -C "$WS" config user.email "${APP_ID}+${BOT_SLUG}[bot]@users.noreply.github.com"
+        git -C "$WS" config user.email "${BOT_UID:-$APP_ID}+${BOT_SLUG}[bot]@users.noreply.github.com"
         mkdir -p "$WS/.orcha"
         # Seed the token we already minted so agents work before the first refresh tick.
         install_token_file "$WS/.orcha/github-token" "$TOKEN"

@@ -1,7 +1,7 @@
 # Agent → PR: sandboxed agents open pull requests as the app bot
 
 Sandboxed Orcha agents can branch, commit, push, and open GitHub pull requests
-— always as the **`orcha-cloud-app[bot]`** GitHub App installation, never as a
+— always as the **`orcha-cloud[bot]`** GitHub App installation, never as a
 human's account. A PR is a *proposal*: merging is always a human decision, the
 same authority gate as the Orcha task flow's `needs_verification` stop.
 
@@ -12,10 +12,19 @@ same authority gate as the Orcha task flow's `needs_verification` stop.
 `deploy/provision-projects.sh` sets **workspace-local** git config on every
 repo it clones:
 
-- `user.name` → `orcha-cloud-app[bot]` (the slug from
-  `/opt/orcha-secrets/github-app.json`, falling back to `orcha-cloud-app`)
-- `user.email` → `<APP_ID>+orcha-cloud-app[bot]@users.noreply.github.com`
-  (APP_ID from the same secrets file)
+- `user.name` → `<slug>[bot]` (slug from `/opt/orcha-secrets/github-app.json`)
+- `user.email` → `<BOT_USER_ID>+<slug>[bot]@users.noreply.github.com` — the
+  numeric prefix is the bot's GitHub **user** id (resolved live from
+  `GET /users/<slug>[bot]` at provision time), *not* the app id. GitHub only
+  links a commit to the bot account (avatar, profile) via the user id; with
+  the wrong number the commit still lands but shows as an unknown author.
+
+**Field gotcha — app renames.** The json slug is a creation-time snapshot. If
+the App is later renamed (ours was: `orcha-cloud-app` → `orcha-cloud`), the
+snapshot goes stale and commits stop linking. The provisioner now resolves the
+bot user id live, but the slug itself comes from the json — after a rename,
+update `slug` in `/opt/orcha-secrets/github-app.json` to match the App's
+current URL (`https://github.com/apps/<slug>`).
 
 So commits and PRs are attributed to the App bot on GitHub, and no human
 credential ever enters a container. Workspaces provisioned **before** this
