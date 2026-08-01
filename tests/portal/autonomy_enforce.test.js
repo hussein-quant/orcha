@@ -3,14 +3,25 @@
    autonomy slider (#autTop). containers.autonomy_enforced:
      • unlit (default) — per-agent autonomy overrides APPLY;
      • lit "🔒 Enforced" — every override is IGNORED, the container level governs
-       every agent. Clicking confirms → POST /autonomy with the UNCHANGED level +
-       autonomy_enforced, optimistic + reconcile/revert (the setAutonomy shape).
+       every agent. Clicking confirms → POST /autonomy with autonomy_enforced ONLY
+       (F1: NO level — a lock flip must never re-assert a possibly-stale cached
+       level, which could silently WIDEN the container).
 
-   Same dependency-free harness as autonomy_switch.test.js: stub DOM + fetch, load
-   the REAL portal app.js in a vm sandbox, drive the wired path. The seg regex is
-   extended with data-enforce so the chip is addressable; the LEVEL count contract
-   (exactly 3 data-level segs) is re-asserted here so the chip never masquerades
-   as a fourth level.
+   ROUND-1 FIX (F2): this suite now loads the LIVE topbar module the running portal
+   actually executes — modules/app-state.js (defines the shared `D`) + then
+   modules/app-autonomy.js (the enforce chip, setEnforce, onLevelClick). The prior
+   revision loaded static/app.js, whose whole body sits behind `if (typeof D ===
+   "undefined")` and is DEAD in the real portal (every page loads app-state.js first,
+   which declares `const D`). So the earlier suite tested a copy no user runs, and F1
+   lived precisely in the untested half. The externals app-autonomy.js reads from
+   sibling modules (esc / actingHuman / modal / closeModal / toast / paintNotifications)
+   are stubbed on the sandbox; the DOM + fetch are faked like autonomy_switch.test.js.
+
+   Teeth pinned here (each BITES a specific mutation):
+     • F1 — the enforce POST carries autonomy_enforced and NO level key (widen-proof).
+     • F3 — an OVERRIDING roster surfaces a count on the chip + names it in the
+             level-change modal.
+     • the LEVEL count contract (exactly 3 data-level segs; the chip is not a 4th level).
 
    Run:  node tests/portal/autonomy_enforce.test.js
    ========================================================================== */
@@ -18,11 +29,12 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const APP_JS = path.join(
+const MOD_DIR = path.join(
   __dirname, "..", "..",
-  "orcha-cli", "orcha_cli", "templates", "portal", "static", "app.js"
+  "orcha-cli", "orcha_cli", "templates", "portal", "static", "modules"
 );
-const SRC = fs.readFileSync(APP_JS, "utf8");
+const STATE_SRC = fs.readFileSync(path.join(MOD_DIR, "app-state.js"), "utf8");
+const AUT_SRC = fs.readFileSync(path.join(MOD_DIR, "app-autonomy.js"), "utf8");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -79,72 +91,90 @@ function makeNode(id) {
 function makeSandbox(opts) {
   opts = opts || {};
   const reg = {};
-  ["notifTop", "autTop", "topbar", "pausebar", "resumeBtn", "__mc", "__mp"].forEach((id) => { reg[id] = makeNode(id); });
+  ["notifTop", "autTop", "topbar", "pausebar", "resumeBtn"].forEach((id) => { reg[id] = makeNode(id); });
 
-  const captured = { modalHandlers: [] };
-  reg.__mp.addEventListener = (ev, fn) => { if (ev === "click") captured.modalHandlers.push(fn); };
-  reg.__mc.addEventListener = () => {};
-
-  const store = {};
-  const localStorage = {
-    getItem: (k) => (k in store ? store[k] : null),
-    setItem: (k, v) => { store[k] = String(v); },
-    removeItem: (k) => { delete store[k]; },
-  };
-  const documentElement = { setAttribute: () => {}, getAttribute: () => null };
   const document = {
-    documentElement, body: makeNode("body"),
+    documentElement: { setAttribute: () => {}, getAttribute: () => null },
+    body: makeNode("body"),
     addEventListener: () => {},
-    createElement: () => {
-      const el = makeNode("");
-      Object.defineProperty(el, "id", {
-        get() { return el._id || ""; },
-        set(v) { el._id = v; reg[v] = el; },
-      });
-      return el;
-    },
+    createElement: () => makeNode(""),
     getElementById: (id) => (id in reg ? reg[id] : null),
     querySelectorAll: () => [],
   };
   const fetchCalls = [];
-  const window = { matchMedia: () => ({ matches: false }) };
+
+  // The simulated persisted container row (server truth), seeded from each applySnapshot so a
+  // partial-update POST echoes the REAL current values for the columns it did not touch.
+  const srv = { autonomy_level: "plan", autonomy_enforced: false };
+
+  // The last confirm modal cfg the code opened — the harness "clicks" primary by calling onPrimary.
+  const modalState = { last: null };
+
   const sandbox = {
-    window, document, localStorage, console,
-    requestAnimationFrame: (fn) => fn(), setTimeout: (fn) => (fn && fn(), 0), clearTimeout: () => {},
+    document, console,
+    window: { matchMedia: () => ({ matches: false }) },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    setTimeout: (fn) => (fn && fn(), 0), clearTimeout: () => {},
+    requestAnimationFrame: (fn) => fn(),
+    // --- externals app-autonomy.js reads from sibling modules (stubbed) ---
+    esc: (s) => (s == null ? "" : String(s)),
+    actingHuman: () => (sandbox.__acting || null),
+    modal: (cfg) => { modalState.last = cfg; },
+    closeModal: () => {},
+    toast: () => {},
+    paintNotifications: () => {},
     fetch: (url, init) => {
       const body = init && init.body ? JSON.parse(init.body) : null;
       fetchCalls.push({ url, body });
       if (opts.failFetch) return Promise.reject(new Error("network"));
-      // Route-aware echo: /autonomy returns the level + the (possibly flipped) enforce switch.
-      const res = /\/autonomy$/.test(url)
-        ? { container_id: "c1", autonomy_level: body.level,
-            autonomy_enforced: body.autonomy_enforced === undefined ? false : body.autonomy_enforced }
-        : { container_id: "c1", wakes_enabled: body.enabled };
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(res) });
+      // Faithful partial-update echo: the server persists ONLY the supplied fields and RETURNS the
+      // real current row for both columns (so a level-only write returns the unchanged enforced
+      // flag, and an enforce-only write returns the unchanged level — never a client-cached value).
+      if (/\/autonomy$/.test(url)) {
+        if (body.level !== undefined) srv.autonomy_level = body.level;
+        if (body.autonomy_enforced !== undefined) srv.autonomy_enforced = body.autonomy_enforced;
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(
+          { container_id: "c1", autonomy_level: srv.autonomy_level, autonomy_enforced: srv.autonomy_enforced }) });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ container_id: "c1", wakes_enabled: body.enabled }) });
     },
   };
+  sandbox.window.ORCHA = { container: null, agents: [], tasks: [], requests: [] };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(SRC, sandbox, { filename: "app.js" });
-  return { Orcha: sandbox.window.Orcha, ORCHA: sandbox.window.ORCHA, reg, fetchCalls, captured, store };
+  // Load order MUST mirror the real page: app-state.js (declares `const D`) then app-autonomy.js.
+  vm.runInContext(STATE_SRC, sandbox, { filename: "app-state.js" });
+  vm.runInContext(AUT_SRC, sandbox, { filename: "app-autonomy.js" });
+  return { sandbox, reg, fetchCalls, modalState, srv,
+           applySnapshot: (fresh, acting) => {
+             sandbox.__acting = acting || null;
+             // Seed the simulated server row from the snapshot's container (the source of truth a
+             // real poll reflects), so a subsequent partial POST echoes the untouched column faithfully.
+             if (fresh && fresh.container) {
+               srv.autonomy_level = fresh.container.autonomy_level != null ? fresh.container.autonomy_level : "plan";
+               srv.autonomy_enforced = !!fresh.container.autonomy_enforced;
+             }
+             sandbox.applySnapshot(fresh);
+           },
+           ORCHA: sandbox.window.ORCHA };
 }
 
 const tick = () => new Promise((r) => setImmediate(r));
 const enforceSeg = (s) => s.reg.autTop.querySelectorAll(".seg").find((x) => x.dataset.enforce);
 const levelSegs = (s) => s.reg.autTop.querySelectorAll(".seg").filter((x) => x.dataset.level);
+const human = { id: "h1", alias: "Op", kind: "human" };
+const confirm = (s) => { if (s.modalState.last && s.modalState.last.onPrimary) s.modalState.last.onPrimary(); };
 
 async function run() {
-  console.log("autonomy_enforce.test.js — GH #207 (enforce-for-all lock chip)\n");
-
-  const human = { id: "h1", alias: "Op", kind: "human" };
+  console.log("autonomy_enforce.test.js — GH #207 enforce chip on the LIVE module (modules/app-autonomy.js)\n");
 
   // --- Case 1: default render — chip present, unlit; 3 levels untouched ------
   {
     console.log("Case 1: default snapshot → enforce chip rendered UNLIT beside exactly 3 level segs");
     const s = makeSandbox();
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" }, agents: [human], tasks: [], requests: [] });
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" }, agents: [human] }, human);
     const chip = enforceSeg(s);
-    assert(!!chip, "the enforce chip renders in the autonomy host");
+    assert(!!chip, "the enforce chip renders in the LIVE autonomy host");
     assert(/\block\b/.test(chip._class), "chip carries the .lock class (not .lvl)");
     assert(!/\bon\b/.test(chip._class), "chip is unlit by default (mig-034 default: not enforced)");
     assert(levelSegs(s).length === 3, "still exactly 3 data-level segs (the chip is NOT a 4th level)");
@@ -154,42 +184,45 @@ async function run() {
   {
     console.log("\nCase 2: autonomy_enforced=true in the snapshot → chip lit '🔒 Enforced'");
     const s = makeSandbox();
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "pr", autonomy_enforced: true }, agents: [human], tasks: [], requests: [] });
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "pr", autonomy_enforced: true }, agents: [human] }, human);
     const chip = enforceSeg(s);
     assert(/\bon\b/.test(chip._class), "chip lit while enforced");
     assert(/🔒/.test(s.reg.autTop.innerHTML), "lock glyph shown while enforced");
   }
 
-  // --- Case 3: click (off) → confirm → POST {level unchanged, enforced:true} -
+  // --- Case 3 (F1 TOOTH): click Enforce → POST enforced:true and NO level ----
   {
-    console.log("\nCase 3: click Enforce (off) → confirm → POST carries the UNCHANGED level + autonomy_enforced:true, optimistic + reconcile");
+    console.log("\nCase 3 (F1): click Enforce (off) → POST carries autonomy_enforced:true and OMITS level (widen-proof)");
     const s = makeSandbox();
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "pr" }, agents: [human], tasks: [], requests: [] });
+    // Stale cache in the PERMISSIVE direction: this browser cached 'full', but ANOTHER operator has
+    // since narrowed the real container to 'plan' (the server truth). A lock flip must NOT re-assert
+    // the cached 'full' — that would silently WIDEN the container, the exact F1 defect.
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "full" }, agents: [human] }, human);
+    s.srv.autonomy_level = "plan";   // the REAL container row moved under this tab
     enforceSeg(s).onclick();
     assert(s.fetchCalls.length === 0, "no POST before confirm");
-    assert(/Enforce autonomy for all agents\?/.test(s.reg.__ov.innerHTML), "confirm modal asks to enforce");
-    s.captured.modalHandlers.forEach((fn) => fn());
+    confirm(s);
     assert(s.ORCHA.container.autonomy_enforced === true, "optimistic: switch flips on immediately");
     assert(s.fetchCalls.length === 1, "exactly one POST fired");
-    assert(/\/api\/containers\/c1\/autonomy$/.test(s.fetchCalls[0].url), "POST hits the SAME /autonomy route");
+    assert(/\/api\/containers\/c1\/autonomy$/.test(s.fetchCalls[0].url), "POST hits the /autonomy route");
     assert(s.fetchCalls[0].body.autonomy_enforced === true, "body.autonomy_enforced === true");
-    assert(s.fetchCalls[0].body.level === "pr", "body re-sends the UNCHANGED level (a flip never moves the slider)");
+    assert(!("level" in s.fetchCalls[0].body), "F1: body OMITS level (a lock flip never re-asserts a cached level → cannot widen)");
     assert(s.fetchCalls[0].body.actor_agent_id === "h1", "body carries the acting human id");
     await tick();
     assert(s.ORCHA.container.autonomy_enforced === true, "reconciled from response (still enforced)");
-    assert(s.ORCHA.container.autonomy_level === "pr", "level untouched by the enforce flip");
+    assert(s.ORCHA.container.autonomy_level === "plan", "F1: the container stays at the SERVER's 'plan' — the flip did NOT widen it back to the stale cached 'full'");
   }
 
-  // --- Case 4: click (on) → confirm → POST {enforced:false} ------------------
+  // --- Case 4: click (on) → confirm → POST {enforced:false}, no level --------
   {
-    console.log("\nCase 4: click Enforced (on) → confirm → POST {autonomy_enforced:false} re-honors overrides");
+    console.log("\nCase 4: click Enforced (on) → POST {autonomy_enforced:false} (no level) re-honors overrides");
     const s = makeSandbox();
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan", autonomy_enforced: true }, agents: [human], tasks: [], requests: [] });
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan", autonomy_enforced: true }, agents: [human] }, human);
     enforceSeg(s).onclick();
-    assert(/Stop enforcing the container level\?/.test(s.reg.__ov.innerHTML), "confirm modal asks to stop enforcing");
-    s.captured.modalHandlers.forEach((fn) => fn());
+    confirm(s);
     await tick();
     assert(s.fetchCalls.length === 1 && s.fetchCalls[0].body.autonomy_enforced === false, "POST {autonomy_enforced:false} fired");
+    assert(!("level" in s.fetchCalls[0].body), "F1: OFF flip also omits level");
     assert(s.ORCHA.container.autonomy_enforced === false, "switch reconciled off");
   }
 
@@ -197,9 +230,9 @@ async function run() {
   {
     console.log("\nCase 5: enforce POST failure reverts the optimistic flip");
     const s = makeSandbox({ failFetch: true });
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" }, agents: [human], tasks: [], requests: [] });
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" }, agents: [human] }, human);
     enforceSeg(s).onclick();
-    s.captured.modalHandlers.forEach((fn) => fn());
+    confirm(s);
     assert(s.ORCHA.container.autonomy_enforced === true, "optimistic flip applied");
     await tick();
     assert(s.ORCHA.container.autonomy_enforced === false, "reverted after the POST failed");
@@ -209,19 +242,19 @@ async function run() {
   {
     console.log("\nCase 6: no acting human → clicking the chip POSTs nothing, opens nothing");
     const s = makeSandbox();
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" }, agents: [], tasks: [], requests: [] });
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" }, agents: [] }, null);
     enforceSeg(s).onclick();
     assert(s.fetchCalls.length === 0, "no POST without an acting human");
-    assert(!s.reg.__ov, "no confirm modal without an acting human");
+    assert(!s.modalState.last, "no confirm modal without an acting human");
   }
 
   // --- Case 7: poll reconcile — an external flip repaints the chip -----------
   {
     console.log("\nCase 7: a later snapshot (poll) repaints the enforce chip");
     const s = makeSandbox();
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" }, agents: [human], tasks: [], requests: [] });
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" }, agents: [human] }, human);
     assert(!/\bon\b/.test(enforceSeg(s)._class), "starts unlit");
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan", autonomy_enforced: true }, agents: [human], tasks: [], requests: [] });
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan", autonomy_enforced: true }, agents: [human] }, human);
     assert(/\bon\b/.test(enforceSeg(s)._class), "poll flip → chip lit");
   }
 
@@ -229,14 +262,44 @@ async function run() {
   {
     console.log("\nCase 8: setting a LEVEL never flips the enforce switch (orthogonal fields)");
     const s = makeSandbox();
-    s.Orcha.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan", autonomy_enforced: true }, agents: [human], tasks: [], requests: [] });
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan", autonomy_enforced: true }, agents: [human] }, human);
     const pr = levelSegs(s).find((x) => x.dataset.level === "pr");
     pr.onclick();
-    s.captured.modalHandlers.forEach((fn) => fn());
+    confirm(s);
     await tick();
     assert(s.ORCHA.container.autonomy_level === "pr", "level moved to 'pr'");
     assert(s.fetchCalls.length === 1 && s.fetchCalls[0].body.autonomy_enforced === undefined, "level POST omits autonomy_enforced (partial update)");
     assert(s.ORCHA.container.autonomy_enforced === true, "enforce switch untouched by a level change");
+  }
+
+  // --- Case 9 (F3 TOOTH): overriding agents surface a count on the chip ------
+  {
+    console.log("\nCase 9 (F3): agents with a per-agent override surface a count on the Enforce chip");
+    const s = makeSandbox();
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan" },
+                      agents: [human,
+                               { id: "a1", alias: "ovr1", kind: "ai", autonomy_override: "full" },
+                               { id: "a2", alias: "ovr2", kind: "ai", autonomy_override: "pr" },
+                               { id: "a3", alias: "plain", kind: "ai", autonomy_override: null }] }, human);
+    const chip = enforceSeg(s);
+    assert(/2 overriding/.test(s.reg.autTop.innerHTML), "chip labels the count of overriding agents ('Enforce · 2 overriding')");
+    assert(/\bhas-ovr\b/.test(chip._class), "chip carries the has-ovr marker class when overrides exist");
+    // and when enforced, the count is suppressed (overrides are moot)
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "plan", autonomy_enforced: true },
+                      agents: [human, { id: "a1", alias: "ovr1", kind: "ai", autonomy_override: "full" }] }, human);
+    assert(!/overriding/.test(s.reg.autTop.innerHTML), "no count while enforced (overrides ignored)");
+  }
+
+  // --- Case 10 (F3 TOOTH): the level-change modal NAMES the overriding agents -
+  {
+    console.log("\nCase 10 (F3): narrowing the slider names the agents that will IGNORE the new level");
+    const s = makeSandbox();
+    s.applySnapshot({ container: { id: "c1", wakes_enabled: true, autonomy_level: "full" },
+                      agents: [human, { id: "a1", alias: "risky", kind: "ai", autonomy_override: "full" }] }, human);
+    const planSeg = levelSegs(s).find((x) => x.dataset.level === "plan");
+    planSeg.onclick();
+    assert(s.modalState.last && /risky/.test(s.modalState.last.desc), "the confirm modal names the overriding agent by alias");
+    assert(/ignore/i.test(s.modalState.last.desc), "the modal warns the override will IGNORE the new level");
   }
 
   console.log("\n" + (failures === 0 ? "ALL PASSED ✅" : failures + " FAILED ❌"));

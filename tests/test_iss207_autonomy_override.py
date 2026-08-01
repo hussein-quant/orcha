@@ -220,6 +220,68 @@ async def test_enforce_write_is_human_gated_and_optional(client, container, make
     assert r.status_code == 200 and r.json()["autonomy_enforced"] is False
 
 
+async def test_enforce_only_write_leaves_container_level_untouched(
+    client, container, make_agent, db
+):
+    """F1 (round-1 review — THE safety tooth): flipping the enforce lock must NOT rewrite the
+    container level. `level` is now OPTIONAL on /autonomy; an enforce-only POST (no `level`) writes
+    the switch ONLY. Before the fix `level` was required and re-asserted unconditionally, so a lock
+    click re-wrote whatever the caller sent — which, from a stale-permissive client cache, could
+    silently WIDEN the container (e.g. reset 'plan' back to 'full'). MUTATION: make `level` required
+    again (or write autonomy_level unconditionally) and the 'level did not move' assertion below goes
+    RED."""
+    human = await make_agent("op", "operator", kind="human")
+    # Ground truth: the container sits at 'plan'.
+    assert (await _set_autonomy(client, container["id"], "plan", human["agent_id"])).status_code == 200
+    # A widen-attempt payload: level='full' WOULD widen — but the enforce-only client omits it.
+    r = await client.post(
+        f"/api/containers/{container['id']}/autonomy",
+        json={"actor_agent_id": human["agent_id"], "autonomy_enforced": True},   # NO level key
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["autonomy_enforced"] is True
+    assert r.json()["autonomy_level"] == "plan"          # the level the response echoes is unchanged
+    rows = db.execute("SELECT autonomy_level, autonomy_enforced FROM containers WHERE id=%s",
+                      (container["id"],))
+    assert rows[0]["autonomy_level"] == "plan"           # F1: the container was NOT widened
+    assert rows[0]["autonomy_enforced"] is True
+
+    # And the symmetric direction: a level-only write leaves the enforce switch alone (already
+    # covered above, re-asserted here beside the enforce-only case for the full partial-update matrix).
+    r = await client.post(
+        f"/api/containers/{container['id']}/autonomy",
+        json={"actor_agent_id": human["agent_id"], "level": "pr"},   # NO autonomy_enforced key
+    )
+    assert r.status_code == 200 and r.json()["autonomy_level"] == "pr"
+    rows = db.execute("SELECT autonomy_level, autonomy_enforced FROM containers WHERE id=%s",
+                      (container["id"],))
+    assert rows[0]["autonomy_level"] == "pr" and rows[0]["autonomy_enforced"] is True
+
+
+async def test_autonomy_empty_body_is_400(client, container, make_agent, db):
+    """F1: a POST with NEITHER level NOR autonomy_enforced is a clear 400, not a silent no-op — an
+    empty partial update is a caller bug, and the route must not build an empty UPDATE."""
+    human = await make_agent("op", "operator", kind="human")
+    r = await client.post(
+        f"/api/containers/{container['id']}/autonomy",
+        json={"actor_agent_id": human["agent_id"]},
+    )
+    assert r.status_code == 400, r.text
+
+
+async def test_enforce_only_write_is_human_gated(client, container, make_agent, db):
+    """F1: the enforce-only partial update rides the SAME human-only gate — an AI actor is 403 and
+    nothing moves (the require_kind check must run even when `level` is absent)."""
+    ai = await make_agent("bot", "eng")
+    r = await client.post(
+        f"/api/containers/{container['id']}/autonomy",
+        json={"actor_agent_id": ai["agent_id"], "autonomy_enforced": True},
+    )
+    assert r.status_code == 403, r.text
+    rows = db.execute("SELECT autonomy_enforced FROM containers WHERE id=%s", (container["id"],))
+    assert rows[0]["autonomy_enforced"] is False
+
+
 # ---------------------------------------------------------------- exposure (additive fields, all surfaces)
 
 async def test_get_container_exposes_enforced_and_per_agent_effective(
@@ -307,9 +369,13 @@ async def test_wake_scan_carries_enforced_and_per_candidate_effective(
 async def test_full_override_audit_records_resolved_level(
     client, container, make_agent, make_task, db, work_headers
 ):
-    """The auto-complete audit row records the RESOLVED level + auto_completed (mirrors the #298
-    audit tooth) so a post-hoc reviewer can see the engine auto-completed under an override while
-    the container itself sat at 'plan'."""
+    """F4 (round-1 review): the auto-complete audit row records the FULL autonomy picture — the
+    CONTAINER level, the enforce flag, the EFFECTIVE level that gated, and the acting agent's
+    override — so a reviewer can see the engine auto-completed UNDER AN OVERRIDE while the container
+    slider itself sat at 'plan'. Before the fix the row hardcoded autonomy_level:'full', which lied:
+    it read as if the slider were wide open. MUTATION: revert to logging a bare {'autonomy_level':
+    'full'} on the auto-complete branch and this test goes RED (autonomy_level would no longer be the
+    container level, and effective_autonomy/autonomy_override would be missing)."""
     human = await make_agent("op", "operator", kind="human")
     a = await make_agent("ovr", "eng")
     assert (await _set_override(client, a["agent_id"], human["agent_id"], "full")).status_code == 200
@@ -321,10 +387,98 @@ async def test_full_override_audit_records_resolved_level(
         "SELECT detail FROM events WHERE entity_id=%s AND event_type='status_changed' ORDER BY id",
         (t["task_id"],))
     last = rows[-1]["detail"]
-    assert last["to"] == "completed" and last["autonomy_level"] == "full"
-    assert last["auto_completed"] is True
+    assert last["to"] == "completed" and last["auto_completed"] is True
+    # `autonomy_level` now carries the CONTAINER level (the slider), NOT the effective level — so it
+    # matches its meaning at the /next claim site and never masquerades as a wide-open slider.
+    assert last["autonomy_level"] == "plan"          # the container slider (never moved)
+    assert last["autonomy_enforced"] is False
+    assert last["effective_autonomy"] == "full"      # what ACTUALLY gated (the override)
+    assert last["autonomy_override"] == "full"       # …and WHY: this agent's per-agent override
     rows = db.execute("SELECT autonomy_level FROM containers WHERE id=%s", (container["id"],))
     assert rows[0]["autonomy_level"] == "plan"     # the container never moved
+
+
+async def test_parked_needs_verification_audit_records_full_picture(
+    client, container, make_agent, make_task, db, work_headers
+):
+    """F4: the parking (plan/pr) branch logs the SAME full autonomy picture. Container 'full' but the
+    agent narrowed to override 'plan' -> the /done parks, and the audit row shows container='full',
+    effective='plan', override='plan' — so a reviewer sees WHY a task parked under a full container.
+    MUTATION: revert the parked branch to {'autonomy_level': level} (the effective level under one
+    ambiguous key) and the container-level / override / effective assertions here go RED."""
+    human = await make_agent("op", "operator", kind="human")
+    a = await make_agent("careful", "eng")
+    assert (await _set_autonomy(client, container["id"], "full", human["agent_id"])).status_code == 200
+    assert (await _set_override(client, a["agent_id"], human["agent_id"], "plan")).status_code == 200
+    t = await make_task("parked", "done", assignee_alias="careful")
+    r = await client.post(f"/api/tasks/{t['task_id']}/done",
+                          json={"agent_id": a["agent_id"], "result": "x"},
+                          headers=await work_headers(a["agent_id"]))
+    assert r.status_code == 200 and r.json()["status"] == "needs_verification"
+    rows = db.execute(
+        "SELECT detail FROM events WHERE entity_id=%s AND event_type='status_changed' ORDER BY id",
+        (t["task_id"],))
+    last = rows[-1]["detail"]
+    assert last["to"] == "needs_verification"
+    assert last["autonomy_level"] == "full"          # the container slider
+    assert last["effective_autonomy"] == "plan"      # what gated (the narrowing override)
+    assert last["autonomy_override"] == "plan"
+    assert last["autonomy_enforced"] is False
+
+
+async def test_override_grant_audit_records_before_and_after(
+    client, container, make_agent, db
+):
+    """F4: granting/clearing an override is the change that removes a human from the loop — its audit
+    row must carry the VALUE (before→after), not just the field name. Before the fix the agent_updated
+    event logged only {'fields': ['autonomy_override']}, so 'who granted full autonomy, and when' was
+    unanswerable. MUTATION: drop the autonomy_override before/after keys from the agent_updated detail
+    and this test goes RED."""
+    human = await make_agent("op", "operator", kind="human")
+    a = await make_agent("dev", "eng")
+    # grant: None -> full
+    assert (await _set_override(client, a["agent_id"], human["agent_id"], "full")).status_code == 200
+    rows = db.execute(
+        "SELECT detail FROM events WHERE entity_id=%s AND event_type='agent_updated' ORDER BY id",
+        (a["agent_id"],))
+    grant = rows[-1]["detail"]
+    assert "autonomy_override" in grant["fields"]
+    assert grant["autonomy_override"] == "full"
+    assert grant["autonomy_override_before"] is None
+    # re-grant: full -> pr (before must reflect the prior 'full', not None)
+    assert (await _set_override(client, a["agent_id"], human["agent_id"], "pr")).status_code == 200
+    rows = db.execute(
+        "SELECT detail FROM events WHERE entity_id=%s AND event_type='agent_updated' ORDER BY id",
+        (a["agent_id"],))
+    regrant = rows[-1]["detail"]
+    assert regrant["autonomy_override"] == "pr" and regrant["autonomy_override_before"] == "full"
+    # clear: pr -> None
+    assert (await _set_override(client, a["agent_id"], human["agent_id"], None)).status_code == 200
+    rows = db.execute(
+        "SELECT detail FROM events WHERE entity_id=%s AND event_type='agent_updated' ORDER BY id",
+        (a["agent_id"],))
+    clear = rows[-1]["detail"]
+    assert clear["autonomy_override"] is None and clear["autonomy_override_before"] == "pr"
+
+
+async def test_role_only_edit_audit_omits_override_keys(
+    client, container, make_agent, db
+):
+    """F4 (negative): a role-only PATCH (override OMITTED) must NOT stamp the override before/after
+    keys — they belong only to an actual override change, so the audit trail never implies an
+    authority change that didn't happen."""
+    human = await make_agent("op", "operator", kind="human")
+    a = await make_agent("dev", "eng")
+    r = await client.patch(f"/api/agents/{a['agent_id']}",
+                           json={"actor_agent_id": human["agent_id"], "role": "senior eng"})
+    assert r.status_code == 200, r.text
+    rows = db.execute(
+        "SELECT detail FROM events WHERE entity_id=%s AND event_type='agent_updated' ORDER BY id",
+        (a["agent_id"],))
+    detail = rows[-1]["detail"]
+    assert detail["fields"] == ["role"]
+    assert "autonomy_override" not in detail
+    assert "autonomy_override_before" not in detail
 
 
 # ---------------------------------------------------------------- portal source contracts (UI teeth)
@@ -352,3 +506,46 @@ def test_topbar_slider_wires_enforce_switch():
     assert "data-enforce" in src, "the enforce chip is gone from the level slider host"
     assert "autonomy_enforced" in src, "the module no longer reads/writes autonomy_enforced"
     assert src.count("autonomy_enforced:") >= 1, "no POST body carries autonomy_enforced"
+
+
+def test_enforce_module_lives_in_the_live_topbar_module():
+    """F2 (round-1 review): the enforce chip + setEnforce must live in the LIVE topbar module
+    (modules/app-autonomy.js — the code every page actually executes), NOT only in the dead
+    static/app.js `if (typeof D === 'undefined')` fallback. Read the module file directly (not the
+    app.js bundle, which also contains the fallback) so a refactor that moves the chip back into the
+    dead branch fails here."""
+    from portal_source import STATIC
+    src = (STATIC / "modules" / "app-autonomy.js").read_text()
+    assert "data-enforce" in src, "the LIVE module lost the enforce chip"
+    assert "function setEnforce" in src, "the LIVE module lost setEnforce"
+
+
+def test_enforce_flip_omits_level_in_both_copies():
+    """F1 (round-1 review) as a SOURCE tooth: the enforce POST body must NOT carry a `level` key in
+    EITHER copy — the live module (modules/app-autonomy.js) or the dead fallback (static/app.js).
+    Re-asserting a cached level on a lock flip is the widen defect; pin it out of both so a
+    regression in either surface is caught even without running node."""
+    from portal_source import STATIC
+    live = (STATIC / "modules" / "app-autonomy.js").read_text()
+    # isolate setEnforce's body: it must send autonomy_enforced but NOT level.
+    seg = live.split("function setEnforce", 1)[1].split("\nfunction ", 1)[0]
+    assert "autonomy_enforced: value, actor_agent_id" in seg, "the live setEnforce POST body changed shape"
+    assert "level:" not in seg, "F1: setEnforce must not send a level (would re-assert a stale cache → widen)"
+    fallback = (STATIC / "app.js").read_text()
+    fb_seg = fallback.split("function F_setEnforce", 1)[1].split("\n  function ", 1)[0]
+    assert "level:" not in fb_seg, "F1: the app.js F_setEnforce twin must not send a level either"
+
+
+def test_agents_override_control_clearable_while_enforced_and_counts_overrides():
+    """F3 (round-1 review): (a) the topbar enforce chip surfaces a count of overriding agents when
+    enforce is OFF ('N overriding'), and the level-change modal names them; (b) the per-agent
+    Autonomy control keeps the Inherit (clear) chip live while the container enforces, so a stale
+    override is never stuck. Source-contract teeth over the live page controllers."""
+    from portal_source import STATIC, page_source
+    aut = (STATIC / "modules" / "app-autonomy.js").read_text()
+    assert "overridingAgents" in aut, "the topbar lost the overriding-agents count helper (F3a)"
+    assert "overriding" in aut, "the enforce chip no longer labels the override count (F3a)"
+    detail = page_source("agents.html")
+    assert "ovrChipEnabled" in detail, "the override control lost the per-chip enable gate (F3b)"
+    # the Inherit chip (o.id == null) must stay enabled under enforcement
+    assert "o.id == null" in detail, "F3b: the Inherit (clear) chip must stay clickable while enforced"

@@ -105,11 +105,26 @@ def mark_done(
             "SELECT autonomy_override FROM agents WHERE id=%s", (body.agent_id,)
         )
         acting = cur.fetchone()
+        acting_override = acting["autonomy_override"] if acting else None
         level = effective_autonomy(
             c["autonomy_level"],
             c["autonomy_enforced"],
-            acting["autonomy_override"] if acting else None,
+            acting_override,
         )
+        # F4 (round-1 review): the audit row for a /done must record the FULL autonomy picture, not a
+        # single ambiguous key. Before this, the auto-complete branch hardcoded autonomy_level:'full'
+        # even when an OVERRIDE (not the slider) drove it, so a reviewer reading the trail concluded
+        # the container slider was wide open when it may have sat at 'plan'. Log the container level,
+        # the enforce flag, the resolved EFFECTIVE level that actually gated, and this agent's raw
+        # override — so "who auto-completed under what, and was it the slider or an override?" is
+        # answerable from one event. `autonomy_level` keeps its historical CONTAINER meaning (not the
+        # effective level) so the key never silently changes what it names across event rows.
+        _autonomy_audit = {
+            "autonomy_level": c["autonomy_level"],
+            "autonomy_enforced": c["autonomy_enforced"],
+            "effective_autonomy": level,
+            "autonomy_override": acting_override,
+        }
         result_json = json.dumps({"result": body.result, "by_agent_id": body.agent_id})
         cur.execute(
             "UPDATE agent_tasks SET assignment_status='done' WHERE agent_id=%s AND task_id=%s",
@@ -137,9 +152,9 @@ def mark_done(
                 "status_changed",
                 {
                     "to": "completed",
-                    "autonomy_level": "full",
                     "auto_completed": True,
                     "unblocked": unblocked,
+                    **_autonomy_audit,
                 },
             )
             conn.commit()
@@ -180,7 +195,7 @@ def mark_done(
             "task",
             tid,
             "status_changed",
-            {"to": "needs_verification", "autonomy_level": level},
+            {"to": "needs_verification", **_autonomy_audit},
         )
         conn.commit()
     return {"task_id": tid, "status": "needs_verification"}

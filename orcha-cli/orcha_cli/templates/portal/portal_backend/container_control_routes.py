@@ -64,28 +64,41 @@ def set_autonomy_level(cid: str, body: AutonomyUpdate):
     mig 034: optionally also flips the container-wide `autonomy_enforced` switch — when true, every
     per-agent autonomy_override (mig 034) is IGNORED and the container level governs everyone
     ("override for everyone"); false re-honors overrides. Omitting it leaves the switch unchanged.
+
+    mig 034 (F1 — round-1 review): `level` is OPTIONAL — a PARTIAL update. Supplying only
+    autonomy_enforced flips the lock WITHOUT touching the container level, so the Enforce chip can
+    never re-assert a stale cached level (which could silently WIDEN the container — the exact
+    backwards behaviour for a safety switch). At least one of level / autonomy_enforced must be
+    supplied; each column is written only when its field is present.
     """
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
-    if body.level not in AUTONOMY_LEVELS:
+    # F1: level is now optional (partial update). Validate it ONLY when supplied; require that at
+    # least one mutating field is present so an empty body is a clear 400, not a silent no-op.
+    if body.level is not None and body.level not in AUTONOMY_LEVELS:
         raise HTTPException(400, f"level must be one of {AUTONOMY_LEVELS}")
+    if body.level is None and body.autonomy_enforced is None:
+        raise HTTPException(400, "supply level and/or autonomy_enforced")
     with db_cursor() as (connection, cur):
         require_container(cur, cid)
         require_kind(cur, body.actor_agent_id, ("human",))
-        if body.autonomy_enforced is None:
-            cur.execute(
-                "UPDATE containers SET autonomy_level=%s WHERE id=%s "
-                "RETURNING autonomy_level, autonomy_enforced",
-                (body.level, cid),
-            )
-            detail = {"level": body.level}
-        else:
-            cur.execute(
-                "UPDATE containers SET autonomy_level=%s, autonomy_enforced=%s WHERE id=%s "
-                "RETURNING autonomy_level, autonomy_enforced",
-                (body.level, body.autonomy_enforced, cid),
-            )
-            detail = {"level": body.level, "autonomy_enforced": body.autonomy_enforced}
+        # Build the SET clause from ONLY the supplied fields so an enforce-only flip never rewrites
+        # the level (F1) and a level-only move never rewrites the switch.
+        sets, params, detail = [], [], {}
+        if body.level is not None:
+            sets.append("autonomy_level=%s")
+            params.append(body.level)
+            detail["level"] = body.level
+        if body.autonomy_enforced is not None:
+            sets.append("autonomy_enforced=%s")
+            params.append(body.autonomy_enforced)
+            detail["autonomy_enforced"] = body.autonomy_enforced
+        params.append(cid)
+        cur.execute(
+            f"UPDATE containers SET {', '.join(sets)} WHERE id=%s "
+            "RETURNING autonomy_level, autonomy_enforced",
+            params,
+        )
         row = cur.fetchone()
         log_event(
             cur,

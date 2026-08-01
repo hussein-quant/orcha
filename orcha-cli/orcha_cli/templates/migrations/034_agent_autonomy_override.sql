@@ -26,7 +26,24 @@
 --                                else (agent.autonomy_override or container.autonomy_level)
 --
 -- ADD-only, both columns. Applied on portal boot by the R1 migration runner (no wipe).
-ALTER TABLE agents ADD COLUMN IF NOT EXISTS autonomy_override TEXT NULL
-    CHECK (autonomy_override IN ('plan', 'pr', 'full'));
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS autonomy_override TEXT NULL;
+
+-- N2 (round-1 review, hardening): the enum CHECK lives in its OWN named, guarded ADD CONSTRAINT
+-- rather than riding on the ADD COLUMN above. Postgres silently SKIPS an inline CHECK when
+-- `ADD COLUMN IF NOT EXISTS` no-ops on a pre-existing column (e.g. a half-applied prior run),
+-- which would leave the column present but UNCONSTRAINED. Adding the constraint separately —
+-- guarded by a pg_constraint lookup so re-running the migration is idempotent — makes the enum
+-- tooth present regardless of how the column came to exist. (The migration runner's
+-- schema_migrations gate makes a half-apply unreachable via the supported path, but this is
+-- defence in depth for the safety-critical enum on the completion gate.)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'agents_autonomy_override_check'
+    ) THEN
+        ALTER TABLE agents ADD CONSTRAINT agents_autonomy_override_check
+            CHECK (autonomy_override IN ('plan', 'pr', 'full'));
+    END IF;
+END $$;
 
 ALTER TABLE containers ADD COLUMN IF NOT EXISTS autonomy_enforced BOOLEAN NOT NULL DEFAULT false;

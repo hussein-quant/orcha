@@ -138,7 +138,14 @@ class WakesToggle(BaseModel):
 
 
 class AutonomyUpdate(BaseModel):
-    level: str = Field(..., description="engine autonomy level: 'plan' | 'pr' | 'full'")
+    level: Optional[str] = Field(
+        default=None,
+        description="engine autonomy level: 'plan' | 'pr' | 'full'. mig 034 (F1): OPTIONAL — omit "
+        "it to leave the container level UNTOUCHED (a partial update, e.g. an enforce-only flip). "
+        "This is what lets the Enforce lock chip flip WITHOUT re-asserting a possibly-stale cached "
+        "level (which could silently WIDEN the container). At least one of level / autonomy_enforced "
+        "must be supplied.",
+    )
     actor_agent_id: str = Field(
         ..., description="UUID of the human (kind='human') moving the slider"
     )

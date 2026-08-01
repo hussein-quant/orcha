@@ -35,6 +35,14 @@ function autEnforced() {
   return !!(D.container && D.container.autonomy_enforced);
 }
 
+// mig 034 (F3): how many agents carry a non-null per-agent autonomy_override. When enforce is OFF
+// these agents IGNORE the container slider — so moving the slider does NOT govern them, and the
+// operator deserves a signal at the slider (not only on the Agents page). Client-side count over
+// the snapshot roster (each agent carries autonomy_override); humans never carry one.
+function overridingAgents() {
+  return (D.agents || []).filter((a) => a && a.kind !== "human" && a.autonomy_override);
+}
+
 // Inject the paused micro-banner once, immediately after the topbar (shared across pages).
 function ensurePausebar(topbar) {
   if (!topbar || document.getElementById("pausebar")) return;
@@ -96,10 +104,16 @@ function paintLevels() {
   // mig 034: the "Enforce for all agents" lock chip lives beside the 3 level segs — lit when
   // containers.autonomy_enforced is on (per-agent overrides ignored), unlit when overrides apply.
   const enforced = autEnforced();
+  // F3: when enforce is OFF, surface how many agents are OVERRIDING (ignoring the slider) right on
+  // the chip, so narrowing the slider is never silently partial. Hidden when enforced (overrides
+  // are moot) or when none exist.
+  const ovrCount = enforced ? 0 : overridingAgents().length;
   const lockTip = canAct
     ? (enforced
         ? "Enforced — the container level governs EVERY agent; per-agent autonomy overrides are ignored. Click to honor overrides again."
-        : "Enforce the container level for ALL agents — per-agent autonomy overrides are ignored while on.")
+        : (ovrCount
+            ? ovrCount + " agent" + (ovrCount === 1 ? "" : "s") + " override the container level and IGNORE the slider. Enforce to make the container level govern EVERY agent."
+            : "Enforce the container level for ALL agents — per-agent autonomy overrides are ignored while on."))
     : "Pick an acting human to change enforcement";
   host.innerHTML = AUT_LEVELS.map((rg) => {
     const active = rg.level === level;
@@ -111,8 +125,8 @@ function paintLevels() {
       : "Pick an acting human to change autonomy";
     return `<span class="${cls}" data-level="${rg.level}" role="radio" aria-checked="${active}" tabindex="0"
       title="${esc(tip)}"><span class="d"></span>${esc(rg.label)}</span>`;
-  }).join("") + `<span class="seg lock${enforced ? " on" : ""}" data-enforce="1" role="switch" aria-checked="${enforced}" tabindex="0"
-    title="${esc(lockTip)}">${enforced ? "🔒 Enforced" : "Enforce"}</span>`;
+  }).join("") + `<span class="seg lock${enforced ? " on" : ""}${ovrCount ? " has-ovr" : ""}" data-enforce="1" role="switch" aria-checked="${enforced}" tabindex="0"
+    title="${esc(lockTip)}">${enforced ? "🔒 Enforced" : (ovrCount ? "Enforce · " + ovrCount + " overriding" : "Enforce")}</span>`;
   host.querySelectorAll(".seg").forEach((seg) => {
     const act = seg.dataset.enforce ? onEnforceClick : () => onLevelClick(seg.dataset.level);
     seg.onclick = act;
@@ -165,9 +179,17 @@ function onLevelClick(level) {
   const rg = AUT_LEVELS.find((x) => x.level === level);
   if (!rg) return;
   if (rg.level === autLevel()) return;   // already at this level — no modal, no POST
+  // F3: if agents are overriding (and enforce is OFF), the new level will NOT govern them — name
+  // that in the confirm modal so narrowing the slider is never silently partial. The count is
+  // suppressed while enforced (overrides are already moot).
+  const overriders = autEnforced() ? [] : overridingAgents();
+  const ovrNote = overriders.length
+    ? " NOTE: " + overriders.length + " agent" + (overriders.length === 1 ? "" : "s") +
+      " (" + overriders.map((a) => a.alias || "?").join(", ") + ") carry a per-agent override and will IGNORE this level until you Enforce."
+    : "";
   modal({
     title: "Set autonomy to " + rg.label + "?",
-    desc: rg.impact,
+    desc: rg.impact + ovrNote,
     primary: "Set " + rg.label,
     danger: rg.level === "full",   // Full removes the human completion gate — flag it red
     onPrimary: () => { closeModal(); setAutonomy(rg.level); },
@@ -220,9 +242,12 @@ function onEnforceClick() {
   });
 }
 
-// mig 034: POST the enforce switch through the SAME container autonomy endpoint (the backend
-// takes an optional autonomy_enforced beside the level; level is re-sent unchanged). Mirrors
-// setAutonomy — acting-human choke point, optimistic/reconcile/revert.
+// mig 034 (F1): POST the enforce switch through the SAME container autonomy endpoint as a PARTIAL
+// update — autonomy_enforced ONLY, NO level. The level is intentionally OMITTED so a lock flip can
+// never re-assert this browser's cached autonomy_level, which may be stale in the permissive
+// direction and would silently WIDEN the container (exactly backwards for a safety switch). The
+// backend leaves the level untouched when it's absent. Mirrors setAutonomy otherwise — acting-human
+// choke point, optimistic/reconcile/revert.
 function setEnforce(value) {
   if (!actingHuman()) { toast("Pick an acting human to change enforcement", "warn"); return; }
   const cid = D.container && D.container.id;
@@ -233,7 +258,7 @@ function setEnforce(value) {
   const who = actingHuman();
   fetch("/api/containers/" + encodeURIComponent(cid) + "/autonomy", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ level: autLevel(), autonomy_enforced: value, actor_agent_id: who ? who.id : null }),
+    body: JSON.stringify({ autonomy_enforced: value, actor_agent_id: who ? who.id : null }),
   })
     .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
     .then((res) => {

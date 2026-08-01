@@ -217,9 +217,11 @@ if (typeof D === "undefined") {
     if (!who || !container) return;
     const previous = !!container.autonomy_enforced;
     container.autonomy_enforced = value; F_paintAutonomy();
+    /* F1: PARTIAL update — autonomy_enforced ONLY, no level (a lock flip must never re-assert a
+       possibly-stale cached level, which could silently widen the container). */
     fetch(`/api/containers/${encodeURIComponent(container.id)}/autonomy`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ level: container.autonomy_level || "plan", autonomy_enforced: value, actor_agent_id: who.id }),
+      body: JSON.stringify({ autonomy_enforced: value, actor_agent_id: who.id }),
     }).then((r) => { if (!r.ok) throw new Error("request failed"); return r.json(); })
       .then((data) => { container.autonomy_level = data.autonomy_level; container.autonomy_enforced = data.autonomy_enforced; F_paintAutonomy(); })
       .catch(() => { container.autonomy_enforced = previous; F_paintAutonomy(); });

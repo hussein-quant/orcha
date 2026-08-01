@@ -130,6 +130,16 @@ def update_agent(aid: str, body: AgentUpdate):
         if override_supplied and row["kind"] == "human":
             raise HTTPException(400, "humans carry no autonomy_override")
 
+        # F4 (round-1 review): granting/clearing an override REMOVES a human from the completion
+        # loop for one agent, yet the audit row logged only the field NAME ({"fields": [...]}) — no
+        # value, no before/after — so "who granted this agent full autonomy, and when" was
+        # unanswerable. Capture the prior override so the event can record before→after for the one
+        # setting that decides when a human stops verifying.
+        override_before = None
+        if override_supplied:
+            cur.execute("SELECT autonomy_override FROM agents WHERE id=%s", (aid,))
+            override_before = cur.fetchone()["autonomy_override"]
+
         sets, params, changed = [], [], []
         if body.role is not None:
             sets.append("role=%s")
@@ -162,6 +172,12 @@ def update_agent(aid: str, body: AgentUpdate):
                 409, f"alias '{body.alias}' already exists in this container"
             )
         updated = cur.fetchone()
+        # F4: name the fields that changed AND, for autonomy_override specifically, record the
+        # before→after value so the grant/clear of authority is fully auditable.
+        detail = {"fields": changed}
+        if override_supplied:
+            detail["autonomy_override"] = body.autonomy_override
+            detail["autonomy_override_before"] = override_before
         log_event(
             cur,
             row["container_id"],
@@ -170,7 +186,7 @@ def update_agent(aid: str, body: AgentUpdate):
             "agent",
             aid,
             "agent_updated",
-            {"fields": changed},
+            detail,
         )
         conn.commit()
     result = {"agent_id": aid, **updated}
