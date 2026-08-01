@@ -607,6 +607,22 @@ CLI release notes say so: `orcha sandbox build-image`. Auth stack upgrades:
 edit/pull under `/opt/orcha-cloud/deploy/auth`, then
 `docker compose --env-file .env -f docker-compose.auth.yml up -d`.
 
+### Boot resilience (restart policies)
+
+Every long-running container in both stacks — the Orcha stack's `portal` and
+`db` (`docker-compose.yml.j2`), and the auth stack's `caddy` and
+`oauth2-proxy` (`deploy/auth/docker-compose.auth.yml`) — runs with
+`restart: unless-stopped`. After a host reboot or a Docker-daemon restart,
+all four come back with zero manual commands: `docker compose up -d` is not
+needed. `unless-stopped` is chosen over the bare `always` specifically so an
+operator's deliberate `docker compose stop <service>` (or `down`, without
+`-v`) stays sticky — Docker will not silently resurrect a service you
+intentionally took offline on the next daemon restart. `restart: "no"`
+(compose's implicit default when the key is absent) was the original gap on
+the Orcha stack: `portal` and `db` had no policy at all, so only the auth
+stack's `caddy`/`oauth2-proxy` (which already carried `restart:
+unless-stopped`) came back after a power cycle.
+
 If you rsync a working tree to the box instead of pulling, **always** exclude
 the live secrets — a `--delete` rsync has wiped a box's `.env` before:
 
