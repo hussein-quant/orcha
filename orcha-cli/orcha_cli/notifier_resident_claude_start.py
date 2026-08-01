@@ -199,6 +199,23 @@ def _boot(
         spawn_info=_spawn_info,
     )
     if not sent or process is None:
+        # Issue #75: the box-wide concurrency cap deferred this resident boot (a
+        # resident IS a sandbox container, counted against the same budget). Release
+        # the claimed lease so the conversation re-competes on a later tick, but log it
+        # as a cap-defer (expected back-pressure), NOT a loud spawn failure. A worktree
+        # was provisioned above — teardown so a deferred boot leaves no orphan tree.
+        if _spawn_info.get("deferred"):
+            if worktree:
+                services._safe_teardown_worktree(base_cwd, worktree, branch)
+            if not quiet:
+                print(
+                    f"[notifier] cap-deferred resident boot for "
+                    f"{candidate.get('agent_alias')}: {spawn_repr} — "
+                    "stays eligible next tick"
+                )
+            services._revoke_or_defer(api_base, token)
+            _release_failed(services, api_base, candidate)
+            return None
         # Fail LOUD (spec §3.2): a sandbox-mode preflight/api-config failure
         # surfaces its "(sandbox unavailable: …)" reason here instead of the
         # conversation silently queueing forever.

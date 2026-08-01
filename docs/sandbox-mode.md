@@ -67,6 +67,50 @@ effective (defaults-filled-in) config.
 | `max_runtime_secs` | `7200` (2h) | Wall-clock deadline; the reaper `docker stop`s a container still running past it. |
 | `network` | *(derived)* | Docker network to attach the container to. If unset, derived as `<compose-name>_default` from `.orcha/docker-compose.yml`'s `name:` line — i.e. the stack's own compose network. Set explicitly only to override that. |
 
+## Concurrency cap — budgeting the box (issue #75)
+
+Nothing used to bound how many sandbox containers ran **at once**. During the
+2026-08-01 OOM incident (F1), six agents each with a ready task spawned six
+sandboxes within 11 seconds; an in-sandbox `npm ci` pushed the swapless 3.7 GB
+box into a global kernel OOM at 14:52:56, and the machine thrashed to death.
+
+The notifier now enforces a **box-wide budget on concurrent managed
+containers**, checked at the *last moment* before every spawn (both one-shot
+wakes and resident boots — a resident is a container too). Excess candidates are
+**deferred**, not lost: they stay eligible and spawn on a later tick once a slot
+frees. Work serializes; it never OOMs the box.
+
+- **Ground truth, host-wide.** The count is live `orcha.managed` containers from
+  `docker ps` across *every* workspace and daemon on the host (drain sidecars,
+  `orcha.sidecar=1`, are excluded — they own no run row). It is **not**
+  `orcha.cid`-scoped, so two Orcha stacks on one machine share one honest budget
+  against the same physical RAM, and racing daemons can't double-book between
+  ticks. A docker hiccup fails **open** (allow the spawn) — the reaper, not the
+  cap, is the backstop for a genuine runaway.
+- **Memory-derived default.** With no override, the cap self-adjusts to the box:
+
+  ```
+  max(1, (host_mem_mb - 2048) // sandbox_mem_mb)
+  ```
+
+  `host_mem_mb` is read from `/proc/meminfo` (`MemTotal`); the 2048 MiB reserve
+  covers portal + db + system; `sandbox_mem_mb` is this workspace's `memory` cap
+  (the same `sandbox.memory` key above). So the incident box (3.7 GB RAM, 4 GB
+  per sandbox) budgets exactly **1** — precisely the bound the six-in-11s herd
+  blew past. A 32 GB box with 4 GB sandboxes budgets 7, and so on. Floors at 1
+  (a machine can always run one). On a host with no `/proc/meminfo` (non-Linux
+  dev machines) it falls back to a fixed default of **2**.
+- **Env override wins.** Set `ORCHA_MAX_CONCURRENT_SANDBOXES` in the notifier
+  daemon's environment to a positive integer to pin the cap explicitly
+  (garbage / values `< 1` are ignored, falling back to the derived default).
+- **Deferral is logged once** per tick per deferred candidate (`[notifier]
+  cap-deferred wake for <alias> …`) — visibility without per-second noise.
+
+**Fairness (no starvation).** The server-side wake-scan already orders
+candidates `ORDER BY created_at` (oldest agent first); a deferred candidate
+stays eligible and re-competes in that same stable order next tick, so the
+oldest waiting agent is served first — no queue of our own is needed.
+
 ## How it works
 
 Each wake becomes one `docker run` instead of one host `Popen`:
@@ -125,6 +169,7 @@ is never something that happens silently on your behalf.
 | Runner image missing | Preflight fails with `runner image <image> not present — run \`docker pull <image>\` (or \`orcha sandbox build-image\`)`. |
 | Disk low (< 5 GiB free on the workspace volume) | Preflight fails with an insufficient-disk reason before spawning. |
 | Out of memory | Docker OOM-kills the container; the reaper reads `OOMKilled` from `docker inspect` and stamps the run `killed` with reason "out of memory — raise sandbox.memory". |
+| Too many concurrent sandboxes | The spawn is **deferred** (not failed): the box is already at its concurrency budget (see *Concurrency cap* above). The candidate stays eligible and spawns on a later tick once a slot frees; the notifier logs one `cap-deferred` line. Raise the budget with `ORCHA_MAX_CONCURRENT_SANDBOXES` or move to a bigger box. |
 | Past its runtime deadline | A container still `running` older than `max_runtime_secs` gets `docker stop`'d by the reaper; the *next* sweep stamps the run from its real exit code once it has actually exited. |
 | Orphaned container | A live, managed container with no open `worker_runs` row referencing it gets stopped (never removed) by the reaper's per-sweep orphan pass — scoped to this project's `orcha.cid` label, so it never touches another stack's containers on the same host. |
 | Notifier/daemon restart mid-run | The sweep treats a live container whose row is still `running` as **adopted**, not orphaned — it is left alone and reconciled from its real state on a later sweep. Runs are never killed just because the daemon that spawned them restarted. |

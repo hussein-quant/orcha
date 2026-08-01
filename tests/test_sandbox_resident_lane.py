@@ -75,6 +75,7 @@ def test_build_docker_argv_interactive_inserts_dash_i():
 def test_dry_run_repr_shows_docker_run_dash_i(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     ok, repr_, proc = notifier.spawn_resident(str(proj), alias="Vox", dry_run=True)
     assert ok is False and proc is None
     assert "docker run -i" in repr_ and "orcha-run-" in repr_
@@ -87,6 +88,7 @@ def test_sandbox_spawn_keeps_stdin_pipe_and_needs_no_host_claude(tmp_path, monke
     and a cloud box needs NO host claude install (the guard is sandbox-aware)."""
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     monkeypatch.setattr(notifier.shutil, "which", lambda x: None)   # no host binary
     monkeypatch.setattr(notifier.subprocess, "Popen", CapturePopen)
     info = {}
@@ -122,6 +124,7 @@ def test_preflight_failure_fails_resident_loudly_without_popen(tmp_path, monkeyp
 def test_api_config_write_failure_fails_resident_without_popen(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     def _oserr(*a, **k):
         raise OSError("read-only filesystem")
     monkeypatch.setattr(sandbox, "write_api_config", _oserr)
@@ -136,6 +139,7 @@ def test_api_config_write_failure_fails_resident_without_popen(tmp_path, monkeyp
 def test_resident_spawn_stamps_project_cid_label(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     captured = {}
     real_build = sandbox.build_docker_argv
     def _spy(inner_argv, **kw):
@@ -151,6 +155,7 @@ def test_resident_spawn_stamps_project_cid_label(tmp_path, monkeypatch):
 def test_resident_sandbox_inner_argv_uses_bare_binary(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     monkeypatch.setattr(notifier, "_resolve_runtime_executable",
                         lambda runtime: "/opt/host/bin/claude")
     captured = {}
@@ -166,6 +171,7 @@ def test_resident_sandbox_inner_argv_uses_bare_binary(tmp_path, monkeypatch):
 def test_resident_sandbox_repr_never_leaks_persona(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     ok, repr_, _ = notifier.spawn_resident(
         str(proj), alias="Vox", system_prompt="PERSONAxDIGESTxPAYLOAD", dry_run=True)
     assert "PERSONAxDIGESTxPAYLOAD" not in repr_
@@ -176,6 +182,7 @@ def test_resident_dry_run_writes_nothing_into_project(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     before = {str(p) for p in proj.rglob("*")}
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     notifier.spawn_resident(str(proj), alias="Vox", dry_run=True)
     assert not (proj / ".orcha" / "sandbox").exists()
     assert {str(p) for p in proj.rglob("*")} == before
@@ -234,6 +241,7 @@ def test_resident_boot_threads_container_into_handle_and_turn_run_row(monkeypatc
     posts = _wire(monkeypatch, active=[conv],
                   turns=[{"seq": 1, "role": "human", "content": "hello"}])
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     monkeypatch.setattr(notifier, "_is_git_repo", lambda p: False)  # spawn in base_cwd
     monkeypatch.setattr(notifier.subprocess, "Popen", CapturePopen)
     live = {}
