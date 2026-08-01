@@ -46,6 +46,7 @@ global.document = { documentElement:{setAttribute(){}}, addEventListener(){}, ge
   createElement:()=>({classList:{add(){},remove(){}},addEventListener(){},style:{},appendChild(){}}), body:{appendChild(){}} };
 __APPJS__
 const M = window.Orcha.mdText;
+const LF = window.Orcha.linkify;
 const A = (name, cond) => { if (!cond) { console.error("FAIL: " + name); process.exit(1); } };
 
 // SECURITY: html is neutralized, never emitted raw
@@ -62,6 +63,18 @@ A("md link", M("[docs](https://x.io/d)").indexOf('href="https://x.io/d"') !== -1
 // GH #202 review: a URL with a balanced (...) group (e.g. a Wikipedia article title) must
 // keep the whole group in the href, not truncate at the inner `)`.
 A("md link with balanced-paren URL", M("[docs](https://en.wikipedia.org/wiki/Function_(mathematics))").indexOf('href="https://en.wikipedia.org/wiki/Function_(mathematics)"') !== -1);
+// GH #202 review round 2: the [text](url) lane above was fixed first, but a PLAIN pasted
+// URL (no markdown link syntax) went through splitUrlTail()'s balance-scan AND a second,
+// balance-UNAWARE punctuation trim that stripped the very ")" the scan had just kept —
+// regressing the bare-URL autolink lane specifically. Pin it directly.
+A("bare URL with balanced-paren tail keeps the whole URL in the href",
+  M("see https://en.wikipedia.org/wiki/Function_(mathematics) now").indexOf('href="https://en.wikipedia.org/wiki/Function_(mathematics)"') !== -1);
+A("bare URL with unbalanced trailing )) still peels the )) off",
+  M("https://x.io/a))").indexOf('href="https://x.io/a"') !== -1 && M("https://x.io/a))").indexOf("</a>))") !== -1);
+// same balance-aware trim is shared by the standalone linkify() helper (thread messages,
+// request payloads, plan bodies) — pin it there too, not just inside mdText's bare-URL pass.
+A("linkify(): bare URL with balanced-paren tail keeps the whole URL in the href",
+  LF("https://en.wikipedia.org/wiki/Function_(mathematics)") === '<a class="lnk" href="https://en.wikipedia.org/wiki/Function_(mathematics)" target="_blank" rel="noopener noreferrer">https://en.wikipedia.org/wiki/Function_(mathematics)</a>');
 // GH #202 review: "> ".repeat(5000)+"deep" is 10,004 chars (under the 100k conversation
 // limit) and used to throw RangeError via recursive quote parsing; it must render safely.
 A("deep blockquote does not throw", (() => { try { return M("> ".repeat(5000) + "deep").indexOf("<blockquote") !== -1; } catch (e) { return false; } })());

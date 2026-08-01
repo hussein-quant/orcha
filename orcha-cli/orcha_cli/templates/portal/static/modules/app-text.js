@@ -44,12 +44,19 @@ function taskRefs(html) {
     });
   }).join("");
 }
-// GH #202 review: a URL that legitimately contains a balanced `(...)` group — e.g. a
-// Wikipedia article title like Function_(mathematics) — must keep that group INSIDE the
+// GH #202 review (round 2): a URL that legitimately contains a balanced `(...)` group — e.g.
+// a Wikipedia article title like Function_(mathematics) — must keep that group INSIDE the
 // URL; only a genuinely unbalanced trailing `)` (closing a surrounding markdown/sentence
 // paren) gets peeled off. Count parens left-to-right and stop the URL at the first `)`
 // that would go negative (nothing left open to close), same rule the [text](url) balanced
-// matcher below encodes structurally. Shared by bare-URL autolinking (mdText + linkify).
+// matcher below (URL_IN_PARENS) encodes structurally. Shared by bare-URL autolinking (mdText + linkify).
+//
+// Round-1 fix only did the depth-scan above; round 2 found that the trailing-punctuation
+// trim that followed re-stripped the very `)` the scan had just kept, because it matched
+// `)` unconditionally. The trim below is now balance-aware: walking right-to-left, a `)`
+// is only peeled off when it is UNBALANCED in what's left of `url` (no earlier `(` to match
+// it) — the same rule as the scan. Every other character in the punctuation class still
+// trims unconditionally.
 function splitUrlTail(m) {
   let depth = 0, cut = m.length;
   for (let i = 0; i < m.length; i++) {
@@ -58,8 +65,16 @@ function splitUrlTail(m) {
     else if (c === ")") { if (depth === 0) { cut = i; break; } depth--; }
   }
   let url = m.slice(0, cut), tail = m.slice(cut);
-  const t = url.match(/[)\].,;:!?]+$/);   // (text is escaped, so quotes/apostrophes are entities)
-  if (t) { tail = url.slice(url.length - t[0].length) + tail; url = url.slice(0, url.length - t[0].length); }
+  let end = url.length;                   // (text is escaped, so quotes/apostrophes are entities)
+  while (end > 0 && /[)\].,;:!?]/.test(url[end - 1])) {
+    if (url[end - 1] === ")") {
+      let bal = 0;
+      for (let i = 0; i < end; i++) { if (url[i] === "(") bal++; else if (url[i] === ")") bal--; }
+      if (bal >= 0) break;                // balanced (or no opener at all) — keep it, stop trimming
+    }
+    end--;
+  }
+  if (end < url.length) { tail = url.slice(end) + tail; url = url.slice(0, end); }
   return [url, tail];
 }
 // ISS-44: make URLs in authored text clickable. SAFETY: esc() FIRST (so the text can never

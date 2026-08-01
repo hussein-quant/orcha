@@ -44,6 +44,7 @@ vm.runInContext('var tasks = () => [{ id: "e4b77f3f-0000-4000-8000-000000000000"
 vm.runInContext(fs.readFileSync(path.join(STATIC, "modules", "app-text.js"), "utf8"),
   sandbox, { filename: "modules/app-text.js" });
 const M = (s) => vm.runInContext("mdText(" + JSON.stringify(s) + ")", sandbox);
+const LF = (s) => vm.runInContext("linkify(" + JSON.stringify(s) + ")", sandbox);
 
 /* ---------------- PART A — XSS: authored text can never inject html -------- */
 console.log("\nPART A — escaping\n");
@@ -81,6 +82,21 @@ console.log("\nPART A — escaping\n");
   const j = M('[x](https://x.io/(<script>alert(1)</script>))');
   assert(j.indexOf("<script>") === -1 && j.indexOf("&lt;script&gt;") !== -1,
     "an html tag inside a balanced-paren URL segment still stays escaped, never live markup");
+  // GH #202 review round 2: the balance-aware punctuation trim in splitUrlTail() is now
+  // shared by the PLAIN bare-URL lane too (mdText's bare-URL pass + linkify()) — re-run the
+  // same adversarial probes through that lane so the fix doesn't reopen href/tag injection.
+  const k = M('https://x.io/(a)"onmouseover="alert(1)');
+  assert(k.indexOf('href="https://x.io/(a)&quot;onmouseover=&quot;alert(1)"') !== -1 && k.indexOf('onmouseover="alert') === -1,
+    "bare URL (mdText): a quote alongside a balanced-paren segment still can't break out of the href attribute");
+  const l = M('https://x.io/(<script>alert(1)</script>)');
+  assert(l.indexOf("<script>") === -1 && l.indexOf("&lt;script&gt;") !== -1,
+    "bare URL (mdText): an html tag inside a balanced-paren segment still stays escaped, never live markup");
+  const kL = LF('https://x.io/(a)"onmouseover="alert(1)');
+  assert(kL.indexOf('href="https://x.io/(a)&quot;onmouseover=&quot;alert(1)"') !== -1 && kL.indexOf('onmouseover="alert') === -1,
+    "bare URL (linkify): a quote alongside a balanced-paren segment still can't break out of the href attribute");
+  const lL = LF('https://x.io/(<script>alert(1)</script>)');
+  assert(lL.indexOf("<script>") === -1 && lL.indexOf("&lt;script&gt;") !== -1,
+    "bare URL (linkify): an html tag inside a balanced-paren segment still stays escaped, never live markup");
 }
 
 /* ---------------- PART B — every construct renders ------------------------- */
@@ -132,6 +148,32 @@ console.log("\nPART B — constructs\n");
   const AU = M("see https://x.io/a. done");
   assert(AU.indexOf('href="https://x.io/a"') !== -1 && AU.indexOf("</a>.") !== -1,
     "bare URL autolinks; trailing period stays outside the link");
+  // GH #202 review round 2: splitUrlTail()'s balance-scan correctly kept a legitimate
+  // trailing ")" (e.g. …Function_(mathematics)), but the punctuation-trim step that ran
+  // right after it stripped that same balanced ")" back off — regressing the PLAIN pasted
+  // URL lane (both mdText's bare-URL pass and the standalone linkify() helper) even though
+  // the [text](url) lane above was fixed. Pin both lanes directly.
+  const BARE_MD = M("see https://en.wikipedia.org/wiki/Function_(mathematics) now");
+  assert(BARE_MD.indexOf('href="https://en.wikipedia.org/wiki/Function_(mathematics)"') !== -1,
+    "mdText(): a PLAIN pasted URL with a balanced-paren tail keeps the whole URL in the href");
+  assert(BARE_MD.indexOf(">https://en.wikipedia.org/wiki/Function_(mathematics)</a> now") !== -1,
+    "…and nothing is left dangling as text after the anchor closes");
+  const BARE_LINKIFY = LF("https://en.wikipedia.org/wiki/Function_(mathematics)");
+  assert(BARE_LINKIFY === '<a class="lnk" href="https://en.wikipedia.org/wiki/Function_(mathematics)" target="_blank" rel="noopener noreferrer">https://en.wikipedia.org/wiki/Function_(mathematics)</a>',
+    "linkify(): same plain-URL balanced-paren case, exact output");
+  // sentence-level parens around a plain URL still work: the OUTER paren was never part of
+  // the URL match to begin with, so it stays outside regardless of the URL's own parens.
+  const BARE_SENTENCE = M("(see https://en.wikipedia.org/wiki/Function_(mathematics))");
+  assert(BARE_SENTENCE.indexOf('href="https://en.wikipedia.org/wiki/Function_(mathematics)"') !== -1
+    && BARE_SENTENCE.indexOf("</a>)</div>") !== -1,
+    "a plain URL with its own balanced paren, itself inside a sentence's parens, splits at the right boundary");
+  // genuinely unbalanced trailing close(s) on a plain URL still get peeled off, in both lanes.
+  const UNBAL_MD = M("https://x.io/a))");
+  assert(UNBAL_MD.indexOf('href="https://x.io/a"') !== -1 && UNBAL_MD.indexOf("</a>))") !== -1,
+    "mdText(): an unbalanced trailing )) on a plain URL is still peeled off, not swallowed");
+  const UNBAL_LINKIFY = LF("https://x.io/a))");
+  assert(UNBAL_LINKIFY.indexOf('href="https://x.io/a"') !== -1 && UNBAL_LINKIFY.indexOf("</a>))") !== -1,
+    "linkify(): same unbalanced-trailing-)) case");
   const IMG = M("![diagram](https://x.io/d.png)");
   assert(IMG.indexOf("<img") === -1 && IMG.indexOf(">diagram</a>") !== -1,
     "images render as plain LINKS (alt as text), never <img>");
