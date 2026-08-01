@@ -3,7 +3,13 @@
    navigation, no third-party request, works offline/air-gapped.
    Variable woff2 instances (latin + latin-ext subsets) fetched once from the
    Google Fonts css2 API and served from /assets/fonts/. font-display: swap
-   keeps text visible in the system fallback while a font streams in. */
+   keeps text visible in the system fallback while a font streams in.
+
+   Licensing (round-2 review, public-release blocker): all three families are
+   SIL Open Font License 1.1 — Inter by Rasmus Andersson, JetBrains Mono by
+   JetBrains s.r.o., Space Grotesk by Florian Karsten. Full license text +
+   per-file provenance: static/fonts/OFL.txt and static/fonts/README.md
+   (same vendoring convention as static/vendor/README.md). */
 
 /* ---- Inter (UI text) — variable, wght 400..800 -------------------------- */
 @font-face {
