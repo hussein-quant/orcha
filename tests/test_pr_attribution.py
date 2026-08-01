@@ -27,7 +27,9 @@ def test_migration_042_exists_and_is_next_sequential():
     assert "git_email" in f.read_text()
     numbers = sorted(int(m.group(1)) for p in mig_dir.glob("*.sql")
                      if (m := re.match(r"^(\d+)_", p.name)))
-    assert numbers[-1] == 42, f"042 must be the latest migration, saw {numbers[-1]:03d}"
+    # cloud #64 (per-agent autonomy overrides) added 043_agent_autonomy_override.sql as the next
+    # sequential migration, so 043 is now the latest. 042 (git_email) still exists (asserted above).
+    assert numbers[-1] == 43, f"043 must be the latest migration, saw {numbers[-1]:03d}"
 
 
 def test_agents_git_email_column_applied(db):

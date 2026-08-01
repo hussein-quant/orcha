@@ -3,6 +3,7 @@
 from fastapi import HTTPException, Request
 
 from portal_backend.application import app
+from portal_backend.autonomy import effective_autonomy
 from portal_backend.database import db_cursor
 from portal_backend.guards import valid_uuid as _valid_uuid
 from portal_backend.identity_routes import require_member_read as _require_member_read
@@ -32,7 +33,7 @@ def get_container(
         cur.execute(
             """SELECT id, name, description, status, root_task_id,
                       max_auto_agents, max_tasks, execution_mode, wakes_enabled,
-                      autonomy_level, github_repo,
+                      autonomy_level, autonomy_enforced, github_repo,
                       -- mig 037: the notifier's last wake-scan poll — recent means a
                       -- host daemon serves THIS project's wakes (switcher/notice signal).
                       last_wake_scan_at,
@@ -55,6 +56,10 @@ def get_container(
                       -- Collab v1: GitHub identity + project role so the portal renders
                       -- member chips/avatars and owner-only affordances off the same poll.
                       a.github_login, a.member_role,
+                      -- mig 043: this agent's per-agent autonomy override (NULL = inherit the
+                      -- container level). The roster card renders a small badge when non-NULL;
+                      -- the effective level is computed below (container-enforced aware).
+                      a.autonomy_override,
                       -- #266: the configured clock-driven auto-wake cadence (NULL = off) so the
                       -- portal can render/edit it on the agent card without a second call.
                       a.auto_wake_interval_secs,
@@ -182,6 +187,19 @@ def get_container(
             (cid, cid),
         )
         agents = cur.fetchall()
+
+        # mig 043: surface each agent's EFFECTIVE autonomy level alongside its raw override, using
+        # the ONE shared rule (container level if the container enforces it for everyone, else the
+        # agent's override, else the container level). Additive per-agent field — the container's
+        # own autonomy_level/autonomy_enforced remain on `c` unchanged, so no existing field shifts
+        # meaning. The roster reads `autonomy_override` for the badge and `effective_autonomy` for
+        # the "acts as" label; the container carries the lock (autonomy_enforced) glyph.
+        _cl = c["autonomy_level"]
+        _ce = bool(c["autonomy_enforced"])
+        for _a in agents:
+            _a["effective_autonomy"] = effective_autonomy(
+                _cl, _ce, _a.get("autonomy_override")
+            )
 
         # ISS-68: TRIMMED, priority-ordered, capped task rows (same shape as GET
         # /api/containers/{cid}/tasks — message_summary + plan_message, NO full thread).

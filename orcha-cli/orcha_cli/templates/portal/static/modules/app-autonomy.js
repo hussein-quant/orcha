@@ -28,6 +28,13 @@ function autLevel() {
   return (D.container && D.container.autonomy_level) || "plan";
 }
 
+// mig 043: the container-wide "enforce for all agents" switch (containers.autonomy_enforced).
+// true = every per-agent autonomy_override is IGNORED (the container level governs everyone);
+// false (the migration default, and the read on a pre-043 snapshot) = overrides apply.
+function autEnforced() {
+  return !!(D.container && D.container.autonomy_enforced);
+}
+
 // Inject the paused micro-banner once, immediately after the topbar (shared across pages).
 function ensurePausebar(topbar) {
   if (!topbar || document.getElementById("pausebar")) return;
@@ -86,6 +93,14 @@ function paintLevels() {
   const canAct = !!actingHuman();
   host.classList.toggle("locked", !canAct);
   host.classList.toggle("dimmed", paused);
+  // mig 043: the "Enforce for all agents" lock chip lives beside the 3 level segs — lit when
+  // containers.autonomy_enforced is on (per-agent overrides ignored), unlit when overrides apply.
+  const enforced = autEnforced();
+  const lockTip = canAct
+    ? (enforced
+        ? "Enforced — the container level governs EVERY agent; per-agent autonomy overrides are ignored. Click to honor overrides again."
+        : "Enforce the container level for ALL agents — per-agent autonomy overrides are ignored while on.")
+    : "Pick an acting human to change enforcement";
   host.innerHTML = AUT_LEVELS.map((rg) => {
     const active = rg.level === level;
     const cls = "seg lvl " + rg.tone + (active ? " on" : "");
@@ -96,10 +111,12 @@ function paintLevels() {
       : "Pick an acting human to change autonomy";
     return `<span class="${cls}" data-level="${rg.level}" role="radio" aria-checked="${active}" tabindex="0"
       title="${esc(tip)}"><span class="d"></span>${esc(rg.label)}</span>`;
-  }).join("");
+  }).join("") + `<span class="seg lock${enforced ? " on" : ""}" data-enforce="1" role="switch" aria-checked="${enforced}" tabindex="0"
+    title="${esc(lockTip)}">${enforced ? "🔒 Enforced" : "Enforce"}</span>`;
   host.querySelectorAll(".seg").forEach((seg) => {
-    seg.onclick = () => onLevelClick(seg.dataset.level);
-    seg.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onLevelClick(seg.dataset.level); } };
+    const act = seg.dataset.enforce ? onEnforceClick : () => onLevelClick(seg.dataset.level);
+    seg.onclick = act;
+    seg.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } };
   });
 }
 
@@ -186,6 +203,52 @@ function setWakes(enabled) {
     });
 }
 
+// mig 043: ENFORCE click → flip the container-wide "overrides ignored" switch. Turning it ON
+// silences every per-agent override (danger-flagged — it can NARROW or WIDEN what individual
+// agents may do, silently); turning it OFF re-honors overrides (light confirm).
+function onEnforceClick() {
+  if (!actingHuman()) { toast("Pick an acting human to change enforcement", "warn"); return; }
+  const on = autEnforced();
+  modal({
+    title: on ? "Stop enforcing the container level?" : "Enforce autonomy for all agents?",
+    desc: on
+      ? "Per-agent autonomy overrides apply again — an agent with its own level acts at that level."
+      : "Every per-agent autonomy override is IGNORED while enforced — the container level governs all agents.",
+    primary: on ? "Honor overrides" : "Enforce for all",
+    danger: !on,
+    onPrimary: () => { closeModal(); setEnforce(!on); },
+  });
+}
+
+// mig 043: POST the enforce switch through the SAME container autonomy endpoint (the backend
+// takes an optional autonomy_enforced beside the level; level is re-sent unchanged). Mirrors
+// setAutonomy — acting-human choke point, optimistic/reconcile/revert.
+function setEnforce(value) {
+  if (!actingHuman()) { toast("Pick an acting human to change enforcement", "warn"); return; }
+  const cid = D.container && D.container.id;
+  if (!cid) { toast("No container", "danger"); return; }
+  const prev = autEnforced();
+  D.container.autonomy_enforced = value;   // optimistic
+  paintAutonomy();
+  const who = actingHuman();
+  fetch("/api/containers/" + encodeURIComponent(cid) + "/autonomy", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ level: autLevel(), autonomy_enforced: value, actor_agent_id: who ? who.id : null }),
+  })
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then((res) => {
+      D.container.autonomy_level = res.autonomy_level;
+      D.container.autonomy_enforced = res.autonomy_enforced;
+      paintAutonomy();
+      toast(res.autonomy_enforced ? "Autonomy · Enforced for all agents" : "Autonomy · Overrides honored", "ok");
+    })
+    .catch((e) => {
+      D.container.autonomy_enforced = prev;   // revert
+      paintAutonomy();
+      toast("Could not change enforcement: " + e.message, "danger");
+    });
+}
+
 // #298: POST the engine autonomy LEVEL, optimistic-paint, then reconcile from the response
 // (and the next snapshot). Mirrors setWakes — same acting-human choke point, same
 // optimistic/reconcile/revert shape — but writes containers.autonomy_level via
@@ -206,6 +269,9 @@ function setAutonomy(level) {
     .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
     .then((res) => {
       D.container.autonomy_level = res.autonomy_level;
+      // mig 043: the endpoint now returns the enforce switch too — reconcile it (a pre-043
+      // backend omits the key: leave the local read untouched rather than clobbering to undefined).
+      if ("autonomy_enforced" in res) D.container.autonomy_enforced = res.autonomy_enforced;
       paintAutonomy();
       const rg = AUT_LEVELS.find((x) => x.level === res.autonomy_level);
       toast("Autonomy · " + (rg ? rg.label : res.autonomy_level), "ok");
