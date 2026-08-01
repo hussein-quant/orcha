@@ -1472,6 +1472,9 @@ def test_ensure_daemon_refuses_cross_worktree_duplicate(monkeypatch, tmp_path):
     # shelling out to a real `ps` (whose subprocess.run would also trip the Popen spy below).
     monkeypatch.setattr(notifier, "_pid_alive", lambda pid: pid == 77777)
     monkeypatch.setattr(notifier, "_daemon_pid_live", lambda pid, cid=None: pid == 77777)
+    # ISS-22 r3: the SERVING-lane claim check goes through _daemon_pid_healthy now
+    monkeypatch.setattr(notifier, "_daemon_pid_healthy",
+                        lambda pid, cid=None, cwd=None: pid == 77777)
     spawned = []
     monkeypatch.setattr(notifier.subprocess, "Popen",
                         lambda *a, **k: spawned.append(a))
@@ -1725,6 +1728,9 @@ def test_stop_daemon_stops_cross_worktree_daemon(monkeypatch, tmp_path):
     (gdir / "notifier-cid-1.pid").write_text(f"77777\n{wt_a}")   # A's daemon, alive
     killed = []
     monkeypatch.setattr(notifier, "_pid_alive", lambda pid: pid == 77777 and 77777 not in killed)
+    # ISS-22 r3: serving-lane lookup (daemon_running_for_container) vets health first
+    monkeypatch.setattr(notifier, "_daemon_pid_healthy",
+                        lambda pid, cid=None, cwd=None: pid == 77777 and 77777 not in killed)
     monkeypatch.setattr(notifier.os, "kill", lambda pid, sig: killed.append(pid))
     assert notifier.stop_daemon(wt_b, quiet=True) is True        # B has NO per-cwd pidfile
     assert killed == [77777], "the A-started daemon must be SIGTERMed exactly once (it exits, no SIGKILL)"
