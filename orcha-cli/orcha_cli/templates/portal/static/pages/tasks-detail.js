@@ -1,16 +1,25 @@
 /* Tasks page controller: task detail, gate surface, protocol, assignment, and message rows. */
 
-/* open-orcha#209: tasks.result is JSONB and /done accepts any JSON, but these
-   render sites string-interpolate — an agent posting a structured result (e.g.
-   {"result": "PR #203 opened…"}) showed the verifying human literally
-   "[object Object]" at the verification gate. Normalize every shape to text:
-   strings pass through; objects with a conventional text field yield that
-   field; anything else becomes readable pretty-printed JSON (escaped by the
-   caller's linkify/esc as usual). */
+/* open-orcha#209: tasks.result is JSONB, but /done (TaskDone.result) takes a
+   required plain string — the server is the one that turns it into an object:
+   task_done_routes.py wraps every completion in {"result": <text>, "by_agent_id":
+   <uuid>} before writing tasks.result, and the list query hands that envelope
+   back raw. These render sites string-interpolated it as-is — the verifying
+   human saw literally "[object Object]" at the verification gate. Normalize
+   every shape to text: strings pass through; the known {result, by_agent_id}
+   envelope unwraps explicitly (even when result is blank, so a blank result
+   still falls through to the caller's "—" instead of dumping the envelope);
+   any other object with a conventional text field yields that field; anything
+   else becomes readable pretty-printed JSON (escaped by the caller's
+   linkify/esc as usual). */
 function resultText(r) {
   if (r == null) return "";
   if (typeof r === "string") return r;
   if (typeof r === "object") {
+    // the ONE shape /done actually produces: unwrap it explicitly, blank or not,
+    // so a blank agent result renders as "—" (via the caller's fallback) instead
+    // of leaking the envelope — including the agent's UUID — onto the gate.
+    if (typeof r.result === "string" && "by_agent_id" in r) return r.result;
     for (const k of ["result", "summary", "text", "message"]) {
       if (typeof r[k] === "string" && r[k].trim()) return r[k];
     }
