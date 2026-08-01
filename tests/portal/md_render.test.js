@@ -72,6 +72,15 @@ console.log("\nPART A — escaping\n");
   const h = M("# <script>x</script>heading");
   assert(h.indexOf("<script") === -1 && h.indexOf("<h1>") !== -1,
     "escaping holds inside headings");
+  // GH #202 review: the balanced-paren URL fix must not open an href-injection path — a
+  // quote/tag inside a URL's balanced (...) group still has to come out escaped, and the
+  // link syntax's own trailing `)` still has to close the href, not get glued into it.
+  const i = M('[x](https://x.io/(a)"onmouseover="alert(1))');
+  assert(i.indexOf('href="https://x.io/(a)&quot;onmouseover=&quot;alert(1)"') !== -1 && i.indexOf('onmouseover="alert') === -1,
+    "a quote alongside a balanced-paren URL segment still can't break out of the href attribute");
+  const j = M('[x](https://x.io/(<script>alert(1)</script>))');
+  assert(j.indexOf("<script>") === -1 && j.indexOf("&lt;script&gt;") !== -1,
+    "an html tag inside a balanced-paren URL segment still stays escaped, never live markup");
 }
 
 /* ---------------- PART B — every construct renders ------------------------- */
@@ -88,16 +97,38 @@ console.log("\nPART B — constructs\n");
   assert(M("- a\n- b") === "<ul><li>a</li><li>b</li></ul>", "unordered list");
   assert(M("1. a\n2. b") === "<ol><li>a</li><li>b</li></ol>", "ordered list");
   assert(M("3. a\n4. b").indexOf('<ol start="3">') === 0, "ordered list keeps its start number");
-  assert(M("- a\n  - b\n- c") === "<ul><li>a</li><ul><li>b</li></ul><li>c</li></ul>",
-    "NESTED list — 2-space indent opens a sub-list, dedent closes it");
+  // GH #202 review: the nested sub-list must render INSIDE its parent <li>, not as a
+  // sibling of it — <li>a</li><ul>… is invalid list structure and breaks accessibility
+  // trees. Correct shape nests the child <ul> inside <li>a…</li> before it closes.
+  assert(M("- a\n  - b\n- c") === "<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>",
+    "NESTED list — child <ul> nests INSIDE the parent <li>, dedent closes back out to a sibling <li>");
   assert(M("- a\n  1. b\n- c").indexOf("<ol><li>b</li></ol>") !== -1, "ordered list nests under a bullet");
   assert(M("> quoted") === '<blockquote class="md-quote"><div class="md-p">quoted</div></blockquote>', "blockquote");
   assert(M("> a\n> b").indexOf("a<br>b") !== -1, "multi-line blockquote keeps its lines");
+  // GH #202 review: "> ".repeat(5000)+"deep" is 10,004 chars (well under the 100k conversation
+  // limit) and used to throw RangeError — one recursive block-render call per nesting level.
+  // Quote depth is now capped at a safe max; deeper input degrades to literal text instead of
+  // crashing. This is the accepted-size regression test for that report.
+  {
+    let deepOut, threw = false;
+    try { deepOut = M("> ".repeat(5000) + "deep"); } catch (e) { threw = true; }
+    assert(!threw, "a 5000-deep blockquote run does not throw (was: RangeError, stack overflow)");
+    assert(!threw && deepOut.indexOf("<blockquote") !== -1 && deepOut.indexOf("deep") !== -1,
+      "…and still renders quote markup with the trailing text intact");
+  }
   assert(M("a\n---\nb").indexOf("<hr>") !== -1, "--- renders a horizontal rule");
   assert(M("***").indexOf("<hr>") !== -1 && M("___").indexOf("<hr>") !== -1, "*** and ___ rules too");
   const L = M("see [the docs](https://x.io/docs) now");
   assert(L.indexOf('<a class="lnk" href="https://x.io/docs" target="_blank" rel="noopener noreferrer">the docs</a>') !== -1,
     "[text](url) link — target=_blank rel=noopener");
+  // GH #202 review: a URL with a balanced (...) group — e.g. a Wikipedia article title like
+  // Function_(mathematics) — must keep the whole group in the href, not truncate at the
+  // inner `)` and leave the final `)` dangling outside the link as text.
+  const PAREN = M("see [docs](https://en.wikipedia.org/wiki/Function_(mathematics)) now");
+  assert(PAREN.indexOf('href="https://en.wikipedia.org/wiki/Function_(mathematics)"') !== -1,
+    "[text](url) link with a balanced-paren URL keeps the whole URL in the href");
+  assert(PAREN.indexOf(">docs</a>) now") === -1 && PAREN.indexOf(">docs</a> now") !== -1,
+    "…and the link's own closing paren is consumed by the markdown syntax, not left dangling in the text");
   const AU = M("see https://x.io/a. done");
   assert(AU.indexOf('href="https://x.io/a"') !== -1 && AU.indexOf("</a>.") !== -1,
     "bare URL autolinks; trailing period stays outside the link");

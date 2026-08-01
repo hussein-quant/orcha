@@ -59,11 +59,19 @@ A("inline code keeps stars", M("use `a * b`").indexOf('<code class="md-code">a *
 A("fenced block", M("```\nx*y\n```").indexOf('<pre class="md-pre"><code>x*y</code></pre>') !== -1);
 A("autolink", M("see https://x.io/a.").indexOf('<a class="lnk" href="https://x.io/a"') !== -1);
 A("md link", M("[docs](https://x.io/d)").indexOf('href="https://x.io/d"') !== -1);
+// GH #202 review: a URL with a balanced (...) group (e.g. a Wikipedia article title) must
+// keep the whole group in the href, not truncate at the inner `)`.
+A("md link with balanced-paren URL", M("[docs](https://en.wikipedia.org/wiki/Function_(mathematics))").indexOf('href="https://en.wikipedia.org/wiki/Function_(mathematics)"') !== -1);
+// GH #202 review: "> ".repeat(5000)+"deep" is 10,004 chars (under the 100k conversation
+// limit) and used to throw RangeError via recursive quote parsing; it must render safely.
+A("deep blockquote does not throw", (() => { try { return M("> ".repeat(5000) + "deep").indexOf("<blockquote") !== -1; } catch (e) { return false; } })());
 A("heading", M("# Title") === "<h1>Title</h1>");
 A("heading scale caps at h4", M("##### deep") === "<h4>deep</h4>");
 A("bullet list", M("- item") === "<ul><li>item</li></ul>");
 A("ordered list", M("1. a\n2. b") === "<ol><li>a</li><li>b</li></ol>");
-A("nested list", M("- a\n  - b") === "<ul><li>a</li><ul><li>b</li></ul></ul>");
+// GH #202 review: the child <ul> nests INSIDE its parent <li>, not as a sibling of it —
+// <li>a</li><ul>… was invalid list structure that broke accessibility trees.
+A("nested list", M("- a\n  - b") === "<ul><li>a<ul><li>b</li></ul></li></ul>");
 A("blockquote", M("> q") === '<blockquote class="md-quote"><div class="md-p">q</div></blockquote>');
 A("hr", M("a\n---\nb").indexOf("<hr>") !== -1);
 A("paragraphs", M("a\n\nb") === '<div class="md-p">a</div><div class="md-p">b</div>');

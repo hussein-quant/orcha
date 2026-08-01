@@ -44,17 +44,35 @@ function taskRefs(html) {
     });
   }).join("");
 }
+// GH #202 review: a URL that legitimately contains a balanced `(...)` group — e.g. a
+// Wikipedia article title like Function_(mathematics) — must keep that group INSIDE the
+// URL; only a genuinely unbalanced trailing `)` (closing a surrounding markdown/sentence
+// paren) gets peeled off. Count parens left-to-right and stop the URL at the first `)`
+// that would go negative (nothing left open to close), same rule the [text](url) balanced
+// matcher below encodes structurally. Shared by bare-URL autolinking (mdText + linkify).
+function splitUrlTail(m) {
+  let depth = 0, cut = m.length;
+  for (let i = 0; i < m.length; i++) {
+    const c = m[i];
+    if (c === "(") depth++;
+    else if (c === ")") { if (depth === 0) { cut = i; break; } depth--; }
+  }
+  let url = m.slice(0, cut), tail = m.slice(cut);
+  const t = url.match(/[)\].,;:!?]+$/);   // (text is escaped, so quotes/apostrophes are entities)
+  if (t) { tail = url.slice(url.length - t[0].length) + tail; url = url.slice(0, url.length - t[0].length); }
+  return [url, tail];
+}
 // ISS-44: make URLs in authored text clickable. SAFETY: esc() FIRST (so the text can never
 // inject HTML), THEN linkify the escaped string — only http(s):// URLs, emitting an anchor
 // with target=_blank + rel=noopener noreferrer. Returns trusted HTML (already escaped).
-// Trailing sentence punctuation / a closing bracket is left OUTSIDE the link, never swallowed.
+// Trailing sentence punctuation / a closing bracket is left OUTSIDE the link, never swallowed
+// — but a BALANCED `(...)` group inside the URL (e.g. …Function_(mathematics)) stays in the
+// href (GH #202 review).
 // ISS-82: after URL-linkify, run taskRefs so bare task-id mentions become [task name] chips
 // too (anchor-aware, so a task-id inside a linked URL is left alone).
 const linkify = (s) => taskRefs(esc(s == null ? "" : String(s)).replace(/https?:\/\/[^\s<]+/g, (m) => {
-  let tail = "";
-  const t = m.match(/[)\].,;:!?]+$/);   // (text is escaped, so quotes/apostrophes are entities)
-  if (t) { tail = m.slice(m.length - t[0].length); m = m.slice(0, m.length - t[0].length); }
-  return `<a class="lnk" href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>${tail}`;
+  const [url, tail] = splitUrlTail(m);
+  return `<a class="lnk" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>${tail}`;
 }));
 // Render SAFE markdown for agent-authored chat text — the full chat-scale subset:
 // headings h1–h4, bold/italic, `code` + fenced blocks, ordered/unordered (nested) lists,
@@ -77,14 +95,17 @@ const mdText = (src) => {
   s = s.replace(/```[^\n`]*\n?([\s\S]*?)```/g, (m, code) => keep(`<pre class="md-pre"><code>${code.replace(/\n+$/, "")}</code></pre>`));
   // inline code  `…`
   s = s.replace(/`([^`\n]+)`/g, (m, code) => keep(`<code class="md-code">${code}</code>`));
-  // ![alt](url) images -> plain links, then [text](url) links — http(s) only
-  s = s.replace(/!\[([^\]\n]*)\]\((https?:\/\/[^\s)]+)\)/g, (m, alt, url) => anchor(url, alt || url));
-  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (m, text, url) => anchor(url, text));
-  // bare URLs — trailing sentence punctuation / a closing bracket stays OUTSIDE the link
+  // ![alt](url) images -> plain links, then [text](url) links — http(s) only. GH #202 review:
+  // the url may contain ONE level of balanced (...) — e.g. …Function_(mathematics) — which
+  // must stay inside the href rather than truncating at the inner `)`.
+  const URL_IN_PARENS = "https?:\\/\\/(?:[^\\s()]|\\([^\\s()]*\\))*";
+  s = s.replace(new RegExp("!\\[([^\\]\\n]*)\\]\\((" + URL_IN_PARENS + ")\\)", "g"), (m, alt, url) => anchor(url, alt || url));
+  s = s.replace(new RegExp("\\[([^\\]\\n]+)\\]\\((" + URL_IN_PARENS + ")\\)", "g"), (m, text, url) => anchor(url, text));
+  // bare URLs — trailing sentence punctuation / a closing bracket stays OUTSIDE the link,
+  // but a balanced (...) group inside the URL stays IN it (GH #202 review; see splitUrlTail).
   s = s.replace(/https?:\/\/[^\s<]+/g, (m) => {
-    let tail = ""; const t = m.match(/[)\].,;:!?]+$/);
-    if (t) { tail = m.slice(m.length - t[0].length); m = m.slice(0, m.length - t[0].length); }
-    return anchor(m, m) + tail;
+    const [url, tail] = splitUrlTail(m);
+    return anchor(url, url) + tail;
   });
   // bold (before italic, so ** isn't eaten by the single-* rule)
   s = s.replace(/\*\*(?!\s)([^\n]+?)\*\*/g, "<strong>$1</strong>");
@@ -99,7 +120,15 @@ const mdText = (src) => {
   const splitRow = (line) => line.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
   const isDelim = (line) => line != null && /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$/.test(line);
   const cell = (c, tag, al) => `<${tag}${al ? ` style="text-align:${al}"` : ""}>${c}</${tag}>`;
-  const blocks = (lines) => {
+  // GH #202 review: quote nesting depth is attacker-controlled ("> ".repeat(5000)+"deep" is
+  // one line with 5000 leading markers) and blocks() recurses once per level, so an uncapped
+  // depth throws RangeError (stack overflow) well under the 100k conversation char limit.
+  // MAX_QUOTE_DEPTH bounds the recursion to a trivially-safe depth; a run nested deeper than
+  // that renders its excess `>` markers as literal text in the innermost quote instead of
+  // opening more <blockquote> levels — never crashes, degrades to a safe, readable fallback.
+  const MAX_QUOTE_DEPTH = 32;
+  const blocks = (lines, depth) => {
+    depth = depth || 0;
     const out = [], para = [];
     const flushP = () => { if (para.length) { out.push(`<div class="md-p">${para.join("<br>")}</div>`); para.length = 0; } };
     for (let i = 0; i < lines.length; i++) {
@@ -132,7 +161,11 @@ const mdText = (src) => {
         const inner = [];
         while (i < lines.length && /^\s{0,3}&gt;/.test(lines[i])) { inner.push(lines[i].replace(/^\s{0,3}&gt;\s?/, "")); i++; }
         i--;
-        out.push(`<blockquote class="md-quote">${blocks(inner)}</blockquote>`);
+        // at the depth cap, stop recursing: render the collected lines (any further leading
+        // &gt; markers left inside them) as literal quote content, not another nested level.
+        out.push(depth + 1 >= MAX_QUOTE_DEPTH
+          ? `<blockquote class="md-quote"><div class="md-p">${inner.join("<br>")}</div></blockquote>`
+          : `<blockquote class="md-quote">${blocks(inner, depth + 1)}</blockquote>`);
         continue;
       }
       if (LIST_RE.test(ln)) {                                     // list run — nested via 2-space indent steps
@@ -145,16 +178,25 @@ const mdText = (src) => {
           i++;
         }
         i--;
+        // GH #202 review: a nested sub-list must render INSIDE its parent <li>, not as a
+        // sibling of it (the old code always closed a parent's <li> immediately, so a
+        // deeper item's <ul>/<ol> landed after </li> — invalid list structure that breaks
+        // accessibility trees). Track whether the current level's <li> is still open and
+        // only close it right before a same-level sibling <li>, or when the list itself closes
+        // — a deeper indent opens its nested list INSIDE the still-open parent <li>.
         const stack = []; let lh = "";
-        const open = (it) => { lh += it.ol ? (it.num > 1 ? `<ol start="${it.num}">` : "<ol>") : "<ul>"; stack.push(it); };
-        const close = () => { lh += stack.pop().ol ? "</ol>" : "</ul>"; };
+        const open = (it) => { lh += it.ol ? (it.num > 1 ? `<ol start="${it.num}">` : "<ol>") : "<ul>"; stack.push({ ind: it.ind, ol: it.ol, liOpen: false }); };
+        const closeLi = () => { if (stack.length && stack[stack.length - 1].liOpen) { lh += "</li>"; stack[stack.length - 1].liOpen = false; } };
+        const close = () => { closeLi(); lh += stack.pop().ol ? "</ol>" : "</ul>"; };
         items.forEach((it) => {
           if (!stack.length || it.ind >= stack[stack.length - 1].ind + 2) open(it);
           else {
             while (stack.length > 1 && it.ind <= stack[stack.length - 1].ind - 2) close();
             if (stack[stack.length - 1].ol !== it.ol) { close(); open(it); }
+            else closeLi();
           }
-          lh += `<li>${it.text}</li>`;
+          lh += `<li>${it.text}`;
+          stack[stack.length - 1].liOpen = true;
         });
         while (stack.length) close();
         out.push(lh); continue;
