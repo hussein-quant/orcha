@@ -18,7 +18,7 @@ import re
 import shutil
 import subprocess
 import pytest
-from portal_source import page_source, script_source
+from portal_source import page_source, script_source, run_node
 
 pytestmark = pytest.mark.asyncio
 
@@ -164,7 +164,7 @@ const out = {
 };
 console.log(JSON.stringify(out));
 """
-    out = subprocess.run(["node", "-e", harness.replace("__ONBJS__", js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__ONBJS__", js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert res["railWelcome"] == "welcome", res

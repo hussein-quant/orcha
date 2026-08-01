@@ -24,7 +24,7 @@ import shutil
 import subprocess
 
 import pytest
-from portal_source import page_source, script_source
+from portal_source import page_source, script_source, run_node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
@@ -45,7 +45,7 @@ const O = window.Orcha;
 def _run_node(snippet):
     app_js = script_source("app.js")
     src = _HARNESS_HEAD.replace("__APPJS__", app_js) + snippet
-    out = subprocess.run(["node", "-e", src], capture_output=True, text=True)
+    out = run_node(src)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout.strip().splitlines()[-1])
 

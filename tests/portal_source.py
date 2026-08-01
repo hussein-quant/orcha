@@ -7,12 +7,34 @@ browser loads without coupling assertions to the former monolithic files.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
+
+
+def run_node(source: str, *args: str) -> subprocess.CompletedProcess:
+    """Run a JS harness through a temp file, argv-compatible with `node -e`.
+
+    The harness sources embed whole portal bundles; passing them as a single
+    `node -e <src>` argument breaks on Linux, where MAX_ARG_STRLEN caps one
+    argv element at 128 KiB (macOS only caps the argv+env TOTAL, so the same
+    call passes locally). A temp file has no size limit. The argv splice keeps
+    `-e` indexing: `node -e src arg` puts arg at process.argv[1], while
+    `node file.js arg` puts the script path there — so drop the path.
+    """
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+        f.write("process.argv.splice(1, 1);\n" + source)
+        path = f.name
+    try:
+        return subprocess.run(["node", path, *args], capture_output=True, text=True)
+    finally:
+        os.unlink(path)
 
 _SCRIPT_MODULES = {
     "app.js": [

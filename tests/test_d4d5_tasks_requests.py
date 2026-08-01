@@ -12,7 +12,7 @@ import pathlib
 import shutil
 import subprocess
 import pytest
-from portal_source import page_source, script_source
+from portal_source import page_source, script_source, run_node
 
 pytestmark = pytest.mark.asyncio
 
@@ -62,7 +62,7 @@ console.log(JSON.stringify({
   defersWhenDirty: wroteDirty === false && c.el.innerHTML === "",
 }));
 """
-    out = subprocess.run(["node", "-e", harness.replace("__APPJS__", app_js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__APPJS__", app_js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert res["proceedsWhenEmpty"], res     # an empty blurred input never blocks a repaint

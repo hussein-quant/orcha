@@ -14,7 +14,7 @@ import re
 import shutil
 import subprocess
 import pytest
-from portal_source import script_source, style_source
+from portal_source import script_source, style_source, run_node
 
 pytestmark = pytest.mark.asyncio
 
@@ -145,7 +145,7 @@ const out = {
 console.log(JSON.stringify(out));
 """
     src = harness.replace("__APPJS__", js)
-    res = subprocess.run(["node", "-e", src], capture_output=True, text=True)
+    res = run_node(src)
     assert res.returncode == 0, res.stderr
     out = json.loads(res.stdout.strip().splitlines()[-1])
     assert out["actingHasHuman"] is True, out      # acting-as shows the real human
@@ -179,7 +179,7 @@ __APPJS__
 console.log(JSON.stringify({ applied: set }));
 """
         src = harness.replace("__SAVED__", json.dumps(saved)).replace("__APPJS__", js)
-        res = subprocess.run(["node", "-e", src], capture_output=True, text=True)
+        res = run_node(src)
         assert res.returncode == 0, res.stderr
         return json.loads(res.stdout.strip().splitlines()[-1])["applied"]
 

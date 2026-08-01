@@ -13,7 +13,7 @@ import re
 import shutil
 import subprocess
 import pytest
-from portal_source import page_source, script_source
+from portal_source import page_source, script_source, run_node
 
 pytestmark = pytest.mark.asyncio
 
@@ -109,7 +109,7 @@ def _classify(line: str):
         "global.window={};\n" + app +
         "\nconst e=window.Orcha.classifyLine(process.argv[1]);console.log(JSON.stringify(e[0]||{}));"
     )
-    out = subprocess.run(["node", "-e", harness, "--", line], capture_output=True, text=True)
+    out = run_node(harness, line)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout.strip())
 

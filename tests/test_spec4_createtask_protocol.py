@@ -16,7 +16,7 @@ import shutil
 import subprocess
 
 import pytest
-from portal_source import page_source
+from portal_source import page_source, run_node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
@@ -44,7 +44,7 @@ console.log(JSON.stringify({
   autonomyOnlyIsNotEmpty: protoEmpty({autonomy:"L1"}) === false,
 }));
 """
-    out = subprocess.run(["node", "-e", harness], capture_output=True, text=True)
+    out = run_node(harness)
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     for k, v in res.items():

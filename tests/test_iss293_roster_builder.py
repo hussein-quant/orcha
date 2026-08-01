@@ -16,6 +16,7 @@ import pathlib
 import shutil
 import subprocess
 import pytest
+from portal_source import run_node
 
 pytestmark = pytest.mark.asyncio
 
@@ -143,7 +144,7 @@ const M = window.OrchaOnboarding;
 def _run_node(body: str) -> dict:
     js = (STATIC / "onboarding.js").read_text()
     script = _HARNESS_PRELUDE.replace("__ONBJS__", js) + "\n" + body
-    out = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    out = run_node(script)
     assert out.returncode == 0, out.stderr
     return json.loads(out.stdout.strip().splitlines()[-1])
 
