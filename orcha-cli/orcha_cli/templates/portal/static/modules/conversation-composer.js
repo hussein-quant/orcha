@@ -105,6 +105,11 @@ function send() {
   if (!h) { O().toast("Pick an acting human (top-right) first.", "danger"); return; }
   closeSlash();
   const atts = done.map((s) => ({ id: s.ref.id, name: s.ref.name }));
+  // Round-2 fix (blocker #1): a FAILED pendingLocal is never overwritten. If the user typed
+  // something new while a failed bubble+Retry was still showing, stash it in failedSends —
+  // its own bubble keeps rendering with its own Retry — instead of letting the new send's
+  // submitTurn() below clobber the only copy of the earlier message.
+  if (pendingLocal && pendingLocal.status === "failed") { failedSends.push(pendingLocal); pendingLocal = null; }
   // optimistic: clear the composer NOW (ISS-64 draft included) and paint a pending bubble;
   // the text + staged refs live on pendingLocal until the server owns the turn.
   inp.value = ""; autosize(inp); saveDraft("");
@@ -138,7 +143,7 @@ function submitTurn(v, atts, keepStaged, h) {
 // the POST returned (append by turn id; the poll's id/seq dedupe drops the copy IT fetches),
 // then raise the honest awaiting-reply indicator.
 function settleSend(t) {
-  sending = false; setSendBusy(false);
+  sending = false; setSendBusy(false); applyLock();   // minor #3: re-lock if a terminal paired mid-send
   if (t && !turns.some((x) => String(x.id) === String(t.id))) {
     turns.push(t);
     if (typeof t.seq === "number" && t.seq > lastSeq) lastSeq = t.seq;
@@ -151,7 +156,7 @@ function settleSend(t) {
 // (only if the user hasn't typed something new), the staged refs return to the tray, and
 // the pending bubble flips to an inline danger note with an explicit Retry.
 function failSend(msg) {
-  sending = false; setSendBusy(false);
+  sending = false; setSendBusy(false); applyLock();   // minor #3: re-lock if a terminal paired mid-send
   if (!pendingLocal) return;   // a poll already reconciled this turn (it DID land server-side)
   pendingLocal.status = "failed"; pendingLocal.err = msg;
   const inp = document.getElementById("convInput");
@@ -159,12 +164,21 @@ function failSend(msg) {
   if (!staged.length && pendingLocal.keepStaged && pendingLocal.keepStaged.length) { staged = pendingLocal.keepStaged; renderTray(); }
   renderList();
 }
-// Retry on the failed bubble: re-submit EXACTLY the failed content through the same
-// guarded path. The failure-restored composer text is taken back out first (when still
-// untouched) so a follow-up Enter can't double it.
-function retrySend() {
-  if (sending || !pendingLocal || pendingLocal.status !== "failed") return;
-  const p = pendingLocal;
+// Retry on a failed bubble: re-submit EXACTLY that failed content through the same guarded
+// path. `at` (the stage timestamp) identifies WHICH failed bubble — the live pendingLocal or
+// one stashed in failedSends by a later send() (blocker #1) — since either can carry a Retry.
+// The failure-restored composer text is taken back out first (when still untouched) so a
+// follow-up Enter can't double it.
+function retrySend(at) {
+  if (sending) return;
+  let p = null;
+  if (pendingLocal && pendingLocal.status === "failed" && (at == null || pendingLocal.at === at)) {
+    p = pendingLocal; pendingLocal = null;
+  } else if (at != null) {
+    const idx = failedSends.findIndex((f) => f.at === at);
+    if (idx >= 0) p = failedSends.splice(idx, 1)[0];
+  }
+  if (!p) return;
   const h = O().actingHuman();
   if (!h) { O().toast("Pick an acting human (top-right) first.", "danger"); return; }
   const inp = document.getElementById("convInput");

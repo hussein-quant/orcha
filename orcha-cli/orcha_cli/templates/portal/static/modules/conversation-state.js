@@ -22,9 +22,18 @@ let awaiting = false;        // optimistic: true from "human turn sent" until th
 // which lives until the SERVER's copy of the turn owns the thread (POST response or poll).
 let sending = false;
 let pendingLocal = null;
+// Round-2 fix (blocker #1): a `failed` pendingLocal must never be silently overwritten by the
+// next send — if the user types something new while a failed bubble+Retry is still showing,
+// send() moves it here instead of letting submitTurn() clobber it. Each entry is a full
+// pendingLocal-shaped object (content/atts/keepStaged/authorId/at/status:'failed'/err); rendered
+// as its own bubble+Retry above the live pendingLocal so the failed copy is never lost.
+let failedSends = [];
 let pollBusy = false;        // a slow/restarting portal must not stack same-cursor /turns fetches
 // how long a polled human turn with identical author+content still reconciles the
 // optimistic bubble (covers "POST landed but its response was lost" during a restart).
+// Round-2 fix (blocker #2): this window only ever gates an already-FAILED bubble now — while
+// pendingLocal.status === 'sending' the POST is still in flight, so any human turn arriving
+// after our cursor with matching author+content is necessarily ours, no matter how old.
 const PENDING_MATCH_MS = 20000;
 let presence = null, presenceReason = null;   // Vault presence contract (req 6de81ae3), null until live
 let mountTok = 0;            // bumped on every (re)mount/teardown; stale in-flight responses no-op

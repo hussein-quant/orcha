@@ -108,8 +108,13 @@ function fakeFetch(url, init) {
   if (/\/turns$/.test(u) && method === "POST") {
     net.posts.push({ url: u, body: init.body });
     if (net.postMode === "reject") return Promise.reject(new Error("network down"));
-    if (net.postMode === "hold") return new Promise((res) => net.heldPosts.push(
-      () => res({ ok: true, json: () => Promise.resolve({ turn: net.turnFor(init.body) }) })));
+    if (net.postMode === "hold") return new Promise((res, rej) => net.heldPosts.push({
+      // release(): settle as success (default, matches every pre-existing caller). releaseFail():
+      // settle as a rejected network error — for a repro that holds a POST then fails IT
+      // specifically, independent of whatever net.postMode is by the time it's released.
+      release: () => res({ ok: true, json: () => Promise.resolve({ turn: net.turnFor(init.body) }) }),
+      releaseFail: () => rej(new Error("network down")),
+    }));
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ turn: net.turnFor(init.body) }) });
   }
   if (u.indexOf("/turns?after_seq=") >= 0) {
@@ -130,14 +135,26 @@ const els = {};
 ["convInput", "convSend", "convList", "convPresence", "convSlash", "convAttach",
  "convAttachInput", "convTray", "convPair", "convMax", "convLock", "convPairWrap",
  "convTermSlot"].forEach((id) => { els[id] = mkEl(id); });
-const state = { retryBtn: null };
-// renderList wires Retry via list.querySelector("[data-retrysend]") — surface it
-els.convList.querySelector = (sel) => {
-  if (sel === "[data-retrysend]" && els.convList._html.indexOf("data-retrysend") >= 0) {
-    state.retryBtn = mkEl("retry");
-    return state.retryBtn;
+const state = { retryBtn: null, retryBtns: {} };
+// renderList wires EVERY Retry via list.querySelectorAll("[data-retrysend]") — one button per
+// failed bubble (blocker #1 can paint more than one at once). Parse each data-retrysend="<at>"
+// out of the rendered HTML and hand back a fake button keyed by its `at`, so a test can fire
+// the click for a SPECIFIC failed bubble instead of only ever "the first one".
+els.convList.querySelectorAll = (sel) => {
+  if (sel !== "[data-retrysend]") return [];
+  const html = els.convList._html;
+  const re = /data-retrysend="(-?\d+)"/g;
+  const found = [];
+  let m;
+  while ((m = re.exec(html))) {
+    const at = m[1];
+    const btn = mkEl("retry-" + at);
+    btn.getAttribute = (k) => (k === "data-retrysend" ? at : null);
+    state.retryBtns[at] = btn;
+    found.push(btn);
   }
-  return null;
+  state.retryBtn = found[0] || null;   // back-compat alias: "the most recent single Retry"
+  return found;
 };
 const orchaStub = {
   esc: (s) => String(s == null ? "" : s), linkify: (s) => String(s == null ? "" : s),
@@ -202,7 +219,7 @@ async function partA() {
     "a single pending bubble paints with the 'sending…' state");
   assert(els.convList._html.indexOf("conv-thinking") < 0, "no reply indicator while the send is unsettled");
   // the POST settles → reconcile by returned turn id
-  net.heldPosts.splice(0).forEach((release) => release());
+  net.heldPosts.splice(0).forEach((h) => h.release());
   await drain();
   assert(net.posts.length === 1, "settling did not re-POST");
   assert(run("sending") === false && els.convSend.disabled === false, "the guard + button release on success");
@@ -291,12 +308,135 @@ async function partD() {
   assert(net.posts.length === 1, "no extra POST was ever issued");
 }
 
+/* ---------------- PART E — round-2 blocker #1: a failed send survives the NEXT send -------
+   Repro from review round 1: send "IMPORTANT first message" while slow, type something new
+   during flight, let the first POST fail (composer non-empty so nothing is restored into it),
+   then send the new text. Before the fix, submitTurn() unconditionally overwrote pendingLocal
+   at send-time — the failed bubble + its Retry vanished with no toast and no trace. */
+async function partE() {
+  console.log("\nPART E — round-2 blocker #1: a later send() must not destroy an earlier FAILED bubble\n");
+  run('window.OrchaConvo.mount(__host, "a4")');
+  await drain();
+  net.postMode = "hold"; net.posts = [];
+  els.convInput.value = "IMPORTANT first message";
+  els.convSend.fire("click");
+  await flush();
+  // type something new WHILE the first send is still in flight (composer stays non-empty
+  // through the failure below, so failSend's own restore path does NOT fire)
+  els.convInput.value = "second message";
+  // the first POST fails (releaseFail settles the ALREADY-HELD promise as rejected — flipping
+  // net.postMode here would do nothing, the promise executor already ran)
+  net.heldPosts.splice(0).forEach((h) => h.releaseFail());
+  await drain();
+  assert(els.convList._html.indexOf("conv-sendfail") >= 0 && count(els.convList._html, "IMPORTANT first message") === 1,
+    "the first message shows failed + Retry (composer held new text, so nothing auto-restored into it)");
+  assert(els.convInput.value === "second message", "the composer still holds the new text, untouched by the failure");
+  // now send the second message through the normal guarded path
+  net.postMode = "ok"; net.posts = [];
+  els.convSend.fire("click");
+  await drain();
+  assert(net.posts.length === 1, "the second send POSTed exactly once");
+  assert(count(els.convList._html, "IMPORTANT first message") === 1,
+    "the FAILED first message is still in the DOM — not silently destroyed by the second send");
+  assert(els.convList._html.indexOf("conv-sendfail") >= 0, "…and its Retry/failure note is still showing");
+  assert(count(els.convList._html, "second message") === 1, "the second message also renders (as the durable turn once settled)");
+  assert(run("failedSends.length") === 1 && run("failedSends[0].content") === "IMPORTANT first message",
+    "the failed send was stashed (not dropped) so it survives the next send()");
+  // Retry on the STASHED failed message must still work and target the right content
+  net.posts = [];
+  // state.retryBtns was populated by renderList()'s OWN querySelectorAll call (inside the
+  // production code) — the listener is wired to THESE objects, so read from that cache
+  // rather than re-invoking querySelectorAll (which would hand back listener-less doubles).
+  const stashedAt = run("failedSends[0].at");
+  const btn = state.retryBtns[String(stashedAt)];
+  assert(!!btn, "a Retry button exists for the stashed failed bubble, keyed by its own `at`");
+  btn.fire("click");
+  await drain();
+  assert(net.posts.length === 1, "retrying the stashed failed message POSTs exactly once");
+  assert(JSON.parse(net.posts[0].body).content === "IMPORTANT first message",
+    "…and it re-sends the STASHED message's own content, not the other one's");
+  assert(run("failedSends.length") === 0, "the stashed failed send is cleared once retried");
+}
+
+/* ---------------- PART F — round-2 blocker #2: reconcile must not age-bound a live "sending" --
+   Repro from review round 1: a send takes > PENDING_MATCH_MS (20s) to settle. The 3s poll picks
+   up the durable copy well before that, but the age check used to block reconcilePending from
+   matching it — the bubble stayed "sending…", the durable copy appended too (double paint), and
+   when the hung POST finally rejected the second bubble flipped to "not sent" with a Retry that
+   would re-POST a genuine duplicate. Fix: no age bound while status === "sending". */
+async function partF() {
+  console.log("\nPART F — round-2 blocker #2: an in-flight (>20s) send must reconcile, not double-paint\n");
+  run('window.OrchaConvo.mount(__host, "a5")');
+  await drain();
+  net.postMode = "hold"; net.posts = [];
+  els.convInput.value = "slow send";
+  els.convSend.fire("click");
+  await flush();
+  assert(run("pendingLocal.status") === "sending", "the send is staged and still in flight");
+  // age the pending bubble past the 20s reconcile window WITHOUT it failing yet
+  run("pendingLocal.at = Date.now() - 25000");
+  // the 3s poll fetches the durable copy the server already persisted
+  net.pollTurns = [{ id: "srv-slow-1", seq: 1, role: "human", author_agent_id: "h",
+                     content: "slow send", attachments: [], created_at: "2026-07-31T00:00:03Z", run_id: null, meta: {} }];
+  run("poll()");
+  await drain();
+  assert(run("pendingLocal") === null, "past 20s, a still-SENDING pendingLocal still reconciles (no age bound while in flight)");
+  assert(run("turns.length") === 1 && count(els.convList._html, "slow send") === 1,
+    "the durable copy renders exactly once — no double bubble");
+  assert(els.convList._html.indexOf("conv-sendfail") < 0, "no failure note — the send hadn't failed, it just reconciled");
+  // when the hung POST finally rejects, failSend must see pendingLocal already cleared and no-op
+  // (this is the existing guard at failSend's top; assert it still holds post-fix)
+  net.heldPosts.splice(0).forEach((h) => h.releaseFail());
+  await drain();
+  assert(run("pendingLocal") === null && run("failedSends.length") === 0,
+    "the late rejection is a no-op — no phantom Retry appears next to the already-landed message");
+  assert(count(els.convList._html, "slow send") === 1, "still exactly one bubble for the message");
+  assert(net.posts.length === 1, "the late rejection did not trigger any extra POST");
+}
+
+/* ---------------- PART G — minor #3: Send must not re-enable itself on a locked conversation --
+   Repro: a terminal pairs mid-send (paired+termConnected -> applyLock() would disable Send).
+   setSendBusy(false) alone re-enables the button unconditionally; settleSend/failSend must call
+   applyLock() right after so a terminal-locked conversation doesn't get a live Send button
+   until the next presence repaint (up to ~3s later, per the review). */
+async function partG() {
+  console.log("\nPART G — minor #3: settling a send must re-apply the terminal lock immediately\n");
+  run('window.OrchaConvo.mount(__host, "a6")');
+  await drain();
+  net.postMode = "hold"; net.posts = [];
+  els.convInput.value = "locks mid-flight";
+  els.convSend.fire("click");
+  await flush();
+  // a terminal pairs WHILE the send is in flight
+  run("paired = true; termConnected = true;");
+  net.heldPosts.splice(0).forEach((h) => h.release());
+  await drain();
+  assert(els.convSend.disabled === true,
+    "Send stays disabled on settle — applyLock() ran right after setSendBusy(false) and saw the live terminal lock");
+  // same check on the failure path
+  run("paired = false; termConnected = false;");
+  run('window.OrchaConvo.mount(__host, "a7")');
+  await drain();
+  net.postMode = "hold"; net.posts = [];
+  els.convInput.value = "fails mid-flight";
+  els.convSend.fire("click");
+  await flush();
+  run("paired = true; termConnected = true;");
+  net.heldPosts.splice(0).forEach((h) => h.releaseFail());
+  await drain();
+  assert(els.convSend.disabled === true,
+    "Send also stays disabled when the in-flight send FAILS while a terminal is paired");
+}
+
 (async () => {
   sb.__host = mountHost;
   await partA();
   await partB();
   await partC();
   await partD();
+  await partE();
+  await partF();
+  await partG();
   console.log("");
   if (failures) { console.error(failures + " FAILURE(S)"); process.exit(1); }
   console.log("ALL PASS");

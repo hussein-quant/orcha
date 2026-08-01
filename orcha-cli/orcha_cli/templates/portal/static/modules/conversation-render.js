@@ -13,22 +13,26 @@ function loadDraft(aid) { try { return sessionStorage.getItem(draftKey(aid)) || 
 /* ---------- render the message list (repaints on poll; composer untouched) ---------- */
 function renderList() {
   const list = document.getElementById("convList"); if (!list) return;
-  if (!turns.length && !pendingLocal) { list.innerHTML = '<div class="none" style="padding:18px">No messages yet — say hello to start the conversation.</div>'; return; }
+  if (!turns.length && !pendingLocal && !failedSends.length) { list.innerHTML = '<div class="none" style="padding:18px">No messages yet — say hello to start the conversation.</div>'; return; }
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
   // ISS-68 PR-3: render only the most-recent `shown` turns; "Load earlier" reveals the rest.
   const startIdx = Math.max(0, turns.length - shown);
   const visible = turns.slice(startIdx);
   const earlier = startIdx > 0
     ? `<button class="btn sm ghost" style="display:block;margin:0 auto 12px" data-loadearlier>Load earlier · ${visible.length} of ${turns.length}</button>` : "";
+  // Round-2 fix (blocker #1): failed sends bumped out of pendingLocal by a later send() still
+  // render — each with its own Retry — above the live pendingLocal/indicator, oldest first.
+  const failedBubbles = failedSends.map(pendingBubble).join("");
   // the optimistic pending bubble suppresses the reply indicator — one honest state at a time
   // (sending… / failed+Retry first; the thinking/queued indicator returns once the turn lands).
-  list.innerHTML = earlier + visible.map(bubble).join("")
-    + (pendingLocal ? pendingBubble() : "")
+  list.innerHTML = earlier + visible.map(bubble).join("") + failedBubbles
+    + (pendingLocal ? pendingBubble(pendingLocal) : "")
     + (awaitingReply() && !pendingLocal ? indicatorBubble() : "");
   const le = list.querySelector("[data-loadearlier]");
   if (le) le.addEventListener("click", () => { shown += CONV_PAGE; renderList(); });
-  const rt = list.querySelector("[data-retrysend]");
-  if (rt) rt.addEventListener("click", retrySend);
+  list.querySelectorAll("[data-retrysend]").forEach((rt) => {
+    rt.addEventListener("click", () => retrySend(+rt.getAttribute("data-retrysend")));
+  });
   // wire each work-log <details> to stream its run on first expand
   list.querySelectorAll("details[data-run]").forEach((d) => {
     d.addEventListener("toggle", () => {
@@ -67,8 +71,10 @@ function thinkingBubble() {
 // the optimistic human bubble: the just-sent text at reduced opacity until the server's
 // copy lands; on failure it carries an inline danger note + Retry (and the composer got
 // the text back) — a failed send is never silently dropped and never auto-reposted.
-function pendingBubble() {
-  const p = pendingLocal;
+// Takes the pendingLocal-shaped entry explicitly (the live one, or one stashed in
+// failedSends by a later send() — blocker #1) so each failed bubble gets its OWN Retry
+// wired to ITS OWN `at`, never the wrong entry's.
+function pendingBubble(p) {
   const failed = p.status === "failed";
   const atts = (p.atts && p.atts.length)
     ? `<div class="msg-atts">${p.atts.map((a) => `<span class="att-file">${FILE_ICON}<span>${O().esc(a.name || a.id)}</span></span>`).join("")}</div>` : "";
@@ -78,7 +84,7 @@ function pendingBubble() {
       <div class="tx md">${O().mdText(p.content || "")}</div>
       ${atts}
       ${failed ? `<div class="conv-sendfail">${O().icon("alert", "")}<span>${O().esc(p.err || "Couldn't send.")}</span>
-        <button type="button" class="btn sm danger" data-retrysend>Retry</button></div>` : ""}
+        <button type="button" class="btn sm danger" data-retrysend="${p.at}">Retry</button></div>` : ""}
     </div></div>`;
 }
 // honest "your message is queued" notice when the agent is busy on another task lease.
@@ -223,22 +229,41 @@ function poll() {
 // The durable copy of the optimistic turn arrived via the poll — including the case where
 // the POST landed server-side but its RESPONSE was lost to a restart (the "failed" bubble
 // would otherwise invite a Retry that duplicates the message). Identical author+content
-// inside the pending window IS our turn: drop the local bubble, and take back the
-// failure-restored composer text so it can't be re-sent by habit.
+// IS our turn: drop the local bubble, and take back the failure-restored composer text so
+// it can't be re-sent by habit.
+// Round-2 fix (blocker #2): PENDING_MATCH_MS only ever gated the ALREADY-FAILED case (the
+// portal restarted and lost the POST's response — an inherently unbounded amount of time
+// could pass before this poll runs, but we still trust the match). While a send is still
+// "sending" the POST is *provably* in flight right now — a same-author/content human turn
+// arriving after our cursor is necessarily ours no matter its age, so that branch is never
+// age-bounded. A stale, remounted (different agentId) sender can't collide: the mount token
+// guard in poll() already drops responses from a torn-down panel before reconcilePending runs.
+function matchesPending(t, p) {
+  return t.role === "human" && String(t.author_agent_id) === String(p.authorId) && (t.content || "") === p.content;
+}
 function reconcilePending(fresh) {
-  if (!pendingLocal) return;
-  const p = pendingLocal;
-  const hit = fresh.some((t) => t.role === "human"
-    && String(t.author_agent_id) === String(p.authorId)
-    && (t.content || "") === p.content
-    && (Date.now() - p.at) < PENDING_MATCH_MS);
-  if (!hit) return;
-  pendingLocal = null;
-  if (p.status === "failed") {
+  if (pendingLocal) {
+    const p = pendingLocal;
+    const hit = fresh.some((t) => matchesPending(t, p)
+      && (p.status === "sending" || (Date.now() - p.at) < PENDING_MATCH_MS));
+    if (hit) {
+      pendingLocal = null;
+      if (p.status === "failed") {
+        const inp = document.getElementById("convInput");
+        if (inp && (inp.value || "").trim() === p.content) { inp.value = ""; autosize(inp); saveDraft(""); }
+        if (staged === p.keepStaged) { staged = []; renderTray(); }
+      }
+    }
+  }
+  // stashed failed sends (blocker #1) are always already-failed → keep the age bound.
+  failedSends = failedSends.filter((p) => {
+    const hit = fresh.some((t) => matchesPending(t, p) && (Date.now() - p.at) < PENDING_MATCH_MS);
+    if (!hit) return true;
     const inp = document.getElementById("convInput");
     if (inp && (inp.value || "").trim() === p.content) { inp.value = ""; autosize(inp); saveDraft(""); }
     if (staged === p.keepStaged) { staged = []; renderTray(); }
-  }
+    return false;   // reconciled → drop from the stash
+  });
 }
 // presence + presence_reason ride on GET /api/conversations/{id} (NOT the /turns delta),
 // so refresh them on the same tick. If the endpoint/field isn't live yet this no-ops and
