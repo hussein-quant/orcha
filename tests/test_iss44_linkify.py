@@ -28,8 +28,10 @@ def test_linkify_is_applied_to_authored_text_surfaces():
     assert "O.mdText(m.body)" in tasks, "task thread message not md-rendered"
     assert "O.mdText(isPlan" in tasks, "plan body / result not md-rendered (verification gate)"
     # BOTH task-result surfaces must render markdown: the verification-gate result AND the
-    # normal task-detail Result block — and neither may regress back to bare esc().
-    assert "O.mdText(t.result)" in tasks, "normal task-detail Result not md-rendered"
+    # normal task-detail Result block — and neither may regress back to bare esc(). Since #66
+    # the result passes through resultText() first (JSONB results are normalized to text
+    # so structured results never render as [object Object]) — the pin follows the wrap.
+    assert "O.mdText(resultText(t.result))" in tasks, "normal task-detail Result not md-rendered"
     assert "O.esc(t.result)" not in tasks, "a task-result surface regressed to bare esc()"
     conv = script_source("conversation.js")
     # conversation turns render via mdText (rich markdown), which still linkifies URLs —
