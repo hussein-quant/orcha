@@ -317,6 +317,7 @@ plane (§7) exists to eat that column.
 | 19 | Phone pairing | **portal UI** (QR) | pairing modal → `/auth/device` → GitHub OAuth → device token via `orcha://` callback |
 | 20 | iOS app on the phone | **manual build/install today** | `ios/` in this repo (no TestFlight yet) |
 | 21 | Upgrades | **manual today** | re-run `bootstrap-clone.sh`, then `orcha update` per workspace (§5); auth stack: `docker compose up -d`. Control plane later |
+| 22 | Swap provisioning (recommended) | **manual-ssh, one script, run once** | `deploy/provision-swap.sh` — 4GB swapfile (`SIZE_GB` to override), fstab-persisted, idempotent; a swapless box thrashes instead of degrading under an agent burst (§5 Known failure modes) |
 
 ---
 
@@ -390,6 +391,14 @@ scp deploy/auth/.env <box>:/opt/orcha-cloud/deploy/auth/.env
 
 The mint token is used once for the clone and scrubbed from git config.
 Verify: `ssh <box> orcha --version`.
+
+Recommended here, not automatic — provision swap while you're already on the
+box (a swapless box thrashes instead of degrading under an agent burst; §5
+Known failure modes has the sizing rationale):
+
+```bash
+ssh <box> 'sh /opt/orcha-cloud/deploy/provision-swap.sh'    # 4GB default, SIZE_GB to override
+```
 
 **6. First project + sandbox mode** (on the box; use `/opt/orcha-work/` so
 the provisioner's registry adopts it):
@@ -678,6 +687,8 @@ tar of the three paths above.
 | Agent can't push / PR fails | stale or missing workspace token (timer stopped, or App not installed on that org) | `journalctl -u github-token-refresh.service`; `<ws>/.orcha/github-token` mtime |
 | Notifier dead for one project | crashed; the provisioner re-ensures it within 2 min — check why | `<ws>/.claude/.orcha-notifier.log` (pidfile beside it) |
 | Wakes die with exit 125 | sandbox network pinned wrong (cloned repo shipped its own compose file) | `sandbox.network` in `<ws>/.claude/orcha.json`; `PROVISION_NETWORK` on the provisioner unit |
+| Box hangs / thrashes instead of degrading under an agent burst | no swap — the OOM path becomes disk-thrash-to-death rather than a graceful kill; provision it once (§3 step 22): `sh deploy/provision-swap.sh` (4GB default, `SIZE_GB` to override — sized against the sandbox concurrency cap's per-wake memory math, §2 Components: runner default 4g/2cpu, provisioner-set 1536m/1cpu per project) | `free -h` (swap row); `swapon --show` |
+| GitHub sign-in 500s at `/oauth2/callback` right after a reboot | a stale OAuth `state` minted before the reboot (oauth2-proxy's session store reset) — cosmetic, just retry | start sign-in fresh from the domain root (`https://orcha.<yourdomain>`), not the old callback URL/tab |
 
 ### Soak / verification checks (run these after any upgrade)
 

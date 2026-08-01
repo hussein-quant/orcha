@@ -32,6 +32,17 @@ ssh <box> 'sh /tmp/bootstrap-clone.sh'     # clones → /opt/orcha-cloud, instal
 Re-run `bootstrap-clone.sh` anytime to pull + reinstall (tokens are minted
 fresh, used once, and scrubbed from git config).
 
+**Swap** (recommended, not automatic — run it once yourself): a box with no
+swap thrashes instead of degrading gracefully under an agent burst. Provision
+a 4GB swapfile (override with `SIZE_GB`):
+
+```bash
+ssh <box> 'sh /opt/orcha-cloud/deploy/provision-swap.sh'
+```
+
+Idempotent — safe to re-run; it no-ops if swap is already active. See
+`docs/byoc-guide.md` for sizing guidance.
+
 ## 2. Project + sandbox mode
 
 ```bash
