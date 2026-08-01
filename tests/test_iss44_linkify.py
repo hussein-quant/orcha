@@ -11,7 +11,7 @@ import pathlib
 import shutil
 import subprocess
 import pytest
-from portal_source import page_source, script_source, style_source
+from portal_source import page_source, script_source, style_source, run_node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
@@ -89,7 +89,6 @@ A("null safe", L(null) === "" && L(undefined) === "");
 
 console.log("OK");
 """
-    out = subprocess.run(["node", "-e", harness.replace("__APPJS__", app_js)],
-                         capture_output=True, text=True)
+    out = run_node(harness.replace("__APPJS__", app_js))
     assert out.returncode == 0, (out.stdout + out.stderr)
     assert out.stdout.strip().splitlines()[-1] == "OK", out.stdout

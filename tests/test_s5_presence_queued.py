@@ -19,7 +19,7 @@ import pathlib
 import shutil
 import subprocess
 import pytest
-from portal_source import page_source, script_source
+from portal_source import page_source, script_source, run_node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
@@ -113,8 +113,7 @@ async function run(payload, agentStatus) {
   console.log(JSON.stringify(out));
 })();
 """
-    out = subprocess.run(["node", "-e", harness.replace("__CONVJS__", conv_js)],
-                         capture_output=True, text=True)
+    out = run_node(harness.replace("__CONVJS__", conv_js))
     assert out.returncode == 0, out.stderr
     r = json.loads(out.stdout.strip().splitlines()[-1])
 
@@ -198,8 +197,7 @@ const flush = () => new Promise((r)=>setTimeout(r, 15));
   console.log(JSON.stringify({ k:p.k, l:p.l, pill: els.convPresence.className, list: els.convList._html }));
 })();
 """
-    out = subprocess.run(["node", "-e", harness.replace("__CONVJS__", conv_js)],
-                         capture_output=True, text=True)
+    out = run_node(harness.replace("__CONVJS__", conv_js))
     assert out.returncode == 0, out.stderr
     r = json.loads(out.stdout.strip().splitlines()[-1])
     # B's panel stays B — A's stale busy must be dropped by the mount-token guard

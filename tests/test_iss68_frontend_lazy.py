@@ -12,7 +12,7 @@ import shutil
 import subprocess
 
 import pytest
-from portal_source import page_source, script_source
+from portal_source import page_source, script_source, run_node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
@@ -40,7 +40,7 @@ console.log(JSON.stringify({
   hasThreadOf: typeof window.OrchaData.threadOf === "function",
 }));
 """
-    out = subprocess.run(["node", "-e", harness.replace("__DATAJS__", data_js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__DATAJS__", data_js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert all(res.values()), res
@@ -66,7 +66,7 @@ window.OrchaData.threadOf("t1").then((thread) => {
   }));
 });
 """
-    out = subprocess.run(["node", "-e", harness.replace("__DATAJS__", data_js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__DATAJS__", data_js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert all(res.values()), res

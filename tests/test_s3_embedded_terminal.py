@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import pytest
+from portal_source import run_node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
@@ -220,7 +221,7 @@ const flush = () => new Promise(r => setTimeout(r, 15));
   console.log("OK");
 })();
 """
-    out = subprocess.run(["node", "-e", harness.replace("__TERMJS__", js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__TERMJS__", js))
     assert out.returncode == 0, (out.stdout + out.stderr)
     assert out.stdout.strip().splitlines()[-1] == "OK", out.stdout
 
@@ -279,7 +280,7 @@ const A = (n, c) => { if (!c) { console.error("FAIL: " + n); process.exit(1); } 
   console.log("OK");
 })();
 """
-    out = subprocess.run(["node", "-e", harness.replace("__TERMJS__", js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__TERMJS__", js))
     assert out.returncode == 0, (out.stdout + out.stderr)
     assert out.stdout.strip().splitlines()[-1] == "OK", out.stdout
 
@@ -342,6 +343,6 @@ let evts = [];
   console.log("OK");
 })();
 """
-    out = subprocess.run(["node", "-e", harness.replace("__TERMJS__", js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__TERMJS__", js))
     assert out.returncode == 0, (out.stdout + out.stderr)
     assert out.stdout.strip().splitlines()[-1] == "OK", out.stdout

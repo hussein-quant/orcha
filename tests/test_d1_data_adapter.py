@@ -13,7 +13,7 @@ import re
 import shutil
 import subprocess
 import pytest
-from portal_source import script_source
+from portal_source import script_source, run_node
 
 pytestmark = pytest.mark.asyncio
 
@@ -114,7 +114,7 @@ function count(target_id) {
 console.log(JSON.stringify({ aiToAi: count("b"), toHuman: count("h"), nullTarget: count(null) }));
 """
     src = harness.replace("__APPJS__", app_js).replace("__DATAJS__", data_js)
-    out = subprocess.run(["node", "-e", src], capture_output=True, text=True)
+    out = run_node(src)
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert res["aiToAi"] == 0, res        # AI→AI is NOT a human escalation
@@ -155,7 +155,7 @@ console.log(JSON.stringify({
   currentTaskDerived: m.agents.find((a) => a.alias === "Frame").current_task.task_id === "t1",
 }));
 """
-    out = subprocess.run(["node", "-e", harness.replace("__DATAJS__", data_js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__DATAJS__", data_js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert all(res.values()), res
@@ -193,7 +193,7 @@ console.log(JSON.stringify({
   promptPreview: m.agents[0].prompt_preview === "You are Frame, frontend engineer",  // #81, consumed by D3 persona
 }));
 """
-    out = subprocess.run(["node", "-e", harness.replace("__DATAJS__", data_js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__DATAJS__", data_js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert all(res.values()), res
@@ -242,7 +242,7 @@ console.log(JSON.stringify({
   deferredOnSelection: wrote3 === false && b.el.innerHTML === "",
 }));
 """
-    out = subprocess.run(["node", "-e", harness.replace("__APPJS__", app_js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__APPJS__", app_js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert res["wrote"] and res["painted"], res
@@ -273,7 +273,7 @@ window.getSelection = () => ({ rangeCount: 1, isCollapsed: false, anchorNode: ou
 const wrote = O.patch(el, "<p>changed</p>");
 console.log(JSON.stringify({ deferred: wrote === false && (el._h === undefined) }));
 """
-    out = subprocess.run(["node", "-e", harness.replace("__APPJS__", app_js)], capture_output=True, text=True)
+    out = run_node(harness.replace("__APPJS__", app_js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert res["deferred"], res

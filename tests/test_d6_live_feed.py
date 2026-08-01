@@ -17,7 +17,7 @@ import pathlib
 import shutil
 import subprocess
 import pytest
-from portal_source import page_source, script_source
+from portal_source import page_source, script_source, run_node
 
 pytestmark = pytest.mark.asyncio
 
@@ -95,8 +95,7 @@ O.applySnapshot(DA.mapSnapshot({
 const aq = O.attnItems();
 console.log(JSON.stringify({ plans: aq.plans.map(t => t.id), count: aq.count }));
 """
-    out = subprocess.run(["node", "-e", harness.replace("__APPJS__", app_js).replace("__DATAJS__", data_js)],
-                         capture_output=True, text=True)
+    out = run_node(harness.replace("__APPJS__", app_js).replace("__DATAJS__", data_js))
     assert out.returncode == 0, out.stderr
     res = json.loads(out.stdout.strip().splitlines()[-1])
     assert res["plans"] == ["t1"], res     # the fresh plan surfaces from the snapshot

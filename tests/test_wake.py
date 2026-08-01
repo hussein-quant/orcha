@@ -1612,6 +1612,13 @@ def test_claim_container_atomic_single_winner(monkeypatch, tmp_path):
     # (not a "notifier") on our own pid and reject it as foreign, so the loser would wrongly re-win.
     monkeypatch.setattr(notifier, "_pid_alive", lambda pid: pid == notifier.os.getpid())
     monkeypatch.setattr(notifier, "_daemon_pid_live", lambda pid, cid=None: pid == notifier.os.getpid())
+    # ISS-22 r3: the loser's claim vet goes through `daemon_running_for_container`, whose
+    # SERVING-lane check is `_daemon_pid_healthy` now. Left unmocked, the real check reads
+    # pytest (no heartbeat, not a "notifier" in ps) as a WEDGED daemon and — because
+    # `_daemon_pid_live` is mocked live above — `_terminate_and_wait` SIGTERMs the claim's
+    # pid, which is pytest's own: the whole test session self-terminates (exit 143).
+    monkeypatch.setattr(notifier, "_daemon_pid_healthy",
+                        lambda pid, cid=None, cwd=None: pid == notifier.os.getpid())
     won1, holder1 = notifier._claim_container("cid-1")
     assert won1 is True and holder1 is None                  # first claimer wins
     won2, holder2 = notifier._claim_container("cid-1")
@@ -1629,6 +1636,13 @@ def test_stop_daemon_clears_container_claim(monkeypatch, tmp_path):
     killed = []
     monkeypatch.setattr(notifier, "_pid_alive", lambda pid: pid == 88888 and 88888 not in killed)
     monkeypatch.setattr(notifier.os, "kill", lambda pid, sig: killed.append(pid))
+    # ISS-22 r3: `daemon_running` now health-vets the pidfile pid via `_daemon_pid_healthy`
+    # (heartbeat-primary, fail-closed). Left unmocked, the real check reads fake pid 88888
+    # as a WEDGED daemon, so `daemon_running` reaps it itself and returns None — and
+    # stop_daemon reports False ("nothing to stop"). Model the docstring's premise — a
+    # genuinely RUNNING daemon — so the test still proves stop_daemon's own teardown path.
+    monkeypatch.setattr(notifier, "_daemon_pid_healthy",
+                        lambda pid, cid=None, cwd=None: pid == 88888 and 88888 not in killed)
     assert notifier.stop_daemon(wt, quiet=True) is True
     assert not (gdir / "notifier-cid-1.pid").exists()
 

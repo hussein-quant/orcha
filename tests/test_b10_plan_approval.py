@@ -19,7 +19,7 @@ import pytest
 pytestmark = pytest.mark.asyncio
 
 from conftest import next_event
-from portal_source import page_source
+from portal_source import page_source, run_node
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
@@ -203,7 +203,7 @@ console.log(JSON.stringify(planMsgOf({thread:[{is_human:true,from:"human",body:"
 const pm2=planMsgOf({plan_message:{body:"PLAN via summary", author_alias:"AG9", at:"t"}});
 console.log(JSON.stringify({from:pm2&&pm2.from, body:pm2&&pm2.body}));
 """
-    out = subprocess.run(["node", "-e", js], capture_output=True, text=True)
+    out = run_node(js)
     assert out.returncode == 0, out.stderr
     lines = out.stdout.strip().splitlines()
     first = json.loads(lines[0])
