@@ -65,6 +65,11 @@ def set_autonomy_level(cid: str, body: AutonomyUpdate, request: Request):
 
     HUMAN-GATED (Orcha#30, stricter than /wakes): moving the slider can switch off the human
     verification gate entirely, so only a kind='human' actor may do it. Audit-logged.
+
+    mig 043: optionally also flips the container-wide `autonomy_enforced` switch — when true, every
+    per-agent autonomy_override (mig 043) is IGNORED and the container level governs everyone
+    ("override for everyone"); false re-honors overrides. Omitting it leaves the switch unchanged.
+    Rides the SAME owner-or-manage_autonomy gate as the level itself.
     """
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
@@ -77,10 +82,20 @@ def set_autonomy_level(cid: str, body: AutonomyUpdate, request: Request):
         enforce_grant(cur, request, cid, "manage_autonomy")
         body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         require_kind(cur, body.actor_agent_id, ("human",))
-        cur.execute(
-            "UPDATE containers SET autonomy_level=%s WHERE id=%s RETURNING autonomy_level",
-            (body.level, cid),
-        )
+        if body.autonomy_enforced is None:
+            cur.execute(
+                "UPDATE containers SET autonomy_level=%s WHERE id=%s "
+                "RETURNING autonomy_level, autonomy_enforced",
+                (body.level, cid),
+            )
+            detail = {"level": body.level}
+        else:
+            cur.execute(
+                "UPDATE containers SET autonomy_level=%s, autonomy_enforced=%s WHERE id=%s "
+                "RETURNING autonomy_level, autonomy_enforced",
+                (body.level, body.autonomy_enforced, cid),
+            )
+            detail = {"level": body.level, "autonomy_enforced": body.autonomy_enforced}
         row = cur.fetchone()
         log_event(
             cur,
@@ -90,7 +105,11 @@ def set_autonomy_level(cid: str, body: AutonomyUpdate, request: Request):
             "container",
             cid,
             "autonomy_changed",
-            {"level": body.level},
+            detail,
         )
         connection.commit()
-    return {"container_id": cid, "autonomy_level": row["autonomy_level"]}
+    return {
+        "container_id": cid,
+        "autonomy_level": row["autonomy_level"],
+        "autonomy_enforced": row["autonomy_enforced"],
+    }
