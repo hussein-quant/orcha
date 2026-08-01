@@ -1,4 +1,24 @@
 /* Tasks page controller: task detail, gate surface, protocol, assignment, and message rows. */
+
+/* open-orcha#209 (cloud port): tasks.result is JSONB and /done accepts any
+   JSON, but these render sites string-interpolate — an agent posting a
+   structured result (e.g. {"result": "PR #203 opened…"}) showed the verifying
+   human literally "[object Object]" at the verification gate. Normalize every
+   shape to text: strings pass through; objects with a conventional text field
+   yield that field; anything else becomes readable pretty-printed JSON
+   (escaped downstream by mdText's esc-first pipeline as usual). */
+function resultText(r) {
+  if (r == null) return "";
+  if (typeof r === "string") return r;
+  if (typeof r === "object") {
+    for (const k of ["result", "summary", "text", "message"]) {
+      if (typeof r[k] === "string" && r[k].trim()) return r[k];
+    }
+    try { return JSON.stringify(r, null, 2); } catch (e) { return String(r); }
+  }
+  return String(r);
+}
+
 function renderDetail(force) {
   const t = (TasD().tasks || []).find((x) => x.id === sel);
   if (!t) { TasO.patch(Tas$("detailMain"), '<div class="card pad"><div class="none">Task not found.</div></div>', force); return; }
@@ -20,7 +40,7 @@ function renderDetail(force) {
     </div>
     ${t.description ? `<div class="field" style="margin-top:16px;padding-top:15px;border-top:1px solid var(--border)"><div class="lbl">Description</div><div class="tx">${TasO.esc(t.description)}</div></div>` : ""}
     <div class="field" style="margin-top:14px"><div class="lbl">Definition of done</div><div class="dod">${TasO.esc(t.definition_of_done || "—")}</div></div>
-    ${t.result ? `<div class="field" style="margin-top:14px"><div class="lbl">Result</div><div class="tx md">${TasO.mdText(t.result)}</div></div>` : ""}
+    ${t.result ? `<div class="field" style="margin-top:14px"><div class="lbl">Result</div><div class="tx md">${TasO.mdText(resultText(t.result))}</div></div>` : ""}
   </div>`;
 
   /* the human-authority gate — plan-approval (B10) OR verify (Epic B), never a dead-end */
@@ -113,7 +133,7 @@ function gateSurface(t) {
       <span class="acting-note">${humanAvatar()}${actorName() ? "acting as " + TasO.esc(actorName()) + " · " : ""}logged to the audit trail</span></div>
     <div class="gb">
       <div class="field"><div class="lbl">${TasO.icon("dot", "")}${isPlan ? "Proposed plan — full text" : "Result claimed by " + TasO.esc(who(t))}</div>
-        <div class="tx md" style="max-height:300px;overflow-y:auto">${TasO.mdText(isPlan ? (pm.body || "") : (t.result || "—"))}</div></div>
+        <div class="tx md" style="max-height:300px;overflow-y:auto">${TasO.mdText(isPlan ? (pm.body || "") : (resultText(t.result) || "—"))}</div></div>
       <div class="field" style="margin-top:14px"><div class="lbl">${TasO.icon("check", "")}Definition of done</div>
         <div class="dod">${TasO.esc(t.definition_of_done || "—")}</div></div>
       <div class="actions">
