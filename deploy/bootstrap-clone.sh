@@ -7,7 +7,7 @@
 # Usage:  sh bootstrap-clone.sh [owner/repo] [dest]
 set -eu
 
-REPO="${1:-hussein-quant/orcha-cloud}"
+REPO="${1:-Quantal-Labs-AI/orcha-cloud}"
 DEST="${2:-/opt/orcha-cloud}"
 SECRETS="${ORCHA_SECRETS_DIR:-/opt/orcha-secrets}"
 APP_ID=$(python3 -c "import json;print(json.load(open('$SECRETS/github-app.json'))['id'])")
