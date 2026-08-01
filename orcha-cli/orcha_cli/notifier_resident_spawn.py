@@ -91,6 +91,17 @@ def spawn_resident(
         if reason is not None:
             # Spec §3.2 hard rule: fail loudly; NEVER fall back to a host process.
             return False, f"(sandbox unavailable: {reason})", None
+        # Issue #75 (OOM incident F1): residents count against the SAME box-wide budget
+        # as one-shot wakes — a resident boot is a sandbox container too. Enforce at the
+        # last moment before committing a name/Popen so racing daemons can't double-book.
+        # A deferral is NOT a failure: stamp spawn_info['deferred'] so the caller keeps
+        # the conversation eligible for a later tick instead of loudly failing the boot.
+        if not dry_run:
+            defer_reason = _sandbox.cap_defers_spawn(sandbox_cfg)
+            if defer_reason is not None:
+                if spawn_info is not None:
+                    spawn_info["deferred"] = True
+                return False, f"(deferred: {defer_reason})", None
         sbx_name = _sandbox.new_container_name()
         if spawn_info is not None:
             spawn_info["sandbox_container_id"] = sbx_name

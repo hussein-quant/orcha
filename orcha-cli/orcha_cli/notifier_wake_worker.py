@@ -201,6 +201,22 @@ def spawn(
         conversation=False,
         spawn_info=_spawn_info,
     )
+    # Issue #75: the box-wide concurrency cap deferred this spawn (ground-truth count
+    # ≥ budget at decision time). NOT a failure — release everything we speculatively
+    # claimed (lease, worktree) so the candidate re-competes cleanly on a later tick in
+    # the SAME server-side ORDER BY created_at order (oldest agent first = fairness, no
+    # starvation), and log the cap ONCE for this deferral (per tick, not per second).
+    if _spawn_info.get("deferred"):
+        if worktree:
+            services._teardown_worktree(headless_cwd, worktree, branch)
+        if not dry_run:
+            services._revoke_or_defer(api_base, token)
+        if not quiet:
+            print(
+                f"[notifier] cap-deferred wake for {candidate.get('alias')}: "
+                f"{command} — stays eligible next tick"
+            )
+        return None
     if sent and process is not None and live_workers is not None:
         _run_payload = {
             "wake_kind": "ephemeral",

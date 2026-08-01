@@ -21,6 +21,7 @@ def _sandbox_project(tmp_path):
 def test_dry_run_repr_shows_docker_wrap(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     sent, repr_, proc = notifier.spawn_headless(str(proj), "do the task", None, True)
     assert sent is False and proc is None
     assert "docker run" in repr_ and "orcha-run-" in repr_
@@ -29,6 +30,7 @@ def test_dry_run_repr_shows_docker_wrap(tmp_path, monkeypatch):
 def test_preflight_failure_fails_wake_without_host_fallback(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: "docker daemon unreachable")
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     def _boom(*a, **k):
         raise AssertionError("must not spawn any process")
     monkeypatch.setattr(notifier.subprocess, "Popen", _boom)
@@ -40,6 +42,7 @@ def test_preflight_failure_fails_wake_without_host_fallback(tmp_path, monkeypatc
 def test_spawn_info_carries_container_name(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     info = {}
     sent, repr_, proc = notifier.spawn_headless(str(proj), "task", None, True,
                                                 spawn_info=info)
@@ -52,6 +55,7 @@ def test_sandbox_inner_argv_uses_bare_binary_name(tmp_path, monkeypatch):
     # in the container and must be replaced with the bare name.
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     monkeypatch.setattr(notifier, "_resolve_runtime_executable",
                         lambda runtime: "/opt/host/bin/claude")
     captured = {}
@@ -71,6 +75,7 @@ def test_spawn_stamps_project_cid_label(tmp_path, monkeypatch):
     # stop the other project's containers.
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     captured = {}
     real_build = sandbox.build_docker_argv
     def _spy(inner_argv, **kw):
@@ -89,6 +94,7 @@ def test_spawn_without_cid_omits_label_fails_safe(tmp_path, monkeypatch):
     (proj / ".claude" / "orcha.json").write_text(json.dumps({
         "api_base_url": "http://127.0.0.1:8000", "sandbox": {"enabled": True}}))
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     captured = {}
     real_build = sandbox.build_docker_argv
     def _spy(inner_argv, **kw):
@@ -105,6 +111,7 @@ def test_sidecar_spawn_carries_sidecar_label(tmp_path, monkeypatch):
     # pass exempts it BY this label). A normal wake must NOT carry it.
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     captured = {}
     real_build = sandbox.build_docker_argv
     def _spy(inner_argv, **kw):
@@ -141,6 +148,7 @@ def test_repr_never_leaks_prompt_or_persona(tmp_path, monkeypatch):
     # reprs it must use a <prompt> placeholder, never the payload itself.
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     secret = "XyLONGDISTINCTIVEPROMPTPAYLOADzz " * 5
     sent, repr_, proc = notifier.spawn_headless(
         str(proj), secret, None, True,
@@ -156,6 +164,7 @@ def test_dry_run_writes_nothing_into_project(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     before = {str(p) for p in proj.rglob("*")}
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     notifier.spawn_headless(str(proj), "task", None, True)
     assert not (proj / ".orcha" / "sandbox").exists()
     assert {str(p) for p in proj.rglob("*")} == before
@@ -164,6 +173,7 @@ def test_dry_run_writes_nothing_into_project(tmp_path, monkeypatch):
 def test_api_config_write_failure_fails_wake_without_popen(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     def _oserr(*a, **k):
         raise OSError("read-only filesystem")
     monkeypatch.setattr(sandbox, "write_api_config", _oserr)
@@ -182,6 +192,7 @@ def test_spawn_creates_agent_home_before_popen(tmp_path, monkeypatch):
     # state. The Popen spy checks the dir at spawn time.
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     seen = {}
 
     def _spy_popen(argv, **kw):
@@ -201,6 +212,7 @@ def test_resident_spawn_creates_agent_home_before_popen(tmp_path, monkeypatch):
     # is the lane the continuity bug actually bit (resumes across restarts).
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     seen = {}
 
     def _spy_popen(argv, **kw):
@@ -237,6 +249,7 @@ def test_worktree_spawn_mounts_root_path_identically(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     wt = _worktree_of(proj)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     seen = {}
 
     def _spy_popen(argv, **kw):
@@ -266,6 +279,7 @@ def test_worktree_resident_spawn_mounts_root_path_identically(tmp_path, monkeypa
     proj = _sandbox_project(tmp_path)
     wt = _worktree_of(proj)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
     seen = {}
 
     def _spy_popen(argv, **kw):
@@ -289,6 +303,7 @@ def test_agent_home_create_failure_fails_wake_without_popen(tmp_path, monkeypatc
     # resumes (the exact bug this mount fixes).
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
 
     def _oserr(ws):
         raise OSError("read-only filesystem")
@@ -307,6 +322,7 @@ def test_agent_home_create_failure_fails_wake_without_popen(tmp_path, monkeypatc
 def test_resident_agent_home_create_failure_fails_boot_without_popen(tmp_path, monkeypatch):
     proj = _sandbox_project(tmp_path)
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
 
     def _oserr(ws):
         raise OSError("read-only filesystem")
@@ -328,6 +344,7 @@ def test_agent_home_path_blocked_by_file_fails_loudly_end_to_end(tmp_path, monke
     proj = _sandbox_project(tmp_path)
     (proj / ".orcha" / "agent-home").write_text("a file in the way")
     monkeypatch.setattr(sandbox, "preflight", lambda cfg, ws: None)
+    monkeypatch.setattr(sandbox, "cap_defers_spawn", lambda cfg: None)  # #75: not under test here
 
     def _boom(*a, **k):
         raise AssertionError("must not spawn any process")

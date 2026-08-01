@@ -427,3 +427,123 @@ def managed_containers(cid: str) -> "list[str]":
         if name.strip():
             names.append(name.strip())
     return names
+
+
+# ---------- Issue #75: the global sandbox concurrency cap (OOM incident F1) ----------
+# 2026-08-01 postmortem: six sandbox containers spawned within 11 seconds (one per
+# agent with ready tasks — NOTHING bounded cross-agent concurrency), an in-sandbox
+# `npm ci` pushed the swapless 3.7 GB box into global OOM (kernel `global_oom` at
+# 14:52:56 killing pid 3782130), thrash-to-death, operator power cycle. The fix is a
+# BOX-WIDE budget on concurrent managed containers, enforced at the last moment before
+# every spawn (both lanes), counting GROUND TRUTH so daemon restarts and multiple
+# workspaces on one box share the budget honestly.
+
+ENV_MAX_CONCURRENT = "ORCHA_MAX_CONCURRENT_SANDBOXES"
+# Host RAM reserved for portal + db + system before dividing the rest among sandboxes.
+BASE_RESERVE_MB = 2048
+# Non-Linux hosts have no /proc/meminfo; without a ground-truth memory reading we
+# cannot derive a budget, so default to a small sane cap (env-overridable).
+DEFAULT_CAP_NO_MEMINFO = 2
+
+
+def all_managed_containers() -> "list[str]":
+    """Names of ALL live managed run containers on the HOST — every workspace, every
+    daemon, cid-agnostic (issue #75: the budget is box-wide, not per-project, so
+    racing daemons on one machine share one honest count). EXCLUDES drain sidecars
+    (label-exempt, no worker_runs row by design). Unlike managed_containers() this is
+    NOT filtered by orcha.cid — a host running several stacks must budget them
+    together against the same physical RAM. Never raises; a docker hiccup reads as an
+    empty list, which fails OPEN (no spurious deferral) — the reaper, not this count,
+    is the safety net for a container that outlives its budget."""
+    out = _docker(["ps", "--filter", f"label={LABEL_MANAGED}",
+                   "--format", "{{.Names}}\t{{.Labels}}"], timeout=10)
+    if out.returncode != 0:
+        return []
+    names: list[str] = []
+    for line in out.stdout.splitlines():
+        if not line.strip():
+            continue
+        name, _, labels = line.partition("\t")
+        if LABEL_SIDECAR in labels.split(","):
+            continue
+        if name.strip():
+            names.append(name.strip())
+    return names
+
+
+def host_memory_mb() -> Optional[int]:
+    """Total host RAM in MiB from /proc/meminfo's MemTotal (kB), or None when it is
+    unreadable (non-Linux, or an unexpected format). psutil is NOT a dependency — we
+    read /proc directly. None signals the caller to fall back to a fixed default."""
+    try:
+        with open("/proc/meminfo", "r") as fh:
+            for line in fh:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return kb // 1024
+    except (OSError, ValueError, IndexError):
+        return None
+    return None
+
+
+def sandbox_mem_mb(cfg: "SandboxConfig") -> int:
+    """The per-sandbox memory cap in MiB, parsed from the workspace's configured
+    `memory` (docker's `--memory` grammar: a bare byte count, or a k/m/g/b suffix,
+    case-insensitive — e.g. '4g', '1536m'). An unparseable value falls back to the
+    default image cap so the budget math never divides by a bogus figure."""
+    raw = str(cfg.memory or DEFAULT_MEMORY).strip().lower()
+    m = re.match(r"^(\d+)\s*([kmgb]?)$", raw)
+    if not m:
+        raw = DEFAULT_MEMORY.lower()
+        m = re.match(r"^(\d+)\s*([kmgb]?)$", raw)
+    value, unit = int(m.group(1)), m.group(2)
+    if unit == "g":
+        mb = value * 1024
+    elif unit == "m":
+        mb = value
+    elif unit == "k":
+        mb = value // 1024
+    else:                                   # bare bytes or explicit 'b'
+        mb = value // (1024 * 1024)
+    return max(1, mb)
+
+
+def concurrency_cap(cfg: "SandboxConfig") -> int:
+    """The box-wide ceiling on CONCURRENT managed sandbox containers (issue #75).
+
+    Precedence: an explicit ORCHA_MAX_CONCURRENT_SANDBOXES env override wins (a
+    positive int; garbage or <1 is ignored). Otherwise derive it from ground truth:
+        max(1, (host_mem_mb - BASE_RESERVE_MB) // sandbox_mem_mb)
+    so it self-adjusts to the machine — a 3.7 GB box with a 4 GB per-sandbox cap
+    budgets exactly ONE, which is precisely the bound the 6-in-11s herd blew past.
+    On a host with no /proc/meminfo (non-Linux dev machines) fall back to a fixed
+    sane default. Always ≥ 1 (a machine can always run at least one)."""
+    override = os.environ.get(ENV_MAX_CONCURRENT)
+    if override is not None:
+        try:
+            value = int(override)
+            if value >= 1:
+                return value
+        except (TypeError, ValueError):
+            pass
+    host_mb = host_memory_mb()
+    if host_mb is None:
+        return DEFAULT_CAP_NO_MEMINFO
+    per = sandbox_mem_mb(cfg)
+    return max(1, (host_mb - BASE_RESERVE_MB) // per)
+
+
+def cap_defers_spawn(cfg: "SandboxConfig") -> Optional[str]:
+    """The last-moment spawn gate (issue #75): None = under budget, spawn; otherwise a
+    one-line human reason to LOG-AND-DEFER (keep the candidate eligible, no spawn this
+    tick). Counts ground-truth live managed containers HOST-WIDE (all workspaces/
+    daemons) so racing daemons on one box can't double-book past the budget between
+    ticks. Fails OPEN: if docker can't be queried the count is empty and we allow the
+    spawn (the reaper backstops a genuine runaway) — the cap must never wedge a healthy
+    box into never spawning."""
+    cap = concurrency_cap(cfg)
+    live = len(all_managed_containers())
+    if live >= cap:
+        return (f"sandbox concurrency cap reached ({live}/{cap} live managed "
+                f"containers box-wide) — deferring spawn to a later tick (issue #75)")
+    return None
