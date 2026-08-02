@@ -69,9 +69,32 @@ struct HomeTabView: View {
                 ConnectionBanners()
                 // The workspace's repo binding — the portal context card's `.tag.gh`
                 // chip: bound shows the mark + owner/name, unbound invites connecting.
-                HStack {
+                // When a repo IS bound, the hub link opens the issues/PRs surface
+                // (the phone parity of the portal's GitHub hub page); unbound, only
+                // the connect chip shows — the hub has nothing to list yet.
+                HStack(spacing: 8) {
                     GitHubRepoChip(repo: snapshot.container.githubRepo) {
                         showRepoConnect = true
+                    }
+                    if snapshot.container.githubRepo != nil {
+                        NavigationLink(value: WorkspaceRoute.githubHub) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.triangle.pull")
+                                Text("Hub")
+                            }
+                            .font(p.uiFont(12, .semibold))
+                            .foregroundStyle(p.accent)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 5)
+                            .background(p.accentSoft, in: RoundedRectangle(cornerRadius: p.radiusTag + 4))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: p.radiusTag + 4)
+                                    .strokeBorder(p.accentLine, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("GitHub hub")
+                        .accessibilityHint("Open issues and pull requests to start work")
                     }
                     Spacer()
                 }

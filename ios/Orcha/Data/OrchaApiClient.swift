@@ -387,7 +387,9 @@ struct OrchaApiClient {
         return (data, http)
     }
 
-    private func get<T: Decodable>(_ base: String, _ path: String) async throws -> T {
+    // `internal` (not `private`): the per-feature `OrchaApiClient+*` extensions live in
+    // their own files and reach these two plumbing helpers to add endpoints (github hub).
+    func get<T: Decodable>(_ base: String, _ path: String) async throws -> T {
         let (data, _) = try await raw(base, path)
         return try decoder.decode(T.self, from: data)
     }
@@ -411,7 +413,7 @@ struct OrchaApiClient {
         _ = try await send(base, path, method: "POST", body)
     }
 
-    private func postDecoding<T: Decodable>(_ base: String, _ path: String, _ body: [String: Any?]) async throws -> T {
+    func postDecoding<T: Decodable>(_ base: String, _ path: String, _ body: [String: Any?]) async throws -> T {
         let data = try await send(base, path, method: "POST", body)
         return try decoder.decode(T.self, from: data)
     }
