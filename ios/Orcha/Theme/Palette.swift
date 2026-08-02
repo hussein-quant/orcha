@@ -48,15 +48,39 @@ struct Palette {
     var flatChrome = false   // Swiss: no brand radial glows behind content
     var displayFamily: String?   // Swiss: bundled Space Grotesk; nil = SF
 
+    /// Minimalist only: bundled static Hanken Grotesk cuts keyed by the
+    /// PostScript name iOS needs for `Font.custom`/`UIFont(name:)`, chosen by
+    /// weight bucket. `hanken-grotesk-var.woff2` (the web's font) is a
+    /// variable font; on iOS `Font.custom(_:).weight()` does not drive the
+    /// `wght` axis — it only synthesizes faux-bold over whatever single
+    /// instance got registered — so registering the raw variable TTF the way
+    /// Swiss/Space Grotesk does would silently lose weight fidelity above the
+    /// font's default instance. Static cuts avoid that: each weight is its
+    /// own named font, selected here instead of relying on `.weight()`.
+    static let hankenGroteskFacesByWeight: [Font.Weight: String] = [
+        .regular: "Hanken Grotesk",
+        .medium: "Hanken Grotesk Medium",
+        .semibold: "Hanken Grotesk SemiBold",
+        .bold: "Hanken Grotesk Bold",
+        .heavy: "Hanken Grotesk Bold",   // no 800 cut shipped; Bold is closest, no synthetic double-bold
+    ]
+    var displayFacesByWeight: [Font.Weight: String]?   // Minimal: bundled Hanken Grotesk statics; nil = Swiss/SF path
+
     /// UI font for the active skin: the bundled display family when the skin
-    /// sets one (Swiss = Space Grotesk, portal parity), else the system font.
-    /// Mono call sites keep `.system(design: .monospaced)` on both skins, the
-    /// way JetBrains Mono survives the web's Swiss.
+    /// sets one (Swiss = Space Grotesk, portal parity; Minimal = Hanken
+    /// Grotesk static cuts, web parity), else the system font. Mono call
+    /// sites keep `.system(design: .monospaced)` on both skins, the way
+    /// JetBrains Mono survives the web's Swiss. `Font.custom` scales with
+    /// Dynamic Type via `UIFontMetrics` the same as `.system`, so accessibility
+    /// text sizing keeps working on both display-family paths.
     func uiFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        if let displayFamily {
-            Font.custom(displayFamily, size: size).weight(weight)
+        if let displayFacesByWeight {
+            let face = displayFacesByWeight[weight] ?? displayFacesByWeight[.regular] ?? "Hanken Grotesk"
+            return Font.custom(face, size: size)
+        } else if let displayFamily {
+            return Font.custom(displayFamily, size: size).weight(weight)
         } else {
-            .system(size: size, weight: weight)
+            return .system(size: size, weight: weight)
         }
     }
 
@@ -231,10 +255,9 @@ struct Palette {
     /// Minimalist skin (portal `[data-skin="minimal"]` tokens 1:1, mig-045 web
     /// parity): deep warm near-black / calm near-white surfaces, one champagne-
     /// gold accent used sparingly, larger radii + hairline borders instead of
-    /// boxed shadows. UI face is the system font (SF Pro) — a deliberate
-    /// substitution for the web's self-hosted Hanken Grotesk, which can't be
-    /// bundled without shipping woff2/ttf; SF Pro is the native modern
-    /// equivalent, so `displayFamily` stays nil (see `uiFont`).
+    /// boxed shadows. UI face is the web's self-hosted Hanken Grotesk, bundled
+    /// as static TTF cuts converted from `hanken-grotesk-var.woff2` (font
+    /// parity with web) — see `displayFacesByWeight` on `uiFont`.
     static let minimalDark: Palette = {
         var p = Palette(
             bg: Color(hex: 0x141414),
@@ -324,6 +347,9 @@ struct Palette {
     /// stays normal case (only Swiss goes mono), flat elevation — no brand
     /// radial glow and `box-shadow: none` on cards, same as the web's
     /// `--shadow-sm` reduction + hairline-instead-of-boxed-border direction.
+    /// `displayFamily` stays nil — Minimal routes fonts through
+    /// `displayFacesByWeight` instead (see `uiFont`), since it needs distinct
+    /// bundled files per weight rather than one variable/`.weight()` pair.
     private mutating func applyMinimalTraits() {
         radiusCard = 18
         radiusButton = 12
@@ -331,6 +357,7 @@ struct Palette {
         pillMono = false
         flatChrome = true
         displayFamily = nil
+        displayFacesByWeight = Palette.hankenGroteskFacesByWeight
     }
 
     /// Resolve for an explicit theme mode + skin; Auto resolves per system in
