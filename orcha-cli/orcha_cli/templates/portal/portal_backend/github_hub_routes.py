@@ -3,7 +3,8 @@ detail), and one-click "Start" that turns an issue/PR into an Orcha task (Featur
 
 Endpoints (all GETs share the SAME grant model; the two writes are only /start):
   GET  .../github/issues            — open issues (list)
-  GET  .../github/pulls             — open PRs (list)
+  GET  .../github/pulls             — open PRs (list) — ONE GitHub call, checks:null
+  GET  .../github/checks            — batch checks rollup for a set of PR numbers
   GET  .../github/pulls/{number}    — one PR's full detail (PR detail page)
   GET  .../github/issues/{number}   — one issue's full detail (issue detail page)
   POST .../github/start             — issue/PR -> Orcha task
@@ -19,17 +20,33 @@ Network calls go through small monkeypatchable leaf functions (`_gh_get`) — te
 that leaf and NEVER hit live GitHub (mirroring github_routes._fetch_installation_repos).
 
 A tiny in-module TTL cache (60s) shields GitHub's rate limit from the portal's polling UI:
-lists keyed per (cid, 'issues'|'pulls'), detail keyed per (cid, 'pull'|'issue', number).
-POST /start invalidates every cache entry for its container so a freshly tracked item's
-state can refresh immediately.
+lists keyed per (cid, 'issues'|'pulls'), detail keyed per (cid, 'pull'|'issue', number),
+per-PR checks rollups keyed per (cid, 'checks', number, sha). POST /start invalidates
+every cache entry for its container so a freshly tracked item's state can refresh
+immediately.
+
+PERFORMANCE (list vs. checks split): the PR list used to build a full checks rollup
+INLINE per row — 2 GitHub HTTP calls per PR head sha (commit-status + check-runs), so a
+26-PR list cost ~52 sequential GitHub round-trips on a cold cache (the "Loading…" the
+founder saw). The list endpoint now makes exactly ONE GitHub call (the /pulls list) and
+returns `checks: null` on every row ("not loaded yet" — distinct from a real all-zero
+rollup `{passed:0,failing:0,pending:0,total:0}`). The frontend renders the list instantly
+off that single call, then requests GET .../github/checks?numbers=... for the visible
+rows; this route resolves each requested number's head sha from the SAME cached pulls
+list (re-fetching the list only if its own 60s cache has expired — never a second list
+call just to get shas) and rolls up checks CONCURRENTLY via a bounded thread pool
+(GITHUB_CHECKS_POOL_SIZE workers) — routes here are plain sync `def`s running in
+Starlette's threadpool, so `concurrent.futures.ThreadPoolExecutor` is the matching
+primitive for fanning out N blocking `_gh_get` calls (no httpx/asyncio dependency added).
 """
 
+import concurrent.futures
 import json
 import time
 import urllib.error
 import urllib.request
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Query, Request
 
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -49,32 +66,42 @@ CACHE_TTL_SECONDS = 60
 # -first for display).
 PR_FILES_PER_PAGE = 100
 ISSUE_COMMENTS_LIMIT = 20
+# GET .../github/checks caps: at most this many PR numbers per request (keeps one batch
+# call boundedly cheap even if the frontend ever passes an oversized ?numbers= list), and
+# at most this many concurrent in-flight GitHub fetches (bounded pool — polite to GitHub's
+# rate limit and to the portal process' own thread budget).
+CHECKS_BATCH_MAX_NUMBERS = 30
+CHECKS_POOL_SIZE = 8
 
 # In-module TTL cache. Deliberately a plain module dict — one portal process, tiny
 # per-container footprint, invalidated on POST /start. Tests exercise TTL behavior by
 # monkeypatching time.monotonic / clearing. Keys are a (cid, kind, *rest) tuple: the
 # list routes cache per (cid, 'issues'|'pulls'); the detail routes cache per
-# (cid, 'pull'|'issue', number) — cid is always key[0] so invalidation stays correct.
+# (cid, 'pull'|'issue', number); the batch checks route caches per
+# (cid, 'checks', number, sha) — the sha is part of the key so a new push (new head sha)
+# is never served a stale rollup even mid-TTL. cid is always key[0] so invalidation
+# (which drops every entry for a container) stays correct for all four shapes.
 _CACHE: dict = {}
 
 
-def _cache_key(cid: str, kind: str, number: int = None) -> tuple:
-    return (cid, kind) if number is None else (cid, kind, number)
+def _cache_key(cid: str, kind: str, *rest) -> tuple:
+    return (cid, kind) + rest
 
 
-def _cache_get(cid: str, kind: str, number: int = None):
-    hit = _CACHE.get(_cache_key(cid, kind, number))
+def _cache_get(cid: str, kind: str, *rest):
+    hit = _CACHE.get(_cache_key(cid, kind, *rest))
     if hit and hit[0] > time.monotonic():
         return hit[1]
     return None
 
 
-def _cache_put(cid: str, kind: str, payload, number: int = None) -> None:
-    _CACHE[_cache_key(cid, kind, number)] = (time.monotonic() + CACHE_TTL_SECONDS, payload)
+def _cache_put(cid: str, kind: str, payload, *rest) -> None:
+    _CACHE[_cache_key(cid, kind, *rest)] = (time.monotonic() + CACHE_TTL_SECONDS, payload)
 
 
 def _cache_invalidate(cid: str) -> None:
-    # Drops every entry for this container — both list and detail caches (key[0] is cid).
+    # Drops every entry for this container — list, detail, raw-pulls, and batch-checks
+    # caches alike (key[0] is cid for all four shapes).
     for key in [k for k in _CACHE if k[0] == cid]:
         _CACHE.pop(key, None)
 
@@ -266,13 +293,17 @@ def _checks_rollup(repo: str, sha: str, token: str, include_runs: bool = False) 
     return rollup
 
 
-def _pull_entry(repo: str, pull: dict, token: str) -> dict:
+def _pull_entry(repo: str, pull: dict) -> dict:
+    """One row of the PR LIST — no checks-rollup GitHub calls (that's the whole point of
+    the lazy split, see the module header's PERFORMANCE note). `checks` is always None
+    here — "not loaded yet", filled in by a follow-up GET .../github/checks batch call —
+    NEVER a real rollup dict, so the frontend can tell "not loaded" apart from an honest
+    all-zero result. `repo` is accepted (unused) to keep this a drop-in swap for the old
+    signature at call sites; head sha isn't needed here either (the checks route re-reads
+    it straight off the cached raw pulls list)."""
     reviewers = [r.get("login") for r in (pull.get("requested_reviewers") or [])
                  if r.get("login")]
     head = pull.get("head") or {}
-    sha = head.get("sha")
-    checks = _checks_rollup(repo, sha, token) if sha else {
-        "passed": 0, "failing": 0, "pending": 0, "total": 0}
     return {
         "number": pull.get("number"),
         "title": pull.get("title"),
@@ -281,7 +312,7 @@ def _pull_entry(repo: str, pull: dict, token: str) -> dict:
         "updated_at": pull.get("updated_at"),
         "html_url": pull.get("html_url"),
         "requested_reviewers": reviewers,
-        "checks": checks,
+        "checks": None,
         "mergeable_state": pull.get("mergeable_state"),
     }
 
@@ -434,14 +465,46 @@ def list_github_issues(cid: str, request: Request):
     return payload
 
 
+def _fetch_and_cache_pulls_list(cid: str, repo: str, token: str):
+    """The ONE GitHub call behind the PR list: fetch `/pulls`, cache both the
+    client-facing payload (`checks: None` per row — see `_pull_entry`) AND the raw
+    GitHub response (`_cache_get(cid, "pulls_raw")`) under the SAME 60s TTL. The raw copy
+    is read-only plumbing for the batch checks route below — it needs each requested
+    number's head sha and must never trigger a second `/pulls` list call just to get it.
+    Returns (payload, raw) on success; raises RuntimeError on a GitHub failure (the raw
+    cache is left untouched on failure — a transient error must never poison it with a
+    partial/absent list)."""
+    raw = _gh_get(f"/repos/{repo}/pulls?state=open&per_page=100", token)
+    pulls = [_pull_entry(repo, p) for p in raw]
+    payload = {"available": True, "repo": repo, "pulls": pulls}
+    _cache_put(cid, "pulls", payload)
+    _cache_put(cid, "pulls_raw", raw)
+    return payload, raw
+
+
+def _cached_or_fetch_raw_pulls(cid: str, repo: str, token: str):
+    """The batch checks route's entry point for "what's this PR's head sha": prefer the
+    warm raw-pulls cache (no GitHub call at all); on a miss/expiry, re-fetch the list
+    ONCE (populating both caches via `_fetch_and_cache_pulls_list`, so a subsequent list
+    GET this same 60s window is also served from cache). Raises RuntimeError on failure,
+    same as any other GitHub fetch here."""
+    raw = _cache_get(cid, "pulls_raw")
+    if raw is not None:
+        return raw
+    _, raw = _fetch_and_cache_pulls_list(cid, repo, token)
+    return raw
+
+
 @app.get("/api/containers/{cid}/github/pulls")
 def list_github_pulls(cid: str, request: Request):
     """Open PRs of the container's connected repo — the hub's PRs tab.
 
     Returns {available, repo, pulls:[{number,title,head,draft,updated_at,html_url,
-    requested_reviewers,checks:{passed,failing,pending,total},mergeable_state}]}. The
-    checks rollup sums the combined-status + check-runs surfaces for each PR's head sha.
-    Same clean-error contract + 60s cache as the issues route."""
+    requested_reviewers,checks:null,mergeable_state}]}. `checks` is ALWAYS null here —
+    "not loaded yet" — never a rollup: this route makes exactly ONE GitHub call (the
+    /pulls list itself); the checks rollup is fetched separately and progressively via
+    GET .../github/checks (see that route's docstring + the module header's PERFORMANCE
+    note). Same clean-error contract + 60s cache as the issues route."""
     with db_cursor() as (_, cur):
         repo = _load_binding(cur, cid, request)
     if not repo:
@@ -453,13 +516,73 @@ def list_github_pulls(cid: str, request: Request):
     if not token:
         return _not_connected()
     try:
-        raw = _gh_get(f"/repos/{repo}/pulls?state=open&per_page=100", token)
+        payload, _raw = _fetch_and_cache_pulls_list(cid, repo, token)
     except RuntimeError as exc:
         return {**_error_payload(exc), "repo": repo}
-    pulls = [_pull_entry(repo, p, token) for p in raw]
-    payload = {"available": True, "repo": repo, "pulls": pulls}
-    _cache_put(cid, "pulls", payload)
     return payload
+
+
+@app.get("/api/containers/{cid}/github/checks")
+def list_github_checks(cid: str, request: Request, numbers: str = Query(...)):
+    """Batch checks rollup for a set of open PRs — the list's progressive-fill follow-up
+    call. ?numbers=1,2,3 (max CHECKS_BATCH_MAX_NUMBERS numbers per request — a 400 above
+    that, not a silent truncation, so a caller notices it's asking for too much rather
+    than quietly losing rows).
+
+    Returns {available, checks: {"<number>": {passed,failing,pending,total}}}. Only
+    numbers whose head sha we can resolve (i.e. still present in the current open-PRs
+    list) get an entry — a number that's since closed/merged is simply absent, not an
+    error. Each number's rollup is fetched CONCURRENTLY off a bounded thread pool
+    (CHECKS_POOL_SIZE workers — see the module header's PERFORMANCE note) and cached per
+    (cid, number, head sha) for 60s, same TTL as everything else here. The existing
+    403-degrades-to-zeros behavior of `_checks_rollup` applies per-number, so one PR's
+    checks being unreadable never fails the whole batch.
+    """
+    with db_cursor() as (_, cur):
+        repo = _load_binding(cur, cid, request)
+    if not repo:
+        return _not_connected()
+    raw_numbers = [n for n in numbers.split(",") if n.strip()]
+    if len(raw_numbers) > CHECKS_BATCH_MAX_NUMBERS:
+        raise HTTPException(
+            400, f"at most {CHECKS_BATCH_MAX_NUMBERS} numbers per request")
+    try:
+        wanted = sorted({int(n) for n in raw_numbers})
+    except ValueError:
+        raise HTTPException(400, "numbers must be a comma-separated list of integers")
+    if not wanted:
+        return {"available": True, "checks": {}}
+    token = _resolve_repo_token(repo)
+    if not token:
+        return _not_connected()
+    try:
+        raw_pulls = _cached_or_fetch_raw_pulls(cid, repo, token)
+    except RuntimeError as exc:
+        return {**_error_payload(exc), "repo": repo}
+    sha_by_number = {}
+    for p in raw_pulls:
+        n = p.get("number")
+        sha = (p.get("head") or {}).get("sha")
+        if n in wanted and sha:
+            sha_by_number[n] = sha
+
+    def _rollup_for(number: int):
+        sha = sha_by_number[number]
+        cached = _cache_get(cid, "checks", number, sha)
+        if cached is not None:
+            return number, cached
+        rollup = _checks_rollup(repo, sha, token)
+        _cache_put(cid, "checks", rollup, number, sha)
+        return number, rollup
+
+    checks: dict = {}
+    targets = list(sha_by_number)
+    if targets:
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(CHECKS_POOL_SIZE, len(targets))) as pool:
+            for number, rollup in pool.map(_rollup_for, targets):
+                checks[str(number)] = rollup
+    return {"available": True, "checks": checks}
 
 
 @app.get("/api/containers/{cid}/github/pulls/{number}")

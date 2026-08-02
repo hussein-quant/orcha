@@ -9,7 +9,24 @@
    Cadence: the shared 3s snapshot poll (OrchaData.start, wired in boot) keeps
    the shell chrome + agent roster live; issues/pulls are a heavier
    GitHub-backed fetch (server-side 60s TTL cache per the spec) so they refresh
-   on load, on tab switch, and on a 60s timer — never on the 3s tick. */
+   on load, on tab switch, and on a 60s timer — never on the 3s tick.
+
+   PERFORMANCE (progressive checks fill): GET .../github/pulls returns each
+   pull with `checks: null` ("not loaded yet" — see github_hub_routes.py's
+   PERFORMANCE note; the list route now makes exactly ONE GitHub call). Once
+   that list paints, maybeLoadChecks() fires a SEPARATE GET .../github/checks
+   batch call for the pull numbers just rendered and patches the results into
+   `checksByNumber` (number -> rollup, keyed independently of `payload.pulls`
+   so it survives the 3s snapshot tick's re-render — that tick only calls
+   render(), never load()/maybeLoadChecks(), so it must read whatever's already in
+   checksByNumber rather than resetting it). renderList() merges
+   checksByNumber onto each pull's `checks: null` before handing the state to
+   GhS.bodyHtml(), so a patched chip shows up on the VERY NEXT render without
+   needing a fresh /pulls fetch. A pull already resolved (real rollup, not
+   null) is left alone — maybeLoadChecks() only asks the batch endpoint about
+   numbers still missing from the map. If the batch call fails outright, the
+   chips simply stay on checksChipHtml's null branch ("checks…") — no crash,
+   no full-list error state (see maybeLoadChecks()'s .catch). */
 const GhO = window.Orcha;
 const GhS = window.OrchaGithubHub;
 const Gh$ = (id) => document.getElementById(id);
@@ -22,6 +39,15 @@ let payload = { issues: null, pulls: null };   // per-tab last-loaded payload
 let loading = { issues: false, pulls: false };
 let loadError = { issues: null, pulls: null };
 let booted = { issues: false, pulls: false };
+// number -> {passed,failing,pending,total}, patched in by maybeLoadChecks() below.
+// Deliberately OUTSIDE `payload` so a background render (3s tick) never wipes
+// it, and so a fresh /pulls refetch (60s timer) doesn't need to carry checks
+// itself — the next maybeLoadChecks() call re-fills whatever's missing.
+let checksByNumber = {};
+// Batch-checks requests already in flight or served this session, so a rapid
+// sequence of renders (each one calling maybeLoadChecks) never fires the same
+// numbers twice while a request is still pending.
+let checksRequested = {};
 
 /* ---- detail route state (?pr=N / ?issue=N) --------------------------------
    One payload/loading/error slot at a time — a route change (row click, back/
@@ -81,13 +107,27 @@ function ghResolvedTheme() {
   } catch (e) { return "dark"; }
 }
 
+// Merge the patched-in checksByNumber map onto a pull-request list: a pull
+// still carrying checks:null gets the resolved rollup if maybeLoadChecks() has
+// already patched that number; a pull that already HAS a real rollup (e.g. a
+// future backend revision that inlines it again, or a re-resolved value) is
+// left untouched — checksByNumber only ever fills gaps, never overwrites.
+function withPatchedChecks(pulls) {
+  return pulls.map((p) => (
+    p.checks == null && checksByNumber[p.number] != null
+      ? Object.assign({}, p, { checks: checksByNumber[p.number] })
+      : p
+  ));
+}
+
 // #ghlist patch for the ACTIVE tab only — pure DOM patch, no shell/chrome, no
 // skeleton awareness (the skeleton swap wraps THIS function; see render() in
 // github-boot.js, mirroring OrchaSkeleton.swap(Tas$("tlist"), renderList) in
 // tasks-boot.js).
 function renderList(force) {
   const key = tab === "pulls" ? "pulls" : "issues";
-  const items = payload[key] ? (payload[key].issues || payload[key].pulls || []) : null;
+  const rawItems = payload[key] ? (payload[key].issues || payload[key].pulls || []) : null;
+  const items = key === "pulls" && rawItems ? withPatchedChecks(rawItems) : rawItems;
   const repo = payload[key] ? payload[key].repo : null;
   const state = {
     loading: loading[key], error: loadError[key], repo, items,
@@ -100,6 +140,11 @@ function renderList(force) {
   const host = Gh$("ghlist");
   if (!host) return;
   GhO.patch(host, GhS.bodyHtml(state), force);
+  // Progressive fill: once the list itself has painted, go fetch checks for
+  // whichever pulls are still null. Runs AFTER the patch call above so the
+  // list is never blocked on this — the instant-list requirement is the
+  // patch() call itself, this is purely a follow-up.
+  if (key === "pulls" && items) maybeLoadChecks(items);
 }
 
 function load(which, force) {
@@ -108,6 +153,7 @@ function load(which, force) {
   if (!id || loading[key]) return;
   if (!force && payload[key]) return;   // already have this tab's data
   loading[key] = true;
+  if (key === "pulls" && force) checksRequested = {};   // a fresh list deserves a fresh fill pass
   fetch("/api/containers/" + encodeURIComponent(id) + "/github/" + key)
     .then((r) => r.json().then((body) => ({ ok: r.ok, status: r.status, body })).catch(() => ({ ok: r.ok, status: r.status, body: null })))
     .then(({ ok, status, body }) => {
@@ -116,6 +162,37 @@ function load(which, force) {
     })
     .catch((e) => { loadError[key] = { kind: "error", status: 0, detail: e.message }; })
     .then(() => { loading[key] = false; render(true); });
+}
+
+/* ---- progressive checks fill (GET .../github/checks) ----------------------
+   Fires right after the pulls list paints (called from renderList above),
+   for whichever numbers on screen don't have a resolved rollup yet AND
+   haven't already been requested this session. Capped at 30 numbers per call
+   to match the backend's CHECKS_BATCH_MAX_NUMBERS — the list itself can carry
+   up to 100 pulls (per_page=100), so a founder with a very large open-PR
+   count simply fills the first 30 still-missing numbers per pass; the next
+   render (e.g. after those resolve, or on the 60s refresh) picks up any
+   remainder. */
+const CHECKS_BATCH_CAP = 30;
+function maybeLoadChecks(pulls) {
+  const id = ghCid();
+  if (!id) return;
+  const wanted = pulls
+    .filter((p) => p.checks == null && !checksRequested[p.number])
+    .slice(0, CHECKS_BATCH_CAP)
+    .map((p) => p.number);
+  if (!wanted.length) return;
+  wanted.forEach((n) => { checksRequested[n] = true; });
+  fetch("/api/containers/" + encodeURIComponent(id) + "/github/checks?numbers=" + wanted.join(","))
+    .then((r) => (r.ok ? r.json() : null))
+    .then((body) => {
+      if (!body || body.available === false || !body.checks) return;   // degrade quietly
+      Object.keys(body.checks).forEach((numStr) => {
+        checksByNumber[Number(numStr)] = body.checks[numStr];
+      });
+      renderList(true);   // patch the resolved chips in place, no full reload
+    })
+    .catch(() => { /* quiet degrade — chips stay on the "checks…" placeholder */ });
 }
 
 /* ---- detail route (?pr=N / ?issue=N) ---------------------------------------

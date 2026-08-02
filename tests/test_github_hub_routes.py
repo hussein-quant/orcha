@@ -112,13 +112,21 @@ async def test_issues_label_missing_color_omits_field(client, container, token_e
     assert r.json()["issues"][0]["labels"] == [{"name": "triage", "color": None}]
 
 
-# ------------------------- pulls + checks rollup math -------------------------
+# ------------------------- pulls list: single-call, lazy checks -------------------------
 
-async def test_pulls_checks_rollup_math(client, container, token_env, monkeypatch):
+async def test_pulls_list_is_one_github_call_and_checks_is_null(
+        client, container, token_env, monkeypatch):
+    """The perf fix's core contract: the list route makes EXACTLY ONE GitHub call (the
+    /pulls list itself) — never the per-PR status/check-runs fetches _checks_rollup used
+    to make inline. `checks` comes back null ("not loaded yet"), not a rollup dict — a
+    mutation that reintroduces an inline per-PR checks fetch on the list path must fail
+    this test (call count > 1)."""
     cid = container["id"]
     await _bind_repo(client, cid)
+    calls = []
 
     def fake_get(path, token):
+        calls.append(path)
         if path.endswith("/pulls?state=open&per_page=100"):
             return [{
                 "number": 12, "title": "Add feature", "draft": False,
@@ -127,29 +135,293 @@ async def test_pulls_checks_rollup_math(client, container, token_env, monkeypatc
                 "head": {"ref": "feat/x", "sha": "deadbeef"},
                 "requested_reviewers": [{"login": "hubot"}],
                 "mergeable_state": "clean",
+            }, {
+                "number": 13, "title": "Second PR", "draft": False,
+                "updated_at": "2026-07-02T00:00:00Z",
+                "html_url": "https://github.com/acme/site/pull/13",
+                "head": {"ref": "feat/y", "sha": "cafef00d"},
+                "requested_reviewers": [],
+                "mergeable_state": "unstable",
             }]
-        if path == "/repos/acme/site/commits/deadbeef/status":
-            return {"statuses": [
-                {"state": "success"}, {"state": "failure"}, {"state": "pending"},
-            ]}
-        if path == "/repos/acme/site/commits/deadbeef/check-runs":
-            return {"check_runs": [
-                {"status": "completed", "conclusion": "success"},
-                {"status": "completed", "conclusion": "failure"},
-                {"status": "in_progress", "conclusion": None},
-                {"status": "completed", "conclusion": "skipped"},   # counts as passed
-            ]}
-        raise AssertionError(f"unexpected path {path}")
+        # If the list route ever calls the checks surfaces, that's the exact regression
+        # this test guards against — fail loudly rather than quietly returning data.
+        raise AssertionError(f"list route must not fetch checks — unexpected path {path}")
 
     monkeypatch.setattr(hub, "_gh_get", fake_get)
     r = await client.get(f"/api/containers/{cid}/github/pulls")
     assert r.status_code == 200, r.text
-    pull = r.json()["pulls"][0]
-    # combined status: 1 pass / 1 fail / 1 pending; check-runs: 2 pass / 1 fail / 1 pending
-    assert pull["checks"] == {"passed": 3, "failing": 2, "pending": 2, "total": 7}
-    assert pull["head"] == "feat/x"
-    assert pull["requested_reviewers"] == ["hubot"]
-    assert pull["mergeable_state"] == "clean"
+    body = r.json()
+    assert len(calls) == 1  # exactly one GitHub round-trip for the whole list
+    pulls = body["pulls"]
+    assert len(pulls) == 2
+    assert pulls[0]["checks"] is None and pulls[1]["checks"] is None
+    assert pulls[0]["head"] == "feat/x"
+    assert pulls[0]["requested_reviewers"] == ["hubot"]
+    assert pulls[0]["mergeable_state"] == "clean"
+
+
+# ------------------------- batch checks endpoint -------------------------
+
+def _fake_pulls_and_checks(calls, extra_numbers=()):
+    """A fake _gh_get that serves a 2-PR (+ optional extras) /pulls list and, for any
+    commits/<sha>/status|check-runs path, a rollup keyed by sha suffix so different PRs
+    get distinguishable math. Every call is recorded in `calls` for concurrency/cache
+    assertions."""
+    base_pulls = [
+        {"number": 12, "title": "Add feature", "draft": False,
+         "updated_at": "2026-07-02T00:00:00Z",
+         "html_url": "https://github.com/acme/site/pull/12",
+         "head": {"ref": "feat/x", "sha": "sha12"},
+         "requested_reviewers": [], "mergeable_state": "clean"},
+        {"number": 13, "title": "Second PR", "draft": False,
+         "updated_at": "2026-07-02T00:00:00Z",
+         "html_url": "https://github.com/acme/site/pull/13",
+         "head": {"ref": "feat/y", "sha": "sha13"},
+         "requested_reviewers": [], "mergeable_state": "unstable"},
+    ]
+    for n in extra_numbers:
+        base_pulls.append({
+            "number": n, "title": f"PR {n}", "draft": False,
+            "updated_at": "2026-07-02T00:00:00Z",
+            "html_url": f"https://github.com/acme/site/pull/{n}",
+            "head": {"ref": f"feat/{n}", "sha": f"sha{n}"},
+            "requested_reviewers": [], "mergeable_state": "clean",
+        })
+
+    def fake_get(path, token):
+        calls.append(path)
+        if path.endswith("/pulls?state=open&per_page=100"):
+            return base_pulls
+        if path.startswith("/repos/acme/site/commits/") and path.endswith("/status"):
+            return {"statuses": [{"state": "success"}]}
+        if path.startswith("/repos/acme/site/commits/") and path.endswith("/check-runs"):
+            return {"check_runs": [{"status": "completed", "conclusion": "failure"}]}
+        raise AssertionError(f"unexpected path {path}")
+
+    return fake_get
+
+
+async def test_checks_batch_shape_and_math(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+    monkeypatch.setattr(hub, "_gh_get", _fake_pulls_and_checks(calls))
+
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers=12,13")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    # 1 status success + 1 check-run failure -> 1 passed, 1 failing, per number
+    assert body["checks"]["12"] == {"passed": 1, "failing": 1, "pending": 0, "total": 2}
+    assert body["checks"]["13"] == {"passed": 1, "failing": 1, "pending": 0, "total": 2}
+
+
+async def test_checks_batch_absent_number_is_silently_skipped(
+        client, container, token_env, monkeypatch):
+    """A requested number that isn't in the current open-PR list (closed/merged since,
+    or simply wrong) is just absent from the response — not an error."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+    monkeypatch.setattr(hub, "_gh_get", _fake_pulls_and_checks(calls))
+
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers=12,999")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "12" in body["checks"]
+    assert "999" not in body["checks"]
+
+
+async def test_checks_batch_cap_rejects_over_30_numbers(client, container, token_env):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    too_many = ",".join(str(n) for n in range(1, 32))  # 31 numbers
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers={too_many}")
+    assert r.status_code == 400
+
+
+async def test_checks_batch_bad_numbers_400(client, container, token_env):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers=abc,def")
+    assert r.status_code == 400
+
+
+async def test_checks_batch_empty_numbers_returns_empty(client, container, token_env):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers=")
+    assert r.status_code == 200
+    assert r.json() == {"available": True, "checks": {}}
+
+
+async def test_checks_batch_missing_numbers_param_422(client, container):
+    """`numbers` is a required query param (Query(...)) — omitting it entirely is a
+    clean FastAPI validation 422, not a 500."""
+    cid = container["id"]
+    r = await client.get(f"/api/containers/{cid}/github/checks")
+    assert r.status_code == 422
+
+
+async def test_checks_batch_reuses_warm_pulls_cache_no_second_list_call(
+        client, container, token_env, monkeypatch):
+    """The batch endpoint must resolve head shas from the ALREADY-cached pulls list (from
+    a prior GET .../pulls) rather than re-fetching the list — a warm cache means the
+    batch call's ONLY GitHub traffic is the per-number checks fetches."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+    monkeypatch.setattr(hub, "_gh_get", _fake_pulls_and_checks(calls))
+
+    await client.get(f"/api/containers/{cid}/github/pulls")
+    list_call_count = len(calls)
+    assert list_call_count == 1
+
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers=12,13")
+    assert r.status_code == 200, r.text
+    # no additional /pulls list call — only the per-number status+check-runs fetches
+    list_calls_after = [c for c in calls if c.endswith("/pulls?state=open&per_page=100")]
+    assert len(list_calls_after) == 1
+    assert len(calls) == list_call_count + 4  # 2 numbers * (status + check-runs)
+
+
+async def test_checks_batch_refetches_list_when_cache_cold(
+        client, container, token_env, monkeypatch):
+    """No warm pulls cache (e.g. the batch call races ahead of/without a prior list GET)
+    -> the batch route fetches the list itself ONCE to resolve shas, then proceeds."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+    monkeypatch.setattr(hub, "_gh_get", _fake_pulls_and_checks(calls))
+
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers=12")
+    assert r.status_code == 200, r.text
+    list_calls = [c for c in calls if c.endswith("/pulls?state=open&per_page=100")]
+    assert len(list_calls) == 1
+    assert body_checks_present(r, "12")
+
+
+def body_checks_present(r, number):
+    return number in r.json()["checks"]
+
+
+async def test_checks_batch_cached_per_number_and_sha(
+        client, container, token_env, monkeypatch):
+    """Repeat batch reads for the SAME number+sha are served from the 60s cache; past the
+    TTL GitHub is hit again for that number."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+    monkeypatch.setattr(hub, "_gh_get", _fake_pulls_and_checks(calls))
+
+    await client.get(f"/api/containers/{cid}/github/checks?numbers=12")
+    n_after_first = len(calls)
+    await client.get(f"/api/containers/{cid}/github/checks?numbers=12")
+    assert len(calls) == n_after_first  # served from cache — no new GitHub calls
+
+    base = hub.time.monotonic()
+    monkeypatch.setattr(hub.time, "monotonic", lambda: base + hub.CACHE_TTL_SECONDS + 1)
+    await client.get(f"/api/containers/{cid}/github/checks?numbers=12")
+    assert len(calls) > n_after_first
+
+
+async def test_checks_batch_concurrency_is_bounded(
+        client, container, token_env, monkeypatch):
+    """Fan-out across the requested numbers happens concurrently (not strictly serial —
+    the whole point of the perf fix), but never exceeds CHECKS_POOL_SIZE in flight at
+    once. Instrument _gh_get to track concurrent in-flight calls via a lock + counter."""
+    import threading
+    import time as time_mod
+
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    lock = threading.Lock()
+    state = {"inflight": 0, "max_inflight": 0}
+    numbers = list(range(20, 20 + 12))  # 12 PRs -> exercises the pool bound (8)
+
+    pulls_list = [{
+        "number": n, "title": f"PR {n}", "draft": False,
+        "updated_at": "2026-07-02T00:00:00Z",
+        "html_url": f"https://github.com/acme/site/pull/{n}",
+        "head": {"ref": f"feat/{n}", "sha": f"sha{n}"},
+        "requested_reviewers": [], "mergeable_state": "clean",
+    } for n in numbers]
+
+    def fake_get(path, token):
+        if path.endswith("/pulls?state=open&per_page=100"):
+            return pulls_list
+        # Only the per-sha check surfaces below simulate concurrent network latency —
+        # a real GitHub round-trip takes measurable wall time, so overlapping calls
+        # only show up as concurrent if we hold the "in flight" window open briefly.
+        with lock:
+            state["inflight"] += 1
+            state["max_inflight"] = max(state["max_inflight"], state["inflight"])
+        try:
+            time_mod.sleep(0.05)
+        finally:
+            with lock:
+                state["inflight"] -= 1
+        if path.endswith("/status"):
+            return {"statuses": []}
+        return {"check_runs": []}
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    numbers_param = ",".join(str(n) for n in numbers)
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers={numbers_param}")
+    assert r.status_code == 200, r.text
+    assert len(r.json()["checks"]) == 12
+    # concurrency actually happened (>1 in flight at once) …
+    assert state["max_inflight"] > 1
+    # … but never exceeded the bounded pool size.
+    assert state["max_inflight"] <= hub.CHECKS_POOL_SIZE
+
+
+async def test_checks_batch_403_degrades_to_zeros_per_number(
+        client, container, token_env, monkeypatch):
+    """The existing 403-unreadable-checks degradation (_checks_rollup catching
+    RuntimeError -> zeros) applies per-number in the batch route too — one PR's checks
+    being forbidden must not fail the whole batch."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+
+    def fake_get(path, token):
+        calls.append(path)
+        if path.endswith("/pulls?state=open&per_page=100"):
+            return [{
+                "number": 12, "title": "x", "draft": False,
+                "updated_at": "2026-07-02T00:00:00Z",
+                "html_url": "https://github.com/acme/site/pull/12",
+                "head": {"ref": "feat/x", "sha": "deadbeef"},
+                "requested_reviewers": [], "mergeable_state": "clean",
+            }]
+        raise RuntimeError("github_status:403")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers=12")
+    assert r.status_code == 200, r.text
+    assert r.json()["checks"]["12"] == {"passed": 0, "failing": 0, "pending": 0, "total": 0}
+
+
+async def test_checks_batch_repo_not_connected(client, container):
+    r = await client.get(f"/api/containers/{container['id']}/github/checks?numbers=1")
+    assert r.status_code == 200
+    assert r.json()["reason"] == "repo_not_connected"
+
+
+async def test_checks_batch_bad_cid_400_and_unknown_404(client):
+    r = await client.get("/api/containers/not-a-uuid/github/checks?numbers=1")
+    assert r.status_code == 400
+    r = await client.get(f"/api/containers/{uuid.uuid4()}/github/checks?numbers=1")
+    assert r.status_code == 404
+
+
+async def test_checks_batch_trusted_non_member_403(
+        client, container, make_agent, trust_proxy):
+    cid = container["id"]
+    await _bind_owner(client, container, make_agent)
+    r = await client.get(f"/api/containers/{cid}/github/checks?numbers=1", headers=MALLORY)
+    assert r.status_code == 403, r.text
 
 
 # ------------------------- cache TTL behavior -------------------------

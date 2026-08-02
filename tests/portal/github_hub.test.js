@@ -149,6 +149,22 @@ function staticTests() {
   assert(/\.tag\.gh-unassigned\s*\{[^}]*border-style:\s*dashed/.test(CSS),
     "Unassigned is a .tag-sized chip with (at most) a subtle dashed border, not the shared 22px-padded .none empty-state block");
   assert(!/\.gh-assignee\.none\s*\{/.test(CSS), "the old .gh-assignee.none rule (which collided with the global oversized .none block) is gone");
+
+  // ---- founder regression: checks/reviewers placeholder chips must not
+  // collide with the bare global .none empty-state class (styles/
+  // components.css: a 22px-padded dashed box) the same way Unassigned once
+  // did. Every one of these three states now has its OWN modifier class name
+  // (.loading / .zero / .empty) that never equals "none" — a mutation that
+  // renames any of them back to `none` (in EITHER github.css's rule or
+  // github-state.js's class string, item above) breaks this CSS-side
+  // guard AND the render-side guard above. ----
+  assert(!/\.tag\.gh-checks\.none\s*\{/.test(CSS),
+    "no .tag.gh-checks.none rule exists in github.css (renamed to .zero/.loading, no collision with the global .none block)");
+  assert(/\.tag\.gh-checks\.zero\s*\{/.test(CSS), "the zero-total checks chip has its own .zero rule");
+  assert(/\.tag\.gh-checks\.loading\s*\{/.test(CSS), "the loading-placeholder checks chip has its own .loading rule");
+  assert(!/\.gh-reviewers\.none\s*\{/.test(CSS),
+    "no .gh-reviewers.none rule exists in github.css (renamed to .empty, no collision with the global .none block)");
+  assert(/\.gh-reviewers\.empty\s*\{/.test(CSS), "the empty-reviewers chip has its own .empty rule");
 }
 
 /* ---------------- part 2: behavior (pages/github-state.js) --------------- */
@@ -268,6 +284,34 @@ function behaviorTests() {
   assert(G.checksChipHtml({ passed: 0, failing: 0, pending: 0, total: 0 }).includes("No checks"),
     "zero-total rollup renders the honest no-checks state, not \"0 passed\"");
 
+  // ---- checks rollup: null placeholder (progressive-fill "not loaded yet") ----
+  assert(G.checksChipHtml(null).includes("checks…") && /class="tag gh-checks loading"/.test(G.checksChipHtml(null)),
+    "checks:null (not loaded yet) renders a quiet loading placeholder chip, distinct from a real zero-total rollup");
+  assert(G.checksChipHtml(undefined).includes("checks…"),
+    "checksChipHtml treats undefined the same as null (not loaded yet)");
+  assert(!G.checksChipHtml(null).includes("No checks"),
+    "the null placeholder never reads as an honest \"No checks\" result — those are two different facts");
+
+  // ---- founder regression: NO placeholder/degraded chip may borrow the bare
+  // global .none empty-state class (styles/components.css — a 22px-padded
+  // dashed box meant for full-panel empty states). This is the SAME class of
+  // bug the Unassigned chip hit earlier (see that regression assertion
+  // below): a `.foo.none` rule that only overrides `color` does not stop the
+  // bare `.none` selector's border/padding/border-radius from applying too
+  // (CSS classes are additive), so the chip renders oversized. Mutation: if a
+  // future change reintroduces `class="... none"` on any of these three
+  // chips, this assertion goes red. ----
+  assert(!/class="tag gh-checks none"/.test(G.checksChipHtml(null)),
+    "the loading placeholder chip does not carry the bare .none class");
+  assert(!/class="tag gh-checks none"/.test(G.checksChipHtml({ passed: 0, failing: 0, pending: 0, total: 0 })),
+    "the zero-total \"No checks\" chip does not carry the bare .none class either (renamed to .zero)");
+  assert(/class="tag gh-checks zero"/.test(G.checksChipHtml({ passed: 0, failing: 0, pending: 0, total: 0 })),
+    "the zero-total chip carries its own .zero modifier class");
+  assert(!/class="gh-reviewers none"/.test(G.reviewersHtml([])),
+    "the empty-reviewers em-dash chip does not carry the bare .none class either (renamed to .empty)");
+  assert(/class="gh-reviewers empty"/.test(G.reviewersHtml([])),
+    "the empty-reviewers chip carries its own .empty modifier class");
+
   // ---- merge chip ----
   assert(G.mergeChipHtml({ draft: false, mergeable_state: "clean" }).includes("Checks passed")
     && G.mergeChipHtml({ draft: false, mergeable_state: "clean" }).includes("gh-merge ok"),
@@ -303,6 +347,37 @@ function behaviorTests() {
   assert(/class="gl gh-kind-ico pull draft"/.test(draftRow),
     "draft PR row's kind glyph carries the draft (grey) modifier — green is reserved for ready-to-review (item 3)");
 
+  // ---- progressive fill: a pull row with checks:null (the list's fresh,
+  // not-yet-batch-resolved shape) renders the loading placeholder, not a
+  // crash and not a false "No checks" ----
+  const PR_LOADING_CHECKS = Object.assign({}, PR_CLEAN, { number: 104, checks: null });
+  const loadingRow = G.pullRowHtml(PR_LOADING_CHECKS, AGENTS, () => null);
+  assert(loadingRow.includes("checks…"), "a pull with checks:null renders the loading placeholder chip in its row");
+  assert(!loadingRow.includes("No checks"), "checks:null never renders as a false \"No checks\" result");
+  assert(!/class="tag gh-checks none"/.test(loadingRow), "the in-row loading placeholder avoids the bare .none class too");
+
+  // ---- founder regression: uniform compact row height in every checks/
+  // reviewers state (the "giant dashed empty-state box" symptom broke this).
+  // ghrow itself sets no explicit height (by design — a content-sized flex
+  // row), so the real guarantee is that NONE of the state chips inside it can
+  // pull in the oversized box-model rule; assert every chip variant renders
+  // at the same compact .tag/.gh-reviewers shape (no dashed borders, no extra
+  // block-level wrapper) across all three checks states + both reviewers
+  // states, so the row's rendered height only ever varies with its own
+  // padding/line-height, never a chip's. ----
+  const checksVariants = [
+    G.checksChipHtml(null),                                             // loading
+    G.checksChipHtml({ passed: 0, failing: 0, pending: 0, total: 0 }),  // zero
+    G.checksChipHtml({ passed: 3, failing: 0, pending: 0, total: 3 }),  // pass
+    G.checksChipHtml({ passed: 0, failing: 1, pending: 0, total: 1 }),  // fail
+    G.checksChipHtml({ passed: 0, failing: 0, pending: 2, total: 2 }),  // pending
+  ];
+  assert(checksVariants.every((html) => /^<span class="tag gh-checks \w+">/.test(html)),
+    "every checks-chip state (loading/zero/pass/fail/pending) renders as the SAME compact <span class=\"tag gh-checks ...\"> shape — one inline element, no block-level empty-state wrapper");
+  const reviewersVariants = [G.reviewersHtml([]), G.reviewersHtml(["octocat"])];
+  assert(reviewersVariants.every((html) => /^<span class="gh-reviewers/.test(html)),
+    "both reviewers states (empty em-dash / populated) render as the same compact <span class=\"gh-reviewers...\"> shape");
+
   // ---- BUG REGRESSION (item 1): render the pulls tab from the EXACT founder-
   // verified live payload shape. GET /api/containers/{cid}/github/pulls was
   // confirmed healthy (available:true, 26 items, 58ms) with each pull shaped
@@ -329,7 +404,7 @@ function behaviorTests() {
   assert(liveShapeBody.includes("spike/founder-repro") && liveShapeBody.includes("fix/founder-repro"),
     "live-shape regression: the branch name (pr.head) renders — this is exactly what silently blanked under the old pr.head_branch read");
   assert(/tag gh-draft/.test(liveShapeBody), "live-shape regression: the draft PR (draft:true) shows its Draft badge");
-  assert((liveShapeBody.match(/gh-reviewers none/g) || []).length === 2,
+  assert((liveShapeBody.match(/gh-reviewers empty/g) || []).length === 2,
     "live-shape regression: both PRs' empty requested_reviewers render the honest em-dash state, not a crash");
   assert(liveShapeBody.includes("3 passed") && liveShapeBody.includes("Checks passed"),
     "live-shape regression: the ready PR's checks/merge chips compose correctly off the real checks/mergeable_state shape");

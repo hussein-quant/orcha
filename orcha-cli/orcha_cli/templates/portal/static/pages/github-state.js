@@ -13,17 +13,29 @@
             labels[], assignee, updated_at, html_url, body_excerpt}] }
      GET  /api/containers/{cid}/github/pulls
        -> { available, repo, pulls: [{number, title, head, draft, updated_at,
-            html_url, requested_reviewers[], checks: {passed, failing, pending,
-            total}, mergeable_state}] }
+            html_url, requested_reviewers[], checks: null, mergeable_state}] }
+       `checks` is ALWAYS null straight off this endpoint — the list route makes
+       exactly ONE GitHub call (the perf fix: it used to build a full checks
+       rollup INLINE per row, 2 extra GitHub calls per PR, ~52 round-trips for
+       a 26-PR list). null means "not loaded yet," never a real rollup.
+     GET  /api/containers/{cid}/github/checks?numbers=1,2,3   (max 30 numbers)
+       -> { available, checks: { "<number>": {passed, failing, pending, total} } }
+       The list's progressive-fill follow-up: github-render.js calls this right
+       after the list paints, for the numbers currently on screen, and patches
+       each row's checks chip in place (see maybeLoadChecks()/checksByNumber
+       in github-render.js).
+       A number absent from the response (closed/merged since, or simply not
+       resolvable) just never gets patched — no error, no crash.
      POST /api/containers/{cid}/github/start
        body {kind: "issue"|"pull", number, assignee_agent_id?}
        -> {task_id, existing?: true}
-   Both GETs 404 (repo not connected) or 403/429 (rate-limited) as clean JSON
-   errors — {"error": "..."} shape assumed; the render layer treats ANY non-ok
-   response the same way (friendly card), so the exact error body isn't load
-   bearing here. This also covers deploy-order: if the backend PR hasn't landed
-   yet, the fetch 404s the same way an unconnected repo would, and the page
-   degrades to the same friendly card instead of a blank/broken page.
+   All three GETs 404 (repo not connected) or 403/429 (rate-limited) as clean
+   JSON errors — {"error": "..."} shape assumed; the render layer treats ANY
+   non-ok response the same way (friendly card / quiet chip degrade), so the
+   exact error body isn't load bearing here. This also covers deploy-order: if
+   the backend PR hasn't landed yet, the fetch 404s the same way an unconnected
+   repo would, and the page degrades to the same friendly card instead of a
+   blank/broken page.
 
    Labels: {name, color} objects (GitHub's own hex, no leading '#') everywhere
    labels appear — issues list AND issue detail — per the backend addition
@@ -67,15 +79,30 @@ window.OrchaGithubHub = (function () {
   const icon = (name, cls) => (window.Orcha && window.Orcha.icon) ? window.Orcha.icon(name, cls) : "";
 
   /* ---- checks rollup math ------------------------------------------------
-     rollup: {passed, failing, pending, total}. Chip reads:
+     rollup: {passed, failing, pending, total} | null. Chip reads:
+       null (not loaded yet) -> quiet "checks…" placeholder, patched in place
+         once the batch GET .../github/checks response lands (github-render.js)
        any failing  -> red "n failing"
        else pending -> amber "n pending"
-       else passed  -> green "n passed" (total===0 -> no chip, "no checks") */
+       else passed  -> green "n passed" (total===0 -> no chip, "no checks")
+     Every non-colored state (loading placeholder AND the zero-total "No
+     checks" case) uses its OWN modifier class (`.loading` / `.zero`) rather
+     than the bare `.none` class components.css defines for full-panel empty
+     states (a 22px-padded dashed box) — `.tag.gh-checks.none` used to ONLY
+     override `color`, so that dashed-box border/padding/border-radius leaked
+     straight through into this inline chip (the exact "giant dashed empty
+     -state box" class of bug the Unassigned chip hit earlier — see
+     .tag.gh-unassigned's note in github.css). Naming the modifier anything
+     other than `none` sidesteps the collision entirely; github.css gives
+     `.loading`/`.zero` their own small explicit rules. */
   function checksChipHtml(rollup) {
+    if (rollup === null || rollup === undefined) {
+      return '<span class="tag gh-checks loading">checks…</span>';
+    }
     const r = rollup || {};
     const passed = r.passed || 0, failing = r.failing || 0, pending = r.pending || 0;
     const total = r.total != null ? r.total : passed + failing + pending;
-    if (!total) return '<span class="tag gh-checks none">No checks</span>';
+    if (!total) return '<span class="tag gh-checks zero">No checks</span>';
     if (failing > 0) return `<span class="tag gh-checks fail">${icon("x", "gl")}${failing} failing</span>`;
     if (pending > 0) return `<span class="tag gh-checks pend">${icon("ring", "gl")}${pending} pending</span>`;
     return `<span class="tag gh-checks pass">${icon("check", "gl")}${passed} passed</span>`;
@@ -93,9 +120,14 @@ window.OrchaGithubHub = (function () {
     return '<span class="tag gh-merge">Merge</span>';
   }
 
+  // `.gh-reviewers.empty` (NOT `.gh-reviewers.none`) for the same reason as
+  // checksChipHtml above: the bare global `.none` class (styles/components.css)
+  // is a 22px-padded dashed empty-state box, and a `.gh-reviewers.none` rule
+  // that only overrides `color` doesn't stop that box styling from applying —
+  // it just leaks through. `empty` never collides with `.none`.
   function reviewersHtml(logins) {
     const l = Array.isArray(logins) ? logins : [];
-    if (!l.length) return '<span class="gh-reviewers none">—</span>';
+    if (!l.length) return '<span class="gh-reviewers empty">—</span>';
     return `<span class="gh-reviewers">${l.slice(0, 3).map((r) => avatar(r)).join("")}${l.length > 3 ? `<span class="gh-more">+${l.length - 3}</span>` : ""}</span>`;
   }
 
