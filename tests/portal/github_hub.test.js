@@ -1,14 +1,19 @@
 /* ============================================================================
    GitHub hub page (Feature A frontend) — module contracts + wiring pins.
 
-   Backend contract (github_hub_routes.py, sibling worktree — coded against the
-   spec's shapes, not the live routes; the page must degrade to a friendly card
-   if an endpoint 404s, which also covers deploy-order if that PR lands after
-   this one):
-     GET  /api/containers/{cid}/github/issues -> {repo, issues:[...]}
-     GET  /api/containers/{cid}/github/pulls  -> {repo, pulls:[...]}
+   Backend contract (github_hub_routes.py — VERIFIED against the shipped
+   routes, not the pre-implementation spec; the page must degrade to a
+   friendly card if an endpoint 404s, which also covers deploy-order if that
+   PR lands after this one):
+     GET  /api/containers/{cid}/github/issues -> {available, repo, issues:[...]}
+     GET  /api/containers/{cid}/github/pulls  -> {available, repo, pulls:[...]}
      POST /api/containers/{cid}/github/start  {kind, number, assignee_agent_id?}
        -> {task_id, existing?: true}
+   issue entries carry `assignee` (a bare login string); pull entries carry
+   `head` (the branch ref string) — NOT `assignee_login`/`head_branch`, the
+   pre-implementation spec's field names this suite originally pinned before
+   a founder smoke test caught the drift (see the PR_LIVE_SHAPE_* fixtures
+   and the item-1 regression block in behaviorTests below).
 
    Part 1 (static): github.html follows the house page skeleton (D0 head +
    shell mounts + module load order + skeleton.css placement), and the page is
@@ -19,13 +24,15 @@
 
    Part 2 (behavior): loads the REAL pages/github-state.js in a bare vm and
    pins the payload -> HTML render: the checks-rollup chip math (pass/fail/
-   pending priority, no-checks), the merge chip (draft/clean/other), the
-   mine-filter (issues: assignee_login; pulls: requested_reviewers), the
-   needs-review filter (pulls only, excludes drafts), text search over
-   title/number, the Start control (bare + dropdown split, already-tracked
-   task-id chip with the {existing:true} label), the assignee roster dropdown
-   markup, and the three degrade states (not connected / rate-limited /
-   generic error) driven off classifyError's {kind} in github-render.js.
+   pending priority, no-checks, ring/x/check glyphs), the merge chip
+   (draft/clean/other), the mine-filter (issues: assignee; pulls:
+   requested_reviewers), the needs-review filter (pulls only, excludes
+   drafts), text search over title/number, the Start control (bare +
+   dropdown split, already-tracked task-id chip with the {existing:true}
+   label), the assignee roster dropdown markup, the row-kind iconography and
+   compact Unassigned chip (items 3-4), and the three degrade states (not
+   connected / rate-limited / generic error) driven off classifyError's
+   {kind} in github-render.js.
 
    Part 3 (wiring, grep-level — mirrors metrics_page.test.js's house style for
    DOM-glue files that are fetch/event heavy rather than pure): github-boot.js
@@ -116,6 +123,32 @@ function staticTests() {
   // CSS: token-driven only (skin-safe: classic, swiss, minimal all read correctly)
   assert(!/#[0-9a-fA-F]{3,8}\b/.test(CSS.replace(/\/\*[\s\S]*?\*\//g, "")), "github.css uses tokens only (no hardcoded hex colors)");
   assert(!/rgba?\(/.test(CSS.replace(/\/\*[\s\S]*?\*\//g, "")), "github.css has no raw rgb()/rgba() literals either");
+
+  // ---- item 2: tab selected state ----
+  // #ghTabs reuses shell.css's .aut/.seg idiom, but every .seg.on rule there is
+  // scoped to a modifier class (.run/.paused/.lvl/.lock) the tabs never carry —
+  // bare .seg.on was inert (no background/color/border-color), so the founder
+  // couldn't tell which tab was active. Mirror the Open/Mine filter chip's own
+  // .on treatment (line "filters button.on") on the tabs specifically.
+  assert(/#ghTabs\.aut \.seg\.on\s*\{[^}]*background:\s*var\(--accent-soft\)[^}]*color:\s*var\(--accent\)[^}]*border-color:\s*var\(--accent-line\)/.test(CSS),
+    "the active GitHub tab gets the same accent-soft/accent/accent-line treatment as the active filter chip");
+  const filterOnRule = CSS.match(/\.filters button\.on\s*\{([^}]*)\}/);
+  const tabOnRule = CSS.match(/#ghTabs\.aut \.seg\.on\s*\{([^}]*)\}/);
+  assert(!!filterOnRule && !!tabOnRule && filterOnRule[1].replace(/\s+/g, " ").trim() === tabOnRule[1].replace(/\s+/g, " ").trim(),
+    "the tab .on rule body is IDENTICAL to the filter chip .on rule body — one active-state idiom, not a near-miss");
+
+  // ---- item 3: compact rows + inline-SVG iconography (no external assets) ----
+  assert(/\.ghrow\s*\{[^}]*padding:\s*9px 10px/.test(CSS),
+    "row padding matches the tasks list's .trow density (9px 10px), not the old sparse 12px 12px");
+  assert(/\.gh-kind-ico\b/.test(CSS), "row-kind icon class (.gh-kind-ico) is styled — issue dot-circle / PR arrow glyphs");
+  assert(/issueDot:\s*'<circle/.test(UI_JS) && /pullArrow:\s*'<circle/.test(UI_JS),
+    "the issue dot-circle and PR arrow glyphs are inline SVG paths in app-ui.js's shared icon set, not external image assets");
+  assert(/ring:\s*'<circle/.test(UI_JS), "the checks-pending glyph (○) is an inline SVG path too");
+
+  // ---- item 4: compact "Unassigned" chip ----
+  assert(/\.tag\.gh-unassigned\s*\{[^}]*border-style:\s*dashed/.test(CSS),
+    "Unassigned is a .tag-sized chip with (at most) a subtle dashed border, not the shared 22px-padded .none empty-state block");
+  assert(!/\.gh-assignee\.none\s*\{/.test(CSS), "the old .gh-assignee.none rule (which collided with the global oversized .none block) is gone");
 }
 
 /* ---------------- part 2: behavior (pages/github-state.js) --------------- */
@@ -147,28 +180,71 @@ const AGENTS = [
   { id: "h-1", alias: "Kedar", kind: "human" },
 ];
 
+// Fixture field names match the SHIPPED backend (github_hub_routes.py's
+// _issue_entry/_pull_entry), NOT the header comment's originally-drafted
+// spec — issues carry `assignee` (a bare login string), pulls carry `head`
+// (the branch ref string). BUG ROOT CAUSE (item 1): the two PRs (#93 UI,
+// #94 API) landed independently against that draft spec and drifted; the
+// UI kept reading `assignee_login`/`head_branch`, fields the real API never
+// sends, so a founder smoke test against the live route (GET .../pulls ->
+// {available:true, pulls:[26 items]}, confirmed healthy, ~58ms) rendered
+// pull rows with the branch name silently blank and every issue's real
+// assignee dropped to "Unassigned" — the OLD fixtures below (pre-fix) had
+// hand-coded the WRONG field names too, so this test suite never caught the
+// mismatch against a browser. issueRowHtml/pullRowHtml now read `assignee`/
+// `head`; matchesFilter's mine/issues branch was fixed the same way.
 const ISSUE_OPEN = { number: 42, title: "Flaky retry on cold start", labels: ["bug", "P1"],
-  assignee_login: "octocat", updated_at: "2026-07-31T01:00:00+00:00",
+  assignee: "octocat", updated_at: "2026-07-31T01:00:00+00:00",
   html_url: "https://github.com/acme/orcha/issues/42", body_excerpt: "Retries fail on cold start…" };
 const ISSUE_UNASSIGNED = { number: 7, title: "Docs: onboarding typo", labels: [],
-  assignee_login: null, updated_at: "2026-07-30T01:00:00+00:00",
+  assignee: null, updated_at: "2026-07-30T01:00:00+00:00",
   html_url: "https://github.com/acme/orcha/issues/7", body_excerpt: "" };
 
-const PR_CLEAN = { number: 101, title: "Fix retry backoff", head_branch: "fix/retry-backoff",
+const PR_CLEAN = { number: 101, title: "Fix retry backoff", head: "fix/retry-backoff",
   draft: false, updated_at: "2026-07-31T02:00:00+00:00",
   html_url: "https://github.com/acme/orcha/pull/101",
   requested_reviewers: ["octocat", "hubot"], checks: { passed: 5, failing: 0, pending: 0, total: 5 },
   mergeable_state: "clean" };
-const PR_FAILING = { number: 102, title: "WIP: new onboarding flow", head_branch: "feat/onboarding",
+const PR_FAILING = { number: 102, title: "WIP: new onboarding flow", head: "feat/onboarding",
   draft: false, updated_at: "2026-07-31T03:00:00+00:00",
   html_url: "https://github.com/acme/orcha/pull/102",
   requested_reviewers: [], checks: { passed: 2, failing: 1, pending: 1, total: 4 },
   mergeable_state: "unstable" };
-const PR_DRAFT = { number: 103, title: "Draft: spike", head_branch: "spike/x",
+const PR_DRAFT = { number: 103, title: "Draft: spike", head: "spike/x",
   draft: true, updated_at: "2026-07-31T04:00:00+00:00",
   html_url: "https://github.com/acme/orcha/pull/103",
   requested_reviewers: ["octocat"], checks: { passed: 0, failing: 0, pending: 0, total: 0 },
   mergeable_state: "draft" };
+
+// EXACT founder-reported live shape from GET /api/containers/{cid}/github/pulls
+// (available:true, 58ms, 26 real items) — the regression fixture for item 1,
+// deliberately field-for-field identical to what the founder pasted: {checks,
+// draft, head, html_url, mergeable_state, number, requested_reviewers, title,
+// updated_at} and nothing else (no head_branch, no id, no user object — just
+// the flattened shape the route actually returns). One draft PR + one with an
+// empty requested_reviewers, per the task's ask.
+const PR_LIVE_SHAPE_DRAFT = {
+  checks: { passed: 0, failing: 0, pending: 0, total: 0 },
+  draft: true,
+  head: "spike/founder-repro",
+  html_url: "https://github.com/acme/orcha/pull/200",
+  mergeable_state: "draft",
+  number: 200,
+  requested_reviewers: [],
+  title: "Draft: founder-reported repro",
+  updated_at: "2026-08-01T12:00:00+00:00",
+};
+const PR_LIVE_SHAPE_READY = {
+  checks: { passed: 3, failing: 0, pending: 0, total: 3 },
+  draft: false,
+  head: "fix/founder-repro",
+  html_url: "https://github.com/acme/orcha/pull/201",
+  mergeable_state: "clean",
+  number: 201,
+  requested_reviewers: [],
+  title: "Fix: founder-reported repro",
+  updated_at: "2026-08-01T13:00:00+00:00",
+};
 
 function behaviorTests() {
   console.log("\nbehavior (pages/github-state.js render from fixture payloads)\n");
@@ -203,17 +279,56 @@ function behaviorTests() {
   assert(issueRow.includes("#42") && issueRow.includes("Flaky retry on cold start"),
     "issue row carries number + title");
   assert(issueRow.includes("bug") && issueRow.includes("P1"), "issue row carries labels");
-  assert(issueRow.includes("octocat"), "issue row shows the assignee login");
+  assert(issueRow.includes("octocat"), "issue row shows the assignee login (reads item.assignee, the real API field)");
+  assert(/class="gl gh-kind-ico issue"/.test(issueRow), "issue row carries the open-issue dot-circle glyph (item 3)");
   const unassignedRow = G.issueRowHtml(ISSUE_UNASSIGNED, AGENTS, () => null);
   assert(unassignedRow.includes("Unassigned"), "unassigned issue shows the honest Unassigned state, not a blank");
+  assert(/class="tag gh-unassigned"/.test(unassignedRow), "Unassigned renders as a small tag chip (item 4), not the shared 22px-padded .none empty-state block");
+  assert(!/class="gh-assignee none"/.test(unassignedRow) && !/<span class="none"/.test(unassignedRow),
+    "Unassigned no longer borrows the bare .none class (styles/components.css) that made the label read as an oversized dashed box");
 
   // ---- row render: pulls (checks + merge + reviewers) ----
   const prRow = G.pullRowHtml(PR_CLEAN, AGENTS, () => null);
-  assert(prRow.includes("#101") && prRow.includes("fix/retry-backoff"), "PR row carries number + head branch");
+  assert(prRow.includes("#101") && prRow.includes("fix/retry-backoff"), "PR row carries number + head branch (reads pr.head, the real API field)");
   assert(prRow.includes("5 passed") && prRow.includes("Checks passed"), "PR row composes both the checks chip and merge chip");
   assert((prRow.match(/av gh/g) || []).length === 2, "PR row renders one avatar per requested reviewer (capped at 3)");
+  assert(/class="gl gh-kind-ico pull"/.test(prRow),
+    "non-draft PR row carries the pull-request arrow glyph without the draft (grey) modifier");
   const draftRow = G.pullRowHtml(PR_DRAFT, AGENTS, () => null);
   assert(draftRow.includes("Draft"), "draft PR row is visually marked draft");
+  assert(/class="gl gh-kind-ico pull draft"/.test(draftRow),
+    "draft PR row's kind glyph carries the draft (grey) modifier — green is reserved for ready-to-review (item 3)");
+
+  // ---- BUG REGRESSION (item 1): render the pulls tab from the EXACT founder-
+  // verified live payload shape. GET /api/containers/{cid}/github/pulls was
+  // confirmed healthy (available:true, 26 items, 58ms) with each pull shaped
+  // exactly {checks, draft, head, html_url, mergeable_state, number,
+  // requested_reviewers, title, updated_at} — no head_branch, no
+  // assignee_login-style field anywhere on a pull. Root cause: github-state.js
+  // read pr.head_branch (issueRowHtml read it.assignee_login on the issues
+  // side), a field name from the pre-implementation spec in this file's own
+  // header comment, never the shipped route — two independently-landed PRs
+  // (#93 UI, #94 API) drifted from that shared draft. Exercising bodyHtml with
+  // this literal fixture (a draft PR + an empty requested_reviewers, per the
+  // task) is the regression net: any future re-drift on these field names
+  // fails loudly here instead of silently blanking the branch/reviewer info
+  // in production. */
+  const liveShapeBody = G.bodyHtml({
+    repo: "acme/orcha",
+    items: [PR_LIVE_SHAPE_DRAFT, PR_LIVE_SHAPE_READY],
+    tab: "pull", filter: "open", query: "", agents: AGENTS, myLogin: null, startedOf: () => null,
+  });
+  assert(liveShapeBody.includes("#200") && liveShapeBody.includes("#201"),
+    "live-shape regression: both pulls render from the founder-verified payload shape");
+  assert(liveShapeBody.includes("Draft: founder-reported repro") && liveShapeBody.includes("Fix: founder-reported repro"),
+    "live-shape regression: both PR titles render");
+  assert(liveShapeBody.includes("spike/founder-repro") && liveShapeBody.includes("fix/founder-repro"),
+    "live-shape regression: the branch name (pr.head) renders — this is exactly what silently blanked under the old pr.head_branch read");
+  assert(/tag gh-draft/.test(liveShapeBody), "live-shape regression: the draft PR (draft:true) shows its Draft badge");
+  assert((liveShapeBody.match(/gh-reviewers none/g) || []).length === 2,
+    "live-shape regression: both PRs' empty requested_reviewers render the honest em-dash state, not a crash");
+  assert(liveShapeBody.includes("3 passed") && liveShapeBody.includes("Checks passed"),
+    "live-shape regression: the ready PR's checks/merge chips compose correctly off the real checks/mergeable_state shape");
 
   // ---- start control: bare Start + dropdown split ----
   const startHtml = G.startCellHtml("issue", ISSUE_OPEN, null);
@@ -242,7 +357,7 @@ function behaviorTests() {
 
   // ---- mine filter ----
   assert(G.matchesFilter("issue", ISSUE_OPEN, "mine", "octocat") === true,
-    "mine/issues: matches when assignee_login === my github_login");
+    "mine/issues: matches when item.assignee === my github_login (the real API field, not assignee_login)");
   assert(G.matchesFilter("issue", ISSUE_OPEN, "mine", "someone-else") === false,
     "mine/issues: excludes issues assigned to someone else");
   assert(G.matchesFilter("issue", ISSUE_UNASSIGNED, "mine", "octocat") === false,
@@ -310,10 +425,20 @@ function behaviorTests() {
   const hostile = JSON.parse(JSON.stringify(ISSUE_OPEN));
   hostile.title = '<img src=x onerror=alert(1)>';
   hostile.labels = ['<script>bad()</script>'];
-  hostile.assignee_login = '"><svg onload=alert(2)>';
+  hostile.assignee = '"><svg onload=alert(2)>';
   const hostileRow = G.issueRowHtml(hostile, AGENTS, () => null);
   assert(!hostileRow.includes("<img src=x") && !hostileRow.includes("<script>bad()") && !hostileRow.includes("<svg onload"),
-    "title, labels, and assignee_login are all HTML-escaped");
+    "title, labels, and assignee are all HTML-escaped");
+
+  // ---- checks chip glyph (item 3): leading check/x/ring icon per rollup state ----
+  assert(/data-icon="check"/.test(G.checksChipHtml({ passed: 5, failing: 0, pending: 0, total: 5 })),
+    "all-passed checks chip carries the check glyph");
+  assert(/data-icon="x"/.test(G.checksChipHtml({ passed: 2, failing: 1, pending: 1, total: 4 })),
+    "any-failing checks chip carries the x glyph");
+  assert(/data-icon="ring"/.test(G.checksChipHtml({ passed: 2, failing: 0, pending: 3, total: 5 })),
+    "pending checks chip carries the open-ring (○) glyph, not a clock — pending here means \"in progress/undetermined,\" not \"waiting on time\"");
+  assert(/data-icon="check"/.test(G.mergeChipHtml({ draft: false, mergeable_state: "clean" })),
+    "clean-merge chip carries the check glyph ahead of \"Checks passed\"");
 }
 
 /* ---------------- part 3: wiring (grep-level, DOM-glue files) ------------ */

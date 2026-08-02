@@ -4,13 +4,15 @@
    fixture payload without a browser, mirroring metrics-state.js. DOM glue
    (fetch, patch, wiring, mountShell) lives in github-render.js/github-boot.js.
 
-   Endpoint contract (backend worktree A, github_hub_routes.py — coded against
-   the spec, not the live routes, so this page never blocks on that PR landing):
+   Endpoint contract (github_hub_routes.py — verified against the SHIPPED
+   routes, not the pre-implementation spec; the two landed in independent PRs
+   and the field names drifted — see the root-cause note on issueRowHtml/
+   pullRowHtml below):
      GET  /api/containers/{cid}/github/issues
-       -> { repo: "owner/name"|null, issues: [{number, title, labels[],
-            assignee_login, updated_at, html_url, body_excerpt}] }
+       -> { available, repo: "owner/name"|null, issues: [{number, title,
+            labels[], assignee, updated_at, html_url, body_excerpt}] }
      GET  /api/containers/{cid}/github/pulls
-       -> { repo, pulls: [{number, title, head_branch, draft, updated_at,
+       -> { available, repo, pulls: [{number, title, head, draft, updated_at,
             html_url, requested_reviewers[], checks: {passed, failing, pending,
             total}, mergeable_state}] }
      POST /api/containers/{cid}/github/start
@@ -50,7 +52,7 @@ window.OrchaGithubHub = (function () {
     const total = r.total != null ? r.total : passed + failing + pending;
     if (!total) return '<span class="tag gh-checks none">No checks</span>';
     if (failing > 0) return `<span class="tag gh-checks fail">${icon("x", "gl")}${failing} failing</span>`;
-    if (pending > 0) return `<span class="tag gh-checks pend">${icon("clock", "gl")}${pending} pending</span>`;
+    if (pending > 0) return `<span class="tag gh-checks pend">${icon("ring", "gl")}${pending} pending</span>`;
     return `<span class="tag gh-checks pass">${icon("check", "gl")}${passed} passed</span>`;
   }
 
@@ -105,15 +107,26 @@ window.OrchaGithubHub = (function () {
 
   /* ---- rows --------------------------------------------------------------
      started: Map-like lookup fn(kind, number) -> taskState|null, injected so
-     this stays a pure fn of (item, started-lookup) rather than owning state. */
+     this stays a pure fn of (item, started-lookup) rather than owning state.
+
+     Field names match the SHIPPED backend contract (github_hub_routes.py's
+     _issue_entry/_pull_entry — already-flattened login/ref strings), not the
+     header comment's originally-drafted spec: issues carry `assignee` (a
+     login string, not `assignee_login`), pulls carry `head` (the branch ref
+     string, not a nested {ref} object, and not `head_branch`). The two PRs
+     landed against the spec independently and drifted; a founder smoke test
+     caught the mismatch (rows rendered with a blank branch name / "always
+     Unassigned" issues), so this reads straight off the real payload shape —
+     see the fixtures ISSUE_OPEN/PR_CLEAN in github_hub.test.js. */
   function issueRowHtml(it, agents, startedFn) {
     const started = startedFn ? startedFn("issue", it.number) : null;
     return `<div class="ghrow" data-gh-row="issue:${esc(it.number)}">
+      ${icon("issueDot", "gl gh-kind-ico issue")}
       <span class="gh-num mono">#${esc(it.number)}</span>
       <span class="grow gh-main">
         <span class="gh-title">${esc(it.title)}</span>
         <span class="gh-meta">${(it.labels || []).slice(0, 4).map((l) => `<span class="tag gh-label">${esc(l)}</span>`).join("")}
-          ${it.assignee_login ? `<span class="gh-assignee">${avatar(it.assignee_login)}<span>${esc(it.assignee_login)}</span></span>` : '<span class="gh-assignee none">Unassigned</span>'}</span>
+          ${it.assignee ? `<span class="gh-assignee">${avatar(it.assignee)}<span>${esc(it.assignee)}</span></span>` : '<span class="tag gh-unassigned">Unassigned</span>'}</span>
       </span>
       <span class="gh-updated">${esc(relTime(it.updated_at))}</span>
       <span class="gh-actions">${startCellHtml("issue", it, started)}</span>
@@ -122,10 +135,11 @@ window.OrchaGithubHub = (function () {
   function pullRowHtml(pr, agents, startedFn) {
     const started = startedFn ? startedFn("pull", pr.number) : null;
     return `<div class="ghrow" data-gh-row="pull:${esc(pr.number)}">
+      ${icon("pullArrow", "gl gh-kind-ico pull" + (pr.draft ? " draft" : ""))}
       <span class="gh-num mono">#${esc(pr.number)}</span>
       <span class="grow gh-main">
         <span class="gh-title">${pr.draft ? '<span class="tag gh-draft">Draft</span>' : ""}${esc(pr.title)}</span>
-        <span class="gh-meta"><span class="gh-branch mono">${esc(pr.head_branch || "")}</span>${reviewersHtml(pr.requested_reviewers)}</span>
+        <span class="gh-meta"><span class="gh-branch mono">${esc(pr.head || "")}</span>${reviewersHtml(pr.requested_reviewers)}</span>
       </span>
       ${checksChipHtml(pr.checks)}
       ${mergeChipHtml(pr)}
@@ -135,14 +149,14 @@ window.OrchaGithubHub = (function () {
   }
 
   /* ---- filtering -----------------------------------------------------------
-     "Mine" = assigned to me (issues: assignee_login) OR requested-review-from
+     "Mine" = assigned to me (issues: assignee) OR requested-review-from
      me (pulls: requested_reviewers) where "me" is the signed-in member's
      github_login (from /api/me — identityHuman/identity().github_login).
      "Needs review" (pulls only) = I'm a requested reviewer AND it's not draft. */
   function matchesFilter(kind, item, filterKey, myLogin) {
     if (filterKey === "open") return true;   // both endpoints already return open-only
     if (filterKey === "mine") {
-      if (kind === "issue") return !!myLogin && item.assignee_login === myLogin;
+      if (kind === "issue") return !!myLogin && item.assignee === myLogin;
       return !!myLogin && (item.requested_reviewers || []).indexOf(myLogin) >= 0;
     }
     if (filterKey === "needs-review") {
