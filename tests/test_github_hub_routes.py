@@ -334,3 +334,362 @@ async def test_start_trusted_member_ok(client, container, make_agent, trust_prox
         headers=OCTO,
     )
     assert r.status_code == 201, r.text
+
+
+# ===================================================================================
+# DETAIL endpoints — PR detail (.../pulls/{n}) and issue detail (.../issues/{n}).
+# Same faked-network / real-route discipline as above; the only stub is hub._gh_get.
+# ===================================================================================
+
+# A full PR object as GitHub's /pulls/{n} returns it (the fields the route reads).
+def _pr_object(number=12):
+    return {
+        "number": number, "title": "Add feature", "state": "open", "draft": False,
+        "body": "## Why\nbecause",
+        "user": {"login": "octocat"},
+        "base": {"ref": "main"}, "head": {"ref": "feat/x", "sha": "deadbeef"},
+        "updated_at": "2026-07-02T00:00:00Z", "created_at": "2026-07-01T00:00:00Z",
+        "html_url": f"https://github.com/acme/site/pull/{number}",
+        "mergeable_state": "clean",
+        "assignees": [{"login": "octocat"}, {"login": "hubot"}],
+        "requested_reviewers": [{"login": "reviewer1"}],
+        "comments": 3, "review_comments": 5, "changed_files": 2,
+    }
+
+
+# ------------------------- PR detail: full shape + shared rollup (with runs) ----------
+
+async def test_pull_detail_full_shape(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        assert token == "ghs_hubtoken"
+        if path == "/repos/acme/site/pulls/12":
+            return _pr_object()
+        if path == "/repos/acme/site/commits/deadbeef/status":
+            return {"statuses": [
+                {"state": "success", "context": "travis", "target_url": "http://t"},
+            ]}
+        if path == "/repos/acme/site/commits/deadbeef/check-runs":
+            return {"check_runs": [
+                {"name": "build", "status": "completed", "conclusion": "success",
+                 "html_url": "http://b"},
+                {"name": "lint", "status": "in_progress", "conclusion": None,
+                 "html_url": "http://l"},
+            ]}
+        if path == "/repos/acme/site/pulls/12/files?per_page=100":
+            return [
+                {"filename": "a.py", "additions": 10, "deletions": 2, "status": "modified",
+                 "patch": "@@ -1 +1 @@ ..."},   # patch present in raw; MUST be dropped
+                {"filename": "b.py", "additions": 3, "deletions": 0, "status": "added"},
+            ]
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls/12")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True and body["repo"] == "acme/site"
+    pull = body["pull"]
+    # scalar contract fields
+    assert pull["number"] == 12 and pull["title"] == "Add feature"
+    assert pull["state"] == "open" and pull["draft"] is False
+    assert pull["body_markdown"] == "## Why\nbecause"   # RAW markdown, not html-rendered
+    assert pull["author_login"] == "octocat"
+    assert pull["base"] == "main" and pull["head"] == "feat/x"
+    assert pull["created_at"] == "2026-07-01T00:00:00Z"
+    assert pull["updated_at"] == "2026-07-02T00:00:00Z"
+    assert pull["html_url"] == "https://github.com/acme/site/pull/12"
+    assert pull["mergeable_state"] == "clean"
+    assert pull["assignees"] == ["octocat", "hubot"]
+    assert pull["requested_reviewers"] == ["reviewer1"]
+    assert pull["comments_count"] == 3 and pull["review_comments_count"] == 5
+    # checks: shared rollup math (1 status pass + 1 run pass = 2 passed, 1 pending) …
+    assert pull["checks"]["passed"] == 2
+    assert pull["checks"]["pending"] == 1
+    assert pull["checks"]["failing"] == 0
+    assert pull["checks"]["total"] == 3
+    # … PLUS the per-run list the detail page needs (status context normalized to a run)
+    runs = pull["checks"]["runs"]
+    assert {"name": "travis", "status": "completed", "conclusion": "success",
+            "html_url": "http://t"} in runs
+    assert {"name": "build", "status": "completed", "conclusion": "success",
+            "html_url": "http://b"} in runs
+    assert {"name": "lint", "status": "in_progress", "conclusion": None,
+            "html_url": "http://l"} in runs
+    # files: list only, count from GitHub's changed_files, NO patch leaked
+    assert pull["files"]["count"] == 2
+    assert "truncated" not in pull["files"]  # count == items -> not truncated
+    assert pull["files"]["items"] == [
+        {"filename": "a.py", "additions": 10, "deletions": 2, "status": "modified"},
+        {"filename": "b.py", "additions": 3, "deletions": 0, "status": "added"},
+    ]
+    assert all("patch" not in f for f in pull["files"]["items"])
+
+
+async def test_pull_detail_files_truncated_flag(client, container, token_env, monkeypatch):
+    """When GitHub's changed_files total exceeds the page we fetched, files.truncated=True
+    and count reports the HONEST total (not the truncated page length)."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    pr = _pr_object()
+    pr["changed_files"] = 250  # more than the 100-item page
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/12":
+            return pr
+        if path.startswith("/repos/acme/site/commits/"):
+            return {"statuses": [], "check_runs": []}
+        if path == "/repos/acme/site/pulls/12/files?per_page=100":
+            # a full page of 100 files
+            return [{"filename": f"f{i}.py", "additions": 1, "deletions": 0,
+                     "status": "modified"} for i in range(100)]
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls/12")
+    files = r.json()["pull"]["files"]
+    assert files["count"] == 250           # honest total from changed_files
+    assert len(files["items"]) == 100      # only the first page returned
+    assert files["truncated"] is True
+
+
+# ------------------------- rollup-helper sharing (mutation note) ----------------------
+
+def test_checks_rollup_helper_is_shared_and_extends(monkeypatch):
+    """The list endpoint and the PR-detail endpoint call the SAME _checks_rollup helper.
+
+    Default (include_runs=False) => the four-count chip, NO 'runs' key (what the list
+    endpoint reads). include_runs=True => the same counts PLUS a freshly-built 'runs'
+    list. Each call builds a NEW dict, so the two callers never share mutable state — the
+    detail route can safely add 'runs' without the list route ever seeing it. Guards
+    against a future refactor that returns a shared/module-level dict."""
+    def fake_get(path, token):
+        if path.endswith("/status"):
+            return {"statuses": [{"state": "success", "context": "ci",
+                                  "target_url": "http://x"}]}
+        if path.endswith("/check-runs"):
+            return {"check_runs": [{"name": "test", "status": "completed",
+                                    "conclusion": "failure", "html_url": "http://y"}]}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    counts_only = hub._checks_rollup("acme/site", "sha1", "tok")
+    with_runs = hub._checks_rollup("acme/site", "sha1", "tok", include_runs=True)
+
+    # same math on both surfaces
+    assert counts_only == {"passed": 1, "failing": 1, "pending": 0, "total": 2}
+    assert "runs" not in counts_only                 # list-endpoint shape unchanged
+    assert with_runs["passed"] == 1 and with_runs["failing"] == 1
+    assert len(with_runs["runs"]) == 2               # status context + check run
+    # distinct objects: mutating one rollup must not bleed into the other (no shared dict)
+    counts_only["passed"] = 999
+    assert with_runs["passed"] == 1
+
+
+# ------------------------- issue detail: shape + comments ordering --------------------
+
+async def test_issue_detail_shape_and_comments_oldest_first(
+        client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        assert token == "ghs_hubtoken"
+        if path == "/repos/acme/site/issues/7":
+            return {
+                "number": 7, "title": "Bug: crash", "state": "open",
+                "body": "steps to repro",
+                "user": {"login": "reporter"},
+                "labels": [{"name": "bug"}, {"name": "p1"}],
+                "assignee": {"login": "octocat"},
+                "assignees": [{"login": "octocat"}, {"login": "hubot"}],
+                "updated_at": "2026-07-03T00:00:00Z",
+                "created_at": "2026-07-01T00:00:00Z",
+                "html_url": "https://github.com/acme/site/issues/7",
+                "comments": 2,
+            }
+        # We ask newest-first; the route re-orders to oldest-first for display.
+        if path == ("/repos/acme/site/issues/7/comments"
+                    "?per_page=20&sort=created&direction=desc"):
+            return [
+                {"user": {"login": "b"}, "body": "second (newer)",
+                 "created_at": "2026-07-02T00:00:00Z"},
+                {"user": {"login": "a"}, "body": "first (older)",
+                 "created_at": "2026-07-01T00:00:00Z"},
+            ]
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/issues/7")
+    assert r.status_code == 200, r.text
+    issue = r.json()["issue"]
+    assert issue["number"] == 7 and issue["title"] == "Bug: crash"
+    assert issue["state"] == "open"
+    assert issue["body_markdown"] == "steps to repro"   # RAW markdown
+    assert issue["author_login"] == "reporter"
+    assert issue["labels"] == ["bug", "p1"]
+    assert issue["assignee"] == "octocat"
+    assert issue["assignees"] == ["octocat", "hubot"]
+    assert issue["created_at"] == "2026-07-01T00:00:00Z"
+    assert issue["updated_at"] == "2026-07-03T00:00:00Z"
+    assert issue["html_url"] == "https://github.com/acme/site/issues/7"
+    assert issue["comments_count"] == 2
+    # comments re-ordered oldest-first, each carrying RAW body_markdown
+    assert issue["comments"] == [
+        {"author_login": "a", "body_markdown": "first (older)",
+         "created_at": "2026-07-01T00:00:00Z"},
+        {"author_login": "b", "body_markdown": "second (newer)",
+         "created_at": "2026-07-02T00:00:00Z"},
+    ]
+
+
+# ------------------------- not_found path (both detail endpoints) ---------------------
+
+async def test_pull_detail_not_found(client, container, token_env, monkeypatch):
+    """A GitHub 404 on the PR number -> {available:false, reason:'not_found'} (distinct
+    from the list endpoint's repo-not-connected treatment of 404)."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    monkeypatch.setattr(hub, "_gh_get",
+                        lambda p, t: (_ for _ in ()).throw(RuntimeError("github_status:404")))
+    r = await client.get(f"/api/containers/{cid}/github/pulls/999")
+    assert r.status_code == 200  # graceful, never a 5xx
+    body = r.json()
+    assert body["available"] is False and body["reason"] == "not_found"
+    assert body["repo"] == "acme/site"
+
+
+async def test_issue_detail_not_found(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    monkeypatch.setattr(hub, "_gh_get",
+                        lambda p, t: (_ for _ in ()).throw(RuntimeError("github_status:404")))
+    r = await client.get(f"/api/containers/{cid}/github/issues/999")
+    assert r.json()["reason"] == "not_found"
+
+
+async def test_detail_rate_limited_403(client, container, token_env, monkeypatch):
+    """403 still maps to rate_limited on the detail routes (shared mapping)."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    monkeypatch.setattr(hub, "_gh_get",
+                        lambda p, t: (_ for _ in ()).throw(RuntimeError("github_status:403")))
+    r = await client.get(f"/api/containers/{cid}/github/pulls/1")
+    assert r.json()["reason"] == "rate_limited"
+
+
+# ------------------------- repo not connected (detail) --------------------------------
+
+async def test_pull_detail_repo_not_connected(client, container):
+    r = await client.get(f"/api/containers/{container['id']}/github/pulls/1")
+    assert r.status_code == 200
+    assert r.json()["reason"] == "repo_not_connected"
+
+
+async def test_issue_detail_repo_not_connected(client, container):
+    r = await client.get(f"/api/containers/{container['id']}/github/issues/1")
+    assert r.json()["reason"] == "repo_not_connected"
+
+
+async def test_detail_bad_cid_400_and_unknown_404(client):
+    r = await client.get("/api/containers/not-a-uuid/github/pulls/1")
+    assert r.status_code == 400
+    r = await client.get(f"/api/containers/{uuid.uuid4()}/github/issues/1")
+    assert r.status_code == 404
+
+
+# ------------------------- cache TTL (detail keyed per number) ------------------------
+
+async def test_pull_detail_cached_per_number(client, container, token_env, monkeypatch):
+    """Detail cache is keyed per (cid,'pull',number): repeat reads of the SAME number are
+    served from cache; a DIFFERENT number is a distinct key (its own GitHub fetch); past
+    the 60s TTL GitHub is hit again."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = {"n": 0}
+
+    def fake_get(path, token):
+        calls["n"] += 1
+        num = int(path.rsplit("/", 1)[1]) if path.startswith("/repos/acme/site/pulls/") \
+            and "commits" not in path and "files" not in path else 12
+        pr = _pr_object(num)
+        pr["head"] = {"ref": "x", "sha": None}  # no sha -> skip the checks fetches
+        if "/files" in path:
+            return []
+        return pr
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+
+    await client.get(f"/api/containers/{cid}/github/pulls/12")
+    n_after_first = calls["n"]
+    await client.get(f"/api/containers/{cid}/github/pulls/12")
+    assert calls["n"] == n_after_first  # second read of #12 served from cache
+
+    # A different number is a separate cache key -> a fresh fetch happens.
+    await client.get(f"/api/containers/{cid}/github/pulls/13")
+    assert calls["n"] > n_after_first
+
+    # Advance past the TTL -> #12 is fetched again.
+    before_ttl = calls["n"]
+    base = hub.time.monotonic()
+    monkeypatch.setattr(hub.time, "monotonic", lambda: base + hub.CACHE_TTL_SECONDS + 1)
+    await client.get(f"/api/containers/{cid}/github/pulls/12")
+    assert calls["n"] > before_ttl
+
+
+async def test_start_invalidates_detail_cache(client, container, token_env, monkeypatch):
+    """POST /start drops EVERY cache entry for the container — including detail keys — so a
+    freshly tracked item's next detail read reflects any state change."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = {"n": 0}
+
+    def fake_get(path, token):
+        calls["n"] += 1
+        pr = _pr_object(5)
+        pr["head"] = {"ref": "x", "sha": None}
+        if "/files" in path:
+            return []
+        return pr
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    await client.get(f"/api/containers/{cid}/github/pulls/5")
+    cached_calls = calls["n"]
+    await client.get(f"/api/containers/{cid}/github/pulls/5")
+    assert calls["n"] == cached_calls  # cached
+
+    # Start a task -> cache invalidated -> next detail read re-fetches.
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "pull", "number": 5, "title": "x"})
+    assert r.status_code == 201, r.text
+    await client.get(f"/api/containers/{cid}/github/pulls/5")
+    assert calls["n"] > cached_calls
+
+
+# ------------------------- grant enforcement (detail reads) ---------------------------
+
+async def test_pull_detail_trusted_non_member_403(
+        client, container, make_agent, trust_proxy):
+    """The detail GETs use the same project-isolation read gate as the list GETs: under
+    proxy trust, a non-member of a mapped container is refused (require_member_read)."""
+    cid = container["id"]
+    await _bind_owner(client, container, make_agent)  # container now mapped to octocat
+    r = await client.get(f"/api/containers/{cid}/github/pulls/1", headers=MALLORY)
+    assert r.status_code == 403, r.text
+
+
+async def test_issue_detail_trusted_member_ok(
+        client, container, make_agent, trust_proxy, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_owner(client, container, make_agent)
+    await _bind_repo(client, cid)
+    monkeypatch.setattr(hub, "_gh_get", lambda p, t: {
+        "number": 1, "title": "x", "state": "open", "body": "", "user": {"login": "octocat"},
+        "labels": [], "assignee": None, "assignees": [], "comments": 0,
+    } if "/comments" not in p else [])
+    r = await client.get(f"/api/containers/{cid}/github/issues/1", headers=OCTO)
+    assert r.status_code == 200, r.text
+    assert r.json()["available"] is True
