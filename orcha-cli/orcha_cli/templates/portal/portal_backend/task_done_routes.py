@@ -19,6 +19,9 @@ from portal_backend.guards import (
 )
 from portal_backend.push_outbox import push_task_verify as _push_task_verify
 from portal_backend.schemas.task_operations import TaskDone
+from portal_backend.slack_notify import (
+    notify_task_needs_verification as _slack_notify_needs_verification,
+)
 from portal_backend.worker_auth import require_work_lane as _require_work_lane
 
 _complete_and_unblock_getter = None
@@ -189,4 +192,8 @@ def mark_done(
     # Push pipeline (mig 041): the task just became a needs-you item. AFTER the
     # commit, best-effort — the hook never raises and never touches this txn.
     _push_task_verify(str(t["container_id"]), tid)
+    # Slack seam (mig 044): if this container has a slack_webhook_url, ping it with a
+    # compact Block Kit "Verify in Orcha" message. Same after-commit, non-fatal contract
+    # as the push hook — a POST failure (or no webhook) never breaks the transition.
+    _slack_notify_needs_verification(str(t["container_id"]), tid)
     return {"task_id": tid, "status": "needs_verification"}
