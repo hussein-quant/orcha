@@ -64,11 +64,14 @@ function renderList() {
     ? head.concat(list.find((r) => r.id === sel)) : head;
   html += shown.length ? shown.map((r) => {
     const escd = isToHuman(r) && r.status === "open";
+    // r.from/r.to are usually a real roster alias (resolved to the full record, so a
+    // mapped human's github_login drives the face); "human" is an anonymous sentinel
+    // (no specific member) and correctly falls through to the plain letter avatar.
     const fa = ReqO.agentByAlias(r.from), ta = ReqO.agentByAlias(r.to);
     return `<button class="qrow ${r.id === sel ? "sel" : ""}" data-id="${ReqO.esc(r.id)}">
-      <span class="flow">${ReqO.avatar(r.from, fa ? fa.kind : "ai", "sm")}<span>${ReqO.esc(r.from)}</span>
+      <span class="flow">${ReqO.face(fa || { alias: r.from, kind: "ai" }, "sm")}<span>${ReqO.esc(r.from)}</span>
         <span class="faint">${ReqO.icon("arrow", "")}</span>
-        ${ReqO.avatar(r.to, r.to === "human" ? "human" : (ta ? ta.kind : "ai"), "sm")}<span>${ReqO.esc(partyLabel(r.to))}</span></span>
+        ${ReqO.face(ta || { alias: r.to, kind: r.to === "human" ? "human" : "ai" }, "sm")}<span>${ReqO.esc(partyLabel(r.to))}</span></span>
       <span class="pv">${ReqO.esc(ReqO.trunc(r.payload, 84))}</span>
       <span class="bot">${ReqO.pill(escd ? "escalated" : r.status)}<span class="tag">${ReqO.esc(r.type)}</span>
         ${r.chain_depth ? '<span class="tag" style="color:var(--info)">↳ chain</span>' : ""}
@@ -126,7 +129,7 @@ function actionsFor(r) {
   if (r.status === "open" || r.status === "answered") btns.push(`<button class="btn subtle" data-act="nudge">${ReqO.icon("bell", "")}Nudge</button>`);
   btns.push(`<button class="btn ghost" data-act="close">Close</button>`);
   let html = `<div class="wrap-g" id="reqacts" data-req="${ReqO.esc(r.id)}">${btns.join("")}</div>
-    <div class="acting-note" style="margin-top:10px;color:var(--muted);font-size:11.5px">${ReqO.avatar(h.alias, "human", "sm")}&nbsp;Arbitrating as ${ReqO.esc(h.alias)} — answer (if it's yours), convert, escalate, or close. Every action is logged.</div>`;
+    <div class="acting-note" style="margin-top:10px;color:var(--muted);font-size:11.5px">${ReqO.face(h, "sm")}&nbsp;Arbitrating as ${ReqO.esc(h.alias)} — answer (if it's yours), convert, escalate, or close. Every action is logged.</div>`;
   if (answering && isTarget && r.status === "open") {
     html += `<div style="margin-top:14px">
       <textarea id="ansIn" class="ans-in" placeholder="Type your answer — ${ReqO.esc(r.from)} sees it verbatim on the next wake."></textarea>

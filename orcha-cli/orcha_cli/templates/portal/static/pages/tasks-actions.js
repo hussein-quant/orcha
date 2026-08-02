@@ -1,7 +1,7 @@
 /* Tasks page controller: actor helpers, assignment, new-task modal, and task posting. */
 function actor() { return TasO.actingHuman(); }
 function actorName() { const h = actor(); return h ? h.alias : ""; }
-function humanAvatar() { const h = actor(); return h ? TasO.avatar(h.alias, "human", "sm") : ""; }
+function humanAvatar() { const h = actor(); return h ? TasO.face(h, "sm") : ""; }
 function actorOrWarn() {
   const h = actor();
   if (!h) TasO.toast(TasO.viewerOnly && TasO.viewerOnly()

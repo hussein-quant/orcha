@@ -32,7 +32,7 @@ function renderAgents() {
     <tbody>${ags.map((a) => {
       const act = activity(a);
       return `<tr class="clickable" onclick="location.href='/agents?agent=${encodeURIComponent(a.alias)}'">
-        <td><div class="row">${HomO.avatar(a.alias, a.kind)}<div><div class="t1">${HomO.esc(a.alias)}</div><div class="t2">${HomO.esc(a.role || "—")}</div></div></div></td>
+        <td><div class="row">${HomO.face(a)}<div><div class="t1">${HomO.esc(a.alias)}</div><div class="t2">${HomO.esc(a.role || "—")}</div></div></div></td>
         <td>${HomO.pill(a.status)}</td>
         <td>${act ? (act.isTask
                 ? `<span class="t1" style="font-weight:550;font-size:12.5px">${HomO.esc(act.text)}</span>`
@@ -79,9 +79,13 @@ function activityEvents() {
 function renderActivity() {
   const evs = activityEvents();
   HomO.patch(Hom$("actList"), evs.length ? evs.map((e) => {
+    // e.who is the roster alias when resolvable (task poster / request from-to), letting
+    // the real member record (incl. github_login) drive the face; the "human" sentinel
+    // (an anonymous is_human thread post — no specific member alias) has no such record
+    // and correctly falls back to the plain letter avatar via face()'s own kind/login guard.
     const a = HomO.agentByAlias(e.who);
     return `<a class="act" href="${e.link}" style="color:inherit">
-      ${HomO.avatar(e.who, a ? a.kind : "human", "sm")}
+      ${HomO.face(a || { alias: e.who, kind: "human" }, "sm")}
       <div class="body">
         <div class="top"><span class="nm">${HomO.esc(e.who)}</span>
           <span class="ty" style="color:${TYC[e.kind]};background:${TYBG[e.kind]}">${HomO.esc(e.kind)}</span>

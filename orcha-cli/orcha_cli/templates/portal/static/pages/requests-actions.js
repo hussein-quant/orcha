@@ -3,14 +3,16 @@ function renderDetail(force) {
   const r = reqs().find((x) => x.id === sel);
   if (!r) { ReqO.patch(Req$("detailMain"), '<div class="card pad"><div class="none">Request not found.</div></div>', force); return; }
   const escd = isToHuman(r) && r.status === "open";
+  // r.from/r.to: a real roster alias resolves to the full record (mapped human ->
+  // github_login face); the "human" sentinel has no specific member and stays a letter avatar.
   const fa = ReqO.agentByAlias(r.from), ta = ReqO.agentByAlias(r.to);
 
   let html = `<div class="card pad" style="margin-bottom:18px">
     <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div class="flowbig">
-        <a class="node" href="/agents?agent=${encodeURIComponent(r.from)}" style="color:inherit">${ReqO.avatar(r.from, fa ? fa.kind : "ai", "sm")}${ReqO.esc(r.from)}</a>
+        <a class="node" href="/agents?agent=${encodeURIComponent(r.from)}" style="color:inherit">${ReqO.face(fa || { alias: r.from, kind: "ai" }, "sm")}${ReqO.esc(r.from)}</a>
         <span class="arrow">${ReqO.icon("arrow", "")}</span>
-        <a class="node" href="${r.to === "human" ? "#" : "/agents?agent=" + encodeURIComponent(r.to)}" style="color:inherit">${ReqO.avatar(r.to, r.to === "human" ? "human" : (ta ? ta.kind : "ai"), "sm")}${ReqO.esc(partyLabel(r.to))}</a>
+        <a class="node" href="${r.to === "human" ? "#" : "/agents?agent=" + encodeURIComponent(r.to)}" style="color:inherit">${ReqO.face(ta || { alias: r.to, kind: r.to === "human" ? "human" : "ai" }, "sm")}${ReqO.esc(partyLabel(r.to))}</a>
       </div>
       ${ReqO.pill(escd ? "escalated" : r.status, "lg")}
     </div>

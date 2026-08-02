@@ -129,11 +129,7 @@ function moreBtn(kind, shown, total) {
 // The image sits over the deterministic letter tile (ghAvatar()'s onerror drops the
 // broken <img>, revealing the letter beneath) — so a missing/offline avatar never blanks
 // the row. Agents (kind !== "human") and unmapped humans keep the plain letter avatar.
-function agentFace(a, size) {
-  return (a.kind === "human" && a.github_login)
-    ? AgeO.ghAvatar(a.github_login, size)
-    : AgeO.avatar(a.alias, a.kind, size);
-}
+function agentFace(a, size) { return AgeO.face(a, size); }
 
 function renderRoster() {
   const ags = AgeO.agents();

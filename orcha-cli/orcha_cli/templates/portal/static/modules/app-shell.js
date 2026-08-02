@@ -92,7 +92,7 @@ function actingChipHtml() {
   }
   const who = actingHuman();
   return who
-    ? `${avatar(who.alias, "human", "sm")}${esc(who.alias)}`
+    ? `${face(who, "sm")}${esc(who.alias)}`
     : `<span class="muted">no human registered</span>`;
 }
 

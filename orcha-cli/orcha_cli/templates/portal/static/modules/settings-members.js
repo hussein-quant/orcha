@@ -64,12 +64,7 @@ async function loadMembers() {
 }
 
 /* ---- render ----------------------------------------------------------- */
-function memFace(m) {
-  const login = m.github_login;
-  return login
-    ? (typeof ghAvatar === "function" ? ghAvatar(login, "") : MemO.avatar(login, "human", ""))
-    : MemO.avatar(m.alias, "human", "");
-}
+function memFace(m) { return MemO.face({ kind: "human", alias: m.alias, github_login: m.github_login }, ""); }
 
 // The role control: a <select> over owner/member/viewer. Promoting TO owner (and
 // touching an owner row at all) is owner-only server-side, so the option/control

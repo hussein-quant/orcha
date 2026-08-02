@@ -75,11 +75,18 @@ function builderSandbox() {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
+  const fakeAvatar = (alias, kind, size) => `<span class="av ${size || ""} ${kind}">${esc((alias || "?").charAt(0).toUpperCase())}</span>`;
+  const fakeGhAvatar = (login, size) => `<span class="av gh ${size || ""} human">${esc((login || "?").charAt(0).toUpperCase())}<img class="gh-face" src="https://github.com/${login}.png?size=96"></span>`;
+  // Orcha.face() — the shared portal-wide avatar convention (app-ui.js): a human WITH a
+  // mapped github_login gets the gh avatar; every AI agent, and any unmapped human, keeps
+  // the plain letter avatar.
+  const fakeFace = (rec, size) => { rec = rec || {}; return (rec.kind === "human" && rec.github_login) ? fakeGhAvatar(rec.github_login, size) : fakeAvatar(rec.alias, rec.kind, size); };
   sandbox.window.Orcha = {
     esc,
     icon: (name, cls) => `<svg class="${cls || "ico"}" data-icon="${name}"></svg>`,
-    avatar: (alias, kind, size) => `<span class="av ${size || ""} ${kind}">${esc((alias || "?").charAt(0).toUpperCase())}</span>`,
-    ghAvatar: (login, size) => `<span class="av gh ${size || ""} human">${esc((login || "?").charAt(0).toUpperCase())}<img class="gh-face" src="https://github.com/${login}.png?size=96"></span>`,
+    avatar: fakeAvatar,
+    ghAvatar: fakeGhAvatar,
+    face: fakeFace,
     orcaSVG: () => "<svg></svg>",
   };
   vm.runInContext(read("pages", "projects-state.js"), sandbox, { filename: "projects-state.js" });
@@ -331,7 +338,7 @@ function bootSandbox() {
   sandbox.window.Orcha = {
     esc,
     icon: (name, cls) => `<svg class="${cls || "ico"}" data-icon="${name}"></svg>`,
-    avatar: () => "<span></span>", ghAvatar: () => "<span></span>",
+    avatar: () => "<span></span>", ghAvatar: () => "<span></span>", face: () => "<span></span>",
     orcaSVG: () => "<svg></svg>",
     cycleTheme: () => { calls.cycleTheme += 1; },
     openPairingModal() {}, modal() {}, closeModal() {}, toast() {},

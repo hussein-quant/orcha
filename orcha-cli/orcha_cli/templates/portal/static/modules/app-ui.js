@@ -21,6 +21,19 @@ function ghAvatar(login, size) {
     `src="https://github.com/${esc(encodeURIComponent(login || ""))}.png?size=96" alt="" ` +
     `loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
 }
+// Portal-wide face convention (originally agentFace() in pages/agents-state.js, promoted
+// here so every avatar surface — not just the Agents page — can share it): a HUMAN with a
+// mapped GitHub identity (github_login) gets their real GitHub profile picture via
+// ghAvatar(); every AI agent, and any unmapped human (no github_login yet), keeps the
+// plain deterministic letter avatar(). Accepts any record shaped like an agent/actor —
+// a full agent object, a task reviewer, a member row, etc. — as long as it carries
+// `kind`/`github_login`/`alias` (or an alias-only record for the AI branch).
+function face(rec, size) {
+  rec = rec || {};
+  return (rec.kind === "human" && rec.github_login)
+    ? ghAvatar(rec.github_login, size)
+    : avatar(rec.alias, rec.kind, size);
+}
 
 /* ---- icons ----------------------------------------------------------- */
 const I = {

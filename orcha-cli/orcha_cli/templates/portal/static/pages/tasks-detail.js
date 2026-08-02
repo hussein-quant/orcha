@@ -160,14 +160,12 @@ function who(t) { return t.assignee || "the assignee"; }
    the shared modal — wired in tasks-thread.js like every other data-act). */
 function reviewerChip(t) {
   const r = t.reviewer;
-  const face = !r ? '<span class="muted" style="font-size:12.5px">anyone</span>'
-    : r.github_login
-      ? `${typeof ghAvatar === "function" ? ghAvatar(r.github_login, "sm") : ""}<span style="font-size:12.5px;font-weight:600">${TasO.esc(r.github_login)}</span>`
-      : `${TasO.avatar(r.alias, "human", "sm")}<span style="font-size:12.5px;font-weight:600">${TasO.esc(r.alias)}</span>`;
+  const chipFace = !r ? '<span class="muted" style="font-size:12.5px">anyone</span>'
+    : `${TasO.face({ kind: "human", alias: r.alias, github_login: r.github_login }, "sm")}<span style="font-size:12.5px;font-weight:600">${TasO.esc(r.github_login || r.alias)}</span>`;
   const edit = TasO.actingOwner && TasO.actingOwner()
     ? `<button class="iconbtn" data-act="reviewer" type="button" title="Change reviewer" style="width:22px;height:22px">${TasO.icon("pencil", "gl")}</button>`
     : "";
-  return `<span style="display:inline-flex;align-items:center;gap:6px">${face}${edit}</span>`;
+  return `<span style="display:inline-flex;align-items:center;gap:6px">${chipFace}${edit}</span>`;
 }
 
 /* ---------- SPEC-4 protocol panel — collapsible hand-off rules on the task itself ----------
@@ -272,7 +270,7 @@ function msgRow(m) {
   const atts = (m.attachments || []).length
     ? `<div class="msg-atts">${m.attachments.map(attRow).join("")}</div>` : "";
   return `<div class="msg ${m.is_human ? "human" : sys ? "system" : ""}">
-    ${sys ? '<span class="av sm" style="background:var(--surface-3);color:var(--muted)">›</span>' : TasO.avatar(m.from, a ? a.kind : "ai", "sm")}
+    ${sys ? '<span class="av sm" style="background:var(--surface-3);color:var(--muted)">›</span>' : TasO.face(a || { alias: m.from, kind: m.is_human ? "human" : "ai" }, "sm")}
     <div class="body">
       <div class="mh"><span class="nm">${sys ? "system" : TasO.esc(m.from)}</span>
         ${a && !sys ? TasO.kindBadge(a.kind) : ""}<span class="when">${m.at ? TasO.relTime(m.at) : ""}</span></div>
