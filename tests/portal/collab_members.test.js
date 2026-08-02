@@ -115,10 +115,19 @@ function membersSandbox(fetchImpl) {
   };
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
+  const fakeAvatar = (alias, kind, size) => `<span class="av ${size || ""} ${kind}">${esc((alias || "?").charAt(0).toUpperCase())}</span>`;
+  // the shared gh avatar helper from app-ui.js rides the settings page too
+  const fakeGhAvatar = (login, size) => `<span class="av gh ${size || ""} human">${esc((login || "?").charAt(0).toUpperCase())}<img class="gh-face" src="https://github.com/${login}.png?size=96"></span>`;
+  // Orcha.face() — the shared portal-wide avatar convention (app-ui.js): a human WITH a
+  // mapped github_login gets the gh avatar; every AI agent, and any unmapped human, keeps
+  // the plain letter avatar.
+  const fakeFace = (rec, size) => { rec = rec || {}; return (rec.kind === "human" && rec.github_login) ? fakeGhAvatar(rec.github_login, size) : fakeAvatar(rec.alias, rec.kind, size); };
   sandbox.window.Orcha = {
     esc,
     icon: (name, cls) => `<svg class="${cls || "ico"}" data-icon="${name}"></svg>`,
-    avatar: (alias, kind, size) => `<span class="av ${size || ""} ${kind}">${esc((alias || "?").charAt(0).toUpperCase())}</span>`,
+    avatar: fakeAvatar,
+    ghAvatar: fakeGhAvatar,
+    face: fakeFace,
     patch: (el, html) => { el.innerHTML = html; return true; },
     toast: (m, k) => toasts.push({ m, k }),
     modal: (cfg) => modals.push(cfg),
@@ -130,8 +139,7 @@ function membersSandbox(fetchImpl) {
     actingHuman: () => ({ id: "h1", alias: "octocat" }),
     identity: () => ({ agent_id: "h1", alias: "octocat", github_login: "octocat", member_role: "owner" }),
   };
-  // the shared gh avatar helper from app-ui.js rides the settings page too
-  sandbox.ghAvatar = (login, size) => `<span class="av gh ${size || ""} human">${esc((login || "?").charAt(0).toUpperCase())}<img class="gh-face" src="https://github.com/${login}.png?size=96"></span>`;
+  sandbox.ghAvatar = fakeGhAvatar;
   vm.runInContext(MEMBERS_JS, sandbox, { filename: "settings-members.js" });
   vm.runInContext('MEM_CID = "c1";', sandbox);
   return { sandbox, reg, toasts, modals };

@@ -17,9 +17,7 @@ function projMembersHtml(c) {
   const n = c.member_count != null ? Number(c.member_count) : null;
   if (Array.isArray(c.members) && c.members.length) {
     const shown = c.members.slice(0, 5);
-    const faces = shown.map((m) => (m.github_login
-      ? PrjO.ghAvatar(m.github_login, "sm")
-      : PrjO.avatar(m.alias || "?", "human", "sm"))).join("");
+    const faces = shown.map((m) => PrjO.face({ kind: "human", alias: m.alias || "?", github_login: m.github_login }, "sm")).join("");
     const extra = c.members.length > shown.length
       ? `<span class="more">+${c.members.length - shown.length}</span>` : "";
     return `<span class="pmembers" title="${PrjO.esc(c.members.map((m) => m.github_login || m.alias).join(", "))}">${faces}${extra}</span>`;

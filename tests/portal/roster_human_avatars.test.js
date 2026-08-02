@@ -77,6 +77,13 @@ function fakeGhAvatar(login, size) {
     `src="https://github.com/${esc(encodeURIComponent(login || ""))}.png?size=96" alt="" ` +
     `loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
 }
+// Real face() signature (mirrors modules/app-ui.js exactly) — PR #90's shared portal-wide
+// convention that agentFace() now delegates to (see avatars_everywhere.test.js for the
+// dedicated Orcha.face() contract coverage).
+function fakeFace(rec, size) {
+  rec = rec || {};
+  return (rec.kind === "human" && rec.github_login) ? fakeGhAvatar(rec.github_login, size) : fakeAvatar(rec.alias, rec.kind, size);
+}
 
 function makeSandbox(agents) {
   const reg = {};
@@ -112,6 +119,7 @@ function makeSandbox(agents) {
     icon: (name, cls) => `<svg class="${cls || "ico"}" data-icon="${name}"></svg>`,
     avatar: fakeAvatar,
     ghAvatar: fakeGhAvatar,
+    face: fakeFace,
     glyph: () => "<svg class=\"gl\"></svg>",
     statusClass: () => "s-idle",
     kindBadge: (kind) => `<span class="kind ${kind === "human" ? "human" : "ai"}"></span>`,
