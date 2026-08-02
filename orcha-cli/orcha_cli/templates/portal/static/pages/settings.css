@@ -93,6 +93,7 @@
   .skin-tile .sw i { width: 20px; height: 20px; border: 1px solid rgba(0,0,0,.25); display: block; }
   .skin-tile[data-skin="classic"] .sw i { border-radius: 6px; }
   .skin-tile[data-skin="swiss"] .sw i { border-radius: 0 !important; }
+  .skin-tile[data-skin="minimal"] .sw i { border-radius: 999px; }
   .skin-tile .nm { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 660; }
   .skin-tile .nm svg { width: 15px; height: 15px; color: var(--accent); margin-left: auto; flex: none; }
   .skin-tile .ds { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 4px; }
