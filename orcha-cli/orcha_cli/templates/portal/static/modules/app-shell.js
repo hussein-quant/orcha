@@ -285,6 +285,11 @@ function mountShell(page, opts) {
       count: tasks().filter((t) => t.status === "needs_verification").length, attn: true },
     { key: "requests", href: withCid("/requests"), ico: "requests", label: "Requests",
       count: requests().filter((r) => r.status === "open").length },
+    // GitHub hub — open issues/PRs on the container's connected repo, with a Start
+    // action that spins up an Orcha task from either. No count badge here (the page
+    // fetches its own issues/pulls payload outside the container snapshot this array
+    // is built from — a badge would need a second fetch just for the sidebar number).
+    { key: "github", href: withCid("/github"), ico: "github", label: "GitHub" },
     // Metrics page — usage/cost visibility per agent. No count badge (an
     // aggregate page has no "N waiting" semantics).
     { key: "metrics", href: withCid("/metrics"), ico: "metrics", label: "Metrics" },

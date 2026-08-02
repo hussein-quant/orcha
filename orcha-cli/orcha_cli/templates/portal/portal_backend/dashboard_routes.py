@@ -82,6 +82,21 @@ def metrics_page():
     return serve_page("metrics.html")
 
 
+@app.get("/github", response_class=HTMLResponse)
+def github_hub_page():
+    """GitHub hub — open issues/PRs on the container's connected repo, with a
+    Start action that spins up an Orcha task from either (Conductor-style list:
+    number, title, reviewers, checks/merge chips, updated, Start + assignee).
+
+    Pure client-side, same pattern as the other pages: serves the static shell,
+    which loads the D0 assets + pages/github-*.js. The page resolves the
+    container (OrchaData) then reads GET /api/containers/{cid}/github/issues and
+    .../pulls (github_hub_routes.py) — new endpoints added alongside this page,
+    not part of the shared container snapshot. No business logic here.
+    """
+    return serve_page("github.html")
+
+
 @app.get("/tasks", response_class=HTMLResponse)
 def tasks_page():
     """Per-task detail view (owned by agent "D").
