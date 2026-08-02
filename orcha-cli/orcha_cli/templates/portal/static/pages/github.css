@@ -66,7 +66,17 @@
 .tag.gh-unassigned { border-style: dashed; color: var(--faint); font-weight: 500; }
 .gh-reviewers { display: inline-flex; align-items: center; gap: 3px; }
 .gh-reviewers .av { margin-right: -6px; border: 2px solid var(--surface); }
-.gh-reviewers.none { color: var(--faint); }
+/* the empty-reviewers "—" state: same box-model-free inline treatment as the
+   Unassigned chip's note above — named `.empty`, NEVER `.none`, so it can't
+   collide with the global `.none` empty-state block (styles/components.css,
+   a 22px-padded dashed panel meant for full-panel empty states). A bare
+   `.gh-reviewers.none` rule that only sets `color` does NOT stop that global
+   rule's border/padding/border-radius from applying to the same element —
+   CSS classes are additive — so the em-dash used to render as an oversized
+   dashed box instead of a quiet inline placeholder (the founder-reported
+   regression this fix addresses, alongside the matching checks-chip case
+   below). */
+.gh-reviewers.empty { color: var(--faint); }
 .gh-more { color: var(--faint); font-size: 10.5px; margin-left: 8px; }
 .gh-updated { color: var(--faint); font-size: 11px; flex: 0 0 auto; white-space: nowrap; min-width: 60px; text-align: right; }
 .gh-actions { flex: 0 0 auto; }
@@ -76,11 +86,16 @@
 .tag.gh-repo { color: var(--muted); font-size: 10.5px; }
 
 /* ---- checks + merge chips ----------------------------------------------
-   n passed green / n failing red / n pending amber, per the checks rollup. */
+   n passed green / n failing red / n pending amber, per the checks rollup.
+   `.zero` (an honest all-zero/no-checks rollup) and `.loading` (checks:null —
+   not fetched yet, the progressive-fill placeholder) are named to NEVER
+   collide with the global `.none` empty-state block — see the matching note
+   on `.gh-reviewers.empty` above; same bug, same fix, same reasoning. */
 .tag.gh-checks.pass { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); }
 .tag.gh-checks.fail { color: var(--danger); border-color: var(--danger-line); background: var(--danger-soft); }
 .tag.gh-checks.pend { color: var(--warn); border-color: var(--warn-line); background: var(--warn-soft); }
-.tag.gh-checks.none { color: var(--faint); }
+.tag.gh-checks.zero { color: var(--faint); }
+.tag.gh-checks.loading { color: var(--faint); font-style: italic; }
 .tag.gh-merge.ok { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); }
 .tag.gh-merge { color: var(--text-2); }
 

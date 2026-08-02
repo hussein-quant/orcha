@@ -413,7 +413,7 @@ function liveShapeChecksReviewersTest() {
 
   // #199: empty checks but REAL reviewers -> avatars/+more, not "—".
   const row199 = body.slice(body.indexOf('data-gh-open="pull:199"'), body.indexOf('data-gh-open="pull:230"'));
-  assert(row199.indexOf('class="gh-reviewers none"') === -1, "PR #199 (live shape with real requested_reviewers) does NOT render the empty '—' reviewers state");
+  assert(row199.indexOf('class="gh-reviewers empty"') === -1, "PR #199 (live shape with real requested_reviewers) does NOT render the empty '—' reviewers state");
   assert(row199.indexOf("gh-more") !== -1 || (row199.match(/av sm/g) || []).length >= 3,
     "PR #199 renders reviewer avatars (up to 3) plus a +N overflow chip for its 4 requested_reviewers");
 
