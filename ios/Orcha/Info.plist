@@ -51,6 +51,10 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>SpaceGrotesk.ttf</string>
+		<string>HankenGrotesk-Regular.ttf</string>
+		<string>HankenGrotesk-Medium.ttf</string>
+		<string>HankenGrotesk-SemiBold.ttf</string>
+		<string>HankenGrotesk-Bold.ttf</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
