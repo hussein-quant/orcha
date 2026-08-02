@@ -13,7 +13,7 @@ function renderDetailMain(force) {
   /* header */
   html += `<div class="card pad" style="margin-bottom:18px">
     <div class="ahead">
-      ${AgeO.avatar(a.alias, a.kind, "lg")}
+      ${agentFace(a, "lg")}
       <div class="who grow">
         <h1>${AgeO.esc(a.alias)} ${AgeO.kindBadge(a.kind)}</h1>
         <div class="role">${AgeO.esc(a.role)}</div>
