@@ -317,6 +317,7 @@ function bootWiringTests() {
     { label: "home/dashboard", file: ["pages", "home-render.js"], kinds: ["list-rows"] },
     { label: "requests", file: ["pages", "requests-actions.js"], kinds: ["list-rows", "detail-pane"] },
     { label: "metrics", file: ["pages", "metrics-render.js"], kinds: ["stat-cards"] },
+    { label: "github", file: ["pages", "github-boot.js"], kinds: ["list-rows"] },
   ];
 
   for (const p of PAGES) {
@@ -384,7 +385,7 @@ function cssInclusionTests() {
   assert(fs.existsSync(SKELETON_CSS_PATH), "static/styles/skeleton.css exists");
 
   const PAGES = ["home.html", "projects.html", "agents.html", "onboarding.html",
-    "metrics.html", "tasks.html", "requests.html", "settings.html"];
+    "metrics.html", "tasks.html", "requests.html", "settings.html", "github.html"];
   for (const page of PAGES) {
     const html = read(page);
     // Mutation: remove the <link> from one page (copy-paste miss on a new
