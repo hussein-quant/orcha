@@ -118,10 +118,26 @@ function renderKanban() {
 
 /* ---- boot: live snapshot on the 3s cadence; every section repaints via Orcha.patch
    (scroll + text-selection safe). ---- */
+// Perceived-lag fix: the portal is an MPA — this page boots empty until the
+// first snapshot tick lands (render() returns early until then). Show a
+// skeleton over the hero "needs your attention" grid right away
+// (OrchaSkeleton.show is delayed 120ms, so a fast local snapshot never
+// flashes one), then swap() it for the real render on the FIRST successful
+// tick only — the rest of the dashboard (ctx bar, table, kanban) renders
+// normally throughout, same as before.
+if (window.OrchaSkeleton) OrchaSkeleton.show(Hom$("aqGrid"), "list-rows");
+let booted = false;
 function render() {
   if (!HomD() || !HomD().container) return;
   HomO.mountShell("home", { title: "Dashboard", ctx: HomD().container.name });
-  renderProjNotice(); renderOnbCta(); renderCtx(); renderQueue(); renderAgents(); renderActivity(); renderKanban();
+  renderProjNotice(); renderOnbCta(); renderCtx();
+  if (!booted && window.OrchaSkeleton) {
+    booted = true;
+    OrchaSkeleton.swap(Hom$("aqGrid"), renderQueue);
+  } else {
+    renderQueue();
+  }
+  renderAgents(); renderActivity(); renderKanban();
 }
 /* Multi-project landing: a BARE "/" (no ?cid deep link) belongs to the /projects hub
  * unless this stack is the single-project case — the post-login proxy redirect and

@@ -18,6 +18,15 @@
       || (window.ORCHA && window.ORCHA.container && window.ORCHA.container.id) || null;
   }
 
+  // Perceived-lag fix: #mxBody shows the M.bodyHtml "Loading…" text state on
+  // every tick until the /metrics aggregate fetch settles (payload or
+  // loadError set) — that plain-text wait is the visible lag on this page.
+  // OrchaSkeleton.show (120ms-delayed, so a fast fetch never flashes it)
+  // covers that gap; swap() fires once, the first render AFTER the fetch
+  // actually settles, not merely once a container snapshot exists.
+  if (window.OrchaSkeleton) OrchaSkeleton.show(document.getElementById("mxBody"), "stat-cards");
+  let booted = false;
+
   function render(force) {
     if (window.ORCHA && window.ORCHA.container) {
       O.mountShell("metrics", { title: "Metrics", ctx: window.ORCHA.container.name });
@@ -30,7 +39,14 @@
       });
     }
     const host = document.getElementById("mxBody");
-    if (host) O.patch(host, M.bodyHtml(payload, { days, error: loadError }), force);
+    if (!host) return;
+    const settled = payload != null || loadError != null;
+    if (!booted && settled && window.OrchaSkeleton) {
+      booted = true;
+      OrchaSkeleton.swap(host, () => O.patch(host, M.bodyHtml(payload, { days, error: loadError }), force));
+    } else {
+      O.patch(host, M.bodyHtml(payload, { days, error: loadError }), force);
+    }
   }
 
   function load(force) {
