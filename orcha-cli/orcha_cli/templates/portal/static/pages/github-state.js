@@ -585,13 +585,24 @@ window.OrchaGithubHub = (function () {
   }
   function detailHtml(state) {
     state = state || {};
-    if (state.loading && !state.pull && !state.issue) return '<div class="none" style="padding:20px">Loading…</div>';
     if (state.error) {
       if (state.error.kind === "not_found") return detailNotFoundHtml(state.kind);
       if (state.error.kind === "not_connected") return emptyRepoHtml();
       if (state.error.kind === "rate_limited") return rateLimitHtml(state.error.detail);
       return genericErrorHtml(state.error.status, state.error.detail);
     }
+    // No item yet (and no error) -> "Loading…", regardless of the `loading`
+    // flag's exact timing. navigate() renders the detail route SYNCHRONOUSLY
+    // (before loadDetail() has even been called, let alone set
+    // detailLoading=true), so on a fresh item this runs with loading:false
+    // AND pull/issue both null — the ORIGINAL `state.loading && ...` guard
+    // missed that window and fell through to prDetailHtml/issueDetailHtml,
+    // which dereference state.pull/state.issue unconditionally and threw a
+    // TypeError (root cause of the live "row click does nothing, tabs
+    // vanish" defect — the throw aborted navigate() before it reached
+    // loadDetail(), leaving #ghHead/#ghFilters already toggled for the
+    // detail route while #ghlist never repainted off the stale list).
+    if (!state.pull && !state.issue) return '<div class="none" style="padding:20px">Loading…</div>';
     return state.kind === "pull" ? prDetailHtml(state) : issueDetailHtml(state);
   }
 
