@@ -116,7 +116,13 @@ def test_plan_card_shows_full_plan_scrollable():
     gate = html[html.index("function gateSurface"):html.index("function who", html.index("function gateSurface"))]
     # feat/chat-markdown: the full body renders via mdText() (esc-first block markdown +
     # clickable URLs), not bare esc() — still the WHOLE body, no truncation.
-    assert "TasO.mdText(isPlan ? (pm.body" in gate, "plan card should render the full message body"
+    # feat/github-hub-detail-ui: mdText's output is now further wrapped by mdGh() — the
+    # portal-wide PR/issue-link rewrite (modules/app-text.js rewriteGithubLinks), so a
+    # github.com/<connected-repo>/pull|issues/N URL an agent mentions in a plan becomes a
+    # clickable internal /github?pr=N|issue=N hop. mdGh still calls TasO.mdText internally
+    # (see its own definition), so the full-body/no-truncation guarantee this test pins is
+    # unchanged — only the call site's NAME changed.
+    assert "mdGh(isPlan ? (pm.body" in gate, "plan card should render the full message body"
     assert "O.trunc(pm.body" not in gate and "slice(0," not in gate, "plan body must not be hard-truncated"
     # md output is block html — the region scrolls, and the md class supplies wrapping
     assert "max-height:300px;overflow-y:auto" in gate and 'class="tx md"' in gate, "plan region not scrollable md"

@@ -101,7 +101,11 @@
 
   /* activity */
   .act-list { display: flex; flex-direction: column; max-height: 540px; overflow: auto; }
-  .act { display: flex; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--border); align-items: flex-start; }
+  /* #act moved from a native <a> to a clickable <div onclick> so a rewritten
+     PR/issue mention inside .txt can carry its OWN real <a> without nesting
+     anchors (invalid HTML — see renderActivity's comment, pages/home-render.js). */
+  .act { display: flex; gap: 10px; padding: 10px 4px; border-bottom: 1px solid var(--border); align-items: flex-start;
+    color: inherit; cursor: pointer; }
   .act:last-child { border-bottom: 0; }
   .act .body { flex: 1; min-width: 0; }
   .act .top { display: flex; align-items: center; gap: 7px; }

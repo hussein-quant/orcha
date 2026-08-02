@@ -160,6 +160,14 @@
   padding: 0 2px; transition: background .12s ease; }
 .tref:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); text-decoration: underline; text-underline-offset: 2px; }
 .lnk:hover { text-decoration-thickness: 2px; }
+/* portal-wide PR/issue-link rewrite (modules/app-text.js rewriteGithubLinks):
+   .gh-pr-link is the rewritten internal /github?pr=N|issue=N hop — same .lnk
+   look, so it reads identically to any other authored link; .gh-pr-ext is the
+   small secondary "↗ open on GitHub" affix that preserves the original URL,
+   deliberately quieter (no underline, faint until hover) so it doesn't compete
+   with the primary link for attention. */
+.gh-pr-ext { display: inline-block; margin-left: 1px; color: var(--faint); text-decoration: none; font-size: 11px; }
+.gh-pr-ext:hover { color: var(--accent); }
 
 /* mono id pill */
 .idpill { display: inline-flex; align-items: center; gap: 8px; background: var(--surface-2);

@@ -78,20 +78,32 @@ function activityEvents() {
 }
 function renderActivity() {
   const evs = activityEvents();
+  // PR-link rewrite: a mentioned github.com/<connected-repo>/pull|issues/N URL
+  // in an activity preview becomes a clickable internal /github?pr=N|issue=N
+  // hop (+ a small "open on GitHub ↗" secondary link), same helper tasks/
+  // requests use. Needs a REAL <a> inside .txt, so the row itself can no
+  // longer be one big <a> (nested anchors are invalid HTML and the browser's
+  // parser would break the outer link) — .act moved from <a href> to a
+  // clickable <div onclick>, mirroring this same file's .kcard idiom below
+  // (renderKanban), so the row still navigates on a click anywhere OUTSIDE
+  // the inner link (the inner <a>'s own click simply doesn't bubble into a
+  // location.href handler on itself the way it would have nested).
+  const repo = (HomD().container || {}).github_repo || null;
   HomO.patch(Hom$("actList"), evs.length ? evs.map((e) => {
     // e.who is the roster alias when resolvable (task poster / request from-to), letting
     // the real member record (incl. github_login) drive the face; the "human" sentinel
     // (an anonymous is_human thread post — no specific member alias) has no such record
     // and correctly falls back to the plain letter avatar via face()'s own kind/login guard.
     const a = HomO.agentByAlias(e.who);
-    return `<a class="act" href="${e.link}" style="color:inherit">
+    const txt = HomO.rewriteGithubLinks(HomO.linkify(e.text), repo);
+    return `<div class="act" onclick="location.href='${e.link}'">
       ${HomO.face(a || { alias: e.who, kind: "human" }, "sm")}
       <div class="body">
         <div class="top"><span class="nm">${HomO.esc(e.who)}</span>
           <span class="ty" style="color:${TYC[e.kind]};background:${TYBG[e.kind]}">${HomO.esc(e.kind)}</span>
           <span class="when">${HomO.relTime(e.at)}</span></div>
-        <div class="txt">${HomO.esc(e.text)}</div>
-      </div></a>`;
+        <div class="txt">${txt}</div>
+      </div></div>`;
   }).join("") : '<div class="none" style="padding:14px;font-size:12.5px">No activity yet.</div>');
 }
 

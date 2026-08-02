@@ -193,7 +193,11 @@ const AGENTS = [
 // hand-coded the WRONG field names too, so this test suite never caught the
 // mismatch against a browser. issueRowHtml/pullRowHtml now read `assignee`/
 // `head`; matchesFilter's mine/issues branch was fixed the same way.
-const ISSUE_OPEN = { number: 42, title: "Flaky retry on cold start", labels: ["bug", "P1"],
+// Labels are {name, color} objects (github_hub_routes.py's _labels — GitHub's
+// own hex, no leading '#'), the backend addition landed alongside this UI so
+// tags render in their real repo colors (labelChipHtml, item below).
+const ISSUE_OPEN = { number: 42, title: "Flaky retry on cold start",
+  labels: [{ name: "bug", color: "d73a4a" }, { name: "P1", color: "e99695" }],
   assignee: "octocat", updated_at: "2026-07-31T01:00:00+00:00",
   html_url: "https://github.com/acme/orcha/issues/42", body_excerpt: "Retries fail on cold start…" };
 const ISSUE_UNASSIGNED = { number: 7, title: "Docs: onboarding typo", labels: [],
@@ -439,6 +443,62 @@ function behaviorTests() {
     "pending checks chip carries the open-ring (○) glyph, not a clock — pending here means \"in progress/undetermined,\" not \"waiting on time\"");
   assert(/data-icon="check"/.test(G.mergeChipHtml({ draft: false, mergeable_state: "clean" })),
     "clean-merge chip carries the check glyph ahead of \"Checks passed\"");
+
+  // ---- label colors (standout tags, item 2 of the deliverable) -------------
+  const redLabel = G.labelChipHtml({ name: "bug", color: "d73a4a" }, "dark");
+  assert(redLabel.includes("background:#d73a4a2e") && redLabel.includes("border-color:#d73a4a55"),
+    "a colored label's background/border derive from GitHub's own hex at low alpha");
+  assert(redLabel.includes("color:#d73a4a"), "dark theme reads the label color at full strength for text");
+  assert(redLabel.includes(">bug<"), "the label name renders as the chip text");
+
+  // light theme: a PALE label color (fef2c0, near-white) needs darkened text to
+  // stay legible — the background swatch still uses the TRUE color, only the
+  // text color is luminance-adjusted.
+  const paleLight = G.labelChipHtml({ name: "docs", color: "fef2c0" }, "light");
+  assert(paleLight.includes("background:#fef2c02e"), "light theme still swatches the TRUE label color as background");
+  assert(!paleLight.includes("color:#fef2c0\""), "light theme darkens a pale label's TEXT color so it stays legible (not the raw near-white hex)");
+  const paleDark = G.labelChipHtml({ name: "docs", color: "fef2c0" }, "dark");
+  assert(paleDark.includes("color:#fef2c0"), "dark theme reads even a pale label at full strength (dark surfaces don't need the light-theme adjustment)");
+
+  // a saturated/dark label color (e.g. a near-black custom label) needs NO
+  // light-theme adjustment — luminance is already low.
+  const darkLabelLight = G.labelChipHtml({ name: "critical", color: "1a1a2e" }, "light");
+  assert(darkLabelLight.includes("color:#1a1a2e"), "an already-dark label color is used as-is on light theme (no darkening needed)");
+
+  // deterministic fallback palette when GitHub sends no color at all.
+  const noColor1 = G.labelChipHtml({ name: "triage" }, "dark");
+  const noColor2 = G.labelChipHtml({ name: "triage" }, "dark");
+  assert(/background:#[0-9a-f]{6}2e/.test(noColor1), "a colorless label still gets a real hex swatch from the fallback palette");
+  assert(noColor1 === noColor2, "the fallback palette is DETERMINISTIC — the same label name always gets the same color");
+  const noColorOther = G.labelChipHtml({ name: "completely-different-name" }, "dark");
+  assert(noColorOther !== noColor1, "different label names land on different fallback colors (not one flat generic chip)");
+
+  // bare-string label (legacy/defensive — the shipped payload always sends
+  // {name,color}, but a bare string must never crash the renderer).
+  const bareString = G.labelChipHtml("legacy-string-label", "dark");
+  assert(bareString.includes(">legacy-string-label<"), "a bare-string label (no {name,color} wrapper) still renders its name safely");
+
+  // escaping: a hostile label name never lands unescaped.
+  const hostileLabel = G.labelChipHtml({ name: '<img src=x onerror=alert(1)>', color: "d73a4a" }, "dark");
+  assert(!hostileLabel.includes("<img src=x"), "label name is HTML-escaped in labelChipHtml");
+
+  // escaping: a hostile/malformed label COLOR can never break out of the
+  // style="" attribute — GitHub's own color field is untrusted API data
+  // reaching an attribute value, so it's validated (strict 6-hex-digit),
+  // never trusted verbatim. An invalid color falls back to the deterministic
+  // palette instead of being interpolated.
+  const hostileColor = G.labelChipHtml({ name: "bug", color: '"><script>alert(1)</script>' }, "dark");
+  assert(!hostileColor.includes("<script>alert(1)</script>"),
+    "a malicious label.color value cannot break out of the style attribute (rejected -> fallback palette used instead)");
+  assert(/style="background:#[0-9a-f]{6}2e/.test(hostileColor),
+    "an invalid color falls back to a real 6-hex-digit swatch from the deterministic palette");
+  const shortColor = G.labelChipHtml({ name: "bug", color: "abc" }, "dark");
+  assert(/style="background:#[0-9a-f]{6}2e/.test(shortColor),
+    "a color that ISN'T exactly 6 hex digits (e.g. CSS 3-digit shorthand) also falls back rather than being trusted as-is");
+
+  // issue rows/detail compose labelChipHtml per label, in real colors.
+  const coloredIssueRow = G.issueRowHtml(ISSUE_OPEN, AGENTS, () => null, "dark");
+  assert(coloredIssueRow.includes("background:#d73a4a2e"), "issue row labels render via labelChipHtml (real GitHub color), not a flat chip");
 }
 
 /* ---------------- part 3: wiring (grep-level, DOM-glue files) ------------ */
@@ -471,10 +531,15 @@ function wiringTests() {
   assert(/window\.OrchaSkeleton/.test(BOOT_JS), "github-boot.js guards the calls behind window.OrchaSkeleton (safe if unloaded)");
 
   // Shared snapshot poll (shell chrome + agent roster) + independent
-  // issues/pulls refresh — never every 3s tick (heavier, GitHub-backed).
+  // issues/pulls refresh — never every 3s tick (heavier, GitHub-backed). The
+  // detail route (github_detail.test.js) rides the SAME 60s interval, calling
+  // loadDetail(true) instead of load(tab,true) while a ?pr=/?issue= route is
+  // active — one setInterval, route-gated, not two competing timers.
   assert(/OrchaData\.start\(/.test(BOOT_JS), "github-boot.js drives the page off the shared OrchaData.start poll");
-  assert(/setInterval\(\(\)\s*=>\s*load\(tab,\s*true\),\s*60000\)/.test(BOOT_JS),
+  assert(/setInterval\(\(\)\s*=>\s*\{[\s\S]*?load\(tab,\s*true\)[\s\S]*?\},\s*60000\)/.test(BOOT_JS),
     "issues/pulls refresh on their own 60s timer, independent of the 3s snapshot tick");
+  assert(/setInterval\(\(\)\s*=>\s*\{[\s\S]*?loadDetail\(true\)[\s\S]*?\},\s*60000\)/.test(BOOT_JS),
+    "the detail route rides the SAME 60s timer (loadDetail(true)), not a second independent interval");
 
   // Row click delegation: Start / dropdown-toggle, on the persistent #ghlist
   // container (survives repaints — same delegation idiom as tasks/requests).

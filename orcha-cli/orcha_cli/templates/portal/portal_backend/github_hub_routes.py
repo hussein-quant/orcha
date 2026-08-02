@@ -170,7 +170,12 @@ def _not_connected():
 
 
 def _labels(issue: dict) -> list:
-    return [lb.get("name") for lb in (issue.get("labels") or []) if lb.get("name")]
+    """Each label as {name, color} — GitHub's own label hex (no leading '#', e.g. "d73a4a"),
+    so the UI can render tags in their real repo colors instead of a flat generic chip.
+    `color` is omitted (None) on the rare label that carries none; the UI falls back to a
+    deterministic palette in that case."""
+    return [{"name": lb.get("name"), "color": lb.get("color")}
+            for lb in (issue.get("labels") or []) if lb.get("name")]
 
 
 def _excerpt(body) -> str:

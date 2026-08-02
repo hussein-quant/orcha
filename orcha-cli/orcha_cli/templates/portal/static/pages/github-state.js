@@ -23,7 +23,32 @@
    response the same way (friendly card), so the exact error body isn't load
    bearing here. This also covers deploy-order: if the backend PR hasn't landed
    yet, the fetch 404s the same way an unconnected repo would, and the page
-   degrades to the same friendly card instead of a blank/broken page. */
+   degrades to the same friendly card instead of a blank/broken page.
+
+   Labels: {name, color} objects (GitHub's own hex, no leading '#') everywhere
+   labels appear — issues list AND issue detail — per the backend addition
+   landed alongside this UI (github_hub_routes.py's _labels). labelChipHtml
+   computes the tag's background/text color from that hex (or a deterministic
+   fallback when color is absent); see the "label colors" section below.
+
+   DETAIL endpoints (github_hub_routes.py, PR #95, merged/deployed):
+     GET  /api/containers/{cid}/github/pulls/{number}
+       -> { available, repo, pull: {number, title, state, draft,
+            body_markdown (RAW), author_login, base, head, updated_at,
+            created_at, html_url, mergeable_state, assignees[],
+            requested_reviewers[], checks: {passed, failing, pending, total,
+            runs:[{name, status, conclusion, html_url}]},
+            files: {count, items:[{filename, additions, deletions, status}],
+            truncated?}, comments_count, review_comments_count} }
+     GET  /api/containers/{cid}/github/issues/{number}
+       -> { available, repo, issue: {number, title, state, body_markdown,
+            author_login, labels[{name,color}], assignee, assignees[],
+            updated_at, created_at, html_url, comments_count,
+            comments:[{author_login, body_markdown, created_at}]} }
+   Errors: HTTP 200 {available:false, reason}. reason:"not_found" is DETAIL-
+   ONLY (a specific issue/PR number 404s distinctly from "repo not connected");
+   detailHtml's degrade ladder mirrors bodyHtml's (not_found -> not_connected
+   -> rate_limited -> generic), so a missing PR/issue never blank-pages either. */
 window.OrchaGithubHub = (function () {
   const esc = (s) => (window.Orcha && window.Orcha.esc)
     ? window.Orcha.esc(s)
@@ -78,6 +103,65 @@ window.OrchaGithubHub = (function () {
     return repo ? `<span class="tag gh-repo mono">${esc(repo)}</span>` : "";
   }
 
+  /* ---- label colors -------------------------------------------------------
+     GitHub-style tags: background = the repo's own label color at ~18% alpha,
+     text = the color at full strength (dark themes) OR a luminance-adjusted
+     shade for light themes (a pale label color like "fef2c0" on white is
+     unreadable at full strength on a light background, so we darken it there).
+     Deterministic fallback palette (hashed off the label name) when GitHub
+     sends no color at all — every label still gets a stable, distinct hue
+     rather than one flat generic chip. Works in classic/swiss/minimal since
+     it's inline style (background/color), not a skin-scoped CSS class. */
+  const LABEL_FALLBACK_PALETTE = [
+    "d73a4a", "0075ca", "cfd3d7", "a2eeef", "7057ff", "008672",
+    "e4e669", "d876e3", "fbca04", "0e8a16", "c5def5", "ff7619",
+  ];
+  function hueForLabel(name) {
+    let h = 0;
+    for (const c of String(name || "")) h = (h * 31 + c.charCodeAt(0)) % LABEL_FALLBACK_PALETTE.length;
+    return h;
+  }
+  // Relative luminance (WCAG-ish, sRGB) — decides whether a color reads as
+  // "light" (needs darkening for legible text on a light theme) or "dark".
+  function hexLuminance(hex) {
+    const h = (hex || "").replace(/[^0-9a-fA-F]/g, "").padEnd(6, "0").slice(0, 6);
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+  // Darken a hex color toward black by `amt` (0-1) — used ONLY for the
+  // light-theme text color of a pale label, never for the background swatch
+  // (the background stays the true GitHub color at low alpha regardless).
+  function darkenHex(hex, amt) {
+    const h = (hex || "").replace(/[^0-9a-fA-F]/g, "").padEnd(6, "0").slice(0, 6);
+    const ch = (i) => Math.max(0, Math.round(parseInt(h.slice(i, i + 2), 16) * (1 - amt)));
+    return [0, 2, 4].map((i) => ch(i).toString(16).padStart(2, "0")).join("");
+  }
+  // Strict 6-hex-digit sanitizer for anything landing in a style="" attribute
+  // (GitHub's own label.color field should always already be clean hex, but
+  // this is untrusted API data reaching an attribute value — validate rather
+  // than trust, same posture as esc() for text content). Anything that isn't
+  // EXACTLY 6 hex digits after stripping a leading '#' is rejected outright
+  // (null), which sends the caller to the deterministic fallback palette
+  // instead of ever interpolating an unvalidated string into style="".
+  function sanitizeHexColor(color) {
+    if (!color) return null;
+    const h = String(color).replace(/^#/, "");
+    return /^[0-9a-fA-F]{6}$/.test(h) ? h.toLowerCase() : null;
+  }
+  function labelChipHtml(label, theme) {
+    const name = (label && label.name) || (typeof label === "string" ? label : "");
+    const color = sanitizeHexColor(label && label.color) || LABEL_FALLBACK_PALETTE[hueForLabel(name)];
+    // light theme + a pale label color (e.g. "fef2c0") needs darkened text to
+    // stay legible on the app's light surfaces; dark theme always reads the
+    // true color at full strength against the app's dark surfaces.
+    const isLight = theme === "light";
+    const textColor = isLight && hexLuminance(color) > 0.65 ? darkenHex(color, 0.45) : color;
+    return `<span class="tag gh-label" style="background:#${color}2e;color:#${textColor};border-color:#${color}55">${esc(name)}</span>`;
+  }
+
   /* ---- start-button + assignee dropdown ---------------------------------
      Rendered per row. `taskLink` (already-started state) takes precedence:
        - no linked task -> [Start ->][v] split button
@@ -117,34 +201,64 @@ window.OrchaGithubHub = (function () {
      landed against the spec independently and drifted; a founder smoke test
      caught the mismatch (rows rendered with a blank branch name / "always
      Unassigned" issues), so this reads straight off the real payload shape —
-     see the fixtures ISSUE_OPEN/PR_CLEAN in github_hub.test.js. */
-  function issueRowHtml(it, agents, startedFn) {
+     see the fixtures ISSUE_OPEN/PR_CLEAN in github_hub.test.js.
+
+     Row click = open the detail view (data-gh-open, wired in github-boot.js's
+     delegated #ghlist click handler); Start / the assignee dropdown toggle
+     call stopPropagation at the wiring layer so a Start click never also
+     navigates. `theme` ("light"|"dark") drives labelChipHtml's text-color
+     computation — threaded down from the render state (see bodyHtml below),
+     never read off `window` here (this file stays DOM-free/pure per its own
+     header contract, so it can run in the bare vm test harness). */
+  function issueRowHtml(it, agents, startedFn, theme) {
     const started = startedFn ? startedFn("issue", it.number) : null;
-    return `<div class="ghrow" data-gh-row="issue:${esc(it.number)}">
+    return `<div class="ghrow" data-gh-row="issue:${esc(it.number)}" data-gh-open="issue:${esc(it.number)}">
       ${icon("issueDot", "gl gh-kind-ico issue")}
       <span class="gh-num mono">#${esc(it.number)}</span>
       <span class="grow gh-main">
         <span class="gh-title">${esc(it.title)}</span>
-        <span class="gh-meta">${(it.labels || []).slice(0, 4).map((l) => `<span class="tag gh-label">${esc(l)}</span>`).join("")}
+        <span class="gh-meta">${(it.labels || []).slice(0, 4).map((l) => labelChipHtml(l, theme)).join("")}
           ${it.assignee ? `<span class="gh-assignee">${avatar(it.assignee)}<span>${esc(it.assignee)}</span></span>` : '<span class="tag gh-unassigned">Unassigned</span>'}</span>
       </span>
+      <span class="gh-reviewers-col"></span>
+      <span class="gh-checks-col"></span>
+      <span class="gh-merge-col"></span>
       <span class="gh-updated">${esc(relTime(it.updated_at))}</span>
       <span class="gh-actions">${startCellHtml("issue", it, started)}</span>
     </div>`;
   }
-  function pullRowHtml(pr, agents, startedFn) {
+  function pullRowHtml(pr, agents, startedFn, theme) {
     const started = startedFn ? startedFn("pull", pr.number) : null;
-    return `<div class="ghrow" data-gh-row="pull:${esc(pr.number)}">
+    return `<div class="ghrow" data-gh-row="pull:${esc(pr.number)}" data-gh-open="pull:${esc(pr.number)}">
       ${icon("pullArrow", "gl gh-kind-ico pull" + (pr.draft ? " draft" : ""))}
       <span class="gh-num mono">#${esc(pr.number)}</span>
       <span class="grow gh-main">
         <span class="gh-title">${pr.draft ? '<span class="tag gh-draft">Draft</span>' : ""}${esc(pr.title)}</span>
-        <span class="gh-meta"><span class="gh-branch mono">${esc(pr.head || "")}</span>${reviewersHtml(pr.requested_reviewers)}</span>
+        <span class="gh-meta"><span class="gh-branch mono">${esc(pr.head || "")}</span></span>
       </span>
-      ${checksChipHtml(pr.checks)}
-      ${mergeChipHtml(pr)}
+      <span class="gh-reviewers-col">${reviewersHtml(pr.requested_reviewers)}</span>
+      <span class="gh-checks-col">${checksChipHtml(pr.checks)}</span>
+      <span class="gh-merge-col">${mergeChipHtml(pr)}</span>
       <span class="gh-updated">${esc(relTime(pr.updated_at))}</span>
       <span class="gh-actions">${startCellHtml("pull", pr, started)}</span>
+    </div>`;
+  }
+
+  /* ---- column-header row (wide viewports only, CSS-hidden below the same
+     breakpoint .ghrow wraps at) — ID | TITLE/CONTEXT | REVIEWERS | CHECKS |
+     MERGE | UPDATED, per the reference layout. Issues rows leave the
+     reviewers/checks/merge columns empty (those are PR-only concepts), so
+     one header serves both tabs without a conditional column set. */
+  function columnHeaderHtml(tab) {
+    return `<div class="ghhead-row" aria-hidden="true">
+      <span class="ghh-ico"></span>
+      <span class="ghh-num">ID</span>
+      <span class="grow ghh-main">TITLE${tab === "pull" ? " / CONTEXT" : ""}</span>
+      <span class="ghh-reviewers">REVIEWERS</span>
+      <span class="ghh-checks">CHECKS</span>
+      <span class="ghh-merge">MERGE</span>
+      <span class="ghh-updated">UPDATED</span>
+      <span class="ghh-actions"></span>
     </div>`;
   }
 
@@ -214,7 +328,8 @@ window.OrchaGithubHub = (function () {
       return `<div class="none" style="padding:20px">${all.length ? "No " + (state.tab === "pull" ? "pull requests" : "issues") + " match this filter." : "No open " + (state.tab === "pull" ? "pull requests" : "issues") + "."}</div>`;
     }
     const rowFn = state.tab === "pull" ? pullRowHtml : issueRowHtml;
-    return filtered.map((it) => rowFn(it, state.agents, state.startedOf)).join("");
+    const header = columnHeaderHtml(state.tab);
+    return header + filtered.map((it) => rowFn(it, state.agents, state.startedOf, state.theme)).join("");
   }
 
   function filterChipsHtml(tab, active) {
@@ -223,9 +338,270 @@ window.OrchaGithubHub = (function () {
     return chips.map((c) => `<button class="${c.k === active ? "on" : ""}" data-gh-filter="${c.k}">${esc(c.label)}</button>`).join("");
   }
 
+  /* ============================================================================
+     DETAIL VIEWS — ?pr=N / ?issue=N within the github page. Pure payload -> HTML
+     builders (same discipline as the list above): no DOM, no fetch. Consumed by
+     github-render.js's route-aware render() + fetched via
+     GET .../github/pulls/{n} | .../issues/{n} (github_hub_routes.py, PR #95).
+
+     mdText: the portal's own markdown module (modules/app-text.js) — injected
+     the same way esc/relTime/icon/ghAvatar are (a page-local fallback when
+     window.Orcha isn't loaded, e.g. this bare-vm test harness), so body_markdown
+     renders through the SAME renderer chat/task bodies use (headings, code,
+     lists, blockquotes, tables, autolinks — the "Triggered-by" blockquote an
+     agent's PR/issue body carries renders naturally, no special-casing here). */
+  const mdText = (s) => (window.Orcha && window.Orcha.mdText) ? window.Orcha.mdText(s) : esc(s);
+
+  function breadcrumbHtml(kind, number, repo) {
+    // relative "?tab=..." replaces only the query string (keeps the path AND
+    // gets combined with the current origin/path by the browser) — but it
+    // would otherwise DROP a ?cid= a multi-project deep link needs, so
+    // github-boot.js's readRouteFromUrl()/render() honor ?tab= on load AND
+    // this stays a relative href (never absolute) so an in-flight ?cid= on
+    // the CURRENT url... note: a bare relative "?query" replaces the whole
+    // query string, so cid is only preserved via the JS history.back() path
+    // (github-boot.js's data-gh-back handler) — the href is the no-JS/
+    // right-click fallback and intentionally lands on the list's default tab.
+    const backHref = "?" + (kind === "pull" ? "tab=pulls" : "tab=issues");
+    const label = kind === "pull" ? "Pull requests" : "Issues";
+    return `<div class="gh-crumb">
+      <a class="gh-crumb-back" href="${esc(backHref)}" data-gh-back="1">${icon("arrow", "gl gh-crumb-ico")}<span>${esc(label)}</span></a>
+      <span class="gh-crumb-sep">·</span>
+      <span class="gh-crumb-repo mono">${esc(repo || "")}</span>
+      <span class="gh-crumb-sep">·</span>
+      <span class="gh-crumb-num">#${esc(number)}</span>
+    </div>`;
+  }
+
+  function statePillHtml(kind, item) {
+    if (kind === "pull") {
+      if (item.draft) return '<span class="pill s-idle gh-state-pill">Draft</span>';
+      if (item.state === "closed") return '<span class="pill s-bad gh-state-pill">Closed</span>';
+      return '<span class="pill s-ok gh-state-pill">Open</span>';
+    }
+    return item.state === "closed"
+      ? '<span class="pill s-acc gh-state-pill">Closed</span>'
+      : '<span class="pill s-ok gh-state-pill">Open</span>';
+  }
+
+  function branchChipsHtml(base, head) {
+    return `<span class="gh-branch-chips">
+      <span class="tag gh-branch-tag mono">${esc(base || "?")}</span>
+      <span class="gh-branch-arrow">${icon("arrow", "gl")}</span>
+      <span class="tag gh-branch-tag mono">${esc(head || "?")}</span>
+    </span>`;
+  }
+
+  function runRowHtml(run) {
+    run = run || {};
+    const completed = run.status === "completed";
+    const conclusion = run.conclusion;
+    let glyph = "ring", cls = "pend";
+    if (completed) {
+      if (conclusion === "success" || conclusion === "neutral" || conclusion === "skipped") { glyph = "check"; cls = "pass"; }
+      else if (conclusion === "failure" || conclusion === "timed_out" || conclusion === "action_required"
+        || conclusion === "cancelled" || conclusion === "stale" || conclusion === "startup_failure") { glyph = "x"; cls = "fail"; }
+      else { glyph = "ring"; cls = "pend"; }
+    }
+    const name = run.name || "check";
+    const link = run.html_url
+      ? `<a class="gh-run-link" href="${esc(run.html_url)}" target="_blank" rel="noopener noreferrer">${icon("ext", "gl")}</a>` : "";
+    return `<div class="gh-run-row ${cls}">
+      <span class="gh-run-glyph ${cls}">${icon(glyph, "gl")}</span>
+      <span class="grow gh-run-name">${esc(name)}</span>
+      <span class="gh-run-state">${esc(completed ? (conclusion || "done") : (run.status || "queued"))}</span>
+      ${link}
+    </div>`;
+  }
+
+  function checksSectionHtml(checks) {
+    const runs = (checks && checks.runs) || [];
+    if (!runs.length) return '<div class="none" style="padding:14px">No checks reported.</div>';
+    return `<div class="gh-runs">${runs.map(runRowHtml).join("")}</div>`;
+  }
+
+  function fileRowHtml(f) {
+    f = f || {};
+    const statusCls = f.status === "removed" ? "del" : f.status === "added" ? "add" : "mod";
+    return `<div class="gh-file-row">
+      <span class="tag gh-file-status ${statusCls}">${esc(f.status || "modified")}</span>
+      <span class="grow gh-file-name mono">${esc(f.filename || "")}</span>
+      <span class="gh-file-diff"><span class="add">+${esc(f.additions || 0)}</span> <span class="del">-${esc(f.deletions || 0)}</span></span>
+    </div>`;
+  }
+
+  function filesSectionHtml(files) {
+    const f = files || {};
+    const items = f.items || [];
+    if (!items.length) return '<div class="none" style="padding:14px">No files changed.</div>';
+    return `<div class="gh-files">${items.map(fileRowHtml).join("")}
+      ${f.truncated ? `<div class="gh-files-more muted">Showing the first ${items.length} of ${esc(f.count)} files.</div>` : ""}</div>`;
+  }
+
+  /* ---- Start / Open-on-GitHub actions (detail header) — same postStart flow
+     as the list rows, reusing startCellHtml/agentRosterHtml verbatim so the
+     already-tracked state and the assignee dropdown stay ONE implementation. */
+  function detailActionsHtml(kind, item, taskState) {
+    return `<div class="gh-detail-actions">
+      ${startCellHtml(kind, item, taskState)}
+      <a class="btn ghost sm gh-open-ext" href="${esc(item.html_url || "#")}" target="_blank" rel="noopener noreferrer">${icon("ext", "gl")}Open on GitHub</a>
+    </div>`;
+  }
+
+  /* ---- right rail: status card + ASSIGNEES + REVIEWERS + checks summary --- */
+  function personListHtml(logins) {
+    const l = Array.isArray(logins) ? logins : [];
+    if (!l.length) return '<div class="none" style="padding:10px 0">None</div>';
+    return `<div class="gh-people">${l.map((login) => `<span class="gh-person">${avatar(login)}<span>${esc(login)}</span></span>`).join("")}</div>`;
+  }
+  function checksSummaryHtml(checks) {
+    const r = checks || {};
+    const total = r.total != null ? r.total : (r.passed || 0) + (r.failing || 0) + (r.pending || 0);
+    if (!total) return '<div class="none" style="padding:10px 0">No checks</div>';
+    return `<div class="gh-checks-summary">
+      ${r.passed ? `<span class="gh-cs-row pass">${icon("check", "gl")}${esc(r.passed)} passed</span>` : ""}
+      ${r.failing ? `<span class="gh-cs-row fail">${icon("x", "gl")}${esc(r.failing)} failing</span>` : ""}
+      ${r.pending ? `<span class="gh-cs-row pend">${icon("ring", "gl")}${esc(r.pending)} pending</span>` : ""}
+    </div>`;
+  }
+  function pullRailHtml(pull) {
+    return `<aside class="gh-rail">
+      <div class="card gh-rail-card">
+        <div class="gh-rail-h">Status</div>
+        ${statePillHtml("pull", pull)}
+      </div>
+      <div class="card gh-rail-card">
+        <div class="gh-rail-h">Assignees</div>
+        ${personListHtml(pull.assignees)}
+      </div>
+      <div class="card gh-rail-card">
+        <div class="gh-rail-h">Reviewers</div>
+        ${personListHtml(pull.requested_reviewers)}
+      </div>
+      <div class="card gh-rail-card">
+        <div class="gh-rail-h">Checks</div>
+        ${checksSummaryHtml(pull.checks)}
+      </div>
+    </aside>`;
+  }
+
+  /* ---- PR detail body ------------------------------------------------------
+     tabs: Conversation (body_markdown) | Checks (n) | Files changed (n). Read
+     + Start only — no approve/close/rerun controls, deliberate (per spec). */
+  function prDetailHtml(state) {
+    const pull = state.pull, repo = state.repo;
+    const checks = pull.checks || {};
+    const total = checks.total != null ? checks.total : (checks.passed || 0) + (checks.failing || 0) + (checks.pending || 0);
+    const filesCount = (pull.files && pull.files.count) || 0;
+    const activeSub = state.subTab || "conversation";
+    const tabs = [
+      { k: "conversation", label: "Conversation" },
+      { k: "checks", label: `Checks (${total})` },
+      { k: "files", label: `Files changed (${filesCount})` },
+    ];
+    return `${breadcrumbHtml("pull", pull.number, repo)}
+    <div class="gh-detail-layout">
+      <div class="gh-detail-main">
+        <div class="gh-detail-head">
+          <h1 class="gh-detail-title">${esc(pull.title)} <span class="gh-detail-num mono">#${esc(pull.number)}</span></h1>
+          <div class="gh-detail-chips">
+            ${statePillHtml("pull", pull)}
+            ${branchChipsHtml(pull.base, pull.head)}
+            <span class="gh-detail-updated">Updated ${esc(relTime(pull.updated_at))}</span>
+          </div>
+          ${detailActionsHtml("pull", pull, state.taskState)}
+        </div>
+        <nav class="aut gh-subtabs" role="tablist" aria-label="Pull request sections">
+          ${tabs.map((t) => `<span class="seg${t.k === activeSub ? " on" : ""}" role="tab" tabindex="0" aria-selected="${t.k === activeSub}" data-gh-subtab="${t.k}">${esc(t.label)}</span>`).join("")}
+        </nav>
+        <div class="card gh-subtab-body">
+          ${activeSub === "checks" ? checksSectionHtml(pull.checks)
+            : activeSub === "files" ? filesSectionHtml(pull.files)
+            : `<div class="md gh-conversation-body">${mdText(pull.body_markdown || "")}</div>`}
+        </div>
+      </div>
+      ${pullRailHtml(pull)}
+    </div>`;
+  }
+
+  /* ---- issue detail body ---------------------------------------------------
+     labels in real colors, body markdown, assignees, recent comments (author
+     is a GitHub login -> ghAvatar directly, not Orcha.face — comment authors
+     aren't necessarily mapped Orcha members). */
+  function commentRowHtml(c) {
+    c = c || {};
+    return `<div class="gh-comment">
+      ${avatar(c.author_login)}
+      <div class="gh-comment-body">
+        <div class="gh-comment-head"><span class="gh-comment-author">${esc(c.author_login || "unknown")}</span><span class="gh-comment-when">${esc(relTime(c.created_at))}</span></div>
+        <div class="md gh-comment-text">${mdText(c.body_markdown || "")}</div>
+      </div>
+    </div>`;
+  }
+  function issueDetailHtml(state) {
+    const issue = state.issue, repo = state.repo, theme = state.theme;
+    const comments = issue.comments || [];
+    return `${breadcrumbHtml("issue", issue.number, repo)}
+    <div class="gh-detail-layout">
+      <div class="gh-detail-main">
+        <div class="gh-detail-head">
+          <h1 class="gh-detail-title">${esc(issue.title)} <span class="gh-detail-num mono">#${esc(issue.number)}</span></h1>
+          <div class="gh-detail-chips">
+            ${statePillHtml("issue", issue)}
+            ${(issue.labels || []).map((l) => labelChipHtml(l, theme)).join("")}
+            <span class="gh-detail-updated">Updated ${esc(relTime(issue.updated_at))}</span>
+          </div>
+          ${detailActionsHtml("issue", issue, state.taskState)}
+        </div>
+        <div class="card gh-subtab-body">
+          <div class="md gh-conversation-body">${mdText(issue.body_markdown || "")}</div>
+        </div>
+        <div class="card" style="margin-top:14px">
+          <div class="card-h"><h3>Comments</h3><span class="count">${comments.length ? "(" + comments.length + ")" : ""}</span></div>
+          <div class="card-b" style="padding:14px 16px">
+            ${comments.length ? comments.map(commentRowHtml).join("") : '<div class="none">No comments yet.</div>'}
+          </div>
+        </div>
+      </div>
+      <aside class="gh-rail">
+        <div class="card gh-rail-card">
+          <div class="gh-rail-h">Status</div>
+          ${statePillHtml("issue", issue)}
+        </div>
+        <div class="card gh-rail-card">
+          <div class="gh-rail-h">Assignees</div>
+          ${personListHtml(issue.assignees && issue.assignees.length ? issue.assignees : (issue.assignee ? [issue.assignee] : []))}
+        </div>
+      </aside>
+    </div>`;
+  }
+
+  /* ---- detail degrade states (loading / not_found / same errors as the list) */
+  function detailNotFoundHtml(kind) {
+    return `<div class="gh-empty card-empty">
+      <div class="t1">${kind === "pull" ? "Pull request" : "Issue"} not found</div>
+      <p>It may have been deleted, or the number doesn't exist in this repo.</p>
+    </div>`;
+  }
+  function detailHtml(state) {
+    state = state || {};
+    if (state.loading && !state.pull && !state.issue) return '<div class="none" style="padding:20px">Loading…</div>';
+    if (state.error) {
+      if (state.error.kind === "not_found") return detailNotFoundHtml(state.kind);
+      if (state.error.kind === "not_connected") return emptyRepoHtml();
+      if (state.error.kind === "rate_limited") return rateLimitHtml(state.error.detail);
+      return genericErrorHtml(state.error.status, state.error.detail);
+    }
+    return state.kind === "pull" ? prDetailHtml(state) : issueDetailHtml(state);
+  }
+
   return {
     checksChipHtml, mergeChipHtml, reviewersHtml, repoChipHtml, startCellHtml,
     agentRosterHtml, issueRowHtml, pullRowHtml, matchesFilter, matchesSearch,
     bodyHtml, filterChipsHtml, emptyRepoHtml, rateLimitHtml, genericErrorHtml,
+    columnHeaderHtml, labelChipHtml,
+    breadcrumbHtml, statePillHtml, branchChipsHtml, runRowHtml, checksSectionHtml,
+    fileRowHtml, filesSectionHtml, detailActionsHtml, personListHtml, checksSummaryHtml,
+    pullRailHtml, prDetailHtml, commentRowHtml, issueDetailHtml, detailNotFoundHtml, detailHtml,
   };
 })();

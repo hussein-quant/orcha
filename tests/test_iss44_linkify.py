@@ -22,15 +22,23 @@ def test_linkify_is_applied_to_authored_text_surfaces():
     assert "const linkify =" in app and "linkify," in app, "linkify not defined/exported"
     # the authored full-text surfaces render via mdText (feat/chat-markdown) — a superset
     # of linkify: same esc-first + http(s)-only autolink invariant, plus block markdown.
+    # feat/github-hub-detail-ui: tasks.html/requests.html now wrap mdText's output in a
+    # page-local mdGh() helper — the portal-wide PR/issue-link rewrite (modules/app-text.js
+    # rewriteGithubLinks) that turns a mentioned github.com/<connected-repo>/pull|issues/N
+    # URL into a clickable internal /github?pr=N|issue=N hop. mdGh calls TasO.mdText/
+    # ReqO.mdText internally, so it's still the SAME renderer at the same call sites — the
+    # sole difference from mdText() is the naming of the wrapper.
     reqs = page_source("requests.html")
-    assert reqs.count("O.mdText(") >= 3, "request payload/response/reason not md-rendered"
+    assert reqs.count("mdGh(") >= 3, "request payload/response/reason not md-rendered (via mdGh)"
+    assert "ReqO.rewriteGithubLinks" in reqs, "requests.html's mdGh applies the PR-link rewrite"
     tasks = page_source("tasks.html")
-    assert "O.mdText(m.body)" in tasks, "task thread message not md-rendered"
-    assert "O.mdText(isPlan" in tasks, "plan body / result not md-rendered (verification gate)"
+    assert "mdGh(m.body)" in tasks, "task thread message not md-rendered (via mdGh)"
+    assert "mdGh(isPlan" in tasks, "plan body / result not md-rendered (verification gate, via mdGh)"
     # BOTH task-result surfaces must render markdown: the verification-gate result AND the
     # normal task-detail Result block — and neither may regress back to bare esc().
-    assert "O.mdText(t.result)" in tasks, "normal task-detail Result not md-rendered"
+    assert "mdGh(resultText(t.result))" in tasks, "normal task-detail Result not md-rendered (via mdGh)"
     assert "O.esc(t.result)" not in tasks, "a task-result surface regressed to bare esc()"
+    assert "TasO.rewriteGithubLinks" in tasks, "tasks.html's mdGh applies the PR-link rewrite"
     conv = script_source("conversation.js")
     # conversation turns render via mdText (rich markdown), which still linkifies URLs —
     # so authored-link coverage is preserved (see test_rich_conversation_markdown for the link case).
@@ -39,9 +47,15 @@ def test_linkify_is_applied_to_authored_text_surfaces():
     # the dashboard plan-approval card renders the FULL plan body → mdText (the last
     # full-text authored surface; "URLs clickable everywhere").
     assert "O.mdText(planText(t))" in home, "home dashboard plan-text not md-rendered"
-    # ...but the activity-feed row text MUST stay esc(): the whole row is wrapped in an
-    # <a class="act"> link, so linkifying it would nest <a> inside <a> (invalid HTML).
-    assert "O.esc(e.text)" in home, "activity-feed text must stay esc() (it's inside a row anchor)"
+    # feat/github-hub-detail-ui: the live-activity row NOW linkifies + PR-link-rewrites its
+    # text too (portal-wide rewrite coverage) — this requires a REAL <a> inside .txt, which
+    # would have nested inside the row's own <a class="act"> (invalid HTML, and the browser's
+    # parser would break the outer link). So .act moved from a native <a href> to a clickable
+    # <div onclick> (mirrors this same file's .kcard idiom), which is what makes a real inner
+    # <a> safe. The old constraint this test used to pin ("activity text must stay esc() because
+    # the row IS an anchor") no longer holds, because the row is no longer an anchor.
+    assert 'class="act" onclick=' in home, "the activity row is now a clickable div, not a native <a> (enables safe nested links)"
+    assert "HomO.rewriteGithubLinks(HomO.linkify(e.text)" in home, "activity-feed text is linkified + PR-link-rewritten"
     css = style_source()
     assert ".lnk" in css, "no link styling"
 

@@ -1,4 +1,11 @@
 /* Requests page controller: detail rendering, request actions, selection, and refresh loop. */
+// PR-link rewrite (portal-wide, modules/app-text.js): a request's payload/
+// answer/rejection-reason commonly cites a github.com/<connected-repo>/pull|
+// issues/N URL — rewrite it to the internal /github?pr=N|issue=N detail
+// route, appending a small "open on GitHub ↗" secondary link. Runs AFTER
+// mdText, never in place of it.
+function mdGh(src) { return ReqO.rewriteGithubLinks(ReqO.mdText(src), (ReqD().container || {}).github_repo || null); }
+
 function renderDetail(force) {
   const r = reqs().find((x) => x.id === sel);
   if (!r) { ReqO.patch(Req$("detailMain"), '<div class="card pad"><div class="none">Request not found.</div></div>', force); return; }
@@ -28,9 +35,9 @@ function renderDetail(force) {
   html += chainView(r);
 
   html += `<div class="card pad" style="margin-bottom:18px">
-    <div class="field" style="margin-bottom:18px"><div class="lbl">${ReqO.icon("dot", "")}Payload</div><div class="payload md">${ReqO.mdText(r.payload)}</div></div>
-    ${r.response ? `<div class="field" style="margin-bottom:18px"><div class="lbl" style="color:var(--ok)">${ReqO.icon("check", "")}Answer · from ${ReqO.esc(partyLabel(r.to))}</div><div class="answer md">${ReqO.mdText(r.response)}</div></div>` : ""}
-    ${r.rejection_reason ? `<div class="field" style="margin-bottom:18px"><div class="lbl" style="color:var(--danger)">${ReqO.icon("x", "")}Rejected — reason</div><div class="answer rej md">${ReqO.mdText(r.rejection_reason)}</div></div>` : ""}
+    <div class="field" style="margin-bottom:18px"><div class="lbl">${ReqO.icon("dot", "")}Payload</div><div class="payload md">${mdGh(r.payload)}</div></div>
+    ${r.response ? `<div class="field" style="margin-bottom:18px"><div class="lbl" style="color:var(--ok)">${ReqO.icon("check", "")}Answer · from ${ReqO.esc(partyLabel(r.to))}</div><div class="answer md">${mdGh(r.response)}</div></div>` : ""}
+    ${r.rejection_reason ? `<div class="field" style="margin-bottom:18px"><div class="lbl" style="color:var(--danger)">${ReqO.icon("x", "")}Rejected — reason</div><div class="answer rej md">${mdGh(r.rejection_reason)}</div></div>` : ""}
     <div class="field"><div class="lbl">${ReqO.icon("shield", "")}Your move</div>${actionsFor(r)}</div>
   </div>`;
 
