@@ -1,5 +1,14 @@
-"""The GitHub hub: a container's connected repo's open issues + PRs, and one-click
-"Start" that turns an issue/PR into an Orcha task (Feature A).
+"""The GitHub hub: a container's connected repo's open issues + PRs (lists AND per-item
+detail), and one-click "Start" that turns an issue/PR into an Orcha task (Feature A).
+
+Endpoints (all GETs share the SAME grant model; the two writes are only /start):
+  GET  .../github/issues            — open issues (list)
+  GET  .../github/pulls             — open PRs (list)
+  GET  .../github/pulls/{number}    — one PR's full detail (PR detail page)
+  GET  .../github/issues/{number}   — one issue's full detail (issue detail page)
+  POST .../github/start             — issue/PR -> Orcha task
+The detail GETs are READ-ONLY: no approve/close/rerun write endpoints — deliberate; the
+portal's only GitHub action stays Start.
 
 Auth/token plumbing is SHARED with github_routes.py — the same GitHub App INSTALLATION
 token the host-side refresh timer maintains (never a personal token). For a container's
@@ -9,9 +18,10 @@ token map, falling back to the legacy single-token file, exactly as github_route
 Network calls go through small monkeypatchable leaf functions (`_gh_get`) — tests stub
 that leaf and NEVER hit live GitHub (mirroring github_routes._fetch_installation_repos).
 
-A tiny in-module TTL cache (60s per (cid, kind)) shields GitHub's rate limit from the
-portal's polling UI; POST /start invalidates the cache for its container so a freshly
-tracked item's state can refresh immediately.
+A tiny in-module TTL cache (60s) shields GitHub's rate limit from the portal's polling UI:
+lists keyed per (cid, 'issues'|'pulls'), detail keyed per (cid, 'pull'|'issue', number).
+POST /start invalidates every cache entry for its container so a freshly tracked item's
+state can refresh immediately.
 """
 
 import json
@@ -33,25 +43,38 @@ GITHUB_API = "https://api.github.com"
 GITHUB_TIMEOUT_SECONDS = 10
 BODY_EXCERPT_CHARS = 200
 CACHE_TTL_SECONDS = 60
+# Detail-endpoint fetch caps. The PR files API is paginated; we take the first page of
+# 100 and flag `files.truncated` when GitHub says there are more. Issue comments show the
+# most-recent 20 (fetched newest-first via GitHub's sort/direction, then re-ordered oldest
+# -first for display).
+PR_FILES_PER_PAGE = 100
+ISSUE_COMMENTS_LIMIT = 20
 
-# In-module TTL cache: {(cid, kind): (expires_at_monotonic, payload)}. Deliberately a
-# plain module dict — one portal process, tiny per-container footprint, invalidated on
-# POST /start. Tests exercise TTL behavior by monkeypatching time.monotonic / clearing.
+# In-module TTL cache. Deliberately a plain module dict — one portal process, tiny
+# per-container footprint, invalidated on POST /start. Tests exercise TTL behavior by
+# monkeypatching time.monotonic / clearing. Keys are a (cid, kind, *rest) tuple: the
+# list routes cache per (cid, 'issues'|'pulls'); the detail routes cache per
+# (cid, 'pull'|'issue', number) — cid is always key[0] so invalidation stays correct.
 _CACHE: dict = {}
 
 
-def _cache_get(cid: str, kind: str):
-    hit = _CACHE.get((cid, kind))
+def _cache_key(cid: str, kind: str, number: int = None) -> tuple:
+    return (cid, kind) if number is None else (cid, kind, number)
+
+
+def _cache_get(cid: str, kind: str, number: int = None):
+    hit = _CACHE.get(_cache_key(cid, kind, number))
     if hit and hit[0] > time.monotonic():
         return hit[1]
     return None
 
 
-def _cache_put(cid: str, kind: str, payload) -> None:
-    _CACHE[(cid, kind)] = (time.monotonic() + CACHE_TTL_SECONDS, payload)
+def _cache_put(cid: str, kind: str, payload, number: int = None) -> None:
+    _CACHE[_cache_key(cid, kind, number)] = (time.monotonic() + CACHE_TTL_SECONDS, payload)
 
 
 def _cache_invalidate(cid: str) -> None:
+    # Drops every entry for this container — both list and detail caches (key[0] is cid).
     for key in [k for k in _CACHE if k[0] == cid]:
         _CACHE.pop(key, None)
 
@@ -114,6 +137,19 @@ def _error_payload(exc: RuntimeError) -> dict:
     return {"available": False, "reason": "unreachable", "detail": "could not reach GitHub"}
 
 
+def _detail_error_payload(exc: RuntimeError) -> dict:
+    """Detail-route error mapping. Identical to `_error_payload` EXCEPT a 404 means the
+    specific issue/PR *number* does not exist (not that the whole repo is unreachable):
+    the detail pages want `reason:"not_found"` so they can render a distinct 'this item
+    is gone' state. All other codes (403 rate-limit, generic, unreachable) reuse the
+    shared mapping so the two surfaces stay consistent."""
+    msg = str(exc)
+    if msg == "github_status:404":
+        return {"available": False, "reason": "not_found",
+                "detail": "issue or pull request not found (404)"}
+    return _error_payload(exc)
+
+
 def _load_binding(cur, cid: str, request: Request):
     """Container exists + reader is authorized + the repo binding. Raises on a bad
     cid/unknown container/non-member; returns the bound `owner/name` or None."""
@@ -154,15 +190,24 @@ def _issue_entry(issue: dict) -> dict:
     }
 
 
-def _checks_rollup(repo: str, sha: str, token: str) -> dict:
+def _checks_rollup(repo: str, sha: str, token: str, include_runs: bool = False) -> dict:
     """Combine the legacy commit-status API and the newer check-runs API for a head SHA
     into one {passed, failing, pending, total} rollup — the UI's checks chip.
 
     Both surfaces coexist on real repos (status = older CI like Travis; check-runs =
     GitHub Actions / Apps), so we sum both. A network failure on either surface degrades
     gracefully to zeros rather than failing the whole PR list.
+
+    The list endpoint calls this with the default `include_runs=False` and reads only the
+    four counts. The PR-DETAIL endpoint passes `include_runs=True` to additionally get a
+    `runs:[{name,status,conclusion,html_url}]` list under the SAME classification math —
+    so the aggregate chip on the detail page can never disagree with the per-run rows.
+    The returned dict is freshly built on every call (no shared mutable default); callers
+    may freely mutate/extend it — e.g. `_pull_detail` drops `runs` in when it wants them
+    and the count-only callers simply ignore that absent key.
     """
     passed = failing = pending = 0
+    runs_out = []
     # Legacy combined commit status: contexts each 'success' | 'failure'|'error' | 'pending'.
     try:
         combined = _gh_get(f"/repos/{repo}/commits/{sha}/status", token)
@@ -174,6 +219,15 @@ def _checks_rollup(repo: str, sha: str, token: str) -> dict:
                 failing += 1
             else:
                 pending += 1
+            if include_runs:
+                # Normalize a legacy status context into the same run row shape as a
+                # check-run: its `state` is the conclusion, and it's always 'completed'.
+                runs_out.append({
+                    "name": st.get("context"),
+                    "status": "completed",
+                    "conclusion": state,
+                    "html_url": st.get("target_url"),
+                })
     except RuntimeError:
         pass
     # Check runs: status queued|in_progress|completed; conclusion success|failure|...
@@ -182,19 +236,29 @@ def _checks_rollup(repo: str, sha: str, token: str) -> dict:
         for run in runs.get("check_runs") or []:
             if run.get("status") != "completed":
                 pending += 1
-                continue
-            conclusion = run.get("conclusion")
-            if conclusion in ("success", "neutral", "skipped"):
-                passed += 1
-            elif conclusion in ("failure", "timed_out", "action_required", "cancelled",
-                                "stale", "startup_failure"):
-                failing += 1
             else:
-                pending += 1
+                conclusion = run.get("conclusion")
+                if conclusion in ("success", "neutral", "skipped"):
+                    passed += 1
+                elif conclusion in ("failure", "timed_out", "action_required", "cancelled",
+                                    "stale", "startup_failure"):
+                    failing += 1
+                else:
+                    pending += 1
+            if include_runs:
+                runs_out.append({
+                    "name": run.get("name"),
+                    "status": run.get("status"),
+                    "conclusion": run.get("conclusion"),
+                    "html_url": run.get("html_url"),
+                })
     except RuntimeError:
         pass
-    return {"passed": passed, "failing": failing, "pending": pending,
-            "total": passed + failing + pending}
+    rollup = {"passed": passed, "failing": failing, "pending": pending,
+              "total": passed + failing + pending}
+    if include_runs:
+        rollup["runs"] = runs_out
+    return rollup
 
 
 def _pull_entry(repo: str, pull: dict, token: str) -> dict:
@@ -214,6 +278,124 @@ def _pull_entry(repo: str, pull: dict, token: str) -> dict:
         "requested_reviewers": reviewers,
         "checks": checks,
         "mergeable_state": pull.get("mergeable_state"),
+    }
+
+
+def _logins(items) -> list:
+    """The `login` of each user object in a list, skipping any without one."""
+    return [u.get("login") for u in (items or []) if u.get("login")]
+
+
+def _pr_files(repo: str, number: int, token: str, changed_files) -> dict:
+    """The PR's changed files (first page of 100), as {count, items[, truncated]}.
+
+    `count` is GitHub's OWN `changed_files` total from the PR object (the honest total,
+    not the length of the page we fetched); `items` carries the per-file rows WITHOUT
+    patches (list only — the detail page shows names + add/del, not diffs). `truncated`
+    is set true only when that honest total exceeds what we returned. A network failure
+    fetching the files page degrades to an empty list rather than failing the whole PR.
+    """
+    try:
+        raw = _gh_get(
+            f"/repos/{repo}/pulls/{number}/files?per_page={PR_FILES_PER_PAGE}", token)
+    except RuntimeError:
+        raw = []
+    items = [{
+        "filename": f.get("filename"),
+        "additions": f.get("additions"),
+        "deletions": f.get("deletions"),
+        "status": f.get("status"),
+    } for f in raw]
+    # Prefer GitHub's declared total; fall back to what we actually fetched if it's absent.
+    count = changed_files if isinstance(changed_files, int) else len(items)
+    out = {"count": count, "items": items}
+    if count > len(items):
+        out["truncated"] = True
+    return out
+
+
+def _pull_detail(repo: str, pull: dict, token: str) -> dict:
+    """Assemble the PR-detail payload from the fetched PR object + its files + checks.
+
+    body_markdown is the RAW markdown straight from GitHub (`body`) — the frontend renders
+    it with the portal's own markdown renderer; we deliberately do NOT html-render server
+    -side. Checks reuse the SHARED `_checks_rollup` (with include_runs=True) so the chip
+    math is identical to the list endpoint, plus a per-run breakdown for the detail page.
+    """
+    head = pull.get("head") or {}
+    base = pull.get("base") or {}
+    sha = head.get("sha")
+    checks = _checks_rollup(repo, sha, token, include_runs=True) if sha else {
+        "passed": 0, "failing": 0, "pending": 0, "total": 0, "runs": []}
+    return {
+        "number": pull.get("number"),
+        "title": pull.get("title"),
+        "state": pull.get("state"),
+        "draft": bool(pull.get("draft")),
+        "body_markdown": pull.get("body") or "",
+        "author_login": (pull.get("user") or {}).get("login"),
+        "base": base.get("ref"),
+        "head": head.get("ref"),
+        "updated_at": pull.get("updated_at"),
+        "created_at": pull.get("created_at"),
+        "html_url": pull.get("html_url"),
+        "mergeable_state": pull.get("mergeable_state"),
+        "assignees": _logins(pull.get("assignees")),
+        "requested_reviewers": _logins(pull.get("requested_reviewers")),
+        "checks": checks,
+        "files": _pr_files(repo, pull.get("number"), token, pull.get("changed_files")),
+        "comments_count": pull.get("comments"),
+        "review_comments_count": pull.get("review_comments"),
+    }
+
+
+def _issue_comment(comment: dict) -> dict:
+    return {
+        "author_login": (comment.get("user") or {}).get("login"),
+        "body_markdown": comment.get("body") or "",
+        "created_at": comment.get("created_at"),
+    }
+
+
+def _issue_comments(repo: str, number: int, token: str) -> list:
+    """The issue's most-recent ISSUE_COMMENTS_LIMIT comments, oldest-first for display.
+
+    We ask GitHub for the newest ones (sort=created&direction=desc, capped at the limit)
+    then reverse to oldest-first so the detail thread reads top-to-bottom. A fetch failure
+    degrades to an empty list rather than failing the whole issue."""
+    try:
+        raw = _gh_get(
+            f"/repos/{repo}/issues/{number}/comments"
+            f"?per_page={ISSUE_COMMENTS_LIMIT}&sort=created&direction=desc",
+            token)
+    except RuntimeError:
+        return []
+    newest_first = [_issue_comment(c) for c in raw[:ISSUE_COMMENTS_LIMIT]]
+    newest_first.reverse()  # -> oldest-first
+    return newest_first
+
+
+def _issue_detail(repo: str, issue: dict, token: str) -> dict:
+    """Assemble the issue-detail payload from the fetched issue object + its comments.
+
+    body_markdown is the RAW markdown (`body`); the frontend renders it. `assignee` is the
+    single primary assignee's login (GitHub's legacy field); `assignees` is the full list.
+    """
+    assignee = issue.get("assignee") or {}
+    return {
+        "number": issue.get("number"),
+        "title": issue.get("title"),
+        "state": issue.get("state"),
+        "body_markdown": issue.get("body") or "",
+        "author_login": (issue.get("user") or {}).get("login"),
+        "labels": _labels(issue),
+        "assignee": assignee.get("login"),
+        "assignees": _logins(issue.get("assignees")),
+        "updated_at": issue.get("updated_at"),
+        "created_at": issue.get("created_at"),
+        "html_url": issue.get("html_url"),
+        "comments_count": issue.get("comments"),
+        "comments": _issue_comments(repo, issue.get("number"), token),
     }
 
 
@@ -272,6 +454,67 @@ def list_github_pulls(cid: str, request: Request):
     pulls = [_pull_entry(repo, p, token) for p in raw]
     payload = {"available": True, "repo": repo, "pulls": pulls}
     _cache_put(cid, "pulls", payload)
+    return payload
+
+
+@app.get("/api/containers/{cid}/github/pulls/{number}")
+def get_github_pull(cid: str, number: int, request: Request):
+    """One PR's full detail — the PR detail page.
+
+    Returns {available, repo, pull:{number,title,state,draft,body_markdown,author_login,
+    base,head,updated_at,created_at,html_url,mergeable_state,assignees,requested_reviewers,
+    checks:{passed,failing,pending,total,runs:[{name,status,conclusion,html_url}]},
+    files:{count,items:[{filename,additions,deletions,status}][,truncated]},comments_count,
+    review_comments_count}}. body_markdown is RAW markdown (rendered client-side). Checks
+    reuse the SHARED list-endpoint rollup helper (with per-run breakdown). A GitHub 404 for
+    the number → {available:false, reason:"not_found"}; not-connected / rate-limited resolve
+    to the same clean {available:false,...} shape (never a 5xx). Cached 60s per
+    (cid,'pull',number)."""
+    with db_cursor() as (_, cur):
+        repo = _load_binding(cur, cid, request)
+    if not repo:
+        return _not_connected()
+    cached = _cache_get(cid, "pull", number)
+    if cached is not None:
+        return cached
+    token = _resolve_repo_token(repo)
+    if not token:
+        return _not_connected()
+    try:
+        raw = _gh_get(f"/repos/{repo}/pulls/{number}", token)
+    except RuntimeError as exc:
+        return {**_detail_error_payload(exc), "repo": repo}
+    payload = {"available": True, "repo": repo, "pull": _pull_detail(repo, raw, token)}
+    _cache_put(cid, "pull", payload, number)
+    return payload
+
+
+@app.get("/api/containers/{cid}/github/issues/{number}")
+def get_github_issue(cid: str, number: int, request: Request):
+    """One issue's full detail — the issue detail page.
+
+    Returns {available, repo, issue:{number,title,state,body_markdown,author_login,labels,
+    assignee,assignees,updated_at,created_at,html_url,comments_count,
+    comments:[{author_login,body_markdown,created_at}]}}. `comments` is the most-recent 20,
+    oldest-first. body_markdown is RAW markdown (rendered client-side). A GitHub 404 →
+    {available:false, reason:"not_found"}; not-connected / rate-limited resolve to the same
+    clean shape. Cached 60s per (cid,'issue',number)."""
+    with db_cursor() as (_, cur):
+        repo = _load_binding(cur, cid, request)
+    if not repo:
+        return _not_connected()
+    cached = _cache_get(cid, "issue", number)
+    if cached is not None:
+        return cached
+    token = _resolve_repo_token(repo)
+    if not token:
+        return _not_connected()
+    try:
+        raw = _gh_get(f"/repos/{repo}/issues/{number}", token)
+    except RuntimeError as exc:
+        return {**_detail_error_payload(exc), "repo": repo}
+    payload = {"available": True, "repo": repo, "issue": _issue_detail(repo, raw, token)}
+    _cache_put(cid, "issue", payload, number)
     return payload
 
 
