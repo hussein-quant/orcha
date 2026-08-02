@@ -132,10 +132,26 @@ Req$("rlist").addEventListener("click", (ev) => {
 ReqO.wireSortControl(Req$("rlist"), () => renderList());
 
 /* ---------- boot ---------- */
+// Perceived-lag fix: the portal is an MPA — this page boots empty until the
+// first snapshot tick lands (render() returns early until then). Show a
+// skeleton in the list + detail regions right away (OrchaSkeleton.show is
+// delayed 120ms, so a fast local snapshot never flashes one), then swap() it
+// for the real render on the FIRST successful tick only.
+if (window.OrchaSkeleton) {
+  OrchaSkeleton.show(Req$("rlist"), "list-rows");
+  OrchaSkeleton.show(Req$("detailMain"), "detail-pane");
+}
+let booted = false;
 function render() {
   if (!ReqD() || !ReqD().container) return;
   if (!sel || !reqs().some((r) => r.id === sel)) sel = firstSel();
   ReqO.mountShell("requests", { title: "Requests", ctx: reqs().length + " requests · " + ReqD().container.name });
-  renderList(); renderDetail();
+  if (!booted && window.OrchaSkeleton) {
+    booted = true;
+    OrchaSkeleton.swap(Req$("rlist"), renderList);
+    OrchaSkeleton.swap(Req$("detailMain"), () => renderDetail());
+  } else {
+    renderList(); renderDetail();
+  }
 }
 window.OrchaData.start(render, 3000);

@@ -57,11 +57,30 @@ document.addEventListener("click", (ev) => {
 });
 
 /* ---------- boot ---------- */
+// Perceived-lag fix: the portal is an MPA, so every sidebar click is a full
+// navigation — this page boots empty until the first snapshot tick lands
+// (render() below returns early until then). Show a skeleton in the primary
+// content regions right away (delayed 120ms — OrchaSkeleton.show — so a fast
+// local snapshot never flashes one), then swap() it for the real render on
+// the FIRST successful tick only; later 3s ticks re-render normally (patch()
+// already no-ops unchanged content, and re-fading every tick would be the
+// opposite of "gentle").
+if (window.OrchaSkeleton) {
+  OrchaSkeleton.show(Tas$("tlist"), "list-rows");
+  OrchaSkeleton.show(Tas$("detailMain"), "detail-pane");
+}
+let booted = false;
 function render() {
   if (!TasD() || !TasD().container) return;
   if (!sel || !(TasD().tasks || []).some((t) => t.id === sel)) sel = firstSel();
   TasO.mountShell("tasks", { title: "Tasks", ctx: (TasD().tasks || []).length + " tasks · " + TasD().container.name });
-  renderList(); renderDetail();
+  if (!booted && window.OrchaSkeleton) {
+    booted = true;
+    OrchaSkeleton.swap(Tas$("tlist"), renderList);
+    OrchaSkeleton.swap(Tas$("detailMain"), renderDetail);
+  } else {
+    renderList(); renderDetail();
+  }
   if (sel) renderRuns(false);
 }
 window.OrchaData.start(render, 3000);

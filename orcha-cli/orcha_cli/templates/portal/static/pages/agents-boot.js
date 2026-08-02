@@ -45,12 +45,28 @@ Age$("detailMain").addEventListener("click", (ev) => {
 });
 
 /* ---------- boot ---------- */
+// Perceived-lag fix: the portal is an MPA — this page boots empty until the
+// first snapshot tick lands (render() returns early until then). Show a
+// skeleton in the roster + detail regions right away (OrchaSkeleton.show is
+// delayed 120ms, so a fast local snapshot never flashes one), then swap() it
+// for the real render on the FIRST successful tick only.
+if (window.OrchaSkeleton) {
+  OrchaSkeleton.show(Age$("roster"), "roster");
+  OrchaSkeleton.show(Age$("detailMain"), "detail-pane");
+}
+let booted = false;
 function render() {
   if (!AgeD() || !AgeD().container) return;
   if (!sel || !AgeO.agentByAlias(sel)) sel = firstAlias();
   AgeO.mountShell("agents", { title: "Agents", ctx: AgeO.agents().length + " agents · " + AgeD().container.name });
-  renderRoster();
-  renderDetailMain();
+  if (!booted && window.OrchaSkeleton) {
+    booted = true;
+    OrchaSkeleton.swap(Age$("roster"), renderRoster);
+    OrchaSkeleton.swap(Age$("detailMain"), renderDetailMain);
+  } else {
+    renderRoster();
+    renderDetailMain();
+  }
   const a = AgeO.agentByAlias(sel);
   if (a) { fetchDigest(a); renderRuns(false); mountConv(a); }
 }
