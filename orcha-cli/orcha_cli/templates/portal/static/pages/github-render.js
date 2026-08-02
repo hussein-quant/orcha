@@ -149,14 +149,18 @@ function loadDetail(force) {
     .then((r) => r.json().then((body) => ({ ok: r.ok, status: r.status, body })).catch(() => ({ ok: r.ok, status: r.status, body: null })))
     .then(({ ok, status, body }) => {
       if (myToken !== detailToken) return;   // a newer route change superseded this fetch
-      if (!ok || !body || body.available === false) { detailError[key] = classifyDetailError(status, body); detailPayload[key] = null; return; }
+      if (!ok || !body || body.available === false) {
+        detailError[key] = Object.assign({ __number: number }, classifyDetailError(status, body));
+        detailPayload[key] = null;
+        return;
+      }
       const item = key === "pull" ? body.pull : body.issue;
       detailPayload[key] = Object.assign({ __number: number }, body, { [key]: item });
       detailError[key] = null;
     })
     .catch((e) => {
       if (myToken !== detailToken) return;
-      detailError[key] = { kind: "error", status: 0, detail: e.message };
+      detailError[key] = { __number: number, kind: "error", status: 0, detail: e.message };
     })
     .then(() => { if (myToken === detailToken) { detailLoading[key] = false; renderDetail(true); } });
 }
@@ -171,8 +175,13 @@ function renderDetail(force) {
   const number = route.number;
   const p = detailPayload[key] && detailPayload[key].__number === number ? detailPayload[key] : null;
   const item = p ? p[key] : null;
+  // detailError is number-scoped the same way detailPayload is (__number) — a
+  // navigate() to a NEW item must never show the PREVIOUS item's stale error
+  // (e.g. a not_found on #7 bleeding into a fresh, valid #5) while its own
+  // fetch is still in flight or hasn't started yet.
+  const err = detailError[key] && detailError[key].__number === number ? detailError[key] : null;
   const state = {
-    loading: detailLoading[key], error: p ? null : detailError[key],
+    loading: detailLoading[key], error: p ? null : err,
     kind: route.kind, repo: p ? p.repo : null,
     [key]: item,
     taskState: startedOf(route.kind, number),
