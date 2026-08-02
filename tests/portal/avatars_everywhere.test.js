@@ -150,7 +150,8 @@ function homeSandbox(snapshot) {
   // app-text.js/app-ui.js above) — wire the REAL ones onto Orcha from inside the vm context,
   // where they're actually in scope (the outer Node process never sees them).
   vm.runInContext("window.Orcha.esc = esc; window.Orcha.face = face; window.Orcha.avatar = avatar; "
-    + "window.Orcha.ghAvatar = ghAvatar; window.Orcha.mdText = (s) => esc(s || '');", sandbox);
+    + "window.Orcha.ghAvatar = ghAvatar; window.Orcha.mdText = (s) => esc(s || ''); "
+    + "window.Orcha.linkify = linkify; window.Orcha.rewriteGithubLinks = rewriteGithubLinks;", sandbox);
   // production load order: home-state.js (HomO/Hom$/HomD) before home-render.js (renderAgents/
   // renderActivity); the trailing homeBoot IIFE needs a real window.OrchaData — strip it, this
   // harness calls renderAgents()/renderActivity() directly.
@@ -300,7 +301,8 @@ function requestsSandbox(snapshot) {
   // esc/face/avatar/ghAvatar/mdText are module-scope in the sandbox (app-text.js/app-ui.js) —
   // wire the REAL ones onto Orcha from inside the vm context, where they're actually in scope.
   vm.runInContext("window.Orcha.esc = esc; window.Orcha.face = face; window.Orcha.avatar = avatar; "
-    + "window.Orcha.ghAvatar = ghAvatar; window.Orcha.mdText = (s) => esc(s || '');", sandbox);
+    + "window.Orcha.ghAvatar = ghAvatar; window.Orcha.mdText = (s) => esc(s || ''); "
+    + "window.Orcha.linkify = linkify; window.Orcha.rewriteGithubLinks = rewriteGithubLinks;", sandbox);
   vm.runInContext(read("pages", "requests-state.js"), sandbox, { filename: "requests-state.js" });
   vm.runInContext(read("pages", "requests-actions.js").replace(/^window\.OrchaData\.start.*$/m, ""), sandbox, { filename: "requests-actions.js" });
   return { sandbox, reg };

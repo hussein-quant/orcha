@@ -71,6 +71,9 @@ if (typeof D === "undefined") {
     // standalone fallback: report wakes as served so the multi-project notice never
     // renders for embedders without the responsibility modules (no false alarms).
     wakesServed: () => true,
+    // standalone fallback: no rewriting without the real mdText/linkify pipeline —
+    // pass the HTML through unchanged.
+    rewriteGithubLinks: (html) => (html == null ? "" : String(html)),
   };
   function F_inputActiveWithin(el) {
     if (!el || !el.querySelectorAll) return false;
@@ -262,7 +265,7 @@ if (typeof D === "undefined") {
   }
 } else {
   window.Orcha = {
-    D, applySnapshot, esc, linkify, mdText, trunc, shortId, relTime, clockTime, recencyTs, recencyBand, avatar, icon, pill, statusClass, glyph,
+    D, applySnapshot, esc, linkify, mdText, rewriteGithubLinks, trunc, shortId, relTime, clockTime, recencyTs, recencyBand, avatar, icon, pill, statusClass, glyph,
     sortState, sortControlHtml, sortComparator, wireSortControl,
     kindBadge, agentLink, taskLink, requestLink, taskByRef, taskRefs, attnItems, mountShell, modal, closeModal, openPairingModal,
     toast, copyText, renderDiff, runCard, stopRun, activateRuns, startRunStream, paintFinished, classifyLine,

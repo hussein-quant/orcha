@@ -172,3 +172,47 @@ const mdText = (src) => {
   for (let g = 0; g < 5 && s.indexOf(Z) >= 0; g++) s = s.replace(new RegExp(Z + "(\\d+)" + Z, "g"), (m, i) => stash[+i]);
   return s;
 };
+
+// Portal-wide PR/issue-link rewrite: run AFTER linkify()/mdText() on their
+// trusted output — finds anchors this module's own renderer just emitted
+// (`<a class="lnk" href="...">`) that point at the CONNECTED repo's
+// github.com/<owner>/<repo>/pull/N or /issues/N, and rewrites them to the
+// internal detail route (/github?pr=N or ?issue=N[&cid=...]), appending a
+// small secondary "open on GitHub ↗" link that preserves the original URL —
+// so an agent's "see PR #42" mention becomes a one-click hop into the portal's
+// own PR detail page instead of always bouncing out to github.com, while the
+// real GitHub link stays one click away. Only touches links to the CURRENT
+// project's OWN repo (`repo`, "owner/name" — from the container snapshot,
+// already in every page's state); a link to a DIFFERENT repo (a founder
+// pasting a link to some other project's PR) is left completely alone, since
+// rewriting it would silently point at the wrong container's task list.
+// SAFETY: operates only on `href="..."` attribute values already produced by
+// THIS module (mdText/linkify), never on raw untrusted text — no new HTML
+// injection surface. Anchor-aware via the same tag-splitting idiom taskRefs
+// uses, so it can't mis-rewrite something that merely LOOKS like a GitHub PR
+// URL inside a code span (already stashed/protected upstream) or plain text.
+function ghPrLinkHref(repo) {
+  if (!repo) return null;
+  const esc_ = repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("^https?://github\\.com/" + esc_ + "/(pull|issues)/(\\d+)(?:[/?#][^\"\\s]*)?$", "i");
+}
+function rewriteGithubLinks(html, repo) {
+  if (html == null) return "";
+  const re = ghPrLinkHref(repo);
+  if (!re) return String(html);
+  const cid = (typeof window !== "undefined" && window.OrchaData && window.OrchaData.currentCid && window.OrchaData.currentCid()) || null;
+  return String(html).replace(/<a\s+class="lnk"\s+href="([^"]+)"([^>]*)>([\s\S]*?)<\/a>/g, (whole, href, attrs, text) => {
+    const m = href.match(re);
+    if (!m) return whole;
+    const kind = m[1] === "pull" ? "pr" : "issue";
+    const number = m[2];
+    let internal = "/github?" + kind + "=" + encodeURIComponent(number);
+    if (cid) internal += "&cid=" + encodeURIComponent(cid);
+    // onclick stopPropagation: some render surfaces (e.g. the home dashboard's
+    // live-activity row) wrap the WHOLE line in a click-to-navigate container:
+    // without this, a click on either link here would also fire the parent's
+    // handler and race/override this link's own navigation.
+    return `<a class="lnk gh-pr-link" href="${internal}" onclick="event.stopPropagation()">${text}</a>` +
+      `<a class="gh-pr-ext" href="${href}" target="_blank" rel="noopener noreferrer" title="Open on GitHub" onclick="event.stopPropagation()">↗</a>`;
+  });
+}

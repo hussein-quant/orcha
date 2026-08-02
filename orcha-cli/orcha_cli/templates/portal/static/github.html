@@ -21,6 +21,7 @@
 <link rel="stylesheet" href="/assets/styles/responsive.css">
 <link rel="stylesheet" href="/assets/styles/skin-minimal.css">
 <link rel="stylesheet" href="/assets/styles/skeleton.css">
+<link rel="stylesheet" href="/assets/styles/markdown.css">
 <link rel="stylesheet" href="/assets/pages/github.css">
 <!-- seamless nav (Chromium 121+): prerender same-origin link targets when the user
      hovers / presses a link ("moderate" eagerness), so the next page is already
@@ -55,7 +56,7 @@
     <div class="content">
       <div class="gh-wrap">
 
-        <div class="gh-head">
+        <div class="gh-head" id="ghHead">
           <nav class="aut" id="ghTabs" role="tablist" aria-label="GitHub hub sections">
             <span class="seg on" role="tab" tabindex="0" aria-selected="true" data-tab="issues">Issues</span>
             <span class="seg" role="tab" tabindex="0" aria-selected="false" data-tab="pulls">Pull requests</span>
@@ -67,9 +68,12 @@
         <div class="filters" id="ghFilters"></div>
 
         <!-- Everything below the header is payload-driven: github-render.js patches
-             OrchaGithubHub's row/empty/error markup into this single mount, mirroring
-             requests.html's single #detailMain-style pattern but as a flat list (no
-             split detail pane — rows carry their own actions per the spec screenshot). -->
+             OrchaGithubHub's row/empty/error markup (list) OR detailHtml's breadcrumb +
+             two-column detail markup (?pr=N / ?issue=N) into this SAME mount — one MPA
+             page hosts both the flat issues/pulls list and every item's client-routed
+             detail view (github-boot.js's navigate()/popstate), never a full navigation
+             between them. #ghHead (tabs/search) hides itself while a detail route is
+             active (render()'s ghHead.hidden toggle). -->
         <div class="card ghlist-card" id="ghlist"></div>
 
       </div>

@@ -70,7 +70,7 @@ async def test_issues_shape_filters_prs(client, container, token_env, monkeypatc
         assert "/repos/acme/site/issues" in path
         return [
             {"number": 7, "title": "Bug: crash on boot",
-             "labels": [{"name": "bug"}, {"name": "p1"}],
+             "labels": [{"name": "bug", "color": "d73a4a"}, {"name": "p1", "color": "e99695"}],
              "assignee": {"login": "octocat"},
              "updated_at": "2026-07-01T00:00:00Z",
              "html_url": "https://github.com/acme/site/issues/7",
@@ -88,11 +88,28 @@ async def test_issues_shape_filters_prs(client, container, token_env, monkeypatc
     assert len(body["issues"]) == 1
     issue = body["issues"][0]
     assert issue == {
-        "number": 7, "title": "Bug: crash on boot", "labels": ["bug", "p1"],
+        "number": 7, "title": "Bug: crash on boot",
+        "labels": [{"name": "bug", "color": "d73a4a"}, {"name": "p1", "color": "e99695"}],
         "assignee": "octocat", "updated_at": "2026-07-01T00:00:00Z",
         "html_url": "https://github.com/acme/site/issues/7",
         "body_excerpt": "x" * 200,   # first 200 chars only
     }
+
+
+async def test_issues_label_missing_color_omits_field(client, container, token_env, monkeypatch):
+    """A label GitHub sends with no color at all still serializes — `color` is simply
+    None, and the frontend falls back to its deterministic palette for that one tag."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        return [{"number": 9, "title": "no-color label", "labels": [{"name": "triage"}],
+                  "assignee": None, "updated_at": "2026-07-01T00:00:00Z",
+                  "html_url": "https://github.com/acme/site/issues/9", "body": ""}]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/issues")
+    assert r.json()["issues"][0]["labels"] == [{"name": "triage", "color": None}]
 
 
 # ------------------------- pulls + checks rollup math -------------------------
@@ -503,7 +520,7 @@ async def test_issue_detail_shape_and_comments_oldest_first(
                 "number": 7, "title": "Bug: crash", "state": "open",
                 "body": "steps to repro",
                 "user": {"login": "reporter"},
-                "labels": [{"name": "bug"}, {"name": "p1"}],
+                "labels": [{"name": "bug", "color": "d73a4a"}, {"name": "p1", "color": "e99695"}],
                 "assignee": {"login": "octocat"},
                 "assignees": [{"login": "octocat"}, {"login": "hubot"}],
                 "updated_at": "2026-07-03T00:00:00Z",
@@ -530,7 +547,7 @@ async def test_issue_detail_shape_and_comments_oldest_first(
     assert issue["state"] == "open"
     assert issue["body_markdown"] == "steps to repro"   # RAW markdown
     assert issue["author_login"] == "reporter"
-    assert issue["labels"] == ["bug", "p1"]
+    assert issue["labels"] == [{"name": "bug", "color": "d73a4a"}, {"name": "p1", "color": "e99695"}]
     assert issue["assignee"] == "octocat"
     assert issue["assignees"] == ["octocat", "hubot"]
     assert issue["created_at"] == "2026-07-01T00:00:00Z"

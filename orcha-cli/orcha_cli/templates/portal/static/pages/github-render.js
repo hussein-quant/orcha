@@ -22,6 +22,25 @@ let payload = { issues: null, pulls: null };   // per-tab last-loaded payload
 let loading = { issues: false, pulls: false };
 let loadError = { issues: null, pulls: null };
 let booted = { issues: false, pulls: false };
+
+/* ---- detail route state (?pr=N / ?issue=N) --------------------------------
+   One payload/loading/error slot at a time — a route change (row click, back/
+   forward, or a fresh deep link) resets these before fetching, so a slow
+   in-flight fetch for the PREVIOUS number can never land after navigation and
+   render stale detail under a new number (guarded by `detailToken`, bumped on
+   every route change; a settling fetch checks its own token before writing).
+   `detailSubTab` is the PR-only Conversation/Checks/Files toggle — reset to
+   "conversation" on every route change, never persisted across items. */
+let detailPayload = { pull: null, issue: null };
+let detailLoading = { pull: false, issue: false };
+let detailError = { pull: null, issue: null };
+let detailToken = 0;
+let detailSubTab = "conversation";
+// route: {kind: null|"pull"|"issue", number: null|int} — derived from the URL
+// (?pr=N / ?issue=N) at boot and on every popstate; owned/updated by
+// github-boot.js's navigate()/readRouteFromUrl(), read here by loadDetail/
+// renderDetail. null kind = the list view (no detail route active).
+let route = { kind: null, number: null };
 // Started-task memory for this page view: number -> {task_id, existing}. Not
 // persisted — a reload re-derives "already tracked" only insofar as the
 // backend's own idempotency (same {existing:true} reply) resends it on the
@@ -50,6 +69,17 @@ function classifyError(status, body) {
   if (status === 403 || status === 429) return { kind: "rate_limited", status, detail: (body && body.detail) || null };
   return { kind: "error", status, detail: (body && (body.detail || body.error)) || null };
 }
+// resolved light/dark, mirroring app-state.js's own resolvedTheme() — github-
+// state.js stays DOM-free (its own header contract), so the render layer
+// resolves the visual theme here and threads it into the render state for
+// labelChipHtml's light-theme text-color adjustment.
+function ghResolvedTheme() {
+  try {
+    const t = localStorage.getItem("orcha:theme") || "auto";
+    if (t === "dark" || t === "light") return t;
+    return (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) ? "light" : "dark";
+  } catch (e) { return "dark"; }
+}
 
 // #ghlist patch for the ACTIVE tab only — pure DOM patch, no shell/chrome, no
 // skeleton awareness (the skeleton swap wraps THIS function; see render() in
@@ -65,6 +95,7 @@ function renderList(force) {
     agents: (GhD() && GhD().agents) || [],
     myLogin: myLogin(),
     startedOf,
+    theme: ghResolvedTheme(),
   };
   const host = Gh$("ghlist");
   if (!host) return;
@@ -85,6 +116,72 @@ function load(which, force) {
     })
     .catch((e) => { loadError[key] = { kind: "error", status: 0, detail: e.message }; })
     .then(() => { loading[key] = false; render(true); });
+}
+
+/* ---- detail route (?pr=N / ?issue=N) ---------------------------------------
+   classifyDetailError distinguishes a 404 (a specific issue/PR NUMBER
+   missing, per _detail_error_payload's `reason:"not_found"`) from the list
+   endpoints' 404-means-not-connected reading — the backend contract already
+   encodes this in the `reason` field, so the classifier trusts that over the
+   raw HTTP status. */
+function classifyDetailError(status, body) {
+  const reason = body && body.reason;
+  if (reason === "not_found") return { kind: "not_found", status, detail: (body && body.detail) || null };
+  if (reason === "repo_not_connected") return { kind: "not_connected", status, detail: (body && body.detail) || null };
+  if (reason === "rate_limited") return { kind: "rate_limited", status, detail: (body && body.detail) || null };
+  if (status === 404) return { kind: "not_found", status, detail: (body && body.detail) || null };
+  if (status === 403 || status === 429) return { kind: "rate_limited", status, detail: (body && body.detail) || null };
+  return { kind: "error", status, detail: (body && (body.detail || body.error)) || null };
+}
+
+function detailKey() { return route.kind === "pull" ? "pull" : "issue"; }
+
+function loadDetail(force) {
+  const id = ghCid();
+  const key = detailKey();
+  const number = route.number;
+  if (!id || !number) return;
+  if (!force && detailPayload[key] && detailPayload[key].__number === number) return;   // already have it
+  const myToken = ++detailToken;
+  detailLoading[key] = true;
+  const path = key === "pull" ? "pulls" : "issues";
+  fetch("/api/containers/" + encodeURIComponent(id) + "/github/" + path + "/" + encodeURIComponent(number))
+    .then((r) => r.json().then((body) => ({ ok: r.ok, status: r.status, body })).catch(() => ({ ok: r.ok, status: r.status, body: null })))
+    .then(({ ok, status, body }) => {
+      if (myToken !== detailToken) return;   // a newer route change superseded this fetch
+      if (!ok || !body || body.available === false) { detailError[key] = classifyDetailError(status, body); detailPayload[key] = null; return; }
+      const item = key === "pull" ? body.pull : body.issue;
+      detailPayload[key] = Object.assign({ __number: number }, body, { [key]: item });
+      detailError[key] = null;
+    })
+    .catch((e) => {
+      if (myToken !== detailToken) return;
+      detailError[key] = { kind: "error", status: 0, detail: e.message };
+    })
+    .then(() => { if (myToken === detailToken) { detailLoading[key] = false; renderDetail(true); } });
+}
+
+// #ghlist patch for the ACTIVE detail route — mirrors renderList's role but
+// for ?pr=/?issue=. taskState reads the SAME started-task cache the list Start
+// button writes to, so a Start click from the list still shows "already
+// tracked" if the founder then opens that item's detail page in the same
+// session (and vice versa — Start from detail feeds the list's cache too).
+function renderDetail(force) {
+  const key = detailKey();
+  const number = route.number;
+  const p = detailPayload[key] && detailPayload[key].__number === number ? detailPayload[key] : null;
+  const item = p ? p[key] : null;
+  const state = {
+    loading: detailLoading[key], error: p ? null : detailError[key],
+    kind: route.kind, repo: p ? p.repo : null,
+    [key]: item,
+    taskState: startedOf(route.kind, number),
+    subTab: detailSubTab,
+    theme: ghResolvedTheme(),
+  };
+  const host = Gh$("ghlist");
+  if (!host) return;
+  GhO.patch(host, GhS.detailHtml(state), force);
 }
 
 /* ---- Start flow -----------------------------------------------------------

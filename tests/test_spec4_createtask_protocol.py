@@ -74,8 +74,11 @@ def test_protocol_panel_rows_and_markdown_notes():
                        ("Autonomy", "autonomy"), ("Notes", "notes")]:
         assert f'"{key}"' in surf, f"row {key} missing from protocol panel"
         assert label in surf, f"row label '{label}' missing"
-    # notes rendered as markdown/links via O.mdText; the others are escaped text
-    assert "O.mdText(p.notes" in surf, "notes not rendered via O.mdText"
+    # notes rendered as markdown/links via O.mdText; the others are escaped text.
+    # feat/github-hub-detail-ui: wrapped in the page-local mdGh() helper (still calls
+    # TasO.mdText internally — see its definition at the top of tasks-detail.js), which
+    # additionally applies the portal-wide PR/issue-link rewrite.
+    assert "mdGh(p.notes" in surf, "notes not rendered via mdGh (which wraps O.mdText)"
     # autonomy is FREE TEXT (SPEC-1 enum deferred) — no enum/select, just esc'd value + chip
     assert "p.autonomy" in surf and "L1" not in surf, "autonomy should be free-text, not enum-bound"
     # header chips visible even collapsed (handoff + autonomy)

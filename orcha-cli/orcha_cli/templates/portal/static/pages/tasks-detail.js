@@ -19,6 +19,15 @@ function resultText(r) {
   return String(r);
 }
 
+// PR-link rewrite (portal-wide, modules/app-text.js): agent-authored task text
+// (results, plan bodies, thread messages, protocol notes) commonly cites a
+// github.com/<connected-repo>/pull|issues/N URL — rewrite it to the internal
+// /github?pr=N|issue=N detail route, appending a small "open on GitHub ↗"
+// secondary link. Connected repo comes from the container snapshot already in
+// page state (TasD().container.github_repo); runs AFTER mdText, never in
+// place of it.
+function mdGh(src) { return TasO.rewriteGithubLinks(TasO.mdText(src), (TasD().container || {}).github_repo || null); }
+
 function renderDetail(force) {
   const t = (TasD().tasks || []).find((x) => x.id === sel);
   if (!t) { TasO.patch(Tas$("detailMain"), '<div class="card pad"><div class="none">Task not found.</div></div>', force); return; }
@@ -40,7 +49,7 @@ function renderDetail(force) {
     </div>
     ${t.description ? `<div class="field" style="margin-top:16px;padding-top:15px;border-top:1px solid var(--border)"><div class="lbl">Description</div><div class="tx">${TasO.esc(t.description)}</div></div>` : ""}
     <div class="field" style="margin-top:14px"><div class="lbl">Definition of done</div><div class="dod">${TasO.esc(t.definition_of_done || "—")}</div></div>
-    ${t.result ? `<div class="field" style="margin-top:14px"><div class="lbl">Result</div><div class="tx md">${TasO.mdText(resultText(t.result))}</div></div>` : ""}
+    ${t.result ? `<div class="field" style="margin-top:14px"><div class="lbl">Result</div><div class="tx md">${mdGh(resultText(t.result))}</div></div>` : ""}
   </div>`;
 
   /* the human-authority gate — plan-approval (B10) OR verify (Epic B), never a dead-end */
@@ -133,7 +142,7 @@ function gateSurface(t) {
       <span class="acting-note">${humanAvatar()}${actorName() ? "acting as " + TasO.esc(actorName()) + " · " : ""}logged to the audit trail</span></div>
     <div class="gb">
       <div class="field"><div class="lbl">${TasO.icon("dot", "")}${isPlan ? "Proposed plan — full text" : "Result claimed by " + TasO.esc(who(t))}</div>
-        <div class="tx md" style="max-height:300px;overflow-y:auto">${TasO.mdText(isPlan ? (pm.body || "") : (resultText(t.result) || "—"))}</div></div>
+        <div class="tx md" style="max-height:300px;overflow-y:auto">${mdGh(isPlan ? (pm.body || "") : (resultText(t.result) || "—"))}</div></div>
       <div class="field" style="margin-top:14px"><div class="lbl">${TasO.icon("check", "")}Definition of done</div>
         <div class="dod">${TasO.esc(t.definition_of_done || "—")}</div></div>
       <div class="actions">
@@ -196,7 +205,7 @@ function protocolSurface(t) {
       : key === "handoff_to"
         ? `${TasO.esc(p.handoff_to || "—")}${p.handoff_to ? ` <span class="muted" style="font-weight:450">— return here first</span>` : ""}`
         : key === "notes"
-          ? TasO.mdText(p.notes || "—")
+          ? mdGh(p.notes || "—")
           : TasO.esc(p[key] || "—");
     // #55: all four fields are drag-expandable <textarea>s (resize: vertical via the
     // .prow textarea CSS) — a multi-line review_chain/handoff_to/autonomy is common, not
@@ -274,7 +283,7 @@ function msgRow(m) {
     <div class="body">
       <div class="mh"><span class="nm">${sys ? "system" : TasO.esc(m.from)}</span>
         ${a && !sys ? TasO.kindBadge(a.kind) : ""}<span class="when">${m.at ? TasO.relTime(m.at) : ""}</span></div>
-      <div class="bubble md">${TasO.mdText(m.body)}</div>
+      <div class="bubble md">${mdGh(m.body)}</div>
       ${atts}
     </div></div>`;
 }
