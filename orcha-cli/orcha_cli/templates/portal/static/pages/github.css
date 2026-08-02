@@ -109,6 +109,25 @@
 .gh-start-split .gh-start-dd { border-radius: 0 8px 8px 0; padding: 6px 8px; border-left: 1px solid var(--border); filter: brightness(0.94); }
 .gh-start-split .gh-start-dd svg { width: 12px; height: 12px; }
 
+/* ---- assignee dropdown: expertise-based SUGGESTED section ---------------
+   The Assign-to dropdown (.pmenu.float, shell.css) gets a compact "Suggested"
+   sub-section on top when github-state.js's suggestAgents() finds a signal
+   match: its own .pm-head.plain label (reusing that class verbatim, same
+   uppercase/letter-spaced treatment as the dropdown's outer "Assign to"
+   head), the matched-agent row(s) with a reason chip, then "All agents" with
+   the remaining roster (omitted entirely when every agent already landed in
+   Suggested — github-state.js's agentRosterHtml, not a CSS concern). No
+   separate hairline rule here: .pm-head already carries its own
+   border-bottom (shell.css's shared .pmenu .pm-head rule) which reads as the
+   section divider for free — a second explicit divider line stacked right
+   above that border-bottom would just be two lines doing one job.
+   .gh-suggested-row reuses .pm-row untouched (no extra rule needed — the
+   reason text rides the SAME .t2 sub-label style .pm-row already gives a
+   second <span>, e.g. the project switcher's account sub-line) so a
+   suggested row and a plain row are visually one family, not two competing
+   row styles. */
+.pmenu .pm-head.gh-suggest-head { margin-top: 2px; }
+
 /* already-started state: the task-id chip a Start click swaps into */
 .gh-task-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600;
   padding: 6px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); }

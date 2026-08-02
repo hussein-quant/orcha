@@ -200,18 +200,243 @@ window.OrchaGithubHub = (function () {
     return `<span class="tag gh-label" style="background:#${color}2e;color:#${textColor};border-color:#${color}55">${esc(name)}</span>`;
   }
 
+  /* ============================================================================
+     EXPERTISE-BASED "Assign to" SUGGESTIONS — suggestAgents(item, agents)
+     ============================================================================
+     Deterministic, client-side, no-LLM-call scoring so the Start/Fix dropdown
+     can put the best-fit AI agent(s) on top instead of a flat alphabetical/
+     roster-order list. Pure function of (item, agents) — no DOM, no fetch,
+     same discipline as every other builder in this file.
+
+     Signal sources, per item:
+       - title            (weight TITLE — the strongest signal: a founder's own words)
+       - labels[].name    (weight TITLE — a maintainer-curated tag is as strong as title)
+       - body text        (weight BODY — noisier prose, counted lower)
+       - head branch name (PRs only; weight TITLE — an agent-authored branch name like
+         "fix/fhir-validation" is a deliberate, title-strength signal, not incidental prose)
+
+     Signal sources, per AI agent: the roster's own `role` string (the persona
+     subtitle, e.g. "web engineer (Next.js clinician dashboard)") — NOTHING
+     else. Deliberately not keyed off `alias`/`id`: a brand-new agent with no
+     bespoke wiring here still gets sensible suggestions purely by writing a
+     descriptive role, which is the whole point of scoring off role text
+     rather than a hardcoded agent-name table.
+
+     ROLE_TOKEN_SYNONYMS below expands each role's own words to closely
+     related terms an issue/PR might use instead (e.g. a role that says "web"
+     should also catch an issue that says "frontend"). It is deliberately a
+     plain, visible, editable object literal — extending an agent's reach
+     (or reining it in) is a one-line edit here, never a code change to the
+     scorer itself. Keys are tokens that might appear in a role string; values
+     are additional tokens folded into that agent's matchable vocabulary. */
+  const ROLE_TOKEN_SYNONYMS = {
+    web: ["frontend", "react", "next", "webapp", "browser"],
+    nextjs: ["next", "react", "frontend", "web", "ssr"],
+    frontend: ["web", "ui", "react", "next"],
+    clinician: ["clinical", "provider", "doctor", "care"],
+    dashboard: ["dashboard", "panel", "overview", "chart"],
+    ios: ["swift", "swiftui", "apple", "mobile", "iphone", "ipad"],
+    swift: ["swiftui", "ios", "xcode"],
+    swiftui: ["swift", "ios", "xcode"],
+    patient: ["patients", "clinical", "care"],
+    app: ["application", "mobile"],
+    mobile: ["ios", "android", "app", "phone"],
+    backend: ["server", "api", "service"],
+    nestjs: ["nest", "node", "backend", "api"],
+    medplum: ["fhir", "ehr", "emr"],
+    fhir: ["medplum", "hl7", "healthcare", "ehr", "emr", "interoperability"],
+    api: ["backend", "endpoint", "rest", "route", "routes"],
+    security: ["auth", "authn", "authz", "vuln", "vulnerability", "secure"],
+    hipaa: ["compliance", "phi", "privacy", "baa"],
+    compliance: ["hipaa", "policy", "legal", "audit"],
+    reviewer: ["review", "reviews"],
+    auth: ["authentication", "authorization", "security", "login", "oauth", "sso"],
+    phi: ["hipaa", "privacy", "phi"],
+    qa: ["test", "testing", "tests", "e2e", "flaky", "regression"],
+    test: ["tests", "testing", "qa", "e2e", "flaky"],
+    release: ["deploy", "deployment", "ship", "shipping"],
+    verification: ["verify", "verified", "qa", "test"],
+    ux: ["ui", "design", "css", "styling", "usability"],
+    design: ["ux", "ui", "css", "styling", "figma"],
+    css: ["style", "styling", "design", "ui"],
+    admin: ["operator", "console", "backoffice"],
+    operator: ["admin", "console", "ops"],
+    panel: ["dashboard", "console", "admin"],
+    docs: ["documentation", "writing"],
+    documentation: ["docs", "writing"],
+    legal: ["policy", "counsel", "contract"],
+    policy: ["legal", "compliance", "governance"],
+    counsel: ["legal", "compliance"],
+    baa: ["hipaa", "compliance", "legal"],
+    orchestrator: ["orchestration", "coordinator", "coordinate", "coordinating"],
+    architect: ["architecture", "design"],
+  };
+
+  // Weighted token sources: TITLE-tier signals (title, labels, PR head branch)
+  // count more than BODY-tier prose. Kept as named constants (not magic
+  // numbers scattered through scoreAgentForItem) so the weighting policy is
+  // visible/tunable in one place.
+  const SUGGEST_WEIGHT_TITLE = 3;
+  const SUGGEST_WEIGHT_BODY = 1;
+  // Roles containing "orchestrator" or "architect" (generalist/coordination
+  // roles, not hands-on specialist work) get scored at this fraction of their
+  // raw overlap — enough that they can still surface on a genuinely generic
+  // item (nobody else matches better), but never enough to outrank a real
+  // specialist match on the same item.
+  const SUGGEST_ORCHESTRATOR_PENALTY = 0.4;
+  // A role string counts as "orchestrator-flavored" by its OWN literal text
+  // containing either word — deliberately simple/explicit rather than routed
+  // through the synonym table, so the penalty is easy to audit independently
+  // of ROLE_TOKEN_SYNONYMS' contents.
+  const ORCHESTRATOR_ROLE_RE = /\borchestrat|\barchitect/i;
+
+  // Tokenizer shared by both item text and role text: lowercase, split on
+  // anything that isn't a letter/digit, drop empty/1-char noise. Deliberately
+  // simple (no stemming) — the synonym table above is where near-miss word
+  // forms (e.g. "next" vs "nextjs") get reconciled, not a stemmer.
+  function suggestTokenize(text) {
+    return String(text || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 1);
+  }
+
+  // Expand a role's own tokens through ROLE_TOKEN_SYNONYMS into the agent's
+  // full matchable vocabulary (a Set — de-duplicated, order doesn't matter
+  // for matching). The role's own literal words are ALWAYS included (a role
+  // that says "fhir" matches "fhir" even before any synonym is consulted).
+  function expandRoleVocabulary(role) {
+    const base = suggestTokenize(role);
+    const vocab = new Set(base);
+    base.forEach((tok) => {
+      const syns = ROLE_TOKEN_SYNONYMS[tok];
+      if (syns) syns.forEach((s) => vocab.add(s));
+    });
+    return vocab;
+  }
+
+  // Build the item's weighted token bag: [{token, weight}]. Duplicate tokens
+  // (e.g. "dashboard" in both title and body) contribute multiple entries —
+  // scoreAgentForItem sums weights per matched vocabulary word, so repetition
+  // legitimately reinforces a signal rather than being deduplicated away.
+  function itemWeightedTokens(item) {
+    item = item || {};
+    const out = [];
+    suggestTokenize(item.title).forEach((t) => out.push({ token: t, weight: SUGGEST_WEIGHT_TITLE }));
+    (item.labels || []).forEach((l) => {
+      const name = (l && l.name) || (typeof l === "string" ? l : "");
+      suggestTokenize(name).forEach((t) => out.push({ token: t, weight: SUGGEST_WEIGHT_TITLE }));
+    });
+    if (item.head) suggestTokenize(item.head).forEach((t) => out.push({ token: t, weight: SUGGEST_WEIGHT_TITLE }));
+    const body = item.body_excerpt || item.body_markdown || item.body || "";
+    suggestTokenize(body).forEach((t) => out.push({ token: t, weight: SUGGEST_WEIGHT_BODY }));
+    return out;
+  }
+
+  // Score one agent against one item's weighted token bag. Returns
+  // {score, tokens}: tokens is the de-duplicated list of item tokens that
+  // actually landed in the agent's vocabulary (matched-token evidence for the
+  // reason chip), in first-matched order, capped at 3 by the caller.
+  function scoreAgentForItem(weightedTokens, agent) {
+    const vocab = expandRoleVocabulary(agent && agent.role);
+    let score = 0;
+    const matched = [];
+    const seen = {};
+    weightedTokens.forEach(({ token, weight }) => {
+      if (!vocab.has(token)) return;
+      score += weight;
+      if (!seen[token]) { seen[token] = true; matched.push(token); }
+    });
+    if (score > 0 && ORCHESTRATOR_ROLE_RE.test(String((agent && agent.role) || ""))) {
+      score *= SUGGEST_ORCHESTRATOR_PENALTY;
+    }
+    return { score, tokens: matched };
+  }
+
+  /* ---- suggestAgents(item, agents) ----------------------------------------
+     Ranks the roster's AI agents (kind==="ai" only — humans and non-AI
+     entries are never suggested) by weighted role/text overlap against one
+     issue/PR. Returns an array of {agent, score, tokens} for every agent that
+     scored ABOVE ZERO, sorted by score descending; a genuine score tie falls
+     back to roster order (Array.prototype.sort's stability handles this for
+     free — equal-score entries are never reordered relative to each other).
+     An item with no matching tokens for ANY agent returns []. `tokens` is
+     capped at 3 matched words, in first-matched order, for the caller's
+     reason chip. */
+  function suggestAgents(item, agents) {
+    const list = (agents || []).filter((a) => a.kind === "ai");
+    const weightedTokens = itemWeightedTokens(item);
+    if (!weightedTokens.length) return [];
+    const ranked = list
+      .map((agent) => {
+        const { score, tokens } = scoreAgentForItem(weightedTokens, agent);
+        return { agent, score, tokens: tokens.slice(0, 3) };
+      })
+      .filter((r) => r.score > 0);
+    // Stable sort by score descending — ties keep their `list` (roster) order.
+    ranked.sort((a, b) => b.score - a.score);
+    return ranked;
+  }
+
+  // A second-place suggestion joins the top match under SUGGESTED when its
+  // score is within this fraction of the top score (0.7 => at least 70% as
+  // strong) — "close enough that either would be a reasonable pick," not
+  // merely nonzero. A clearly-weaker #2 stays out of SUGGESTED and shows up
+  // in ALL AGENTS like everyone else.
+  const SUGGEST_CLOSE_SECOND_RATIO = 0.7;
+  function topSuggestions(ranked) {
+    if (!ranked.length) return [];
+    const top = [ranked[0]];
+    if (ranked.length > 1 && ranked[1].score >= ranked[0].score * SUGGEST_CLOSE_SECOND_RATIO) {
+      top.push(ranked[1]);
+    }
+    return top;
+  }
+
   /* ---- start-button + assignee dropdown ---------------------------------
      Rendered per row. `taskLink` (already-started state) takes precedence:
        - no linked task -> [Start ->][v] split button
        - linked task    -> a task-id chip (portal deeplink), "already tracked"
          label when the create call came back {existing:true}
-     agents: the container's AI roster (kind==="ai") for the dropdown. */
-  function agentRosterHtml(kind, number, agents) {
+     agents: the container's AI roster (kind==="ai") for the dropdown.
+     `item` (optional, 4th arg — back-compat: callers that omit it just get
+     the plain unsuggested list) is the issue/PR object suggestAgents() scores
+     against. A zero-signal item (suggestAgents returns []) renders the exact
+     same plain list as before this feature shipped — no SUGGESTED section,
+     no divider, no behavior change for a caller that never passes `item`. */
+  function suggestedRowHtml(kind, number, r) {
+    const reason = r.tokens.join(" · ");
+    return `<button class="pm-row gh-suggested-row" type="button" data-gh-assign="${esc(r.agent.id)}" data-gh-kind="${esc(kind)}" data-gh-number="${esc(number)}">
+        <span class="b"><span class="t1">${esc(r.agent.alias)}</span>${reason ? `<span class="t2">${esc(reason)}</span>` : ""}</span>
+      </button>`;
+  }
+  function plainRowHtml(kind, number, a) {
+    return `<button class="pm-row" type="button" data-gh-assign="${esc(a.id)}" data-gh-kind="${esc(kind)}" data-gh-number="${esc(number)}">
+        <span class="b"><span class="t1">${esc(a.alias)}</span></span>
+      </button>`;
+  }
+  function agentRosterHtml(kind, number, agents, item) {
     const list = (agents || []).filter((a) => a.kind === "ai");
     if (!list.length) return '<div class="pm-row muted">No AI agents on this project</div>';
-    return list.map((a) => `<button class="pm-row" type="button" data-gh-assign="${esc(a.id)}" data-gh-kind="${esc(kind)}" data-gh-number="${esc(number)}">
-        <span class="b"><span class="t1">${esc(a.alias)}</span></span>
-      </button>`).join("");
+    const ranked = item ? suggestAgents(item, agents) : [];
+    if (!ranked.length) return list.map((a) => plainRowHtml(kind, number, a)).join("");
+    const suggested = topSuggestions(ranked);
+    const suggestedIds = {};
+    suggested.forEach((r) => { suggestedIds[r.agent.id] = true; });
+    const rest = list.filter((a) => !suggestedIds[a.id]);
+    // When every AI agent on the roster already qualifies for SUGGESTED
+    // (small roster, all close-scoring), `rest` is empty — omit the "All
+    // agents" header entirely rather than rendering a dangling empty section
+    // with nothing under it. The header's own border-bottom (shell.css's
+    // shared .pmenu .pm-head rule) IS the divider between sections — no
+    // separate divider element needed here.
+    const restHtml = rest.length
+      ? `<div class="pm-head plain gh-suggest-head">All agents</div>`
+        + rest.map((a) => plainRowHtml(kind, number, a)).join("")
+      : "";
+    return `<div class="pm-head plain gh-suggest-head">Suggested</div>`
+      + suggested.map((r) => suggestedRowHtml(kind, number, r)).join("")
+      + restHtml;
   }
 
   // Dispatch-button label split (founder decision): a PR's button reads
@@ -805,5 +1030,6 @@ window.OrchaGithubHub = (function () {
     fileRowHtml, filesSectionHtml, detailActionsHtml, personListHtml, checksSummaryHtml,
     pullRailHtml, prDetailHtml, commentRowHtml, issueDetailHtml, detailNotFoundHtml, detailHtml,
     fixOutstandingItems, fixOutstandingSummaryFromRollup, fixInfoTriggerHtml, fixInfoPopoverBodyHtml,
+    suggestAgents,
   };
 })();

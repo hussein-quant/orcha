@@ -40,12 +40,34 @@ function ghCloseDropdown() {
   if (ddEl) ddEl.classList.remove("show");
   document.querySelectorAll("[data-gh-start-dd][aria-expanded='true']").forEach((b) => b.setAttribute("aria-expanded", "false"));
 }
+// Resolves the actual issue/PR object for (kind, number) so the dropdown can
+// score expertise-based suggestions against its real title/body/labels —
+// checked against whichever of list payload / detail payload actually has it
+// loaded (a list-row dropdown reads the list payload; a detail-page dropdown
+// reads detailPayload; either can in principle have the number cached, so
+// both are tried rather than assuming which route the click came from).
+// Returns null (never throws) if neither is loaded yet — agentRosterHtml's
+// `item` param is optional precisely for this: a null item degrades to the
+// plain unsuggested list, never a crash.
+function ghFindItem(kind, number) {
+  const listKey = kind === "pull" ? "pulls" : "issues";
+  const list = payload[listKey] ? (payload[listKey].issues || payload[listKey].pulls) : null;
+  if (list) {
+    const found = list.find((it) => it.number === number);
+    if (found) return found;
+  }
+  const dKey = kind === "pull" ? "pull" : "issue";
+  const d = detailPayload[dKey];
+  if (d && d.__number === number) return d[dKey];
+  return null;
+}
 function ghOpenDropdown(anchor, kind, number) {
   const el = ghDdHost();
   const key = kind + ":" + number;
   if (ddOpenFor === key) { ghCloseDropdown(); return; }
   ddOpenFor = key;
-  el.innerHTML = `<div class="pm-head plain">Assign to</div>${GhS.agentRosterHtml(kind, number, (GhD() && GhD().agents) || [])}`;
+  const item = ghFindItem(kind, number);
+  el.innerHTML = `<div class="pm-head plain">Assign to</div>${GhS.agentRosterHtml(kind, number, (GhD() && GhD().agents) || [], item)}`;
   const r = anchor.getBoundingClientRect();
   el.style.top = Math.round(r.bottom + 6) + "px";
   el.style.left = Math.round(Math.max(8, r.right - 200)) + "px";
