@@ -94,6 +94,12 @@ const I = {
   // ring — the "○" the founder's spec called for — distinct from the clock
   // glyph (which reads as "waiting on time," not "in progress/undetermined").
   ring: '<circle cx="10" cy="10" r="6"/>',
+  // Info-circle glyph (GitHub hub's PR "Fix" outstanding-items popover trigger,
+  // github-state.js's fixInfoTriggerHtml): the classic "ⓘ" idiom — an open
+  // ring with a dot (the "i"'s tittle) + a short vertical stroke (the "i"'s
+  // stem), redrawn in the same thin-stroke set rather than a filled Unicode
+  // glyph so it scales/recolors identically to every other icon here.
+  info: '<circle cx="10" cy="10" r="7"/><circle cx="10" cy="6.6" r="0.9" fill="currentColor" stroke="none"/><path d="M10 9.6v4.4"/>',
 };
 const icon = (name, cls) => `<svg class="${cls || "ico"}" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${I[name] || ""}</svg>`;
 

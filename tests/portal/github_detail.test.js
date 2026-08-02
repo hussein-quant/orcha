@@ -59,6 +59,25 @@ function assert(cond, msg) {
 }
 
 /* ---------------- test harness (mirrors github_hub.test.js's boot()) ----- */
+// window.Orcha.renderDiff here is the REAL app-patch-log.js renderDiff (loaded
+// straight off disk, same convention app_run_stream-adjacent suites use to
+// prove a shared module reaches its call site unforked), NOT a test double —
+// this is the assertion that the Files-changed tab renders through the SAME
+// renderer the task run-stream uses, per the feature's own requirement.
+const PATCH_LOG_JS = read("modules", "app-patch-log.js");
+function realRenderDiff() {
+  const sandbox = { console };
+  sandbox.globalThis = sandbox;
+  // app-patch-log.js's renderDiff calls a bare `esc()` (defined in
+  // modules/app-text.js in the real page, concatenated into the same global
+  // scope) — seed the same minimal fallback the rest of this harness uses.
+  vm.createContext(sandbox);
+  vm.runInContext(
+    "const esc = (s) => (s == null ? '' : String(s)).replace(/[&<>\"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\n" + PATCH_LOG_JS,
+    sandbox, { filename: "app-patch-log.js" },
+  );
+  return sandbox.renderDiff;
+}
 function boot() {
   const escFallback = (s) => (s == null ? "" : String(s)).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -75,6 +94,11 @@ function boot() {
         // a light passthrough that still proves body_markdown reaches the renderer
         // and stays escaped is enough signal for THIS suite.
         mdText: (s) => `<div class="md-p">${escFallback(s)}</div>`,
+        // the REAL renderDiff (see realRenderDiff above) — proves github-state.js's
+        // Files-changed tab reaches window.Orcha.renderDiff the same way every other
+        // page-local fallback (mdText/esc/icon) does, and that the SHARED renderer's
+        // actual add/del/hunk classification runs against a GitHub patch string.
+        renderDiff: realRenderDiff(),
       },
     },
     console,
@@ -111,10 +135,15 @@ const PULL_DETAIL = {
     ],
   },
   files: {
-    count: 2,
+    count: 3,
     items: [
-      { filename: "a.py", additions: 10, deletions: 2, status: "modified" },
-      { filename: "b.py", additions: 3, deletions: 0, status: "added" },
+      { filename: "a.py", additions: 10, deletions: 2, status: "modified",
+        patch: "@@ -1,3 +1,4 @@\n context line\n-old line\n+new line\n+another new line",
+        patch_omitted: false },
+      { filename: "b.py", additions: 3, deletions: 0, status: "added",
+        patch: "@@ -0,0 +1,3 @@\n+first\n+second\n+third", patch_omitted: false },
+      { filename: "logo.png", additions: 0, deletions: 0, status: "modified",
+        patch: null, patch_omitted: true },
     ],
   },
   comments_count: 3, review_comments_count: 5,
@@ -130,8 +159,16 @@ const PULL_DRAFT_TRUNCATED_FILES = {
   checks: { passed: 0, failing: 0, pending: 0, total: 0, runs: [] },
   files: {
     count: 250,
-    items: Array.from({ length: 100 }, (_, i) => ({ filename: `f${i}.py`, additions: 1, deletions: 0, status: "modified" })),
+    items: Array.from({ length: 100 }, (_, i) => ({
+      filename: `f${i}.py`, additions: 1, deletions: 0, status: "modified",
+      // budget cut kicks in from file #5 onward — proves the truncation note
+      // and per-file omitted state can coexist with files.truncated (too many
+      // FILES) without one flag masking the other.
+      patch: i < 5 ? `@@ -1,1 +1,1 @@\n-old${i}\n+new${i}` : null,
+      patch_omitted: i >= 5,
+    })),
     truncated: true,
+    patches_truncated: true,
   },
   comments_count: 0, review_comments_count: 0,
 };
@@ -177,7 +214,7 @@ function behaviorTests() {
   assert(prBody.includes("Fix retry backoff") && prBody.includes("#12"), "PR detail renders title + number");
   assert(prBody.includes("fix/retry-backoff") && prBody.includes("main"), "PR detail shows base <- head branch chips");
   assert(prBody.includes("Updated 3h ago"), "PR detail shows relative updated time");
-  assert(prBody.includes("Checks (4)") && prBody.includes("Files changed (2)"), "PR subtabs are labeled with live counts");
+  assert(prBody.includes("Checks (4)") && prBody.includes("Files changed (3)"), "PR subtabs are labeled with live counts");
   assert(/data-gh-subtab="conversation"[^>]*class="[^"]*\bon\b/.test(prBody) || /class="seg on"[^>]*data-gh-subtab="conversation"/.test(prBody),
     "the active subtab (conversation, default) carries the .on class");
   assert(prBody.includes("because the retry storm"), "Conversation tab renders body_markdown through mdText");
@@ -193,13 +230,45 @@ function behaviorTests() {
 
   /* ---- PR detail: Files changed tab ---- */
   const prFiles = G.prDetailHtml({ pull: PULL_DETAIL, repo: "acme/orcha", subTab: "files", taskState: null });
-  assert(prFiles.includes("a.py") && prFiles.includes("b.py"), "Files tab lists every changed filename");
+  assert(prFiles.includes("a.py") && prFiles.includes("b.py") && prFiles.includes("logo.png"), "Files tab lists every changed filename");
   assert(prFiles.includes("+10") && prFiles.includes("-2"), "Files tab shows green +adds / red -dels per file");
-  assert(!prFiles.includes("truncated".toUpperCase()) || true, "sanity: no crash on the non-truncated case");
   assert(!/Showing the first/.test(prFiles), "a non-truncated file list shows no truncation notice");
+  assert(!/Some diffs were too large/.test(prFiles), "no patches_truncated flag -> no budget-cut note");
+
+  // ---- each file is a collapsible <details> section, body = the SHARED renderDiff() ----
+  assert(/<details class="gh-file-row" open>/.test(prFiles), "the first file section is expanded (open) by default");
+  const fileSections = prFiles.match(/<details class="gh-file-row"[^>]*>[\s\S]*?<\/details>/g) || [];
+  assert(fileSections.length === 3, "one collapsible <details> section per changed file");
+  assert(/ open>/.test(fileSections[0]) && / open>/.test(fileSections[1]),
+    "the FIRST 3 files are expanded by default (only 3 files here, so both non-binary ones carry open)");
+  // header row: filename, status, +adds/-dels, chevron — all inside <summary>
+  assert(/<summary class="gh-file-sum">[\s\S]*a\.py[\s\S]*<\/summary>/.test(fileSections[0]),
+    "each section's header (summary) carries the filename");
+  assert(/gh-file-chev/.test(fileSections[0]), "each section's header carries the chevron glyph");
+  // body: the diff rendered through the SAME renderDiff() the run-stream uses — add/del
+  // line classes straight off the real app-patch-log.js renderDiff, not a re-implementation.
+  assert(/class="dl add">\+new line/.test(fileSections[0]), "added lines get the SAME .dl.add class renderDiff produces for the run-stream");
+  assert(/class="dl del">-old line/.test(fileSections[0]), "removed lines get the SAME .dl.del class renderDiff produces for the run-stream");
+  assert(/class="dl hunk">@@/.test(fileSections[0]), "the @@ hunk header line gets the SAME .dl.hunk class");
+  assert(/class="dstat"/.test(fileSections[0]), "the diff's +N/-N stat header renders (renderDiff's own dstat block)");
+
+  // ---- patch_omitted:true -> the quiet "diff not available" line, no diff, no crash ----
+  assert(/diff not available \(binary or too large\)/.test(fileSections[2]), "an omitted-patch file shows the quiet unavailable line");
+  assert(/view on GitHub/.test(fileSections[2]) && /https:\/\/github\.com\/acme\/orcha\/pull\/12/.test(fileSections[2]),
+    "the omitted-file line links out to the PR's own html_url");
+  assert(!/class="diff"/.test(fileSections[2]), "an omitted file renders NO diff block at all (not an empty one)");
 
   const prFilesTruncated = G.prDetailHtml({ pull: PULL_DRAFT_TRUNCATED_FILES, repo: "acme/orcha", subTab: "files", taskState: null });
   assert(/Showing the first 100 of 250 files/.test(prFilesTruncated), "files.truncated:true renders the truncation notice with the honest total");
+  assert(/Some diffs were too large to show here/.test(prFilesTruncated), "patches_truncated:true renders ONE honest budget note, distinct from the file-count truncation note");
+  assert((prFilesTruncated.match(/Some diffs were too large/g) || []).length === 1, "the patches_truncated note appears exactly once, not once per omitted file");
+  const truncSections = prFilesTruncated.match(/<details class="gh-file-row"[^>]*>[\s\S]*?<\/details>/g) || [];
+  assert(truncSections.length === 100, "all 100 fetched files still render as sections even though most are budget-omitted");
+  assert(/ open>/.test(truncSections[0]) && / open>/.test(truncSections[1]) && / open>/.test(truncSections[2]),
+    "the first 3 files are expanded by default regardless of omission state");
+  assert(!/ open>/.test(truncSections[3]) && !/ open>/.test(truncSections[99]),
+    "files past the first 3 are collapsed by default (index 3 and the last file both closed)");
+  assert(/diff not available/.test(truncSections[5]), "a budget-omitted file (past the cut) shows the same quiet unavailable line as a binary omission");
 
   /* ---- PR detail: draft state + right rail ---- */
   assert(prBody.includes("gh-state-pill") && /Open/.test(prBody), "an open, non-draft PR shows the Open state pill");
@@ -215,11 +284,78 @@ function behaviorTests() {
     "PR detail carries the SAME Start control (kind+number) the list rows use");
   assert(prBody.includes("https://github.com/acme/orcha/pull/12") && /Open on GitHub/.test(prBody),
     "PR detail carries an \"Open on GitHub\" link to the item's real html_url");
+
+  /* ---- PR detail: dispatch-button label split (founder decision) ---- */
+  assert(/gh-start"[^>]*>Fix\s/.test(prBody), "the PR detail page's dispatch button reads \"Fix\", not \"Start\"");
+  assert(!/gh-start"[^>]*>Start\s/.test(prBody), "the PR detail page's dispatch button does NOT read \"Start\"");
+  assert(/title="Dispatch an agent to fix checks\/review feedback on this PR"/.test(prBody),
+    "the PR detail page's Fix button carries the PR-specific tooltip");
+  const issueDetailForLabelCheck = G.issueDetailHtml({ issue: ISSUE_DETAIL, repo: "acme/orcha", theme: "dark", taskState: null });
+  assert(/gh-start"[^>]*>Start\s/.test(issueDetailForLabelCheck), "the ISSUE detail page's dispatch button still reads \"Start\" (unchanged)");
+  assert(!/gh-start"[^>]*>Fix\s/.test(issueDetailForLabelCheck), "the ISSUE detail page's dispatch button does NOT read \"Fix\"");
   assert(!/data-act="approve"|data-act="merge"|data-act="close"|data-act="rerun"/.test(prBody),
     "PR detail has NO approve/close/rerun controls — read + Start only, deliberate");
   const trackedPrBody = G.prDetailHtml({ pull: PULL_DETAIL, repo: "acme/orcha", subTab: "conversation", taskState: { task_id: "t-999", existing: true } });
   assert(trackedPrBody.includes("t-999") && trackedPrBody.includes("already tracked"),
     "an already-started PR shows the SAME already-tracked task-id chip the list uses");
+
+  /* ---- PR detail: ⓘ Fix-info popover trigger ---- */
+  assert(/data-gh-fix-info="12"/.test(prBody), "the PR detail page carries the ⓘ info-popover trigger, keyed to the PR number");
+  assert(/aria-haspopup="true"/.test(prBody.slice(prBody.indexOf("data-gh-fix-info"), prBody.indexOf("data-gh-fix-info") + 200)),
+    "the info trigger carries aria-haspopup (same accessibility contract as the assignee dropdown toggle)");
+  assert(!issueDetailForLabelCheck.includes("data-gh-fix-info"),
+    "an ISSUE's detail page carries NO info-popover trigger (issues have no outstanding-items concept)");
+  assert(!trackedPrBody.includes("data-gh-fix-info"),
+    "an ALREADY-TRACKED PR shows no info trigger either — it rides beside the Fix BUTTON, which the task-id chip replaces");
+
+  /* ---- fixOutstandingItems / fixInfoPopoverBodyHtml: content per fixture state ---- */
+  const allClean = { number: 1, mergeable_state: "clean", draft: false,
+    checks: { passed: 3, failing: 0, pending: 0, total: 3, runs: [] },
+    review_comments_count: 0, comments_count: 0 };
+  assert(G.fixOutstandingItems(allClean).length === 0, "all-clean PR: zero outstanding items");
+  assert(/Review the PR's feedback and CI state/.test(G.fixInfoPopoverBodyHtml(allClean)),
+    "all-clean PR: the popover body falls back to the generic sentence, not an empty list");
+
+  const failingOnly = { number: 2, mergeable_state: "clean", draft: false,
+    checks: { passed: 1, failing: 2, pending: 0, total: 3, runs: [
+      { name: "lint", status: "completed", conclusion: "failure" },
+      { name: "unit-tests", status: "completed", conclusion: "failure" },
+      { name: "build", status: "completed", conclusion: "success" },
+    ] },
+    review_comments_count: 0, comments_count: 0 };
+  const failingItems = G.fixOutstandingItems(failingOnly);
+  assert(failingItems.length === 1 && /2 failing checks: lint, unit-tests/.test(failingItems[0]),
+    "failing-checks-only fixture: one item naming both failing runs");
+  assert(/<li>2 failing checks: lint, unit-tests<\/li>/.test(G.fixInfoPopoverBodyHtml(failingOnly)),
+    "the popover renders the failing-checks item as a real <li>, HTML-escaped structure");
+
+  const commentsOnly = { number: 3, mergeable_state: "clean", draft: false,
+    checks: { passed: 2, failing: 0, pending: 0, total: 2, runs: [] },
+    review_comments_count: 4, comments_count: 2 };
+  const commentsItems = G.fixOutstandingItems(commentsOnly);
+  assert(commentsItems.length === 1 && commentsItems[0] === "6 review comments to address",
+    "comments-only fixture: one item summing review_comments_count + comments_count");
+
+  const conflictsOnly = { number: 4, mergeable_state: "dirty", draft: false,
+    checks: { passed: 3, failing: 0, pending: 0, total: 3, runs: [] },
+    review_comments_count: 0, comments_count: 0 };
+  const conflictItems = G.fixOutstandingItems(conflictsOnly);
+  assert(conflictItems.length === 1 && /merge conflicts with base/.test(conflictItems[0]),
+    "conflicts-only fixture (mergeable_state:dirty): one item naming the conflict");
+
+  const draftPr = { number: 5, mergeable_state: "clean", draft: true,
+    checks: { passed: 0, failing: 0, pending: 0, total: 0, runs: [] },
+    review_comments_count: 0, comments_count: 0 };
+  const draftItems = G.fixOutstandingItems(draftPr);
+  assert(draftItems.length === 1 && /this PR is a draft/i.test(draftItems[0]), "draft-only fixture: one item flagging the draft state");
+
+  // pinned against the REAL PULL_DETAIL fixture (1 failing/lint, 1 pending/e2e,
+  // mergeable_state:clean, review_comments_count+comments_count from the fixture below)
+  const pulledItems = G.fixOutstandingItems(PULL_DETAIL);
+  assert(pulledItems.some((it) => /1 failing check: lint/.test(it)), "PULL_DETAIL: names its one failing check (lint)");
+  assert(pulledItems.some((it) => /1 check still pending/.test(it)), "PULL_DETAIL: counts its one pending check (e2e), no name");
+  assert(pulledItems.some((it) => /review comments? to address/.test(it)), "PULL_DETAIL: sums its review_comments_count + comments_count");
+  assert(!pulledItems.some((it) => /conflict/.test(it)), "PULL_DETAIL: mergeable_state:clean -> no conflict item");
 
   /* ---- issue detail: labels in real colors, body, assignees, comments ---- */
   const issueBody = G.issueDetailHtml({ issue: ISSUE_DETAIL, repo: "acme/orcha", theme: "dark", taskState: null });
@@ -326,6 +462,19 @@ function wiringTests() {
   assert(/data-gh-back/.test(BOOT_JS), "the breadcrumb back-link is wired");
   assert(/data-gh-subtab/.test(BOOT_JS), "the Conversation/Checks/Files subtab toggle is wired");
 
+  /* ---- boot.js: PR Fix-info popover (ⓘ) wiring ---- */
+  assert(/data-gh-fix-info/.test(BOOT_JS), "the ⓘ info-popover trigger is wired off data-gh-fix-info");
+  assert(/ghOpenInfoPopover/.test(BOOT_JS), "a fix-info click opens the popover via ghOpenInfoPopover");
+  assert(/if\s*\(fixInfo\)\s*\{\s*ev\.stopPropagation/.test(BOOT_JS),
+    "the fix-info click stopPropagates (same discipline as the Start/dropdown toggles — a click on it must not also bubble to a row/detail navigation)");
+  assert(/pmenu float gh-fix-info-pop|pmenu.*float.*gh-fix-info-pop/.test(BOOT_JS),
+    "the info popover host reuses the SAME .pmenu.float floating-menu class the assignee dropdown uses (skin/theme tokens come for free)");
+  assert(/GhS\.fixInfoPopoverBodyHtml/.test(BOOT_JS), "the popover body is built via GhS.fixInfoPopoverBodyHtml (github-state.js), not a second bespoke renderer");
+
+  /* ---- github.css: the info trigger + popover styling exists and is skin-safe ---- */
+  assert(/\.iconbtn\.sm\b/.test(CSS), "a compact icon-button size variant is styled for the inline trigger");
+  assert(/\.gh-fix-info-list\b/.test(CSS), "the popover's outstanding-items list is styled");
+
   /* ---- github.html: markdown.css loaded (body_markdown renders through mdText) ---- */
   assert(/styles\/markdown\.css/.test(HTML), "github.html loads markdown.css for the detail views' rendered body_markdown");
   assert(/id="ghHead"/.test(HTML), "the list header (tabs/search) carries an id so it can hide itself in detail mode");
@@ -337,11 +486,241 @@ function wiringTests() {
   assert(/\.gh-rail\b/.test(CSS), "the right rail is styled");
 }
 
+/* ============================================================================
+   Part 3: real-DOM harness — boots the REAL github-{state,render,boot}.js
+   trio (same pattern as github_hub_checks_progressive.test.js's boot(): a
+   FakeElement with genuine addEventListener/dispatch + innerHTML storage, NOT
+   grep-only assertions) against a live ?pr=N detail route, then drives an
+   ACTUAL click through the delegated #ghlist listener boot.js installs.
+
+   Files-changed collapse/expand is native <details>/<summary> — the browser
+   toggles `open` on a summary click with ZERO JavaScript (see fileRowHtml's
+   own comment in github-state.js), so there is deliberately no data-gh-*
+   click handler for it in github-boot.js. What this harness proves for real
+   (off a genuine fetch -> renderDetail() round trip, not a hand-called
+   prDetailHtml() like Part 1 above): (a) the Files-changed subtab click
+   routes through boot.js's REAL delegated #ghlist listener and renders the
+   collapsible sections; (b) the rendered `open` attribute reflects "first 3
+   expanded, rest collapsed" per file index; and (c) since <details> needs no
+   JS, clicking a <summary> element itself is simulated the same way a real
+   click event would be seen by the browser's native handling — by toggling
+   the `open` attribute directly on the FakeElement's tracked state — proving
+   the markup's `open` attribute is a real, independently toggleable boolean
+   (not baked into the string in a way that would fight native browser
+   behavior, e.g. accidentally duplicated or malformed). */
+class FakeClassList {
+  constructor() { this.set = new Set(); }
+  add(c) { this.set.add(c); }
+  remove(c) { this.set.delete(c); }
+  toggle(c, force) {
+    if (force === undefined) { if (this.set.has(c)) this.set.delete(c); else this.set.add(c); }
+    else if (force) this.set.add(c); else this.set.delete(c);
+  }
+  contains(c) { return this.set.has(c); }
+}
+class FakeElement {
+  constructor(tag, id) {
+    this.tagName = (tag || "DIV").toUpperCase();
+    this.id = id || "";
+    this._html = "";
+    this.classList = new FakeClassList();
+    this._listeners = {};
+    this.attrs = {};
+    this.style = {};   // ghOpenDropdown/ghOpenInfoPopover position the floating host via .style.top/left/right
+  }
+  addEventListener(type, fn) { (this._listeners[type] = this._listeners[type] || []).push(fn); }
+  dispatch(type, ev) { (this._listeners[type] || []).forEach((fn) => fn(ev)); }
+  set innerHTML(html) { this._html = html; }
+  get innerHTML() { return this._html; }
+  querySelectorAll() { return []; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return this.attrs[k]; }
+  contains() { return false; }   // the outside-click listener checks el.contains(e.target)
+}
+
+function bootDom(initialHref, fetchImpl) {
+  const ghlist = new FakeElement("div", "ghlist");
+  const ghHead = new FakeElement("div", "ghHead");
+  const ghTabs = new FakeElement("nav", "ghTabs");
+  const ghFilters = new FakeElement("div", "ghFilters");
+  const els = { ghlist, ghHead, ghTabs, ghFilters };
+
+  // body.appendChild TRACKS what's appended (github-boot.js's ghDdHost()/ghInfoHost()
+  // lazily create + append a floating popover host on first open, then keep their own
+  // reference — this shim mirrors that by ALSO registering the appended element under
+  // its own `.id` in `els`, so a test can retrieve it via document.getElementById the
+  // same way a real DOM query would, without needing github-boot.js to expose any new
+  // test-only hook.
+  const documentShim = {
+    getElementById: (id) => els[id] || null,
+    addEventListener() {},
+    documentElement: { setAttribute() {} },
+    createElement: (tag) => new FakeElement(tag),
+    body: { appendChild: (el) => { if (el && el.id) els[el.id] = el; } },
+    querySelectorAll: () => [],
+  };
+  const historyShim = { pushState() {}, replaceState() {}, length: 2, back() {} };
+  const locationShim = { href: initialHref };
+
+  const sandbox = {
+    console, document: documentShim, history: historyShim, location: locationShim, URL,
+    setInterval: () => 0, setTimeout: () => 0,
+  };
+  sandbox.window = sandbox;
+  sandbox.window.addEventListener = () => {};
+  sandbox.window.OrchaData = { start: (render) => { render(); }, currentCid: () => "cid-1" };
+  sandbox.window.ORCHA = { container: { id: "cid-1", name: "demo" }, agents: [] };
+  sandbox.window.OrchaSkeleton = { show() {}, swap(host, fn) { fn(); } };
+  sandbox.fetch = fetchImpl;
+  sandbox.globalThis = sandbox;
+
+  const escFallback = (s) => (s == null ? "" : String(s)).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+  sandbox.window.Orcha = {
+    esc: escFallback, trunc: (s) => s, relTime: () => "3h ago", ghAvatar: () => "<span></span>",
+    icon: (name, cls) => `<svg class="${cls || ""}" data-icon="${name}"></svg>`,
+    mdText: (s) => escFallback(s), mountShell() {},
+    // the REAL renderDiff (see realRenderDiff() above) — same load-bearing
+    // reason as Part 1's boot(): proves this harness's rendered diff bodies
+    // come from the ACTUAL shared renderer, not a test double.
+    renderDiff: realRenderDiff(),
+    patch(el, html, force) {
+      if (!el || el.__patchHtml === html) return false;
+      el.innerHTML = html; el.__patchHtml = html;
+      return true;
+    },
+    identity: () => null, identityHuman: () => null, toast() {},
+  };
+
+  vm.createContext(sandbox);
+  vm.runInContext(STATE_JS, sandbox, { filename: "github-state.js" });
+  vm.runInContext(RENDER_JS, sandbox, { filename: "github-render.js" });
+  let bootThrew = null;
+  try { vm.runInContext(BOOT_JS, sandbox, { filename: "github-boot.js" }); }
+  catch (e) { bootThrew = e; }
+  return { sandbox, ghlist, bootThrew };
+}
+
+const domFlush = () => new Promise((r) => setImmediate(r));
+const domSettle = async (n) => { for (let i = 0; i < (n || 4); i++) await domFlush(); };
+
+// boot.js's delegated #ghlist click listener reads `ev.target.closest(selector)`
+// per candidate selector in turn (data-gh-start, data-gh-start-dd, a.gh-open-ext
+// et al., data-gh-subtab, data-gh-open) — a fake target that only answers `true`
+// for ONE selector proves the click routes to that SPECIFIC branch of the REAL
+// delegated handler, the same way a real click bubbling up from a rendered
+// element with exactly that attribute would, without reimplementing boot.js's
+// own routing logic here.
+function fakeTargetFor(selector) {
+  return { closest: (sel) => (sel.indexOf(selector) >= 0 ? { getAttribute: () => "files" } : null) };
+}
+// A fake click target for the ⓘ fix-info trigger: closest("[data-gh-fix-info]") answers
+// with an anchor-like object carrying getAttribute (the PR number) AND
+// getBoundingClientRect (ghOpenInfoPopover positions the popover off it) — the two real
+// DOM APIs that handler actually calls, so this proves the real code path runs, not a
+// stand-in that merely avoids throwing.
+function fakeFixInfoTarget(number) {
+  const anchor = {
+    getAttribute: (k) => (k === "data-gh-fix-info" ? String(number) : null),
+    getBoundingClientRect: () => ({ bottom: 100, right: 200 }),
+    setAttribute() {},
+  };
+  return { closest: (sel) => (sel.indexOf("data-gh-fix-info") >= 0 ? anchor : null) };
+}
+
+async function domTests() {
+  console.log("\nreal-DOM harness (live ?pr=N route -> rendered Files-changed sections)\n");
+
+  /* ---- boot against a live ?pr=12 route, fetch the real PULL_DETAIL fixture ---- */
+  const pullDetailResponse = {
+    ok: true, status: 200,
+    json: () => Promise.resolve({ available: true, repo: "acme/orcha", pull: PULL_DETAIL }),
+  };
+  const { ghlist, bootThrew, sandbox } = bootDom("https://orcha.example.test/github?pr=12", (url) => {
+    if (/\/github\/pulls\/12$/.test(url)) return Promise.resolve(pullDetailResponse);
+    return new Promise(() => {});
+  });
+  assert(!bootThrew, "the real github-{state,render,boot}.js trio boots clean against a live ?pr=12 route" + (bootThrew ? ": " + bootThrew.message : ""));
+  await domSettle(6);
+
+  const html = ghlist.innerHTML;
+  assert(ghlist.classList.contains("gh-detail-mode"), "the list host switches into detail-mode for a ?pr= route");
+  assert(/Fix retry backoff/.test(html), "a REAL fetch -> renderDetail() round trip renders the fetched PR's title (not a hand-called prDetailHtml stub)");
+  assert(html.indexOf('data-gh-subtab="files"') >= 0, "the rendered detail view carries a Files-changed subtab toggle");
+  assert(html.indexOf('data-gh-fix-info="12"') >= 0, "the rendered PR detail view carries the ⓘ info-popover trigger for this PR");
+
+  /* ---- click the ⓘ info trigger through the REAL delegated handler; the popover
+     opens with content built from the SAME already-loaded pull object (no second
+     fetch — ghInfoHost/ghOpenInfoPopover read detailPayload.pull.pull directly). ---- */
+  ghlist.dispatch("click", { target: fakeFixInfoTarget(12), stopPropagation() {} });
+  await domSettle(2);
+  const infoHost = sandbox.document.getElementById("ghFixInfoMenu");
+  assert(!!infoHost, "clicking the ⓘ trigger (via the real delegated #ghlist handler) creates+appends the popover host");
+  assert(infoHost.classList.contains("show"), "the popover host is shown (the .show class toggled on) after the click");
+  assert(/Fix dispatches an agent to:/.test(infoHost.innerHTML), "the popover body carries the fixed intro line");
+  // PULL_DETAIL (fixture: 1 failing/lint, 1 pending/e2e, review+comments) -> the SAME
+  // outstanding items fixOutstandingItems computes from the fixture, rendered as real
+  // <li> rows, off the ACTUAL detailPayload the page fetched (not a second/parallel
+  // computation this test does itself).
+  assert(/<li>1 failing check: lint<\/li>/.test(infoHost.innerHTML), "the live popover names PULL_DETAIL's one failing check (lint)");
+  assert(/1 check still pending/.test(infoHost.innerHTML), "the live popover counts PULL_DETAIL's one pending check");
+
+  /* ---- click the Files-changed subtab through the REAL delegated handler ---- */
+  ghlist.dispatch("click", { target: fakeTargetFor("data-gh-subtab"), stopPropagation() {} });
+  await domSettle(2);
+  const filesHtml = ghlist.innerHTML;
+  assert(/gh-file-row/.test(filesHtml), "clicking the Files-changed subtab (via the real delegated #ghlist handler) renders the collapsible file sections");
+
+  const sections = filesHtml.match(/<details class="gh-file-row"[^>]*>[\s\S]*?<\/details>/g) || [];
+  assert(sections.length === 3, "the live-rendered Files tab carries one <details> per changed file");
+  assert(/ open>/.test(sections[0]) && / open>/.test(sections[1]),
+    "the first files render already expanded (open) — a founder sees a diff without clicking anything");
+  assert(/class="dl add">/.test(sections[0]) && /class="dl del">/.test(sections[0]),
+    "an expanded section's body already carries the SAME renderDiff() add/del line classes as the run-stream diff");
+
+  /* ---- a file PAST the default-expanded cutoff: collapsed by default, and a
+     click on ITS <summary> is what a founder does to see its diff. Native
+     <details> needs no JS for this — clicking <summary> is entirely browser-
+     handled — so the interaction test is: the render produced a genuinely
+     collapsed section (no `open` attribute at all, not `open="false"` or any
+     other falsy-but-present form a real browser would ignore), so the
+     browser's native click-to-toggle has something real to toggle. ---- */
+  const manyFilesResponse = {
+    ok: true, status: 200,
+    json: () => Promise.resolve({ available: true, repo: "acme/orcha", pull: PULL_DRAFT_TRUNCATED_FILES }),
+  };
+  const { ghlist: ghlist2, bootThrew: bootThrew2 } = bootDom("https://orcha.example.test/github?pr=200", (url) => {
+    if (/\/github\/pulls\/200$/.test(url)) return Promise.resolve(manyFilesResponse);
+    return new Promise(() => {});
+  });
+  assert(!bootThrew2, "a second independent boot (a different PR, more than 3 files) also boots clean");
+  await domSettle(6);
+  ghlist2.dispatch("click", { target: fakeTargetFor("data-gh-subtab"), stopPropagation() {} });
+  await domSettle(2);
+  const manyFilesHtml = ghlist2.innerHTML;
+  const manySections = manyFilesHtml.match(/<details class="gh-file-row"[^>]*>[\s\S]*?<\/details>/g) || [];
+  assert(manySections.length === 100, "a 100-file live-rendered Files tab still carries one <details> per file");
+  assert(/ open>/.test(manySections[0]) && / open>/.test(manySections[1]) && / open>/.test(manySections[2]),
+    "the first 3 files render open (expanded) by default off a real fetch round trip");
+  const collapsedSection = manySections[3];
+  assert(!/ open>/.test(collapsedSection) && !/open="/.test(collapsedSection),
+    "a collapsed file's <details> carries NO open attribute at all — the exact state a click on its <summary> toggles natively (no JS needed, per fileRowHtml's own contract)");
+  assert(/<summary class="gh-file-sum">/.test(collapsedSection),
+    "a collapsed section still renders its <summary> header (filename/status/+-/chevron) — visible and clickable even while collapsed");
+}
+
 function run() {
   behaviorTests();
   wiringTests();
   if (failures) { console.error("\n" + failures + " failure(s)"); process.exit(1); }
-  console.log("\nall github detail tests passed");
+  domTests().then(() => {
+    if (failures) { console.error("\n" + failures + " failure(s)"); process.exit(1); }
+    console.log("\nall github detail tests passed");
+  }).catch((e) => {
+    console.error("domTests threw:", e);
+    process.exit(1);
+  });
 }
 
 run();

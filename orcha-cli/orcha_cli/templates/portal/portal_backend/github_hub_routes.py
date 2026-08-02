@@ -54,7 +54,7 @@ from portal_backend.guards import require_container, valid_uuid
 from portal_backend.github_routes import _read_token, _read_token_map
 from portal_backend.identity_routes import require_member_read, trusted_actor
 from portal_backend.schemas.github_hub import GithubStartBody
-from portal_backend.task_start_core import start_task_from_github
+from portal_backend.task_start_core import find_open_gh_task, start_task_from_github
 
 GITHUB_API = "https://api.github.com"
 GITHUB_TIMEOUT_SECONDS = 10
@@ -66,6 +66,15 @@ CACHE_TTL_SECONDS = 60
 # -first for display).
 PR_FILES_PER_PAGE = 100
 ISSUE_COMMENTS_LIMIT = 20
+# Per-file `patch` text budget for the Files-changed diff view: files are walked IN ORDER
+# (the order GitHub's files-page returns them) and each file's patch is included until the
+# running total of patch bytes would exceed this budget; every file from that point on gets
+# `patch_omitted: true` instead (same shape a binary/oversized single file already gets from
+# GitHub omitting `patch` itself — the frontend can't tell "budget" apart from "GitHub never
+# sent one" and doesn't need to). ~800KB keeps a large PR's response bounded without needing
+# a second paginated fetch of patch text; `files.patches_truncated` is set true whenever ANY
+# file's patch was skipped for budget (as opposed to GitHub simply never sending one).
+PATCH_BUDGET_BYTES = 800_000
 # GET .../github/checks caps: at most this many PR numbers per request (keeps one batch
 # call boundedly cheap even if the frontend ever passes an oversized ?numbers= list), and
 # at most this many concurrent in-flight GitHub fetches (bounded pool — polite to GitHub's
@@ -323,30 +332,70 @@ def _logins(items) -> list:
 
 
 def _pr_files(repo: str, number: int, token: str, changed_files) -> dict:
-    """The PR's changed files (first page of 100), as {count, items[, truncated]}.
+    """The PR's changed files (first page of 100), as
+    {count, items[{filename,additions,deletions,status,patch,patch_omitted}][, truncated,
+    patches_truncated]}.
 
-    `count` is GitHub's OWN `changed_files` total from the PR object (the honest total,
-    not the length of the page we fetched); `items` carries the per-file rows WITHOUT
-    patches (list only — the detail page shows names + add/del, not diffs). `truncated`
-    is set true only when that honest total exceeds what we returned. A network failure
-    fetching the files page degrades to an empty list rather than failing the whole PR.
+    `count` is GitHub's OWN `changed_files` total from the PR object (the honest total, not
+    the length of the page we fetched); `truncated` is set true only when that honest total
+    exceeds what we returned (unchanged from the list-only shape this replaces).
+
+    Each item now ALSO carries the diff text: `patch` is GitHub's raw unified-diff hunk
+    string for that file, or `null` when GitHub itself omits it (binary files, and files
+    GitHub judges "too large" get no `patch` field at all) — `patch_omitted: true` marks
+    that case so the frontend can render an honest "diff not available" line instead of a
+    silently-empty diff. Files are walked IN ORDER (GitHub's own files-page order) tracking
+    a running total of patch bytes; once including a file's patch would cross
+    PATCH_BUDGET_BYTES, a STICKY `budget_hit` flag flips on and every file from that point
+    on — regardless of how small its own patch is — is ALSO forced to
+    patch:null/patch_omitted:true (never re-checked against the budget again; a small file
+    arriving after a big one that tripped the budget must not sneak back in under the
+    now-stale running total). Same shape as a GitHub-side omission, so the frontend needs no
+    separate case for it — and `patches_truncated: true` is set on the returned dict so the
+    UI can show one honest "diffs cut off, view on GitHub" note distinct from the per-file
+    omitted line. A network failure fetching the files page degrades to an empty list rather
+    than failing the whole PR.
     """
     try:
         raw = _gh_get(
             f"/repos/{repo}/pulls/{number}/files?per_page={PR_FILES_PER_PAGE}", token)
     except RuntimeError:
         raw = []
-    items = [{
-        "filename": f.get("filename"),
-        "additions": f.get("additions"),
-        "deletions": f.get("deletions"),
-        "status": f.get("status"),
-    } for f in raw]
+    items = []
+    patch_bytes_used = 0
+    budget_hit = False
+    for f in raw:
+        patch = f.get("patch")
+        entry = {
+            "filename": f.get("filename"),
+            "additions": f.get("additions"),
+            "deletions": f.get("deletions"),
+            "status": f.get("status"),
+        }
+        if patch is None:
+            # GitHub itself never sent a patch (binary file, or GitHub judged it too large) —
+            # honest omission, not a budget decision.
+            entry["patch"] = None
+            entry["patch_omitted"] = True
+        elif budget_hit or patch_bytes_used + len(patch) > PATCH_BUDGET_BYTES:
+            # Either the budget was already tripped by an earlier file (sticky — never
+            # re-checked), or including THIS file's patch would trip it now. Either way, omit
+            # this file's patch (and every file after it) and flag the budget cut distinctly.
+            entry["patch"] = None
+            entry["patch_omitted"] = True
+            budget_hit = True
+        else:
+            entry["patch"] = patch
+            entry["patch_omitted"] = False
+            patch_bytes_used += len(patch)
+        items.append(entry)
     # Prefer GitHub's declared total; fall back to what we actually fetched if it's absent.
     count = changed_files if isinstance(changed_files, int) else len(items)
     out = {"count": count, "items": items}
     if count > len(items):
         out["truncated"] = True
+    if budget_hit:
+        out["patches_truncated"] = True
     return out
 
 
@@ -382,6 +431,100 @@ def _pull_detail(repo: str, pull: dict, token: str) -> dict:
         "files": _pr_files(repo, pull.get("number"), token, pull.get("changed_files")),
         "comments_count": pull.get("comments"),
         "review_comments_count": pull.get("review_comments"),
+    }
+
+
+def _fix_description(*, number: int, title: str, head: str, draft: bool,
+                      mergeable_state, checks: dict, review_comments_count,
+                      comments_count) -> str:
+    """Compose the context-aware DoD for a PR "Fix" dispatch (founder decision) from the
+    PR's ACTUAL state at dispatch time — the same fields the detail path already
+    surfaces (checks-with-runs, mergeable_state, comment counts) — rather than the
+    generic static template every PR used to get regardless of what's actually wrong
+    with it.
+
+    Pure/no-network (the caller does the one PR + one checks-rollup fetch and hands the
+    already-assembled pieces in), so this is independently unit-testable against fixture
+    shapes without stubbing _gh_get.
+
+    Clauses, each included ONLY when it applies (all omitted -> the generic fallback
+    sentence, never an empty "Outstanding: ." line):
+      - failing checks: "k failing check(s): name1, name2" (names from checks['runs'],
+        capped at 5 named + "+N more" so a PR with 30 failing jobs doesn't blow up the
+        DoD into a wall of text)
+      - unresolved review feedback: review_comments_count + comments_count as the
+        available proxy for "there's feedback to address" (the detail endpoint doesn't
+        expose per-comment resolved/unresolved state, so a total count is the honest
+        signal we actually have)
+      - merge conflicts: mergeable_state == "dirty" (GitHub's own vocabulary for "has
+        conflicts with base" — see mergeChipHtml's CLEAN_STATES on the frontend for the
+        sibling "clean" set this deliberately does NOT reuse, since dirty is a specific
+        state, not "not clean")
+      - draft: prefixed as its own note (not folded into "Outstanding") since a draft PR
+        isn't really "outstanding work to fix" so much as "not ready for this yet" — still
+        worth flagging so the dispatched agent knows.
+    pending checks are mentioned by count only (no per-check detail — GitHub doesn't
+    tell us what a still-running check's outcome will be, so there's nothing more
+    specific to say about it yet).
+    """
+    r = checks or {}
+    failing = r.get("failing") or 0
+    pending = r.get("pending") or 0
+    runs = r.get("runs") or []
+    failing_names = [run.get("name") or "unnamed check" for run in runs
+                     if (run.get("status") == "completed"
+                         and run.get("conclusion") in ("failure", "timed_out",
+                                                        "action_required", "cancelled",
+                                                        "stale", "startup_failure"))]
+
+    outstanding = []
+    if failing:
+        shown = failing_names[:5]
+        more = len(failing_names) - len(shown)
+        names = ", ".join(shown) + (f", +{more} more" if more > 0 else "")
+        outstanding.append(f"{failing} failing check{'s' if failing != 1 else ''}"
+                            + (f": {names}" if names else ""))
+    if pending:
+        outstanding.append(f"{pending} check{'s' if pending != 1 else ''} still pending")
+    review_total = (review_comments_count or 0) + (comments_count or 0)
+    if review_total:
+        outstanding.append(
+            f"{review_total} review comment{'s' if review_total != 1 else ''} to address")
+    if mergeable_state == "dirty":
+        outstanding.append("merge conflicts with base — rebase or resolve conflicts")
+
+    draft_note = "This PR is a draft. " if draft else ""
+    if outstanding:
+        body = f"Outstanding: {'; '.join(outstanding)}."
+    else:
+        body = "Review the PR's feedback and CI state and address anything outstanding."
+    return (f"Fix PR #{number}: {title}. {draft_note}{body} "
+            f"Push fixes to its branch {head or '?'}. "
+            f"Never merge; stop for human review.")
+
+
+def _pull_fix_context(repo: str, number: int, token: str) -> dict:
+    """The minimal live-state fetch a Fix dispatch needs to compose _fix_description:
+    one PR object + one checks rollup (WITH per-run names) — deliberately NOT the full
+    _pull_detail (which also paginates the files list; a Fix dispatch doesn't need
+    files, so skipping that fetch keeps the dispatch click itself fast). Returns the
+    kwargs _fix_description expects, straight off the raw GitHub shapes. A 404 for the
+    number propagates as RuntimeError (github_status:404) exactly like every other
+    _gh_get caller here — the route's existing _detail_error_payload handles it."""
+    pull = _gh_get(f"/repos/{repo}/pulls/{number}", token)
+    head = pull.get("head") or {}
+    sha = head.get("sha")
+    checks = _checks_rollup(repo, sha, token, include_runs=True) if sha else {
+        "passed": 0, "failing": 0, "pending": 0, "total": 0, "runs": []}
+    return {
+        "number": pull.get("number"),
+        "title": pull.get("title") or "",
+        "head": head.get("ref") or "",
+        "draft": bool(pull.get("draft")),
+        "mergeable_state": pull.get("mergeable_state"),
+        "checks": checks,
+        "review_comments_count": pull.get("review_comments"),
+        "comments_count": pull.get("comments"),
     }
 
 
@@ -592,8 +735,13 @@ def get_github_pull(cid: str, number: int, request: Request):
     Returns {available, repo, pull:{number,title,state,draft,body_markdown,author_login,
     base,head,updated_at,created_at,html_url,mergeable_state,assignees,requested_reviewers,
     checks:{passed,failing,pending,total,runs:[{name,status,conclusion,html_url}]},
-    files:{count,items:[{filename,additions,deletions,status}][,truncated]},comments_count,
-    review_comments_count}}. body_markdown is RAW markdown (rendered client-side). Checks
+    files:{count,items:[{filename,additions,deletions,status,patch,patch_omitted}]
+    [,truncated][,patches_truncated]},comments_count,
+    review_comments_count}}. body_markdown is RAW markdown (rendered client-side). Each
+    file's `patch` is GitHub's raw unified-diff text (string) or null when omitted — either
+    GitHub itself never sent one (binary/oversized single file, `patch_omitted:true`) or the
+    summed patch text crossed PATCH_BUDGET_BYTES (~800KB; same per-file shape, plus
+    `files.patches_truncated:true`) — see `_pr_files`'s docstring. Checks
     reuse the SHARED list-endpoint rollup helper (with per-run breakdown). A GitHub 404 for
     the number → {available:false, reason:"not_found"}; not-connected / rate-limited resolve
     to the same clean {available:false,...} shape (never a 5xx). Cached 60s per
@@ -648,7 +796,7 @@ def get_github_issue(cid: str, number: int, request: Request):
 
 @app.post("/api/containers/{cid}/github/start", status_code=201)
 def start_from_github(cid: str, body: GithubStartBody, request: Request):
-    """Turn a GitHub issue/PR into an Orcha task (the [Start →] button).
+    """Turn a GitHub issue/PR into an Orcha task (the [Start →] / PR [Fix →] button).
 
     Reuses the SAME start internals the Slack seam uses (task_start_core) — one source
     of truth. Grant model MIRRORS task creation exactly: the trusted proxy login IS the
@@ -656,6 +804,19 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
     permissive body-actor convention. Idempotent: an OPEN task already tracking `GH #N:`
     for this number is returned with {existing:true}. Optional assignee_agent_id assigns
     a live AI agent so the wake machinery fires; bare start = an unassigned 'ready' task.
+
+    PR dispatch (kind="pull") is CONTEXT-AWARE (founder decision): before creating the
+    task, this re-fetches the PR's live state from GitHub (_pull_fix_context — one PR +
+    one checks-rollup call, NOT the full detail/files fetch) and composes the DoD from
+    what's ACTUALLY outstanding right now (failing checks by name, pending count, review
+    -comment count, draft/mergeable_state) via _fix_description — never the frontend
+    -supplied fields, which the server already doesn't trust for identity either. If the
+    idempotency check finds an already-open GH task for this number, existing:true short
+    -circuits BEFORE this fetch ever happens (no wasted GitHub call on a re-click). If
+    the live re-fetch itself fails (rate limit, repo unreachable), the dispatch degrades
+    to the static generic DoD (dod_override stays None) rather than failing the whole
+    Start click over a context-enrichment nicety — a dispatched task with the generic DoD
+    beats no task at all.
     Returns {task_id, existing}.
     """
     if not valid_uuid(cid):
@@ -686,6 +847,18 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
                 raise HTTPException(409, "can only assign GitHub work to AI agents")
             assignee_id = body.assignee_agent_id
 
+        dod_override = None
+        if body.kind == "pull" and not find_open_gh_task(cur, cid, body.number):
+            cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
+            repo = cur.fetchone()["github_repo"]
+            token = _resolve_repo_token(repo) if repo else None
+            if token:
+                try:
+                    ctx = _pull_fix_context(repo, body.number, token)
+                    dod_override = _fix_description(**ctx)
+                except RuntimeError:
+                    pass   # live re-fetch failed — degrade to the generic static DoD
+
         result = start_task_from_github(
             cur,
             cid,
@@ -696,6 +869,7 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
             html_url=body.html_url or "",
             created_by_agent_id=created_by,
             assignee_agent_id=assignee_id,
+            dod_override=dod_override,
             source="github_hub",
         )
         conn.commit()

@@ -670,7 +670,7 @@ async def test_pull_detail_full_shape(client, container, token_env, monkeypatch)
         if path == "/repos/acme/site/pulls/12/files?per_page=100":
             return [
                 {"filename": "a.py", "additions": 10, "deletions": 2, "status": "modified",
-                 "patch": "@@ -1 +1 @@ ..."},   # patch present in raw; MUST be dropped
+                 "patch": "@@ -1 +1 @@ ..."},
                 {"filename": "b.py", "additions": 3, "deletions": 0, "status": "added"},
             ]
         raise AssertionError(f"unexpected path {path}")
@@ -707,14 +707,16 @@ async def test_pull_detail_full_shape(client, container, token_env, monkeypatch)
             "html_url": "http://b"} in runs
     assert {"name": "lint", "status": "in_progress", "conclusion": None,
             "html_url": "http://l"} in runs
-    # files: list only, count from GitHub's changed_files, NO patch leaked
+    # files: count from GitHub's changed_files, EACH file now carries its patch text
     assert pull["files"]["count"] == 2
     assert "truncated" not in pull["files"]  # count == items -> not truncated
+    assert "patches_truncated" not in pull["files"]   # well under budget -> not set
     assert pull["files"]["items"] == [
-        {"filename": "a.py", "additions": 10, "deletions": 2, "status": "modified"},
-        {"filename": "b.py", "additions": 3, "deletions": 0, "status": "added"},
+        {"filename": "a.py", "additions": 10, "deletions": 2, "status": "modified",
+         "patch": "@@ -1 +1 @@ ...", "patch_omitted": False},
+        {"filename": "b.py", "additions": 3, "deletions": 0, "status": "added",
+         "patch": None, "patch_omitted": True},
     ]
-    assert all("patch" not in f for f in pull["files"]["items"])
 
 
 async def test_pull_detail_files_truncated_flag(client, container, token_env, monkeypatch):
@@ -743,6 +745,135 @@ async def test_pull_detail_files_truncated_flag(client, container, token_env, mo
     assert files["count"] == 250           # honest total from changed_files
     assert len(files["items"]) == 100      # only the first page returned
     assert files["truncated"] is True
+    # files.truncated (too many FILES) is orthogonal to patches_truncated (too much PATCH
+    # TEXT) — none of this fixture's 100 files carry a patch, so every item is an honest
+    # GitHub-side omission, not a budget cut.
+    assert "patches_truncated" not in files
+    assert all(f["patch"] is None and f["patch_omitted"] is True for f in files["items"])
+
+
+# ------------------------- PR detail: per-file patch text (diff view) -----------------
+
+async def test_pull_detail_files_include_patch_text(client, container, token_env, monkeypatch):
+    """Each file in files.items now carries GitHub's raw unified-diff `patch` text (or
+    null when GitHub omits it) — the Files-changed tab's diff renderer input."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/12":
+            return _pr_object()
+        if path.startswith("/repos/acme/site/commits/"):
+            return {"statuses": [], "check_runs": []}
+        if path == "/repos/acme/site/pulls/12/files?per_page=100":
+            return [
+                {"filename": "a.py", "additions": 1, "deletions": 1, "status": "modified",
+                 "patch": "@@ -1,1 +1,1 @@\n-old\n+new"},
+            ]
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls/12")
+    item = r.json()["pull"]["files"]["items"][0]
+    assert item["patch"] == "@@ -1,1 +1,1 @@\n-old\n+new"
+    assert item["patch_omitted"] is False
+
+
+async def test_pull_detail_files_binary_omits_patch(client, container, token_env, monkeypatch):
+    """A binary (or GitHub-judged-too-large) file carries no `patch` key at all in GitHub's
+    response — the route must render that as an HONEST patch:null/patch_omitted:true, not
+    crash or silently fabricate an empty string."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/12":
+            return _pr_object()
+        if path.startswith("/repos/acme/site/commits/"):
+            return {"statuses": [], "check_runs": []}
+        if path == "/repos/acme/site/pulls/12/files?per_page=100":
+            # GitHub's real shape for a binary file: no "patch" key present at all.
+            return [
+                {"filename": "logo.png", "additions": 0, "deletions": 0, "status": "modified"},
+            ]
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls/12")
+    files = r.json()["pull"]["files"]
+    assert files["items"][0]["patch"] is None
+    assert files["items"][0]["patch_omitted"] is True
+    # a GitHub-side omission is NOT the same thing as a budget cut.
+    assert "patches_truncated" not in files
+
+
+async def test_pull_detail_files_patch_budget_truncates_in_order(
+        client, container, token_env, monkeypatch):
+    """When the summed patch text would exceed PATCH_BUDGET_BYTES, files are included IN
+    ORDER until the budget is hit; the rest get patch:null/patch_omitted:true and the
+    files object is marked patches_truncated:true (distinct from files.truncated, which is
+    about the file COUNT/pagination, not patch text size)."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    small_budget = 100
+    monkeypatch.setattr(hub, "PATCH_BUDGET_BYTES", small_budget)
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/12":
+            return _pr_object()
+        if path.startswith("/repos/acme/site/commits/"):
+            return {"statuses": [], "check_runs": []}
+        if path == "/repos/acme/site/pulls/12/files?per_page=100":
+            return [
+                {"filename": "a.py", "additions": 1, "deletions": 0, "status": "modified",
+                 "patch": "x" * 60},
+                {"filename": "b.py", "additions": 1, "deletions": 0, "status": "modified",
+                 "patch": "y" * 60},   # 60+60 > 100 -> this one gets cut
+                {"filename": "c.py", "additions": 1, "deletions": 0, "status": "modified",
+                 "patch": "z" * 10},   # every file after the cut is ALSO omitted
+            ]
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls/12")
+    files = r.json()["pull"]["files"]
+    items = files["items"]
+    assert items[0]["patch"] == "x" * 60 and items[0]["patch_omitted"] is False
+    assert items[1]["patch"] is None and items[1]["patch_omitted"] is True
+    assert items[2]["patch"] is None and items[2]["patch_omitted"] is True
+    assert files["patches_truncated"] is True
+    # file-count pagination truncation is untouched by the patch-text budget.
+    assert "truncated" not in files
+
+
+async def test_pull_detail_files_patch_budget_boundary_is_inclusive(
+        client, container, token_env, monkeypatch):
+    """Mutation-guard for the off-by-one at the budget boundary: a file whose patch fits
+    EXACTLY within the remaining budget is included, not omitted (the check is
+    `used + len(patch) > budget`, not `>=`)."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    monkeypatch.setattr(hub, "PATCH_BUDGET_BYTES", 10)
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/12":
+            return _pr_object()
+        if path.startswith("/repos/acme/site/commits/"):
+            return {"statuses": [], "check_runs": []}
+        if path == "/repos/acme/site/pulls/12/files?per_page=100":
+            return [
+                {"filename": "exact.py", "additions": 1, "deletions": 0,
+                 "status": "modified", "patch": "x" * 10},   # == budget exactly
+            ]
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls/12")
+    files = r.json()["pull"]["files"]
+    assert files["items"][0]["patch"] == "x" * 10
+    assert files["items"][0]["patch_omitted"] is False
+    assert "patches_truncated" not in files
 
 
 # ------------------------- rollup-helper sharing (mutation note) ----------------------
@@ -982,3 +1113,276 @@ async def test_issue_detail_trusted_member_ok(
     r = await client.get(f"/api/containers/{cid}/github/issues/1", headers=OCTO)
     assert r.status_code == 200, r.text
     assert r.json()["available"] is True
+
+
+# ===================================================================================
+# PR "Fix" dispatch: context-aware DoD (founder decision) — _fix_description is a pure
+# compose-from-already-fetched-shapes function; _pull_fix_context is the one PR + one
+# checks-rollup fetch that feeds it. Unit tests below pin the pure compose function
+# directly (fixture PRs: failing-checks-only / comments-only / conflicts / all-clean);
+# the integration test at the bottom exercises the full POST /github/start route with
+# _gh_get stubbed, proving the route actually wires the live re-fetch into the created
+# task's definition_of_done.
+# ===================================================================================
+
+def _fix_ctx(**overrides):
+    """A fully-specified, all-clean _fix_description kwargs dict — no failing/pending
+    checks, no review comments, not draft, mergeable_state clean. Each test overrides
+    only the field(s) it's pinning, so every fixture stays obviously scoped to the ONE
+    clause it's proving/disproving."""
+    base = dict(
+        number=42, title="Fix retry backoff", head="fix/retry-backoff", draft=False,
+        mergeable_state="clean",
+        checks={"passed": 3, "failing": 0, "pending": 0, "total": 3, "runs": [
+            {"name": "build", "status": "completed", "conclusion": "success"},
+        ]},
+        review_comments_count=0, comments_count=0,
+    )
+    base.update(overrides)
+    return base
+
+
+def test_fix_description_all_clean_uses_generic_fallback():
+    """Nothing outstanding -> the generic fallback sentence, never an empty
+    'Outstanding: .' line."""
+    desc = hub._fix_description(**_fix_ctx())
+    assert "Fix PR #42: Fix retry backoff." in desc
+    assert "review the pr's feedback and ci state and address anything outstanding" in desc.lower()
+    assert "Outstanding:" not in desc
+    assert "Push fixes to its branch fix/retry-backoff" in desc
+    assert "Never merge; stop for human review." in desc
+    assert "draft" not in desc.lower()
+
+
+def test_fix_description_failing_checks_only_lists_names():
+    """Failing-checks-only fixture: names the failing runs, omits every other clause
+    (no pending/review/conflict text leaking in)."""
+    ctx = _fix_ctx(checks={
+        "passed": 1, "failing": 2, "pending": 0, "total": 3,
+        "runs": [
+            {"name": "lint", "status": "completed", "conclusion": "failure"},
+            {"name": "unit-tests", "status": "completed", "conclusion": "failure"},
+            {"name": "build", "status": "completed", "conclusion": "success"},
+        ],
+    })
+    desc = hub._fix_description(**ctx)
+    assert "Outstanding: 2 failing checks: lint, unit-tests." in desc
+    assert "pending" not in desc.lower()
+    assert "review comment" not in desc.lower()
+    assert "conflict" not in desc.lower()
+
+
+def test_fix_description_failing_checks_caps_named_list_at_five():
+    """A PR with many failing checks names only the first 5 and summarizes the rest as
+    '+N more' rather than dumping an unbounded list into the DoD."""
+    runs = [{"name": f"job-{i}", "status": "completed", "conclusion": "failure"}
+            for i in range(8)]
+    ctx = _fix_ctx(checks={"passed": 0, "failing": 8, "pending": 0, "total": 8, "runs": runs})
+    desc = hub._fix_description(**ctx)
+    assert "8 failing checks: job-0, job-1, job-2, job-3, job-4, +3 more." in desc
+
+
+def test_fix_description_pending_checks_count_only_no_names():
+    """Pending checks are mentioned by COUNT only — GitHub hasn't told us an outcome
+    yet, so there's nothing more specific to name."""
+    ctx = _fix_ctx(checks={
+        "passed": 1, "failing": 0, "pending": 3, "total": 4,
+        "runs": [{"name": "e2e", "status": "in_progress", "conclusion": None}],
+    })
+    desc = hub._fix_description(**ctx)
+    assert "3 checks still pending" in desc
+    assert "e2e" not in desc   # no per-check naming for pending, unlike failing
+
+
+def test_fix_description_comments_only_uses_review_proxy():
+    """Unresolved-review-feedback-only fixture: review_comments_count + comments_count
+    sums into the 'review comments to address' clause; checks/conflict clauses absent."""
+    ctx = _fix_ctx(review_comments_count=4, comments_count=2)
+    desc = hub._fix_description(**ctx)
+    assert "Outstanding: 6 review comments to address." in desc
+    assert "failing" not in desc.lower()
+    assert "conflict" not in desc.lower()
+
+
+def test_fix_description_singular_wording_for_count_of_one():
+    """Mutation-guard for the singular/plural branch: count==1 must not read '1 checks'
+    or '1 review comments'."""
+    desc_check = hub._fix_description(**_fix_ctx(checks={
+        "passed": 0, "failing": 1, "pending": 0, "total": 1,
+        "runs": [{"name": "lint", "status": "completed", "conclusion": "failure"}],
+    }))
+    assert "1 failing check:" in desc_check and "1 failing checks:" not in desc_check
+    desc_review = hub._fix_description(**_fix_ctx(review_comments_count=1, comments_count=0))
+    assert "1 review comment to address" in desc_review and "1 review comments" not in desc_review
+
+
+def test_fix_description_conflicts_only_mentions_rebase():
+    """mergeable_state:'dirty' -> the merge-conflicts clause fires, naming rebase/conflict
+    resolution explicitly (per the founder's template shape)."""
+    desc = hub._fix_description(**_fix_ctx(mergeable_state="dirty"))
+    assert "merge conflicts with base" in desc.lower()
+    assert "rebase" in desc.lower() or "resolve conflicts" in desc.lower()
+    assert "failing" not in desc.lower()
+
+
+def test_fix_description_non_dirty_mergeable_states_omit_conflict_clause():
+    """Mutation-guard: only 'dirty' triggers the conflict clause — 'blocked'/'unstable'/
+    'unknown'/None must NOT (those mean something else in GitHub's vocabulary, not
+    'has conflicts with base')."""
+    for state in ("blocked", "unstable", "unknown", None, "behind"):
+        desc = hub._fix_description(**_fix_ctx(mergeable_state=state))
+        assert "conflict" not in desc.lower(), f"mergeable_state={state!r} wrongly triggered the conflict clause"
+
+
+def test_fix_description_draft_note_is_prefixed_not_folded_into_outstanding():
+    """draft:true adds its own note distinct from the 'Outstanding:' clause list (a draft
+    PR isn't 'outstanding work to fix' so much as 'not ready yet')."""
+    desc = hub._fix_description(**_fix_ctx(draft=True))
+    assert "This PR is a draft." in desc
+    assert "Outstanding:" not in desc   # still all-clean otherwise -> generic fallback
+
+
+def test_fix_description_combines_multiple_outstanding_clauses():
+    """All four signals present at once: every clause shows up, semicolon-joined, in a
+    single Outstanding: sentence — proves the clauses compose rather than only ever
+    firing one at a time."""
+    ctx = _fix_ctx(
+        draft=False, mergeable_state="dirty",
+        checks={"passed": 0, "failing": 1, "pending": 2, "total": 3,
+                "runs": [{"name": "lint", "status": "completed", "conclusion": "failure"}]},
+        review_comments_count=1, comments_count=0,
+    )
+    desc = hub._fix_description(**ctx)
+    assert "1 failing check: lint" in desc
+    assert "2 checks still pending" in desc
+    assert "1 review comment to address" in desc
+    assert "merge conflicts with base" in desc.lower()
+    # semicolon-joined, single sentence
+    assert desc.count("Outstanding:") == 1
+
+
+def test_fix_description_always_names_the_head_branch_and_never_merge_footer():
+    """The 'push to branch' + 'never merge, stop for human review' footer is unconditional
+    — present regardless of what's outstanding (or not)."""
+    for ctx in (_fix_ctx(), _fix_ctx(mergeable_state="dirty"), _fix_ctx(draft=True)):
+        desc = hub._fix_description(**ctx)
+        assert "Push fixes to its branch fix/retry-backoff." in desc
+        assert "Never merge; stop for human review." in desc
+
+
+# ------------------------- PR "Fix" dispatch: full route integration ------------------
+
+async def test_start_pull_uses_context_aware_dod_from_live_state(
+        client, container, token_env, monkeypatch):
+    """POST /github/start (kind=pull) re-fetches the PR's live state and composes the
+    context-aware DoD — NOT the generic static template — when a repo is bound and the
+    live re-fetch succeeds."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/77":
+            return {"number": 77, "title": "Add retry", "draft": False,
+                    "mergeable_state": "dirty", "head": {"ref": "feat/retry", "sha": "abc123"},
+                    "review_comments": 2, "comments": 1}
+        if path == "/repos/acme/site/commits/abc123/status":
+            return {"statuses": []}
+        if path == "/repos/acme/site/commits/abc123/check-runs":
+            return {"check_runs": [
+                {"name": "lint", "status": "completed", "conclusion": "failure",
+                 "html_url": "http://x"},
+            ]}
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "pull", "number": 77, "title": "stale frontend title"})
+    assert r.status_code == 201, r.text
+    tid = r.json()["task_id"]
+    listed = (await client.get(f"/api/containers/{cid}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["id"] == tid][0]
+    dod = t["definition_of_done"]
+    assert "1 failing check: lint" in dod
+    assert "3 review comments to address" in dod   # review_comments(2) + comments(1)
+    assert "merge conflicts with base" in dod.lower()
+    assert "fix/retry-backoff" not in dod   # NOT the frontend-supplied stale field
+    assert "feat/retry" in dod              # the LIVE re-fetched head branch
+    assert "Resolve CI failures / review feedback on PR #77" not in dod   # not the generic template
+
+
+async def test_start_pull_idempotent_skips_live_refetch(
+        client, container, token_env, monkeypatch):
+    """The idempotency short-circuit (an already-open GH task for this number) must skip
+    the live re-fetch entirely — a re-click on an already-tracked PR costs zero extra
+    GitHub calls. A REAL token is configured for BOTH calls here (token_env, unlike a
+    variant that stubs _resolve_repo_token to None) so a passing test can only mean the
+    `not find_open_gh_task(...)` guard itself did the skipping — not a token-resolution
+    short-circuit masking it. Mutation note: dropping that guard makes this test fail,
+    since the second call's _gh_get stub raises on ANY invocation."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = {"n": 0}
+
+    def fake_get(path, token):
+        calls["n"] += 1
+        raise AssertionError(f"unexpected _gh_get call: {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+
+    # Seed an "already open" pull task for #88 directly via find_open_gh_task's own
+    # idempotency key (title LIKE 'GH #88: %', a non-terminal status) using the plain
+    # task-creation API — deliberately NOT routing a real pull start through first,
+    # since that would exercise the untested code path (and cost a _gh_get call the
+    # stub above would reject).
+    seeded = await client.post(f"/api/containers/{cid}/tasks", json={
+        "title": "GH #88: seed", "description": "", "definition_of_done": "x",
+    })
+    assert seeded.status_code == 201, seeded.text
+    assert calls["n"] == 0
+
+    # NOW the real assertion: a pull start for #88 with a WORKING token configured must
+    # see existing:true and NEVER call _gh_get — the idempotency guard, not a disabled
+    # token, is what prevents the live re-fetch.
+    r2 = await client.post(f"/api/containers/{cid}/github/start",
+                           json={"kind": "pull", "number": 88, "title": "x"})
+    assert r2.status_code == 201, r2.text
+    assert r2.json()["existing"] is True
+    assert calls["n"] == 0
+
+
+async def test_start_pull_degrades_to_generic_dod_when_live_refetch_fails(
+        client, container, token_env, monkeypatch):
+    """If the live re-fetch itself fails (rate limit / repo unreachable), the Start click
+    still succeeds — falling back to the generic static DoD rather than failing the
+    whole dispatch over a context-enrichment nicety."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        raise RuntimeError("github_status:403")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "pull", "number": 99, "title": "x"})
+    assert r.status_code == 201, r.text
+    tid = r.json()["task_id"]
+    listed = (await client.get(f"/api/containers/{cid}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["id"] == tid][0]
+    assert "Resolve CI failures / review feedback on PR #99" in t["definition_of_done"]
+
+
+async def test_start_issue_dispatch_never_triggers_live_refetch(
+        client, container, token_env, monkeypatch):
+    """Mutation-guard: the context-aware re-fetch is PR-only (kind=pull) — an issue
+    dispatch must never call _gh_get at all, even with a repo bound and a token
+    resolvable, since issues keep their original generic DoD unchanged."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        raise AssertionError(f"issue dispatch must never call _gh_get: {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "issue", "number": 100, "title": "x"})
+    assert r.status_code == 201, r.text
