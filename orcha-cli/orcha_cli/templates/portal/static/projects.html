@@ -11,7 +11,7 @@
      --bg/--text in styles/tokens.css (classic) and styles/responsive.css (swiss);
      the inline override is cleared once real CSS is live (DOMContentLoaded) so
      theme switching keeps sole ownership of the canvas color. -->
-<script>(function(){try{var d=document.documentElement,t=localStorage.getItem('orcha:theme')||'auto',s=localStorage.getItem('orcha:skin'),b=localStorage.getItem('orcha:sidebar');d.setAttribute('data-theme',t);if(s&&s!=='classic')d.setAttribute('data-skin',s);if(b==='collapsed')d.setAttribute('data-sidebar','collapsed');var L=t==='light'||(t!=='dark'&&window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches),W=s==='swiss';d.style.backgroundColor=W?(L?'#f3f3f0':'#0e0e10'):(L?'#f3f6fa':'#0a0d12');d.style.color=W?(L?'#16161a':'#f2f2ee'):(L?'#0e1722':'#e8edf6');document.addEventListener('DOMContentLoaded',function(){d.style.backgroundColor='';d.style.color='';});}catch(e){document.documentElement.setAttribute('data-theme','auto');}})();</script>
+<script>(function(){try{var d=document.documentElement,t=localStorage.getItem('orcha:theme')||'auto',s=localStorage.getItem('orcha:skin'),b=localStorage.getItem('orcha:sidebar');d.setAttribute('data-theme',t);if(s&&s!=='classic')d.setAttribute('data-skin',s);if(b==='collapsed')d.setAttribute('data-sidebar','collapsed');var L=t==='light'||(t!=='dark'&&window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches),W=s==='swiss',M=s==='minimal';d.style.backgroundColor=M?(L?'#faf8f2':'#141414'):W?(L?'#f3f3f0':'#0e0e10'):(L?'#f3f6fa':'#0a0d12');d.style.color=M?(L?'#1a1a1a':'#f5f0e6'):W?(L?'#16161a':'#f2f2ee'):(L?'#0e1722':'#e8edf6');document.addEventListener('DOMContentLoaded',function(){d.style.backgroundColor='';d.style.color='';});}catch(e){document.documentElement.setAttribute('data-theme','auto');}})();</script>
 <link rel="stylesheet" href="/assets/styles/fonts.css">
 <link rel="stylesheet" href="/assets/styles/tokens.css">
 <link rel="stylesheet" href="/assets/styles/shell.css">
@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="/assets/styles/overlays.css">
 <link rel="stylesheet" href="/assets/styles/conversation.css">
 <link rel="stylesheet" href="/assets/styles/responsive.css">
+<link rel="stylesheet" href="/assets/styles/skin-minimal.css">
 <link rel="stylesheet" href="/assets/pages/projects.css">
 <!-- seamless nav (Chromium 121+): prerender same-origin link targets when the user
      hovers / presses a link ("moderate" eagerness), so the next page is already

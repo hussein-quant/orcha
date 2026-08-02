@@ -2,14 +2,17 @@
 /* ---- appearance: portal design (skin) picker --------------------------- *
  * Browser-local (localStorage "orcha:skin"), no API — mirrors the theme
  * toggle's contract. "classic" = the shipped teal look (no attribute);
- * "swiss" = the sharp indigo direction, applied as data-skin on <html>.
- * Every page's pre-paint <head> script reads the same key, so the pick
- * sticks across the whole portal with no flash. */
+ * "swiss" = the sharp indigo direction; "minimal" = the clean/gold direction —
+ * both applied as data-skin on <html>. Every page's pre-paint <head> script
+ * reads the same key, so the pick sticks across the whole portal with no
+ * flash. */
 const SKINS = [
   { id: "classic", name: "Classic", desc: "Teal accent, rounded corners, soft shadows — the original Orcha look.",
     sw: ["#111620", "#1fc7cd", "#f2a83c", "#e8edf6"] },
   { id: "swiss", name: "Swiss", desc: "Electric indigo, sharp corners, mono status chips — dense engineering grid.",
     sw: ["#151517", "#5a72ff", "#ff7a52", "#f2f2ee"] },
+  { id: "minimal", name: "Minimalist", desc: "clean · gold",
+    sw: ["#161616", "#c9a24b", "#f5f0e6", "#ffffff"] },
 ];
 function currentSkin() {
   try { const s = localStorage.getItem("orcha:skin"); return SKINS.some((k) => k.id === s) ? s : "classic"; }
