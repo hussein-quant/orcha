@@ -228,6 +228,111 @@ struct Palette {
         displayFamily = "Space Grotesk"
     }
 
+    /// Minimalist skin (portal `[data-skin="minimal"]` tokens 1:1, mig-045 web
+    /// parity): deep warm near-black / calm near-white surfaces, one champagne-
+    /// gold accent used sparingly, larger radii + hairline borders instead of
+    /// boxed shadows. UI face is the system font (SF Pro) — a deliberate
+    /// substitution for the web's self-hosted Hanken Grotesk, which can't be
+    /// bundled without shipping woff2/ttf; SF Pro is the native modern
+    /// equivalent, so `displayFamily` stays nil (see `uiFont`).
+    static let minimalDark: Palette = {
+        var p = Palette(
+            bg: Color(hex: 0x141414),
+            surface: Color(hex: 0x1B1B1A),
+            surface2: Color(hex: 0x212120),
+            surface3: Color(hex: 0x282826),
+            raised: Color(hex: 0x212120),
+            border: Color(hex: 0x322F2B),
+            border2: Color(hex: 0x3D3934),
+            text: Color(hex: 0xF5F0E6),
+            text2: Color(hex: 0xCEC7B8),
+            muted: Color(hex: 0x958D7D),
+            faint: Color(hex: 0x696153),
+            accent: Color(hex: 0xE7C368),
+            accentInk: Color(hex: 0x221B10),
+            accentSoft: Color(hex: 0xE7C368, alpha: 0.12),
+            accentLine: Color(hex: 0xE7C368, alpha: 0.34),
+            ok: Color(hex: 0x6FB894),
+            okSoft: Color(hex: 0x6FB894, alpha: 0.12),
+            okLine: Color(hex: 0x6FB894, alpha: 0.30),
+            info: Color(hex: 0x7EA3C9),
+            infoSoft: Color(hex: 0x7EA3C9, alpha: 0.12),
+            infoLine: Color(hex: 0x7EA3C9, alpha: 0.30),
+            warn: Color(hex: 0xCC9F5A),
+            warnSoft: Color(hex: 0xCC9F5A, alpha: 0.13),
+            warnLine: Color(hex: 0xCC9F5A, alpha: 0.32),
+            danger: Color(hex: 0xC97A72),
+            dangerSoft: Color(hex: 0xC97A72, alpha: 0.12),
+            dangerLine: Color(hex: 0xC97A72, alpha: 0.30),
+            violet: Color(hex: 0xA693C4),
+            violetSoft: Color(hex: 0xA693C4, alpha: 0.12),
+            violetLine: Color(hex: 0xA693C4, alpha: 0.30),
+            idle: Color(hex: 0x6E6558),
+            idleSoft: Color(hex: 0x6E6558, alpha: 0.16),
+            idleLine: Color(hex: 0x6E6558, alpha: 0.30),
+            isDark: true
+        )
+        p.applyMinimalTraits()
+        return p
+    }()
+
+    /// Minimalist light: calm near-white surfaces, the gold accent darkened
+    /// for AA text/interactive contrast (same relationship the web skin uses
+    /// between `--gold` and `--accent-text`).
+    static let minimalLight: Palette = {
+        var p = Palette(
+            bg: Color(hex: 0xFAF8F2),
+            surface: Color(hex: 0xFFFFFF),
+            surface2: Color(hex: 0xF6F3EC),
+            surface3: Color(hex: 0xF0EBE0),
+            raised: Color(hex: 0xFFFFFF),
+            border: Color(hex: 0xE7E0D2),
+            border2: Color(hex: 0xDCD3BF),
+            text: Color(hex: 0x1A1A1A),
+            text2: Color(hex: 0x423D33),
+            muted: Color(hex: 0x7C7264),
+            faint: Color(hex: 0xA49A89),
+            accent: Color(hex: 0x96721A),
+            accentInk: Color(hex: 0xFFFFFF),
+            accentSoft: Color(hex: 0x96721A, alpha: 0.10),
+            accentLine: Color(hex: 0x96721A, alpha: 0.32),
+            ok: Color(hex: 0x3F8462),
+            okSoft: Color(hex: 0x3F8462, alpha: 0.11),
+            okLine: Color(hex: 0x3F8462, alpha: 0.28),
+            info: Color(hex: 0x3F6C96),
+            infoSoft: Color(hex: 0x3F6C96, alpha: 0.10),
+            infoLine: Color(hex: 0x3F6C96, alpha: 0.26),
+            warn: Color(hex: 0x9C7218),
+            warnSoft: Color(hex: 0x9C7218, alpha: 0.12),
+            warnLine: Color(hex: 0x9C7218, alpha: 0.30),
+            danger: Color(hex: 0xA4483E),
+            dangerSoft: Color(hex: 0xA4483E, alpha: 0.10),
+            dangerLine: Color(hex: 0xA4483E, alpha: 0.26),
+            violet: Color(hex: 0x6F5A92),
+            violetSoft: Color(hex: 0x6F5A92, alpha: 0.11),
+            violetLine: Color(hex: 0x6F5A92, alpha: 0.26),
+            idle: Color(hex: 0x918879),
+            idleSoft: Color(hex: 0x918879, alpha: 0.13),
+            idleLine: Color(hex: 0x918879, alpha: 0.26),
+            isDark: false
+        )
+        p.applyMinimalTraits()
+        return p
+    }()
+
+    /// Web parity: larger radii (`.card` 18px, `.btn`/`.tag` 12px), pill text
+    /// stays normal case (only Swiss goes mono), flat elevation — no brand
+    /// radial glow and `box-shadow: none` on cards, same as the web's
+    /// `--shadow-sm` reduction + hairline-instead-of-boxed-border direction.
+    private mutating func applyMinimalTraits() {
+        radiusCard = 18
+        radiusButton = 12
+        radiusTag = 12
+        pillMono = false
+        flatChrome = true
+        displayFamily = nil
+    }
+
     /// Resolve for an explicit theme mode + skin; Auto resolves per system in
     /// views via the environment (see `OrchaThemed`).
     static func current(_ mode: ThemeMode, skin: SkinMode = .classic, systemDark: Bool = true) -> Palette {
@@ -239,6 +344,7 @@ struct Palette {
         return switch skin {
         case .classic: dark ? .dark : .light
         case .swiss: dark ? .swissDark : .swissLight
+        case .minimal: dark ? .minimalDark : .minimalLight
         }
     }
 }
