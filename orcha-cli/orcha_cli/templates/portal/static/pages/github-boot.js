@@ -54,6 +54,48 @@ function ghOpenDropdown(anchor, kind, number) {
   anchor.setAttribute("aria-expanded", "true");
 }
 
+/* ---------- PR "Fix" info popover (ⓘ) -----------------------------------
+   A SIBLING floating host to ghDdHost() above — same .pmenu.float idiom,
+   same outside-click/Escape close behavior, its own state so opening the
+   info popover and the assignee dropdown never fight over one host/element
+   (a founder could plausibly open one, then the other, in the same detail
+   view). Content is built from the SAME pull object already loaded for the
+   detail view (detailPayload.pull.pull, github-render.js's module state) —
+   no second fetch, no separate payload shape to keep in sync. */
+let infoEl = null, infoOpenFor = null;
+function ghInfoHost() {
+  if (infoEl) return infoEl;
+  infoEl = document.createElement("div");
+  infoEl.id = "ghFixInfoMenu"; infoEl.className = "pmenu float gh-fix-info-pop";
+  document.body.appendChild(infoEl);
+  document.addEventListener("click", (e) => {
+    if (!infoOpenFor || infoEl.contains(e.target)) return;
+    if (e.target.closest && e.target.closest("[data-gh-fix-info]")) return;   // toggle handles its own
+    ghCloseInfoPopover();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") ghCloseInfoPopover(); });
+  return infoEl;
+}
+function ghCloseInfoPopover() {
+  infoOpenFor = null;
+  if (infoEl) infoEl.classList.remove("show");
+  document.querySelectorAll("[data-gh-fix-info][aria-expanded='true']").forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+function ghOpenInfoPopover(anchor, number) {
+  const el = ghInfoHost();
+  const key = "pull:" + number;
+  if (infoOpenFor === key) { ghCloseInfoPopover(); return; }
+  infoOpenFor = key;
+  const p = detailPayload.pull && detailPayload.pull.__number === Number(number) ? detailPayload.pull.pull : null;
+  el.innerHTML = GhS.fixInfoPopoverBodyHtml(p || {});
+  const r = anchor.getBoundingClientRect();
+  el.style.top = Math.round(r.bottom + 6) + "px";
+  el.style.left = Math.round(Math.max(8, r.right - 260)) + "px";
+  el.style.right = "auto";
+  el.classList.add("show");
+  anchor.setAttribute("aria-expanded", "true");
+}
+
 /* ---------- routing (?pr=N / ?issue=N) ----------------------------------
    Client-side only — one MPA page (github.html) hosts both the list and every
    item's detail view, swapping via history.pushState so back/forward and a
@@ -80,12 +122,17 @@ function navigate(next, replace) {
   else history.pushState(null, "", u);
   route = next;
   detailSubTab = "conversation";
+  // a fresh item (or back to the list) needs its own skeleton: detailBooted
+  // is keyed per kind+number, so a brand-new number always shows one; ghSkeletonShow
+  // itself picks "detail-pane" vs "list-rows" off the JUST-updated route.
+  ghSkeletonShow();
   render(true);
   if (next.kind) loadDetail(false);
 }
 window.addEventListener("popstate", () => {
   route = readRouteFromUrl();
   detailSubTab = "conversation";
+  ghSkeletonShow();
   render(true);
   if (route.kind) loadDetail(false);
 });
@@ -96,6 +143,8 @@ Gh$("ghlist").addEventListener("click", (ev) => {
   if (start) { ev.stopPropagation(); postStart(start.getAttribute("data-gh-start"), Number(start.getAttribute("data-gh-number")), null, start); return; }
   const dd = ev.target.closest("[data-gh-start-dd]");
   if (dd) { ev.stopPropagation(); ghOpenDropdown(dd, dd.getAttribute("data-gh-start-dd"), Number(dd.getAttribute("data-gh-number"))); return; }
+  const fixInfo = ev.target.closest("[data-gh-fix-info]");
+  if (fixInfo) { ev.stopPropagation(); ghOpenInfoPopover(fixInfo, fixInfo.getAttribute("data-gh-fix-info")); return; }
   const ext = ev.target.closest("a.gh-open-ext, a.gh-crumb-back, a.dlink");
   if (ext) return;   // real external/back/task links — let the browser handle them
   const subtab = ev.target.closest("[data-gh-subtab]");
@@ -127,6 +176,12 @@ if (ghTabsBar) {
     if (!next || next === tab) return;
     tab = next; filter = "open";
     if (route.kind) navigate({ kind: null, number: null }, true);
+    // a tab switch back to the list route: only (re)show the skeleton if
+    // this tab has genuinely never settled — a tab visited earlier this
+    // session already has its payload cached (booted[] stays true forever
+    // once set), so re-flashing a skeleton over already-loaded data would be
+    // the exact "unnecessary shimmer" this gate is meant to avoid.
+    if (!route.kind && !booted[tab === "pulls" ? "pulls" : "issues"]) ghSkeletonShow();
     render(true);
     load(tab);
   });
@@ -146,20 +201,10 @@ if (ghSearchIn) {
 }
 
 /* ---------- boot ---------- */
-// Perceived-lag fix: the portal is an MPA, so every sidebar click is a full
-// navigation — this page boots empty until the first snapshot tick AND the
-// issues/pulls fetch both land. Show a skeleton in #ghlist right away
-// (OrchaSkeleton.show is delayed 120ms, so a fast local response never
-// flashes one), then swap() it for the real render once the active tab's
-// fetch settles (render()'s own booted[] gate — matches tasks-boot.js's
-// pattern; renderList() — the #ghlist patch — lives in github-render.js,
-// this render() owns shell mount + tab chrome + the skeleton swap itself).
-if (window.OrchaSkeleton) {
-  OrchaSkeleton.show(Gh$("ghlist"), "list-rows");
-}
 // initial route from whatever URL the page loaded with (deep link or a bare
-// /github visit) — read BEFORE the first render so a pr=/issue= deep link
-// skips the list entirely on first paint, never flashing the list first.
+// /github visit) — read BEFORE the first render/skeleton so a pr=/issue=
+// deep link skips the list entirely on first paint, never flashing the list
+// first.
 route = readRouteFromUrl();
 if (route.kind === "pull") tab = "pulls";
 else if (route.kind === "issue") tab = "issues";
@@ -171,6 +216,26 @@ else {
   const initialTab = new URL(location.href).searchParams.get("tab");
   if (initialTab === "pulls" || initialTab === "issues") tab = initialTab;
 }
+
+// Perceived-lag fix: the portal is an MPA, so every sidebar click is a full
+// navigation — this page boots empty until the first snapshot tick AND the
+// issues/pulls (or detail item) fetch lands. Show a skeleton in #ghlist right
+// away (OrchaSkeleton.show is delayed 120ms, so a fast local response never
+// flashes one), kind matched to the route we're ACTUALLY booting into — a
+// deep-linked ?pr=N gets "detail-pane", a bare list visit gets "list-rows" —
+// then swap() it for the real render once that route settles (render()'s own
+// booted[]/detailBooted[] gate — matches tasks-boot.js's pattern; renderList
+// ()/renderDetail() — the #ghlist patch — live in github-render.js, this
+// render() owns shell mount + tab chrome + the skeleton swap itself).
+// ghSkeletonShow() is also called on every client-side route change
+// (navigate()/popstate below) — swap() clears a container's skeleton state
+// once it fires, so a LATER navigation needs its own fresh show() call to
+// get a skeleton again rather than silently falling through to a no-op.
+function ghSkeletonShow() {
+  if (!window.OrchaSkeleton) return;
+  OrchaSkeleton.show(Gh$("ghlist"), route.kind ? "detail-pane" : "list-rows");
+}
+ghSkeletonShow();
 
 function render(force) {
   if (GhD() && GhD().container) {
@@ -192,6 +257,32 @@ function render(force) {
   if (filtersEl) filtersEl.innerHTML = route.kind ? "" : GhS.filterChipsHtml(tabKind(), filter);
 
   if (route.kind) {
+    // Skeleton-gated exactly like the list branch below: the detail route's
+    // own "have we settled at least once for THIS item" flag is keyed per
+    // kind+number (detailBooted, github-render.js) rather than per-kind, so
+    // navigating from an already-loaded item to a fresh one shows the
+    // skeleton again for the new fetch instead of reusing the old item's
+    // "already booted" state. Until settled, DO NOTHING here — the
+    // OrchaSkeleton.show() call at boot (below) already has a skeleton
+    // pending/showing on #ghlist, and calling renderDetail() early would
+    // patch over it with detailHtml()'s bare "Loading…" text, which is
+    // exactly the state-ordering bug this gate exists to prevent (mirrors
+    // the not-connected-card race on the list side, one function down).
+    const dKey = detailKey();
+    const bootKey = dKey + ":" + route.number;
+    const host = Gh$("ghlist");
+    const dSettled = (detailPayload[dKey] && detailPayload[dKey].__number === route.number)
+      || (detailError[dKey] && detailError[dKey].__number === route.number);
+    if (!detailBooted[bootKey]) {
+      if (dSettled && window.OrchaSkeleton) {
+        detailBooted[bootKey] = true;
+        OrchaSkeleton.swap(host, () => renderDetail(force));
+      } else if (dSettled) {
+        renderDetail(force);
+      }
+      // !dSettled: nothing to paint yet — leave the pending/showing skeleton alone.
+      return;
+    }
     renderDetail(force);
     return;
   }
@@ -199,12 +290,23 @@ function render(force) {
   const key = tab === "pulls" ? "pulls" : "issues";
   const host = Gh$("ghlist");
   const settled = payload[key] != null || loadError[key] != null;
-  if (!booted[key] && settled && window.OrchaSkeleton) {
-    booted[key] = true;
-    OrchaSkeleton.swap(host, () => renderList(force));
-  } else {
-    renderList(force);
+  if (!booted[key]) {
+    if (settled && window.OrchaSkeleton) {
+      booted[key] = true;
+      OrchaSkeleton.swap(host, () => renderList(force));
+    } else if (settled) {
+      renderList(force);
+    }
+    // !settled: nothing to paint yet — leave the pending/showing skeleton
+    // alone rather than falling through to renderList(), which would render
+    // bodyHtml()'s !state.repo -> emptyRepoHtml() branch (the "connect a
+    // repo" card) BEFORE the fetch has actually told us the repo isn't
+    // connected — a false-negative flash on every normal load, not just the
+    // not-connected case, since payload/loadError are both still null here
+    // regardless of which way the fetch eventually resolves.
+    return;
   }
+  renderList(force);
 }
 window.OrchaData.start(() => {
   render();

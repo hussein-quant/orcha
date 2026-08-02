@@ -62,6 +62,16 @@ let detailLoading = { pull: false, issue: false };
 let detailError = { pull: null, issue: null };
 let detailToken = 0;
 let detailSubTab = "conversation";
+// "kind:number" -> true once that item's detail route has been swapped past
+// its skeleton at least once (github-boot.js's render(), mirroring `booted`
+// above for the list tabs). Keyed per ITEM (not just per kind) so navigating
+// from an already-settled #12 to a fresh #99 shows the skeleton again for
+// #99 rather than reusing #12's "already booted" state — a new number is a
+// new fetch with its own loading gap. Never explicitly cleared: an old
+// number's entry simply stops being read once route.number moves on, and a
+// revisit within the same page session correctly skips the skeleton (the
+// payload is likely still cached from `detailPayload`'s own number check).
+let detailBooted = {};
 // route: {kind: null|"pull"|"issue", number: null|int} — derived from the URL
 // (?pr=N / ?issue=N) at boot and on every popstate; owned/updated by
 // github-boot.js's navigate()/readRouteFromUrl(), read here by loadDetail/
@@ -239,7 +249,13 @@ function loadDetail(force) {
       if (myToken !== detailToken) return;
       detailError[key] = { __number: number, kind: "error", status: 0, detail: e.message };
     })
-    .then(() => { if (myToken === detailToken) { detailLoading[key] = false; renderDetail(true); } });
+    // route through render() (github-boot.js), NOT renderDetail() directly —
+    // mirrors load()'s own render(true) call above. render() owns the
+    // skeleton-swap gate (detailBooted[]) the same way it owns booted[] for
+    // the list tabs; calling renderDetail() straight from here would patch
+    // real content into #ghlist without ever flipping detailBooted or
+    // running it through OrchaSkeleton.swap()'s cross-fade.
+    .then(() => { if (myToken === detailToken) { detailLoading[key] = false; render(true); } });
 }
 
 // #ghlist patch for the ACTIVE detail route — mirrors renderList's role but

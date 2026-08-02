@@ -72,6 +72,7 @@ const read = (...p) => fs.readFileSync(path.join(STATIC, ...p), "utf8");
 const STATE_JS = read("pages", "github-state.js");
 const RENDER_JS = read("pages", "github-render.js");
 const BOOT_JS = read("pages", "github-boot.js");
+const SKELETON_JS = read("modules", "app-skeleton.js");
 
 let failures = 0;
 function assert(cond, msg) {
@@ -116,6 +117,7 @@ class FakeElement {
   }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return this.attrs[k]; }
+  removeAttribute(k) { delete this.attrs[k]; }
   _rebuildChildrenFromHtml(html) {
     this.children = [];
     const re = /data-gh-open="([^"]+)"/g;
@@ -135,6 +137,13 @@ function clickOn(row) {
 }
 const flush = () => new Promise((r) => setImmediate(r));
 const settle = async (n) => { for (let i = 0; i < (n || 4); i++) await flush(); };
+// app-skeleton.js's show() schedules a REAL 130ms+ setTimeout before it
+// paints anything (SHOW_DELAY_MS=120) — this waits past that real delay (a
+// genuine timer wait, not a fake-timer skip, since the sandbox's setTimeout
+// IS Node's real setTimeout) so a test can observe the skeleton markup that
+// actually lands in the DOM, the same way a human waiting slightly over
+// 120ms would.
+const settleSkeleton = () => new Promise((r) => setTimeout(r, 150));
 
 /* Boots the REAL three files in REAL github.html script order against one
    fresh DOM + fetch stub. `fetchImpl(url)` mirrors the real endpoint shapes;
@@ -167,7 +176,13 @@ function boot(fetchImpl) {
 
   const sandbox = {
     console, document: documentShim, history: historyShim, location: locationShim, URL,
-    setInterval: () => 0, setTimeout: () => 0,
+    // REAL timers (not stubbed to a no-op 0): app-skeleton.js's show() relies
+    // on a genuine setTimeout(…, 120) to know a fast load never flashed a
+    // skeleton at all — see settleSkeleton() below, which advances past that
+    // delay with the SAME real-timer + flush pattern the rest of this file's
+    // settle() already uses for promise microtasks.
+    setInterval: () => 0, setTimeout, clearTimeout,
+    matchMedia: () => ({ matches: false }),   // reducedMotion() reads this; no-reduce by default
   };
   sandbox.window = sandbox;
   sandbox.window.addEventListener = () => {};
@@ -177,7 +192,6 @@ function boot(fetchImpl) {
     currentCid: () => "cid-1",
   };
   sandbox.window.ORCHA = { container: { id: "cid-1", name: "demo" }, agents: [] };
-  sandbox.window.OrchaSkeleton = { show() {}, swap(host, fn) { fn(); } };
   sandbox.fetch = fetchImpl;
   sandbox.globalThis = sandbox;
 
@@ -196,6 +210,13 @@ function boot(fetchImpl) {
   };
 
   vm.createContext(sandbox);
+  // the REAL app-skeleton.js — NOT a no-op stub. The whole point of this
+  // suite's skeleton-ordering assertions (below) is that the state-ordering
+  // bug (the not-connected/stale-list card racing ahead of real data) is
+  // only observable against the genuine show()/swap() timing contract; a
+  // stub that paints (or doesn't paint) unconditionally would hide exactly
+  // the regression class this file exists to catch.
+  vm.runInContext(SKELETON_JS, sandbox, { filename: "app-skeleton.js" });
   vm.runInContext(STATE_JS, sandbox, { filename: "github-state.js" });
   vm.runInContext(RENDER_JS, sandbox, { filename: "github-render.js" });
   let bootThrew = null;
@@ -260,12 +281,34 @@ async function clickNavigationTests() {
   assert(!clickThrew, "clicking a row's data-gh-open target does NOT throw (was: TypeError reading state.issue/.pull before the fetch resolves)");
   assert(getPushedUrl() === "https://orcha.nursoftai.com/github?issue=5", "the click pushes the ?issue=5 route to the URL");
   assert(ghHead.classList.contains("hidden"), "the tab/search header (#ghHead) hides for the detail route");
-  assert(ghlist.innerHTML.indexOf("Loading") !== -1, "while the detail fetch is in flight, #ghlist shows Loading… (not stale list rows, not a blank/broken page)");
-  assert(ghlist.innerHTML.indexOf("Something broke") === -1 || ghlist.innerHTML.indexOf("ghhead-row") === -1,
+
+  // Synchronously, right after the click — BEFORE OrchaSkeleton's own 120ms
+  // timer has had any chance to fire — render()'s detail-route gate must
+  // itself refrain from painting detailHtml()'s bare "Loading…" text (this
+  // is the assertion that actually exercises render()'s own gating logic,
+  // as distinct from the settleSkeleton() checks below, which would ALSO
+  // pass if render() painted "Loading…" first and the skeleton's
+  // independently-scheduled timer simply overwrote it moments later —
+  // mutation note: removing render()'s `!detailBooted[bootKey]` gate so it
+  // falls through to an unconditional renderDetail(force) call makes this
+  // specific assertion fail, since "Loading…" appears immediately rather
+  // than waiting for the skeleton).
+  assert(ghlist.innerHTML.indexOf("Loading") === -1,
+    "immediately after the click, BEFORE the skeleton's own timer fires, render() has NOT painted the bare 'Loading…' text itself");
+
+  // Skeleton-first ordering (founder feedback): while the detail fetch is in
+  // flight, #ghlist must NOT show the stale list markup — the real
+  // OrchaSkeleton.show() paints the shimmer after its genuine 120ms delay
+  // (settleSkeleton waits past that), never the bare "Loading…" text
+  // (github-boot.js's render() now leaves the pre-existing skeleton alone
+  // rather than falling through to renderDetail() before the item settles).
+  await settleSkeleton();
+  assert(ghlist.innerHTML.indexOf("ork-sk") !== -1, "while the detail fetch is in flight, #ghlist shows the skeleton shimmer (not stale list rows, not a blank/broken page)");
+  assert(ghlist.innerHTML.indexOf("Something broke") === -1 && ghlist.innerHTML.indexOf("ghhead-row") === -1,
     "the STALE list markup (column header + rows) is gone — the page did not get stuck showing the list under a hidden tab bar");
 
   // A 3s snapshot poll tick landing WHILE the detail fetch is still in
-  // flight must keep showing the detail route, never flash back to the list.
+  // flight must keep showing the skeleton/detail route, never flash back to the list.
   tick();
   assert(ghlist.innerHTML.indexOf("ghhead-row") === -1, "a poll tick mid-flight does not leak the list's column-header row back in");
 
@@ -324,15 +367,19 @@ async function staleDetailErrorTest() {
   await settle();
   assert(ghlist.innerHTML.indexOf("not found") !== -1, "item #7 (not_found) shows the not-found card");
 
-  // navigate to #5 (a real, valid item) — its OWN fetch hasn't resolved yet
-  // at the instant navigate() calls render(true) synchronously.
+  // navigate to #5 (a real, valid item) — its OWN fetch resolves via a
+  // normal (ungated, fast) promise in this fixture, so by the time either
+  // the skeleton's 120ms delay OR the fetch's own microtask settles, #5's
+  // real content may already have painted (the SAME "a fast load never
+  // flashes a skeleton at all" behavior every other OrchaSkeleton-using page
+  // gets) — settle() below waits for whichever wins that race. What must be
+  // true EITHER way: the previous item's stale "not found" card must be
+  // gone (no bleed-through), and #5's own detail is what's showing, not #7's.
   vm.runInContext('navigate({ kind: "issue", number: 5 })', sandbox);
-  assert(ghlist.innerHTML.indexOf("not found") === -1,
-    "navigating to a DIFFERENT item immediately clears the previous item's stale error (no bleed-through) — shows Loading… instead");
-  assert(ghlist.innerHTML.indexOf("Loading") !== -1, "item #5 shows Loading… immediately after navigate(), before its fetch settles");
-
   await settle();
-  assert(ghlist.innerHTML.indexOf("Something broke") !== -1, "item #5's real detail paints once its fetch resolves");
+  assert(ghlist.innerHTML.indexOf("not found") === -1,
+    "navigating to a DIFFERENT item clears the previous item's stale error (no bleed-through)");
+  assert(ghlist.innerHTML.indexOf("Something broke") !== -1, "item #5's real detail paints, not #7's stale error card");
 }
 
 /* ---------------- regression 3: checks/reviewers off the EXACT live shape -
@@ -425,10 +472,99 @@ function liveShapeChecksReviewersTest() {
     "PR #230's checks CHIP shows failing, not pending, once any check is failing (only one chip per row)");
 }
 
+/* ---------------- founder feedback: skeleton-first list state ordering ----
+   Reported live: on initial load the Issues/Pull requests list showed the
+   "not connected to GitHub" empty-state card by default, BEFORE the /issues
+   or /pulls fetch had actually told the page whether a repo is connected —
+   wrong state ordering (bodyHtml()'s `if (!state.repo) return
+   emptyRepoHtml()` fallback fires on a state that just hasn't loaded yet,
+   which reads identically to a genuinely disconnected repo).
+
+   Fix (github-boot.js's render()): the list branch no longer falls through
+   to renderList() at all while `!settled` (payload/loadError both still
+   null) — it leaves whatever OrchaSkeleton.show() already has pending/
+   showing alone instead. renderList()/bodyHtml() are now ONLY ever called
+   once a response has genuinely arrived (a real payload OR a real error),
+   so emptyRepoHtml() can only render off an ACTUAL reason:"repo_not_connected"
+   response, never off "nothing has loaded yet". This test proves the ordering
+   with a DELAYED fetch fixture — the exact shape that would have raced the
+   old bug — asserting skeleton -> rows with NO not-connected flash in
+   between, using the REAL app-skeleton.js module (not a stub), matching the
+   founder's own repro shape. */
+async function listSkeletonOrderingTest() {
+  console.log("\n-- founder feedback: list shows the skeleton first, never a premature not-connected flash --");
+  let releaseIssues;
+  const gate = new Promise((r) => { releaseIssues = r; });
+  const { ghlist, bootThrew } = boot((url) => {
+    if (/\/github\/issues$/.test(url)) {
+      return gate.then(() => ({
+        ok: true, status: 200,
+        json: () => Promise.resolve({
+          available: true, repo: "acme/demo",
+          issues: [{ number: 5, title: "Something broke", labels: [], assignee: null,
+            updated_at: "2026-08-01T00:00:00Z", html_url: "x" }],
+        }),
+      }));
+    }
+    return new Promise(() => {});
+  });
+  assert(!bootThrew, "github-boot.js boots without throwing (list-skeleton scenario)");
+
+  // Immediately after boot — BEFORE the /issues fetch has resolved, and
+  // BEFORE the skeleton's own 120ms delay has even elapsed — #ghlist must
+  // show NEITHER the not-connected card NOR any list rows (mutation note:
+  // reverting render()'s `!settled -> do nothing` gate back to an
+  // unconditional `renderList(force)` call makes this assertion fail
+  // immediately, since bodyHtml() would render emptyRepoHtml() off
+  // state.repo:null before any response has arrived).
+  assert(ghlist.innerHTML.indexOf("No GitHub repo connected") === -1,
+    "immediately after boot, BEFORE any response has arrived, the not-connected card is NOT rendered");
+  assert(ghlist.innerHTML.indexOf("ghhead-row") === -1,
+    "immediately after boot, no (empty/premature) list rows render either — nothing has loaded yet");
+
+  // Past the skeleton's real 120ms delay, still before the fetch resolves:
+  // the shimmer covers the gap, still no not-connected card.
+  await settleSkeleton();
+  assert(ghlist.innerHTML.indexOf("ork-sk") !== -1, "past the skeleton's genuine delay, the shimmer is what's showing");
+  assert(ghlist.innerHTML.indexOf("No GitHub repo connected") === -1,
+    "the skeleton shimmer, not the not-connected card, covers the gap while the fetch is still in flight");
+
+  // Now let the /issues fetch resolve — the real rows replace the skeleton,
+  // and the not-connected card never rendered at any point in between.
+  releaseIssues();
+  await settle();
+  assert(ghlist.innerHTML.indexOf("Something broke") !== -1, "once the fetch resolves, the real issue row paints");
+  assert(ghlist.innerHTML.indexOf("No GitHub repo connected") === -1,
+    "the not-connected card never rendered at any point during a normal (successful) load");
+}
+
+/* A genuine repo_not_connected response, by contrast, DOES render the card
+   — proving requirement (2)/(3) aren't satisfied by simply suppressing the
+   card outright; it must still appear for the response that actually means
+   it, just never as a stand-in for "no data yet". */
+async function listNotConnectedStillRendersOnRealResponseTest() {
+  console.log("\n-- a GENUINE repo_not_connected response still renders the connect-a-repo card --");
+  const { ghlist } = boot((url) => {
+    if (/\/github\/issues$/.test(url)) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({ available: false, reason: "repo_not_connected",
+          detail: "no GitHub repo is connected to this project" }),
+      });
+    }
+    return new Promise(() => {});
+  });
+  await settle();
+  assert(ghlist.innerHTML.indexOf("No GitHub repo connected") !== -1,
+    "a genuine available:false reason:\"repo_not_connected\" response still renders the connect-a-repo card once it actually arrives");
+}
+
 async function run() {
   await clickNavigationTests();
   await staleDetailErrorTest();
   liveShapeChecksReviewersTest();
+  await listSkeletonOrderingTest();
+  await listNotConnectedStillRendersOnRealResponseTest();
   if (failures) { console.error("\n" + failures + " failure(s)"); process.exit(1); }
   console.log("\nall github hub live-defect regression tests passed");
 }

@@ -45,13 +45,20 @@ _KIND_LABEL = {"issue": "issue", "pull": "pull request"}
 
 
 def build_task_fields(kind: str, number: int, gh_title: str, body_excerpt: str,
-                      html_url: str) -> dict:
+                      html_url: str, dod_override: str = None) -> dict:
     """Compose the {title, description, definition_of_done} an external GH trigger
     creates — the spec's templated shape. Pure (no DB), so tests can assert the copy
     directly and both trigger seams share one template. `kind` is 'issue' | 'pull'.
+
+    `dod_override`, when given, REPLACES the generic static `_PULL_DOD`/`_ISSUE_DOD`
+    template outright — the GitHub hub's PR "Fix" dispatch (github_hub_routes.py)
+    passes a context-aware DoD composed from the PR's actual live state (failing
+    checks by name, pending count, review-comment count, draft/mergeable_state) instead
+    of this generic fallback; the Slack seam and issue dispatches never pass one, so
+    their behavior is unchanged.
     """
     title = f"{GH_TITLE_PREFIX}{number}: {gh_title}".strip()
-    dod = (_PULL_DOD if kind == "pull" else _ISSUE_DOD).format(n=number)
+    dod = dod_override if dod_override else (_PULL_DOD if kind == "pull" else _ISSUE_DOD).format(n=number)
     excerpt = (body_excerpt or "").strip()
     parts = []
     if excerpt:
@@ -87,7 +94,7 @@ def find_open_gh_task(cur, container_id, number: int):
 def start_task_from_github(cur, container_id, *, kind: str, number: int,
                            gh_title: str, body_excerpt: str, html_url: str,
                            created_by_agent_id, assignee_agent_id=None,
-                           source: str = "github_hub"):
+                           source: str = "github_hub", dod_override: str = None):
     """Create (or idempotently return) the Orcha task for a GitHub issue/PR.
 
     Reuses create_task's DB mechanics verbatim. Returns
@@ -102,7 +109,8 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
     THIS container — the caller validates that before calling (mirroring create_task's
     assignee_alias resolution, but by id since the hub dropdown/Slack carry agent ids).
     `source` is a free-text provenance tag ('github_hub' | 'slack') recorded on the
-    audit + wake events so the two seams are distinguishable in the log.
+    audit + wake events so the two seams are distinguishable in the log. `dod_override`
+    passes straight through to build_task_fields — see that function's docstring.
 
     The caller owns the commit. Never commits or opens its own connection.
     """
@@ -113,7 +121,7 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
     if existing:
         return {"task_id": existing, "existing": True}
 
-    fields = build_task_fields(kind, number, gh_title, body_excerpt, html_url)
+    fields = build_task_fields(kind, number, gh_title, body_excerpt, html_url, dod_override)
 
     # Mirror create_task: an explicitly-assigned task starts 'in_progress' with
     # started_at stamped; an unassigned one lands 'ready' (Atlas routes it). No deps

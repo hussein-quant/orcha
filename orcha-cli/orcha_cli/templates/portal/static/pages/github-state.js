@@ -50,8 +50,14 @@
             created_at, html_url, mergeable_state, assignees[],
             requested_reviewers[], checks: {passed, failing, pending, total,
             runs:[{name, status, conclusion, html_url}]},
-            files: {count, items:[{filename, additions, deletions, status}],
-            truncated?}, comments_count, review_comments_count} }
+            files: {count, items:[{filename, additions, deletions, status,
+            patch, patch_omitted}], truncated?, patches_truncated?},
+            comments_count, review_comments_count} }
+       Each file's `patch` (GitHub's raw unified-diff hunk string) is null
+       when omitted (patch_omitted:true) — either GitHub itself never sent
+       one (binary/oversized single file) or the server's ~800KB total-patch
+       budget was hit (files.patches_truncated:true then, on top of the
+       per-file flag). See filesSectionHtml/fileRowHtml below.
      GET  /api/containers/{cid}/github/issues/{number}
        -> { available, repo, issue: {number, title, state, body_markdown,
             author_login, labels[{name,color}], assignee, assignees[],
@@ -208,6 +214,90 @@ window.OrchaGithubHub = (function () {
       </button>`).join("");
   }
 
+  // Dispatch-button label split (founder decision): a PR's button reads
+  // "Fix ->" (dispatching an agent onto an EXISTING PR's checks/review
+  // feedback reads differently from starting fresh work), an issue's stays
+  // "Start ->" (the original, unchanged framing — new work from scratch).
+  // Same POST /github/start body shape either way (data-gh-start carries the
+  // real `kind`, unchanged) — label/tooltip only, per kind.
+  function dispatchLabel(kind) {
+    return kind === "pull"
+      ? { label: "Fix", tooltip: "Dispatch an agent to fix checks/review feedback on this PR" }
+      : { label: "Start", tooltip: "Dispatch an agent to work on this issue" };
+  }
+
+  /* ---- PR "Fix" info popover: outstanding-items list ---------------------
+     Frontend mirror of github_hub_routes.py's _fix_description clause logic
+     (SAME signals, SAME priority order) — but returns an array of short
+     bullet strings for a popover list, not a single DoD sentence for a task.
+     Deliberately kept in lockstep with the backend's wording/thresholds (5
+     named failing checks + "+N more", singular/plural, "dirty" only for
+     conflicts) so the popover never promises the agent something the actual
+     dispatched task's DoD doesn't also say — see task_start_core.py's
+     dod_override wiring. `pull`: the SAME PR-detail object the page already
+     has loaded (pull.checks.runs, pull.mergeable_state, pull.draft,
+     pull.review_comments_count, pull.comments_count) — no extra fetch. */
+  function fixOutstandingItems(pull) {
+    pull = pull || {};
+    const checks = pull.checks || {};
+    const failing = checks.failing || 0;
+    const pending = checks.pending || 0;
+    const runs = checks.runs || [];
+    const FAIL_CONCLUSIONS = { failure: 1, timed_out: 1, action_required: 1, cancelled: 1, stale: 1, startup_failure: 1 };
+    const failingNames = runs
+      .filter((r) => r && r.status === "completed" && FAIL_CONCLUSIONS[r.conclusion])
+      .map((r) => r.name || "unnamed check");
+
+    const items = [];
+    if (failing) {
+      const shown = failingNames.slice(0, 5);
+      const more = failingNames.length - shown.length;
+      const names = shown.join(", ") + (more > 0 ? `, +${more} more` : "");
+      items.push(`${failing} failing check${failing !== 1 ? "s" : ""}` + (names ? `: ${names}` : ""));
+    }
+    if (pending) items.push(`${pending} check${pending !== 1 ? "s" : ""} still pending`);
+    const reviewTotal = (pull.review_comments_count || 0) + (pull.comments_count || 0);
+    if (reviewTotal) items.push(`${reviewTotal} review comment${reviewTotal !== 1 ? "s" : ""} to address`);
+    if (pull.mergeable_state === "dirty") items.push("merge conflicts with base — rebase or resolve conflicts");
+    if (pull.draft) items.push("this PR is a draft");
+    return items;
+  }
+
+  /* Rollup-only variant for a LIST row, which carries checksChipHtml's rollup
+     ({passed,failing,pending,total}) but NOT the per-run names/mergeable
+     -state/comment-count detail the full PR-detail payload has — a coarser
+     summary, not a fabricated detail the row's own payload doesn't carry.
+     Currently unused (the info-icon trigger ships on the PR DETAIL page only
+     — see fixInfoTriggerHtml's header note on why list rows are out of
+     scope for now); kept as the documented rollup-level fallback the
+     addendum calls for if a future pass adds the icon to list rows too. */
+  function fixOutstandingSummaryFromRollup(checks) {
+    const r = checks || {};
+    const failing = r.failing || 0, pending = r.pending || 0;
+    const items = [];
+    if (failing) items.push(`${failing} failing check${failing !== 1 ? "s" : ""}`);
+    if (pending) items.push(`${pending} check${pending !== 1 ? "s" : ""} still pending`);
+    return items;
+  }
+
+  /* The ⓘ trigger + its popover body, rendered INLINE next to the Fix button
+     (PR kind only — an issue's plain "Start" carries no outstanding-items
+     concept). data-gh-fix-info carries the PR number so github-boot.js's
+     click handler can look up the SAME already-loaded pull object (no second
+     fetch) and open the SAME .pmenu.float floating popover idiom the
+     assignee dropdown uses (ghOpenDropdown/ghDdHost, github-boot.js) — a
+     sibling host, not a duplicate implementation, see fixInfoPopoverBodyHtml. */
+  function fixInfoTriggerHtml(number) {
+    return `<button class="iconbtn sm gh-fix-info" type="button" data-gh-fix-info="${esc(number)}" aria-haspopup="true" aria-expanded="false" title="What will the dispatched agent do?" aria-label="What will the dispatched agent do?">${icon("info", "gl")}</button>`;
+  }
+  function fixInfoPopoverBodyHtml(pull) {
+    const items = fixOutstandingItems(pull);
+    const list = items.length
+      ? `<ul class="gh-fix-info-list">${items.map((it) => `<li>${esc(it)}</li>`).join("")}</ul>`
+      : `<p class="muted">Review the PR's feedback and CI state and address anything outstanding.</p>`;
+    return `<div class="pm-head plain">Fix dispatches an agent to:</div>${list}`;
+  }
+
   function startCellHtml(kind, item, taskState) {
     // taskState: null (not started) | {task_id, existing} (started this session or
     // resolved from a prior idempotent start — see github-render.js's local cache)
@@ -215,8 +305,9 @@ window.OrchaGithubHub = (function () {
       const href = "/tasks?task=" + encodeURIComponent(taskState.task_id);
       return `<a class="dlink gh-task-chip" href="${href}">${icon("tasks", "gl")}${esc(taskState.task_id)}${taskState.existing ? '<span class="gh-already">already tracked</span>' : ""}</a>`;
     }
+    const d = dispatchLabel(kind);
     return `<div class="gh-start-split">
-      <button class="btn approve sm gh-start" type="button" data-gh-start="${esc(kind)}" data-gh-number="${esc(item.number)}">Start ${icon("arrow", "gl")}</button>
+      <button class="btn approve sm gh-start" type="button" data-gh-start="${esc(kind)}" data-gh-number="${esc(item.number)}" title="${esc(d.tooltip)}" aria-label="${esc(d.tooltip)}">${esc(d.label)} ${icon("arrow", "gl")}</button>
       <button class="btn approve sm gh-start-dd" type="button" data-gh-start-dd="${esc(kind)}" data-gh-number="${esc(item.number)}" aria-haspopup="true" aria-expanded="false" title="Assign to an agent">${icon("chev", "gl")}</button>
     </div>`;
   }
@@ -381,8 +472,26 @@ window.OrchaGithubHub = (function () {
      window.Orcha isn't loaded, e.g. this bare-vm test harness), so body_markdown
      renders through the SAME renderer chat/task bodies use (headings, code,
      lists, blockquotes, tables, autolinks — the "Triggered-by" blockquote an
-     agent's PR/issue body carries renders naturally, no special-casing here). */
+     agent's PR/issue body carries renders naturally, no special-casing here).
+
+     renderDiff: the SAME unified-diff renderer the task run-stream's "code
+     diff" <details> uses (modules/app-patch-log.js's bare renderDiff, folded
+     into window.Orcha by app.js exactly like mdText/esc/icon above — every
+     portal page's <script> tags share one global scope, so this file reaches
+     it the identical way it reaches every other Orcha.* helper, never a
+     forked copy of the diff-classification logic). A GitHub PR file's `patch`
+     is already a raw unified-diff hunk string (no `diff --git`/`+++`/`---`
+     header lines — those are per-file metadata GitHub's files API doesn't
+     repeat inside `patch`), which renderDiff already handles: it only
+     special-cases `@@` (hunk) and leading `+`/`-` (add/del) lines and treats
+     everything else as context, so it needs no changes to serve this second
+     call site. The page-local fallback (bare-vm test harness / window.Orcha
+     absent) renders the RAW patch text escaped-but-unstyled rather than
+     silently dropping it, mirroring mdText's own esc(s) fallback above. */
   const mdText = (s) => (window.Orcha && window.Orcha.mdText) ? window.Orcha.mdText(s) : esc(s);
+  const renderDiff = (s) => (window.Orcha && window.Orcha.renderDiff)
+    ? window.Orcha.renderDiff(s)
+    : `<div class="diff"><div class="dl">${esc(s || "")}</div></div>`;
 
   function breadcrumbHtml(kind, number, repo) {
     // relative "?tab=..." replaces only the query string (keeps the path AND
@@ -452,30 +561,79 @@ window.OrchaGithubHub = (function () {
     return `<div class="gh-runs">${runs.map(runRowHtml).join("")}</div>`;
   }
 
-  function fileRowHtml(f) {
-    f = f || {};
-    const statusCls = f.status === "removed" ? "del" : f.status === "added" ? "add" : "mod";
-    return `<div class="gh-file-row">
-      <span class="tag gh-file-status ${statusCls}">${esc(f.status || "modified")}</span>
-      <span class="grow gh-file-name mono">${esc(f.filename || "")}</span>
-      <span class="gh-file-diff"><span class="add">+${esc(f.additions || 0)}</span> <span class="del">-${esc(f.deletions || 0)}</span></span>
-    </div>`;
+  /* ---- per-file diff body ---------------------------------------------
+     patch_omitted:true -> a quiet one-line note (binary/too-large OR this
+     file fell past the server's PATCH_BUDGET_BYTES cut — the payload gives
+     no way to tell those two apart, and the UI doesn't need to: either way
+     there's no diff to show here, so "view on GitHub" is the honest next
+     step). Otherwise the raw `patch` string renders through the SAME
+     renderDiff() the task run-stream's "code diff" uses (see the renderDiff
+     reach-through above this section) — never a forked diff renderer. */
+  function fileDiffBodyHtml(f, htmlUrl) {
+    if (f.patch_omitted) {
+      const link = htmlUrl
+        ? `<a href="${esc(htmlUrl)}" target="_blank" rel="noopener noreferrer">view on GitHub ${icon("ext", "gl")}</a>`
+        : "view on GitHub";
+      return `<div class="gh-file-omitted muted">diff not available (binary or too large) — ${link}</div>`;
+    }
+    return renderDiff(f.patch || "");
   }
 
-  function filesSectionHtml(files) {
+  /* ---- one collapsible file section --------------------------------------
+     <details>/<summary> — the SAME native collapsible idiom the task
+     run-stream's "code diff" and work-log sections use (modules/
+     app-run-stream.js, modules/conversation-render.js): free keyboard/
+     click toggle behavior, no bespoke JS wiring needed for expand/collapse,
+     and `open` is a plain boolean attribute so "first 3 expanded" is just
+     whether the caller passes expanded:true for this row's index. Header row
+     (native <summary>) carries the status chip, filename, +adds/-dels, and a
+     chevron glyph that CSS rotates off <details[open]> — same visual chevron
+     idiom as the assignee-dropdown toggle (icon("chev","gl")), not a second
+     bespoke glyph. */
+  function fileRowHtml(f, expanded, htmlUrl) {
+    f = f || {};
+    const statusCls = f.status === "removed" ? "del" : f.status === "added" ? "add" : "mod";
+    return `<details class="gh-file-row"${expanded ? " open" : ""}>
+      <summary class="gh-file-sum">
+        <span class="tag gh-file-status ${statusCls}">${esc(f.status || "modified")}</span>
+        <span class="grow gh-file-name mono">${esc(f.filename || "")}</span>
+        <span class="gh-file-diff"><span class="add">+${esc(f.additions || 0)}</span> <span class="del">-${esc(f.deletions || 0)}</span></span>
+        <span class="gh-file-chev">${icon("chev", "gl")}</span>
+      </summary>
+      <div class="gh-file-body">${fileDiffBodyHtml(f, htmlUrl)}</div>
+    </details>`;
+  }
+
+  // First 3 files expanded by default (a quick "what changed" glance without
+  // a click), the rest collapsed (a large PR's Files tab isn't a wall of
+  // diffs by default). `htmlUrl` (the PR's own html_url) threads through to
+  // the omitted-file "view on GitHub" link — GitHub has no per-file deep
+  // link in this payload, so the PR's own page is the honest fallback.
+  const FILES_EXPANDED_BY_DEFAULT = 3;
+  function filesSectionHtml(files, htmlUrl) {
     const f = files || {};
     const items = f.items || [];
     if (!items.length) return '<div class="none" style="padding:14px">No files changed.</div>';
-    return `<div class="gh-files">${items.map(fileRowHtml).join("")}
-      ${f.truncated ? `<div class="gh-files-more muted">Showing the first ${items.length} of ${esc(f.count)} files.</div>` : ""}</div>`;
+    return `<div class="gh-files">${items.map((it, i) => fileRowHtml(it, i < FILES_EXPANDED_BY_DEFAULT, htmlUrl)).join("")}
+      ${f.truncated ? `<div class="gh-files-more muted">Showing the first ${items.length} of ${esc(f.count)} files.</div>` : ""}
+      ${f.patches_truncated ? '<div class="gh-files-more muted">Some diffs were too large to show here — <a href="' + esc(htmlUrl || "#") + '" target="_blank" rel="noopener noreferrer">view the full diff on GitHub ' + icon("ext", "gl") + '</a>.</div>' : ""}</div>`;
   }
 
   /* ---- Start / Open-on-GitHub actions (detail header) — same postStart flow
      as the list rows, reusing startCellHtml/agentRosterHtml verbatim so the
      already-tracked state and the assignee dropdown stay ONE implementation. */
+  /* the ⓘ info popover trigger rides beside the Fix button ONLY while that
+     button itself is showing (not already-tracked, and PR-only — an issue's
+     "Start" has no outstanding-items concept to explain). Scope note: this
+     ships on the PR DETAIL page only (this call site) — list rows stay at
+     their existing compact row height without it; see the module header's
+     scope note near fixOutstandingItems for the rollup-level fallback a
+     future pass could use if list rows ever get it too. */
   function detailActionsHtml(kind, item, taskState) {
+    const showFixInfo = kind === "pull" && !(taskState && taskState.task_id);
     return `<div class="gh-detail-actions">
       ${startCellHtml(kind, item, taskState)}
+      ${showFixInfo ? fixInfoTriggerHtml(item.number) : ""}
       <a class="btn ghost sm gh-open-ext" href="${esc(item.html_url || "#")}" target="_blank" rel="noopener noreferrer">${icon("ext", "gl")}Open on GitHub</a>
     </div>`;
   }
@@ -548,7 +706,7 @@ window.OrchaGithubHub = (function () {
         </nav>
         <div class="card gh-subtab-body">
           ${activeSub === "checks" ? checksSectionHtml(pull.checks)
-            : activeSub === "files" ? filesSectionHtml(pull.files)
+            : activeSub === "files" ? filesSectionHtml(pull.files, pull.html_url)
             : `<div class="md gh-conversation-body">${mdText(pull.body_markdown || "")}</div>`}
         </div>
       </div>
@@ -642,9 +800,10 @@ window.OrchaGithubHub = (function () {
     checksChipHtml, mergeChipHtml, reviewersHtml, repoChipHtml, startCellHtml,
     agentRosterHtml, issueRowHtml, pullRowHtml, matchesFilter, matchesSearch,
     bodyHtml, filterChipsHtml, emptyRepoHtml, rateLimitHtml, genericErrorHtml,
-    columnHeaderHtml, labelChipHtml,
+    columnHeaderHtml, labelChipHtml, dispatchLabel,
     breadcrumbHtml, statePillHtml, branchChipsHtml, runRowHtml, checksSectionHtml,
     fileRowHtml, filesSectionHtml, detailActionsHtml, personListHtml, checksSummaryHtml,
     pullRailHtml, prDetailHtml, commentRowHtml, issueDetailHtml, detailNotFoundHtml, detailHtml,
+    fixOutstandingItems, fixOutstandingSummaryFromRollup, fixInfoTriggerHtml, fixInfoPopoverBodyHtml,
   };
 })();

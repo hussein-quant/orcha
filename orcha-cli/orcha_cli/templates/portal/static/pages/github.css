@@ -189,6 +189,21 @@
 .gh-detail-actions { display: flex; align-items: center; gap: 8px; }
 .btn.gh-open-ext { display: inline-flex; align-items: center; gap: 6px; }
 
+/* ---- PR "Fix" info popover trigger + body --------------------------------
+   .iconbtn.sm: a compact size variant of the shared shell.css .iconbtn (that
+   base rule is sized for the topbar's 36px theme toggle — too large sitting
+   inline beside the detail actions row's sm buttons), sized to match the
+   row's other sm controls. .gh-fix-info-pop reuses shell.css's .pmenu.float
+   idiom verbatim (own class only for host targeting in github-boot.js, not
+   its own visual rules) so every skin/theme token it needs comes for free —
+   see shell.css's .pmenu.float definition. */
+.iconbtn.sm { width: 26px; height: 26px; border-radius: 7px; }
+.iconbtn.sm svg { width: 14px; height: 14px; }
+.gh-fix-info-list { list-style: none; margin: 0; padding: 2px 4px 4px; display: flex; flex-direction: column; gap: 6px; }
+.gh-fix-info-list li { font-size: 12.5px; color: var(--text-2); line-height: 1.4; padding-left: 14px; position: relative; }
+.gh-fix-info-list li::before { content: ""; position: absolute; left: 2px; top: 7px; width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
+.gh-fix-info-pop p { margin: 2px 4px 4px; font-size: 12.5px; }
+
 /* ---- subtabs (Conversation / Checks / Files changed) --------------------
    reuses the .aut/.seg pill idiom (same active-state fix as #ghTabs). */
 .gh-subtabs { margin-bottom: 12px; }
@@ -210,10 +225,22 @@
 .gh-run-link:hover { color: var(--accent); }
 .gh-run-link .gl { width: 13px; height: 13px; }
 
-/* ---- files tab: changed-file rows ---------------------------------------- */
+/* ---- files tab: collapsible changed-file sections -------------------------
+   Each file is a native <details>/<summary> (the same collapsible idiom the
+   task run-stream's "code diff" and work-log sections use — modules/
+   app-run-stream.js, modules/conversation-render.js — free keyboard/click
+   toggle behavior, no bespoke JS wiring). .gh-file-row is the <details>
+   element itself; .gh-file-sum (the <summary>, browser-default-styled
+   otherwise) carries the row layout the old flat .gh-file-row rule used to —
+   status chip / filename / +adds -dels / chevron. The chevron rotates via
+   the native [open] state, same rotation idiom shell.css's collapsed-sidebar
+   toggle uses for its own chevron. */
 .gh-files { display: flex; flex-direction: column; gap: 2px; }
-.gh-file-row { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+.gh-file-row { border-bottom: 1px solid var(--border); font-size: 12.5px; }
 .gh-file-row:last-child { border-bottom: 0; }
+.gh-file-sum { display: flex; align-items: center; gap: 10px; padding: 7px 4px; cursor: pointer; list-style: none; }
+.gh-file-sum::-webkit-details-marker { display: none; }
+.gh-file-row:hover > .gh-file-sum { background: var(--hover); border-radius: 6px; }
 .gh-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gh-file-diff { flex: none; font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .gh-file-diff .add { color: var(--ok); }
@@ -221,7 +248,14 @@
 .tag.gh-file-status.add { color: var(--ok); border-color: var(--ok-line); background: var(--ok-soft); }
 .tag.gh-file-status.del { color: var(--danger); border-color: var(--danger-line); background: var(--danger-soft); }
 .tag.gh-file-status.mod { color: var(--text-2); }
+.gh-file-chev { flex: none; width: 13px; height: 13px; display: inline-flex; color: var(--faint); transform: rotate(-90deg); transition: transform .12s; }
+.gh-file-row[open] > .gh-file-sum .gh-file-chev { transform: rotate(0deg); }
+.gh-file-body { padding: 2px 4px 10px; }
+.gh-file-body .diff { max-height: 480px; margin: 0; }
+.gh-file-omitted { padding: 10px 12px; font-size: 12.5px; }
+.gh-file-omitted a { color: var(--accent); display: inline-flex; align-items: center; gap: 4px; }
 .gh-files-more { padding: 8px 4px 0; font-size: 11.5px; }
+.gh-files-more a { color: var(--accent); display: inline-flex; align-items: center; gap: 4px; }
 
 /* ---- right rail: status / assignees / reviewers / checks summary -------- */
 .gh-rail { display: flex; flex-direction: column; gap: 12px; }

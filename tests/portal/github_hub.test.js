@@ -416,6 +416,28 @@ function behaviorTests() {
   assert(/data-gh-start-dd="issue"/.test(startHtml), "the split [v] carries its own dropdown trigger data attrs");
   assert(startHtml.includes("Start"), "bare Start reads \"Start\" (unassigned — Atlas routes it per the spec)");
 
+  // ---- dispatch-button label split (founder decision): PR reads "Fix", issue stays
+  // "Start" — same data-gh-start POST wiring either way, label/tooltip only. Mutation
+  // note: swapping the two labels in dispatchLabel() flips both assertions below to RED.
+  const issueStartHtml = G.startCellHtml("issue", ISSUE_OPEN, null);
+  assert(/gh-start"[^>]*>Start\s/.test(issueStartHtml), "an ISSUE's dispatch button reads \"Start\"");
+  assert(!/gh-start"[^>]*>Fix\s/.test(issueStartHtml), "an ISSUE's dispatch button does NOT read \"Fix\"");
+  assert(/title="Dispatch an agent to work on this issue"/.test(issueStartHtml),
+    "an ISSUE's dispatch button carries the issue-specific tooltip/aria copy");
+
+  const pullFixHtml = G.startCellHtml("pull", PR_CLEAN, null);
+  assert(/gh-start"[^>]*>Fix\s/.test(pullFixHtml), "a PR's dispatch button reads \"Fix\" (not \"Start\")");
+  assert(!/gh-start"[^>]*>Start\s/.test(pullFixHtml), "a PR's dispatch button does NOT read \"Start\"");
+  assert(/title="Dispatch an agent to fix checks\/review feedback on this PR"/.test(pullFixHtml),
+    "a PR's dispatch button carries the PR-specific tooltip/aria copy");
+  assert(/data-gh-start="pull"/.test(pullFixHtml) && /data-gh-number="101"/.test(pullFixHtml),
+    "the PR Fix button still carries the SAME data-gh-start=\"pull\"+number wiring — label-only change, same POST /github/start behavior");
+
+  // the already-tracked task-id chip state is label-agnostic (same chip for both kinds)
+  const pullTrackedHtml = G.startCellHtml("pull", PR_CLEAN, { task_id: "t-999", existing: true });
+  assert(pullTrackedHtml.includes("t-999") && pullTrackedHtml.includes("already tracked"),
+    "a PR's already-tracked state renders the SAME task-id chip an issue's does (label split only touches the un-started button)");
+
   // ---- already-tracked / existing state ----
   const trackedHtml = G.startCellHtml("issue", ISSUE_OPEN, { task_id: "t-abc123", existing: false });
   assert(trackedHtml.includes("t-abc123") && trackedHtml.includes('href="/tasks?task=t-abc123"'),
