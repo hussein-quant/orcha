@@ -123,6 +123,18 @@ function moreBtn(kind, shown, total) {
 }
 
 /* ---------- roster ---------- */
+// A human member with a mapped GitHub identity (github_login) gets their real GitHub
+// profile picture — same convention as the Settings→Collaboration members list and the
+// topbar "ACTING AS" chip (memFace()/actingChipHtml(), both riding Orcha.ghAvatar()).
+// The image sits over the deterministic letter tile (ghAvatar()'s onerror drops the
+// broken <img>, revealing the letter beneath) — so a missing/offline avatar never blanks
+// the row. Agents (kind !== "human") and unmapped humans keep the plain letter avatar.
+function agentFace(a, size) {
+  return (a.kind === "human" && a.github_login)
+    ? AgeO.ghAvatar(a.github_login, size)
+    : AgeO.avatar(a.alias, a.kind, size);
+}
+
 function renderRoster() {
   const ags = AgeO.agents();
   // ISS-71 caveat (Forge): an agent with a backgrounded live terminal holds its single-flight
@@ -130,7 +142,7 @@ function renderRoster() {
   const liveSet = (window.OrchaTerm ? OrchaTerm.liveAgentIds() : []);
   AgeO.patch(Age$("roster"), `<div class="rh">${AgeO.icon("agents", "")}Roster · ${ags.length}<span style="flex:1"></span><a href="/onboarding?new=1" style="color:var(--accent);font-weight:650;text-transform:none;letter-spacing:0">+ New</a></div>` +
     ags.map((a) => `<button class="rrow ${a.alias === sel ? "sel" : ""}" data-alias="${AgeO.esc(a.alias)}">
-      ${AgeO.avatar(a.alias, a.kind, "")}
+      ${agentFace(a, "")}
       <span class="grow"><span class="nm">${AgeO.esc(a.alias)}</span><span class="rl">${AgeO.esc(a.role)}</span></span>
       ${ovrBadge(a)}
       ${embodBadge(a, liveSet)}
