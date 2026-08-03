@@ -302,3 +302,85 @@ def test_build_task_fields_dod_override_bypasses_triage_clause():
         "issue", 42, "title", "", "", dod_override="Custom DoD with no triage clause.",
     )
     assert fields["definition_of_done"] == "Custom DoD with no triage clause."
+
+
+# ------------------------- slack-captured task-first start -------------------------
+
+def test_build_slack_captured_dod_includes_file_issue_first_clauses():
+    """The new DoD variant for Slack-captured tasks (no GH issue exists yet at
+    creation time) must instruct the agent, in order: file a professional GitHub
+    issue first (imperative title, structured body, embed screenshots, quote the
+    reporter verbatim, provenance footer, post the link back to the task thread),
+    THEN post the triage comment on that issue, THEN implement per the standard
+    protocol (PR, never merge, human verifies)."""
+    dod = core.build_slack_captured_dod()
+    assert "file a professional github issue" in dod.lower()
+    assert "imperative" in dod.lower()
+    assert "screenshot" in dod.lower()
+    assert "verbatim" in dod.lower()
+    assert "post the new issue's link" in dod.lower() or "post the link" in dod.lower()
+    assert "triage comment" in dod.lower()
+    assert "never merge" in dod.lower() or "never merged" in dod.lower()
+    assert "human" in dod.lower()
+    # Ordering: the file-issue instruction must appear before the triage/implement
+    # instructions (agents read DoDs top to bottom as an ordered checklist).
+    file_idx = dod.lower().index("file a professional github issue")
+    triage_idx = dod.lower().index("triage comment")
+    assert file_idx < triage_idx
+
+
+async def test_start_task_from_slack_capture_creates_ready_task_with_raw_title(
+        client, container, make_agent, db):
+    """A Slack-captured task has no GH number — the title is the raw modal title,
+    unprefixed (never 'GH #N: ...', since find_open_gh_task's idempotency probe
+    must never accidentally match a slack-captured task)."""
+    member = await make_agent("reporter", kind="human")
+    from portal_backend.database import db_cursor
+    with db_cursor() as (conn, cur):
+        result = core.start_task_from_slack_capture(
+            cur, container["id"],
+            title="Login button is misaligned",
+            description="raw slack message text\n\n_Captured from Slack by reporter via Orcha_",
+            created_by_agent_id=member["agent_id"],
+            assignee_agent_id=None,
+        )
+        conn.commit()
+    assert result["existing"] is False
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["id"] == result["task_id"]][0]
+    assert t["title"] == "Login button is misaligned"
+    assert not t["title"].startswith("GH #")
+    assert t["status"] == "ready"  # unassigned -> Atlas routes it, same convention as create_task
+
+
+async def test_start_task_from_slack_capture_with_assignee_starts_in_progress(
+        client, container, make_agent, db):
+    """Mirrors start_task_from_github's assigned-vs-unassigned status convention."""
+    member = await make_agent("reporter", kind="human")
+    ai = await make_agent("atlas", kind="ai")
+    from portal_backend.database import db_cursor
+    with db_cursor() as (conn, cur):
+        result = core.start_task_from_slack_capture(
+            cur, container["id"],
+            title="Assigned capture",
+            description="body",
+            created_by_agent_id=member["agent_id"],
+            assignee_agent_id=ai["agent_id"],
+        )
+        conn.commit()
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["id"] == result["task_id"]][0]
+    assert t["status"] == "in_progress"
+    at = db.execute("SELECT agent_id FROM agent_tasks WHERE task_id=%s", (t["id"],))
+    assert str(at[0]["agent_id"]) == ai["agent_id"]
+
+
+def test_start_task_from_slack_capture_uses_slack_captured_dod_not_issue_dod():
+    """The new function must use the new DoD template, not the GH-issue one — a
+    slack-captured task has no GH issue yet, so the generic _ISSUE_DOD's 'post a
+    triage comment on GH issue #{n}' phrasing (which assumes a pre-existing numbered
+    issue) would be nonsensical here."""
+    import inspect
+    src = inspect.getsource(core.start_task_from_slack_capture)
+    assert "build_slack_captured_dod" in src
+    assert "_ISSUE_DOD" not in src
