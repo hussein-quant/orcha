@@ -249,6 +249,47 @@ def _excerpt(body) -> str:
     return (body or "")[:BODY_EXCERPT_CHARS]
 
 
+def _fetch_gh_item(cur, container_id, kind: str, number: int):
+    """Live-fetch a GitHub issue/PR's {title, html_url, body_excerpt} — the
+    AUTHORITATIVE source for a start's task copy (see `start_from_github`'s
+    docstring). Originally built for the Slack seam (which only ever gets a bare
+    number from Slack) and promoted here as the shared server-side source of truth
+    after a production defect: the hub's OWN frontend (`postStart` in
+    static/pages/github-render.js) never actually sends `title`/`body_excerpt`/
+    `html_url` in its POST body despite `GithubStartBody`'s docstring assuming it
+    does — every hub-started task (issue OR pull) was landing titled bare `GH #<N>:`
+    with nothing after. Rather than patch the frontend (still worth doing, but a
+    server-side authoritative fetch fixes EVERY caller — hub, Slack, any future
+    seam — in one place and can't regress the same way again), every dispatch path
+    now fetches the real title itself; a client-supplied title is only ever used as
+    the last-resort fallback when this live fetch fails.
+
+    Returns None on ANY failure (no bound repo, no installation token, GitHub
+    unreachable/rate-limited/404) — callers degrade to whatever fallback title they
+    have on hand (client-supplied, or a bare '#N') rather than fail the whole start;
+    neither the hub route nor Slack's 3s slash-command contract has room for a retry
+    loop.
+    """
+    cur.execute("SELECT github_repo FROM containers WHERE id=%s", (container_id,))
+    row = cur.fetchone()
+    repo = row["github_repo"] if row else None
+    if not repo:
+        return None
+    token = _resolve_repo_token(repo)
+    if not token:
+        return None
+    path = f"/repos/{repo}/pulls/{number}" if kind == "pull" else f"/repos/{repo}/issues/{number}"
+    try:
+        raw = _gh_get(path, token)
+    except RuntimeError:
+        return None
+    return {
+        "title": raw.get("title") or "",
+        "html_url": raw.get("html_url") or "",
+        "body_excerpt": _excerpt(raw.get("body")),
+    }
+
+
 def _issue_entry(issue: dict) -> dict:
     assignee = issue.get("assignee") or {}
     return {
@@ -861,6 +902,19 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
     to the static generic DoD (dod_override stays None) rather than failing the whole
     Start click over a context-enrichment nicety — a dispatched task with the generic DoD
     beats no task at all.
+
+    Title/body_excerpt/html_url are ALSO authoritatively live-fetched here
+    (`_fetch_gh_item`, shared with the Slack seam), for BOTH kinds, before every fresh
+    start — a production defect fix: the hub's OWN frontend (`postStart` in
+    static/pages/github-render.js) never actually sends these fields in its POST body
+    despite this schema's docstring assuming it does, so a client-supplied `body.title`
+    was silently empty on every real hub-started task, landing as a bare `GH #<N>:`
+    with nothing after. The client-supplied fields are now used ONLY as the fallback
+    when the live fetch itself fails (repo not bound, no token, GitHub
+    unreachable/rate-limited) — never as the primary source, mirroring the same
+    fail-open-to-a-degraded-but-real-title contract task_start_core.start_task_from_github
+    already has for a title-fetch failure. Skipped on an `existing:true` idempotency
+    hit (no wasted GitHub call re-rendering a task that already exists).
     Returns {task_id, existing}.
     """
     if not valid_uuid(cid):
@@ -891,26 +945,37 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
                 raise HTTPException(409, "can only assign GitHub work to AI agents")
             assignee_id = body.assignee_agent_id
 
+        gh_title, body_excerpt, html_url = body.title or "", body.body_excerpt or "", body.html_url or ""
         dod_override = None
-        if body.kind == "pull" and not find_open_gh_task(cur, cid, body.number):
-            cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
-            repo = cur.fetchone()["github_repo"]
-            token = _resolve_repo_token(repo) if repo else None
-            if token:
-                try:
-                    ctx = _pull_fix_context(repo, body.number, token)
-                    dod_override = _fix_description(**ctx)
-                except RuntimeError:
-                    pass   # live re-fetch failed — degrade to the generic static DoD
+        if not find_open_gh_task(cur, cid, body.number):
+            # Authoritative title/body/url — see this function's docstring. Fetched for
+            # BOTH kinds; the client-supplied body.* fields above are the fallback,
+            # used only if this fetch itself fails.
+            gh_item = _fetch_gh_item(cur, cid, body.kind, body.number)
+            if gh_item:
+                gh_title = gh_item["title"] or gh_title
+                body_excerpt = gh_item["body_excerpt"] or body_excerpt
+                html_url = gh_item["html_url"] or html_url
+
+            if body.kind == "pull":
+                cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
+                repo = cur.fetchone()["github_repo"]
+                token = _resolve_repo_token(repo) if repo else None
+                if token:
+                    try:
+                        ctx = _pull_fix_context(repo, body.number, token)
+                        dod_override = _fix_description(**ctx)
+                    except RuntimeError:
+                        pass   # live re-fetch failed — degrade to the generic static DoD
 
         result = start_task_from_github(
             cur,
             cid,
             kind=body.kind,
             number=body.number,
-            gh_title=body.title or "",
-            body_excerpt=body.body_excerpt or "",
-            html_url=body.html_url or "",
+            gh_title=gh_title,
+            body_excerpt=body_excerpt,
+            html_url=html_url,
             created_by_agent_id=created_by,
             assignee_agent_id=assignee_id,
             dod_override=dod_override,

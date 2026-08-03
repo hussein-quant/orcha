@@ -32,14 +32,43 @@ belongs — well within Slack's 3s response contract. A Slack-started task is
 byte-identical to a hub-started one: both call the one shared
 `task_start_core.start_task_from_github` (single source of truth), so the title
 (`GH #N: <the real GitHub title>`), the templated definition-of-done, and the audit
-trail match. The Slack seam does the ONE extra live GitHub fetch (issue/PR title +
-html_url + body excerpt) the hub gets for free from its frontend's already-loaded list
-row — a bare Slack number has no title to pass otherwise. If that fetch fails (repo
+trail match. The Slack seam does a live GitHub fetch (issue/PR title + html_url + body
+excerpt, `github_hub_routes._fetch_gh_item`) since a bare Slack number has no title to
+pass otherwise — a bare `#N` has no title to pass otherwise. If that fetch fails (repo
 not bound, no installation token, GitHub unreachable/rate-limited), the command still
 succeeds and degrades to the bare `#N` title rather than erroring the dispatch.
 
+**The hub's OWN `POST /github/start` does the SAME live fetch now, for both
+issue and pull starts** — a production defect fix: the hub frontend's `postStart()`
+(static/pages/github-render.js) never actually sent `title`/`body_excerpt`/`html_url`
+in its request body despite `GithubStartBody`'s docstring assuming it did, so every
+hub-started task was landing titled a bare `GH #<N>:` with nothing after. Both dispatch
+paths now go through the exact same `_fetch_gh_item`, so a hub-started task and a
+Slack-started task of the SAME GitHub item structurally cannot drift on title. The
+client-supplied `title`/`body_excerpt`/`html_url` fields remain in `GithubStartBody`
+purely as the fallback when the live fetch itself fails.
+
 **Inbound — `POST /api/slack/interactions`** (message shortcuts, modal submission,
 button clicks) — see "Creating issues from Slack" below.
+
+**Ack-first, work-after (interactions endpoint).** Every `/api/slack/interactions`
+payload type acks Slack's HTTP response IMMEDIATELY and does its actual work —
+`views.open`, GitHub calls, image downloads, task_start_core — in a background task
+scheduled only AFTER that response is already built:
+  - **shortcut/message_action**: an empty `200` returns first; `views.open` (the call
+    that visibly opens the modal) fires a beat later in the background. Slack shows
+    no "trouble connecting" banner even when the modal takes a moment to appear.
+  - **view_submission**: `{"response_action": "clear"}` returns first (closing the
+    modal); the WHOLE pipeline — AI title/body refinement, screenshot download +
+    GitHub commit, the issue POST itself, and (for "Create Orcha task") the chained
+    task start — runs in the background. The result (or an honest failure card) is
+    delivered afterward as a `chat.postMessage` DM to the submitting user.
+  - **block_actions** (the "Start Orcha task" button): a minimal, blocks-free
+    ephemeral acks immediately; the live GitHub title fetch + task_start_core call run
+    in the background, with the result card DMed to the clicking user.
+`/orcha issue` (the SLASH COMMAND) intentionally keeps its pre-existing synchronous,
+inline-reply contract — it does not do AI refinement and is not part of this
+ack-timing rework (see "AI-refined issue titles/bodies" below for why).
 
 **Outbound — needs_verification ping**: when a task transitions to `needs_verification`
 (the `plan`/`pr` autonomy default — an agent finished and a human must verify), and the
@@ -108,8 +137,45 @@ Both shortcuts share one modal layout (`slack_notify.build_create_issue_modal`);
 `view_submission` routes on the submitted view's own callback_id to either just file
 the issue, or file it AND start the task.
 
+### AI-refined issue titles/bodies (both message shortcuts only)
+
+Before filing, the modal's title/body (the user's own edits, if any — their intent is
+the input) are passed through the portal's existing universal LLM client
+(`llm_util`/`llm_catalog`/`llm_decisions` — the SAME provider-key resolution and
+model-selection convention `onboarding_routes.py` uses: a stored per-container
+`slack_issue_refine` model override, falling back to the shipped default (Haiku);
+`container_provider_keys`, falling back to `ORCHA_LLM_API_KEY`/the provider's own env
+var). The rewrite is a forced structured tool-call (`llm_decisions.refine_slack_issue`
+— the schema itself is what keeps this deterministic; the client has no separate
+temperature knob) that turns a raw pasted message like "Hey Kedar, have you noticed an
+issue on the android and iOS app we are not able" into an imperative, ≤80-char title
+and a `## Summary` / `## Observed` / `## Expected` / `## Technical context` markdown
+body — using ONLY facts the source message actually supports (the model is instructed
+to omit a section rather than invent repro steps, versions, or causes). The reporter's
+raw message ALWAYS survives verbatim under a `## Reporter's original message` heading,
+composed in Python (never left to the model), regardless of what the model returns.
+
+This runs entirely in the BACKGROUND pipeline (see "Ack-first, work-after" above) — the
+~20s worst-case model timeout was never safe to run inline. Fails closed on any error
+(no key configured, provider error, timeout): the RAW title/body are filed unchanged,
+and the confirmation card says "AI refinement unavailable" instead of "✨ AI-refined".
+The dispatched agent's own DoD (see "Codebase triage-first" below) is the deliberate
+second half of this division of labor: fast, cheap wording polish up front from the
+LLM refine pass (codebase-blind by design); real investigation from inside the repo
+once an agent actually picks the work up.
+
+**`/orcha issue` (the slash command) does NOT get this** — it keeps its pre-existing
+synchronous, 3s-budget, inline-reply contract, and an LLM call risks blowing that
+budget exactly the way this whole ack-timing fix exists to prevent. Backgrounding a
+slash command's reply is a differently-shaped change (Slack's `response_url` +
+"Working on it…" + `replace_original` idiom, not the `response_action`/DM idiom the
+interactions endpoint uses) — a documented follow-up, not shipped here. A member typing
+`/orcha issue <title>` is composing that title deliberately; raw is an acceptable
+default there.
+
 **Screenshots travel with the work.** If the source message carries images (the first
-5, `image/*` mimetypes only, each ≤5MB), they're downloaded and:
+5, `image/*` mimetypes only, each ≤10MB — see "Screenshot download hardening" below for
+why), they're downloaded and:
   - Committed into the connected repo under
     `.github/orcha-attachments/<issue-slug>/` via the GitHub Contents API and embedded
     as markdown images in the issue body (`### Screenshots` + one `![name](url)` per
@@ -128,6 +194,32 @@ add the files:read scope and reinstall the App"). Any per-image failure (downloa
 GitHub commit, or task-attach) is isolated to that one file — one bad screenshot never
 fails the whole issue/task creation — and the confirmation card's screenshot count is
 always honest about how many actually landed (e.g. "2/3 screenshots attached").
+
+**Card honesty widened (issue #234 follow-up):** the confirmation card now states an
+outcome whenever the source message carried ANY candidate images — not just when at
+least one survived the pre-download selection filter. A message whose screenshots were
+ALL filtered out (over the size cap, wrong mimetype) used to produce a card with no
+screenshot note at all, indistinguishable from a plain-text message that never had any
+— it now says "N screenshots were skipped — too large or not an image" instead.
+
+**Screenshot download hardening (task 394d1063):** a production incident landed two
+"screenshots" that were actually Slack's own HTML page saved with a `.png` name —
+`url_private_download` answered HTTP 200 (not 401/403) when the bot token wasn't
+effectively authorizing the request, and the pipeline accepted any 200 as image bytes.
+Root cause: a redirect hop on Slack's download flow was dropping the `Authorization`
+header (the stdlib's default redirect handling does not guarantee a custom header
+survives a cross-host 30x). Fixed two ways, independent of each other:
+  - `slack_files.download_slack_file` now uses an explicit redirect handler
+    (`_AuthPreservingRedirectHandler`) that re-attaches the same Authorization header
+    on every hop.
+  - Every download is validated before being accepted as a screenshot: the response
+    `Content-Type` must be `image/*`, AND the downloaded bytes' own magic-number
+    signature must match a real image format (PNG/JPEG/GIF/WebP) — an HTTP 200 with an
+    HTML (or any other non-image) body is now treated as a download failure, counted
+    honestly in the skip total, never stored or embedded.
+The per-file selection cap was also raised from 5MB to **10MB** (matching the
+task-attachment store's own `MAX_ATTACHMENT_BYTES` ceiling) — full-resolution
+phone/desktop screenshots routinely exceed 5MB, and the old cap silently dropped them.
 
 ### App-config steps for the message shortcuts
 
@@ -260,6 +352,21 @@ frontend's surface; the column and the mapping are here.)
   request landing there still must pass the app-level signature check above before any
   work happens; the bypass only lets that check run at all.
 
+## Codebase triage-first (all GitHub-originated ISSUE tasks)
+
+Every issue-kind task's `definition_of_done` (`task_start_core._ISSUE_DOD` — shared by
+the hub's Start button, `/orcha start issue <N>`, and both message shortcuts' chained
+"Create Orcha task" flow) now opens with an explicit instruction: before writing any
+code, post a triage comment on the GitHub issue with codebase-grounded analysis — the
+specific modules/files involved, the most likely cause ranked against the actual code,
+and what logs/repro would confirm it. This is the deliberate second half of the AI
+issue-refinement division of labor: the LLM refine pass polishes WORDING in seconds and
+is codebase-blind by design (it never sees the repo); the dispatched agent is the one
+with actual repo access, so its first move is real investigation from inside the code,
+not more wording. PR/Fix tasks (`_PULL_DOD`, and any `dod_override` the hub's PR-Fix
+path supplies) are unchanged — a PR is reacting to CI/review feedback on code that
+already exists, not triaging a fresh report.
+
 ## Cross-seam consistency: the hub also knows about a Slack start
 
 Because a Slack start and a hub start share the same `task_start_core` internals, the
@@ -279,21 +386,35 @@ core exists to guarantee.
   issue`), member mapping, the live GitHub title fetch for `/orcha start`, GitHub
   issue creation (`create_github_issue`, `_gh_post_issue`), the Contents-API
   screenshot commit (`_gh_put_contents`, `_commit_images_to_repo`,
-  `_embed_images_markdown`), the shortcut/modal/view_submission/block_actions
-  handlers, and task-attachment landing (`_land_images_on_task`).
+  `_embed_images_markdown`), AI issue refinement (`_refine_issue_for_filing`), the
+  ack-first shortcut/view_submission/block_actions split (`_prepare_interaction`,
+  `_build_shortcut_modal_view`/`_open_modal_background`,
+  `_prepare_view_submission`/`_run_view_submission_pipeline`,
+  `_prepare_block_action`/`_run_block_action_pipeline`, all scheduled through the ONE
+  `_schedule_background` seam), the shortcut-time per-file verdict instrumentation
+  (`_log_shortcut_file_verdicts`), the private_metadata byte-budget guard
+  (`_private_metadata_files`), and task-attachment landing (`_land_images_on_task`).
 - `portal_backend/slack_notify.py` — the Block Kit composers (inbound ephemeral
   replies, modal views, and the outbound ping) + the non-fatal outbound webhook POST +
   `call_slack_api` (the authenticated Slack Web API leaf for `views.open`/
   `views.update`/`chat.postMessage`).
-- `portal_backend/slack_files.py` — Slack message-file selection (count/mimetype/size
-  filtering) and download (`files:read`-gated, with the scope-missing degradation
-  path).
+- `portal_backend/slack_files.py` — Slack message-file selection
+  (count/mimetype/size filtering, `select_image_files_verdicts` for the per-file
+  instrumentation) and download (`files:read`-gated, with the scope-missing
+  degradation path; `_AuthPreservingRedirectHandler` + Content-Type/magic-byte
+  validation per the task 394d1063 hardening).
 - `portal_backend/task_start_core.py` — the shared start internals (also used by the
   GitHub hub and the "Create Orcha task" shortcut): task creation/idempotency, the
-  batched `find_open_gh_tasks` tracked-state lookup, and the non-fatal GitHub
-  round-trip comment.
+  batched `find_open_gh_tasks` tracked-state lookup, the non-fatal GitHub round-trip
+  comment, and the codebase-triage-first `_ISSUE_DOD` clause.
+- `orcha_cli/llm_catalog.py` / `llm_decisions.py` / `llm_util.py` — the
+  `slack_issue_refine` use case (model default, Settings registry entry) and
+  `refine_slack_issue` (the fail-closed structured-output rewrite), reusing the SAME
+  provider-neutral client every other LLM use case in the portal goes through.
 - `portal_backend/github_hub_routes.py` — `tracked_task_id` on the issues/pulls list
-  and detail endpoints (`_with_tracked_list`/`_with_tracked_one`).
+  and detail endpoints (`_with_tracked_list`/`_with_tracked_one`); the authoritative
+  server-side title/body/url fetch (`_fetch_gh_item`, shared with `slack_routes.py`)
+  `POST /github/start` now runs for both issue and pull dispatches.
 - `portal_backend/attachment_references.py` / `attachment_storage.py` — the existing
   task-attachment store/ref machinery the screenshot-landing path reuses in-process
   (same store `POST /api/tasks/{tid}/attachments` writes to).
@@ -307,3 +428,20 @@ core exists to guarantee.
 - Tests: `tests/test_slack_routes.py`, `tests/test_slack_files.py`,
   `tests/test_task_start_core.py`, `tests/test_github_hub_routes.py`,
   `tests/portal/github_hub_live_defects.test.js`.
+
+## Known follow-up (not shipped here)
+
+`/orcha issue` (the slash command) does not get AI refinement — see "AI-refined issue
+titles/bodies" above for the reasoning (backgrounding a slash command's reply needs
+Slack's `response_url` idiom, a differently-shaped change from the interactions
+endpoint's `response_action`/DM idiom this PR adds). A future PR could add it.
+
+A `conversations.history` fallback for message-shortcut screenshot handling (in case a
+future incident shows Slack ever delivers a `message_action` payload with a TRIMMED
+`files[]` array, requiring a follow-up fetch) was considered and explicitly deferred —
+task 394d1063's actual root cause turned out to be the redirect/auth-header bug fixed
+above, not payload trimming, so no evidence currently supports adding the extra
+`channels:history`/`groups:history` scope this would require. Revisit only if a
+production repro specifically shows an empty `files[]` on a message that demonstrably
+had attachments (the per-file verdict logging added in this change would surface that
+distinction immediately).

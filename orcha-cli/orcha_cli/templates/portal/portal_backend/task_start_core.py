@@ -51,7 +51,10 @@ GH_TITLE_PREFIX = "GH #"
 _OPEN_STATUSES = ("pending", "ready", "not_ready", "in_progress", "needs_verification")
 
 _ISSUE_DOD = (
-    "Fix GH #{n} per its description. Open a PR referencing #{n}. "
+    "Before implementing: post a triage comment on GH issue #{n} with codebase-grounded "
+    "analysis — the specific modules/files involved, the most likely cause ranked "
+    "against the actual code, and what logs/repro would confirm it. Then proceed to "
+    "the fix. Fix GH #{n} per its description. Open a PR referencing #{n}. "
     "Fresh-session review, then human review. Never merge."
 )
 _PULL_DOD = (

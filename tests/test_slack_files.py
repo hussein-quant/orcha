@@ -8,9 +8,63 @@ import pytest
 
 from portal_backend import slack_files
 
+_PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"restofpngdata"
+
 
 def _file(name="shot.png", mimetype="image/png", size=1024, url="https://files.slack.com/x/download"):
     return {"name": name, "mimetype": mimetype, "size": size, "url_private_download": url}
+
+
+class _FakeResponse:
+    """A minimal `http.client.HTTPResponse`-shaped stand-in for
+    `download_slack_file`'s `opener.open(...)` context-manager usage — carries a body
+    and a `headers.get(...)`-capable header mapping (real HTTPMessage supports the
+    same `.get`)."""
+
+    def __init__(self, body: bytes, content_type: str = "image/png"):
+        self._body = body
+        self.headers = {"Content-Type": content_type} if content_type is not None else {}
+
+    def read(self, n=-1):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeOpener:
+    """Stand-in for `urllib.request.build_opener(...)`'s return value — captures the
+    `Request` it was asked to open (for header/URL assertions) and returns a
+    caller-supplied fake response or raises a caller-supplied exception."""
+
+    def __init__(self, respond=None, raise_exc=None, captured: dict = None):
+        self._respond = respond
+        self._raise_exc = raise_exc
+        self._captured = captured if captured is not None else {}
+
+    def open(self, request, timeout=None):
+        self._captured["headers"] = dict(request.header_items())
+        self._captured["url"] = request.full_url
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return self._respond
+
+
+def _patch_opener(monkeypatch, *, respond=None, raise_exc=None, captured: dict = None):
+    """Patch `slack_files.urllib.request.build_opener` (the seam `download_slack_file`
+    now uses, via `_AuthPreservingRedirectHandler`, instead of the bare
+    `urllib.request.urlopen` the pre-redirect-fix code called directly) to return a
+    `_FakeOpener` wired to the given response/exception. Returns the `captured` dict
+    the fake opener records the outgoing request's headers/URL into."""
+    captured = captured if captured is not None else {}
+    monkeypatch.setattr(
+        slack_files.urllib.request, "build_opener",
+        lambda *handlers: _FakeOpener(respond=respond, raise_exc=raise_exc, captured=captured),
+    )
+    return captured
 
 
 # ------------------------- select_image_files: filtering -------------------------
@@ -68,31 +122,23 @@ class _FakeHTTPError(urllib.error.HTTPError):
 
 
 def test_download_slack_file_403_raises_scope_missing(monkeypatch):
-    def fake_urlopen(request, timeout=None):
-        raise _FakeHTTPError(403)
-
-    monkeypatch.setattr(slack_files.urllib.request, "urlopen", fake_urlopen)
+    _patch_opener(monkeypatch, raise_exc=_FakeHTTPError(403))
     with pytest.raises(slack_files.SlackFilesScopeMissing):
         slack_files.download_slack_file("https://files.slack.com/x", "xoxb-test")
 
 
 def test_download_slack_file_401_raises_scope_missing(monkeypatch):
-    def fake_urlopen(request, timeout=None):
-        raise _FakeHTTPError(401)
-
-    monkeypatch.setattr(slack_files.urllib.request, "urlopen", fake_urlopen)
+    _patch_opener(monkeypatch, raise_exc=_FakeHTTPError(401))
     with pytest.raises(slack_files.SlackFilesScopeMissing):
         slack_files.download_slack_file("https://files.slack.com/x", "xoxb-test")
 
 
 def test_download_slack_file_404_raises_plain_runtime_error(monkeypatch):
-    def fake_urlopen(request, timeout=None):
-        raise _FakeHTTPError(404)
-
-    monkeypatch.setattr(slack_files.urllib.request, "urlopen", fake_urlopen)
+    _patch_opener(monkeypatch, raise_exc=_FakeHTTPError(404))
     with pytest.raises(RuntimeError):
         slack_files.download_slack_file("https://files.slack.com/x", "xoxb-test")
     # NOT the scope-missing subtype for a 404.
+    _patch_opener(monkeypatch, raise_exc=_FakeHTTPError(404))
     try:
         slack_files.download_slack_file("https://files.slack.com/x", "xoxb-test")
     except slack_files.SlackFilesScopeMissing:
@@ -102,44 +148,84 @@ def test_download_slack_file_404_raises_plain_runtime_error(monkeypatch):
 
 
 def test_download_slack_file_sends_bearer_auth(monkeypatch):
-    captured = {}
-
-    class _Resp:
-        def read(self, n=-1):
-            return b"\x89PNG-bytes"
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    def fake_urlopen(request, timeout=None):
-        captured["headers"] = dict(request.header_items())
-        captured["url"] = request.full_url
-        return _Resp()
-
-    monkeypatch.setattr(slack_files.urllib.request, "urlopen", fake_urlopen)
+    captured = _patch_opener(
+        monkeypatch, respond=_FakeResponse(_PNG_BYTES, content_type="image/png"),
+    )
     data = slack_files.download_slack_file("https://files.slack.com/x/download", "xoxb-secret")
-    assert data == b"\x89PNG-bytes"
+    assert data == _PNG_BYTES
     assert captured["headers"]["Authorization"] == "Bearer xoxb-secret"
     assert captured["url"] == "https://files.slack.com/x/download"
 
 
 def test_download_slack_file_empty_body_raises(monkeypatch):
-    class _Resp:
-        def read(self, n=-1):
-            return b""
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-    monkeypatch.setattr(slack_files.urllib.request, "urlopen", lambda r, timeout=None: _Resp())
+    _patch_opener(monkeypatch, respond=_FakeResponse(b"", content_type="image/png"))
     with pytest.raises(RuntimeError):
         slack_files.download_slack_file("https://files.slack.com/x", "xoxb-test")
+
+
+# ------------------------- download_slack_file: task 394d1063 (auth-dropped-on-redirect,
+# HTML-with-200 accepted as a "screenshot") -------------------------
+
+def test_download_slack_file_redirect_preserves_authorization_header():
+    """`_AuthPreservingRedirectHandler.redirect_request` must re-attach the SAME
+    Authorization header the original request carried onto the redirected request —
+    the exact mechanism task 394d1063 traced the incident to (the stdlib's default
+    redirect handling does not guarantee this across a cross-host hop)."""
+    import urllib.request
+
+    handler = slack_files._AuthPreservingRedirectHandler()
+    original = urllib.request.Request(
+        "https://files.slack.com/x/download",
+        headers={"Authorization": "Bearer xoxb-secret", "User-Agent": "orcha-portal"},
+    )
+    new_req = handler.redirect_request(
+        original, None, 302, "Found",
+        {"location": "https://files-edge.slack.com/x/download"},
+        "https://files-edge.slack.com/x/download",
+    )
+    assert new_req is not None
+    assert new_req.get_header("Authorization") == "Bearer xoxb-secret"
+    assert new_req.full_url == "https://files-edge.slack.com/x/download"
+
+
+def test_download_slack_file_html_with_200_rejected_by_content_type(monkeypatch):
+    """The task 394d1063 shape: Slack answers HTTP 200 (not 401/403) with an HTML
+    body when the download wasn't actually authorized. The Content-Type check alone
+    must reject this — never accepted as a screenshot just because the status was
+    200."""
+    html = b"<!DOCTYPE html><html lang=\"en-US\">not a screenshot</html>"
+    _patch_opener(monkeypatch, respond=_FakeResponse(html, content_type="text/html; charset=utf-8"))
+    with pytest.raises(RuntimeError, match="not_image"):
+        slack_files.download_slack_file("https://files.slack.com/x", "xoxb-test")
+
+
+def test_download_slack_file_html_with_200_and_no_content_type_rejected_by_magic_bytes(monkeypatch):
+    """Belt-and-suspenders: even if the server sends NO (or a lying) Content-Type, the
+    magic-byte sniff independently rejects a non-image body — the Content-Type header
+    is not the only gate."""
+    html = b"<!DOCTYPE html><html lang=\"en-US\">not a screenshot</html>"
+    _patch_opener(monkeypatch, respond=_FakeResponse(html, content_type=None))
+    with pytest.raises(RuntimeError, match="not_image"):
+        slack_files.download_slack_file("https://files.slack.com/x", "xoxb-test")
+
+
+def test_download_slack_file_valid_png_accepted(monkeypatch):
+    _patch_opener(monkeypatch, respond=_FakeResponse(_PNG_BYTES, content_type="image/png"))
+    data = slack_files.download_slack_file("https://files.slack.com/x", "xoxb-test")
+    assert data == _PNG_BYTES
+
+
+def test_sniff_image_mimetype_recognizes_common_formats():
+    assert slack_files._sniff_image_mimetype(b"\x89PNG\r\n\x1a\nrest") == "image/png"
+    assert slack_files._sniff_image_mimetype(b"\xff\xd8\xffrest") == "image/jpeg"
+    assert slack_files._sniff_image_mimetype(b"GIF89arest") == "image/gif"
+    assert slack_files._sniff_image_mimetype(b"RIFF\x00\x00\x00\x00WEBPrest") == "image/webp"
+
+
+def test_sniff_image_mimetype_rejects_html_and_riff_non_webp():
+    assert slack_files._sniff_image_mimetype(b"<!DOCTYPE html>") == ""
+    # RIFF magic without the WEBP fourCC (e.g. a WAV file) must not false-positive.
+    assert slack_files._sniff_image_mimetype(b"RIFF\x00\x00\x00\x00WAVErest") == ""
 
 
 # ------------------------- fetch_selected_images: end-to-end + isolation -------------------------
