@@ -77,11 +77,10 @@ let detailBooted = {};
 // github-boot.js's navigate()/readRouteFromUrl(), read here by loadDetail/
 // renderDetail. null kind = the list view (no detail route active).
 let route = { kind: null, number: null };
-// Started-task memory for this page view: number -> {task_id, existing}. Not
-// persisted — a reload re-derives "already tracked" only insofar as the
-// backend's own idempotency (same {existing:true} reply) resends it on the
-// next Start click; this cache just avoids a re-POST loop within the same
-// session and reflects the Start response instantly (no 60s wait).
+// Started-task memory for THIS page view's own Start clicks: number ->
+// {task_id, existing}. Purely a same-session instant-feedback cache (a Start
+// click's response paints the chip immediately, no wait for the next fetch) —
+// NOT the source of truth for "is this tracked", see startedOf() below.
 const startedIssue = {};
 const startedPull = {};
 
@@ -90,9 +89,43 @@ function ghCid() {
     || (GhD() && GhD().container && GhD().container.id) || null;
 }
 function tabKind() { return tab === "pulls" ? "pull" : "issue"; }
+
+// The server's own tracked_task_id for (kind, number) — present on every list row
+// AND every detail payload as of github_hub_routes' tracked-state addition, computed
+// server-side from the SAME open-task lookup POST /start's idempotency check uses.
+// This is what makes a task started via ANY path (a hub click in a DIFFERENT
+// session, or the Slack `/orcha start` slash command) show as tracked on this
+// page's very first load — the client-side startedIssue/startedPull cache below
+// only ever covers a Start click made in THIS session.
+function serverTrackedTaskId(kind, number) {
+  const listKey = kind === "pull" ? "pulls" : "issues";
+  const listPayload = payload[listKey];
+  const listItems = listPayload ? (listPayload.issues || listPayload.pulls || []) : null;
+  if (listItems) {
+    const row = listItems.find((it) => it.number === number);
+    if (row && row.tracked_task_id) return row.tracked_task_id;
+  }
+  const detailPayloadForKind = detailPayload[kind];
+  if (detailPayloadForKind && detailPayloadForKind.__number === number) {
+    const item = detailPayloadForKind[kind];
+    if (item && item.tracked_task_id) return item.tracked_task_id;
+  }
+  return null;
+}
+
+// started-task lookup for a row/detail's taskState: the LOCAL session cache (this
+// session's own Start-click result, which also distinguishes a fresh create from an
+// {existing:true} click) takes precedence when present; otherwise fall back to the
+// server-supplied tracked_task_id (a task started elsewhere — a different session, a
+// hub click before this page loaded, or the Slack `/orcha start` command — surfaces
+// as "already tracked" with existing:true, since from THIS page's perspective it
+// always was). Returns null (renders the Start/Fix split button) only when NEITHER
+// source knows about a task for this item.
 function startedOf(kind, number) {
   const m = kind === "pull" ? startedPull : startedIssue;
-  return m[number] || null;
+  if (m[number]) return m[number];
+  const serverTaskId = serverTrackedTaskId(kind, number);
+  return serverTaskId ? { task_id: serverTaskId, existing: true } : null;
 }
 function myLogin() {
   const id = GhO.identity && GhO.identity();
@@ -259,10 +292,12 @@ function loadDetail(force) {
 }
 
 // #ghlist patch for the ACTIVE detail route — mirrors renderList's role but
-// for ?pr=/?issue=. taskState reads the SAME started-task cache the list Start
-// button writes to, so a Start click from the list still shows "already
-// tracked" if the founder then opens that item's detail page in the same
-// session (and vice versa — Start from detail feeds the list's cache too).
+// for ?pr=/?issue=. taskState reads the SAME startedOf() the list Start button
+// writes to (this session's own clicks) AND the server's tracked_task_id (any
+// session, any dispatch path) — see startedOf()'s header comment. A Start click
+// from the list still shows "already tracked" if the founder then opens that
+// item's detail page in the same session (and vice versa), AND a task started
+// via Slack or a different browser session shows tracked here too.
 function renderDetail(force) {
   const key = detailKey();
   const number = route.number;

@@ -4,12 +4,30 @@
 Per the test-teeth convention, the ONLY thing stubbed is the network leaf
 (`github_hub_routes._gh_get`) plus the installation-token file read — the routes,
 schema validation, task-creation internals, cache, and grant gate all run for real.
+
+Any test here that binds a repo + a working token AND drives a FRESH start (not an
+idempotent existing=True hit) also stubs `task_start_core._gh_post_comment` — the
+round-trip "Orcha started this" comment leaf task_start_core fires on every fresh
+start. Without the stub, a bound repo + resolvable token would make that leaf attempt
+a REAL network call to api.github.com from a unit test. See test_task_start_core.py
+for the comment feature's own dedicated coverage (composition, fresh-vs-existing,
+non-fatal failure).
 """
 import uuid
 
 import pytest
 
 from portal_backend import github_hub_routes as hub
+from portal_backend import task_start_core as core
+
+
+@pytest.fixture(autouse=True)
+def _stub_start_comment(monkeypatch):
+    """Autouse: no test in this file exercises the GitHub round-trip comment itself
+    (that lives in test_task_start_core.py) — stub the leaf everywhere so a bound
+    repo + working token never makes a real network call as a side effect of testing
+    something else entirely."""
+    monkeypatch.setattr(core, "_gh_post_comment", lambda repo, number, token, body: None)
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +111,7 @@ async def test_issues_shape_filters_prs(client, container, token_env, monkeypatc
         "assignee": "octocat", "updated_at": "2026-07-01T00:00:00Z",
         "html_url": "https://github.com/acme/site/issues/7",
         "body_excerpt": "x" * 200,   # first 200 chars only
+        "tracked_task_id": None,     # no open Orcha task for #7 in this test
     }
 
 
@@ -530,6 +549,140 @@ async def test_start_prefix_does_not_false_match(client, container):
     r = await client.post(f"/api/containers/{cid}/github/start",
                           json={"kind": "issue", "number": 123, "title": "one-two-three"})
     assert r.json()["existing"] is False  # a distinct task, not a false idempotency hit
+
+
+# ------------------------- tracked_task_id: list/detail know up front -------------------------
+#
+# Founder-caught gap: issue #232 started via Slack still showed a fresh "Start ->" on
+# the hub's list/detail — the frontend's "already tracked" chip only appeared AFTER a
+# click returned {existing:true}, since the list/detail endpoints never told it a task
+# was already tracked. Fix: every list/detail response now carries `tracked_task_id`
+# (str|None) per item, computed via the SAME open-task lookup POST /start's idempotency
+# check uses (task_start_core.find_open_gh_tasks) — so the two can't drift, and a task
+# started through ANY path (hub click, Slack `/orcha start`) shows as tracked on the
+# very next hub fetch, not just within the browser session that started it.
+
+async def test_issues_list_carries_tracked_task_id_for_started_item(
+        client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        return [
+            {"number": 232, "title": "Clinician dashboard", "html_url": "https://github.com/acme/site/issues/232"},
+            {"number": 50, "title": "untouched", "html_url": "https://github.com/acme/site/issues/50"},
+        ]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    # Start #232 the way EITHER dispatch path would — directly through the shared core
+    # here (task_start_core), so this test doesn't depend on the Slack route at all.
+    start_r = await client.post(f"/api/containers/{cid}/github/start",
+                                json={"kind": "issue", "number": 232, "title": "Clinician dashboard"})
+    assert start_r.status_code == 201, start_r.text
+    tid = start_r.json()["task_id"]
+
+    r = await client.get(f"/api/containers/{cid}/github/issues")
+    assert r.status_code == 200, r.text
+    by_number = {it["number"]: it for it in r.json()["issues"]}
+    assert by_number[232]["tracked_task_id"] == tid
+    assert by_number[50]["tracked_task_id"] is None
+
+
+async def test_issues_list_reflects_tracked_state_even_when_gh_cache_is_warm(
+        client, container, token_env, monkeypatch):
+    """tracked_task_id is computed OUTSIDE the 60s GitHub-list cache — a task tracked
+    AFTER the list was cached still shows as tracked on the very next fetch, without
+    waiting for the GitHub cache to expire. Seeds the tracked task directly via the
+    plain tasks API (the SAME 'GH #300: ' title-prefix idempotency key
+    find_open_gh_tasks matches on — see test_start_pull_idempotent_skips_live_refetch's
+    identical seeding technique) rather than through POST /start, since THAT route's
+    own _cache_invalidate would confound this test's "still warm" premise with its
+    own (separate, pre-existing, intentional) full-cache invalidation on every start."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = {"n": 0}
+
+    def fake_get(path, token):
+        calls["n"] += 1
+        return [{"number": 300, "title": "x", "html_url": "https://github.com/acme/site/issues/300"}]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r1 = await client.get(f"/api/containers/{cid}/github/issues")
+    assert r1.json()["issues"][0]["tracked_task_id"] is None
+    assert calls["n"] == 1
+
+    seeded = await client.post(f"/api/containers/{cid}/tasks", json={
+        "title": "GH #300: seed", "description": "", "definition_of_done": "x",
+    })
+    assert seeded.status_code == 201, seeded.text
+    tid = seeded.json()["task_id"]
+
+    # Second list fetch: GitHub cache still warm (no new _gh_get call)…
+    r2 = await client.get(f"/api/containers/{cid}/github/issues")
+    assert calls["n"] == 1   # still cached — no extra GitHub call
+    # …but tracked_task_id is fresh, not stale from the cached payload.
+    assert r2.json()["issues"][0]["tracked_task_id"] == tid
+
+
+async def test_pull_detail_carries_tracked_task_id(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    pr = _pr_object(77)
+    monkeypatch.setattr(hub, "_gh_get", lambda p, t: [] if "/files" in p else pr)
+    start_r = await client.post(f"/api/containers/{cid}/github/start",
+                                json={"kind": "pull", "number": 77, "title": "x"})
+    assert start_r.status_code == 201, start_r.text
+
+    r = await client.get(f"/api/containers/{cid}/github/pulls/77")
+    assert r.status_code == 200, r.text
+    assert r.json()["pull"]["tracked_task_id"] == start_r.json()["task_id"]
+
+
+async def test_issue_detail_carries_tracked_task_id_none_when_untracked(
+        client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    monkeypatch.setattr(hub, "_gh_get", lambda p, t: {
+        "number": 5, "title": "x", "state": "open", "body": "", "user": {"login": "octocat"},
+        "labels": [], "assignee": None, "assignees": [], "comments": 0,
+    } if "/comments" not in p else [])
+    r = await client.get(f"/api/containers/{cid}/github/issues/5")
+    assert r.status_code == 200, r.text
+    assert r.json()["issue"]["tracked_task_id"] is None
+
+
+async def test_pulls_list_batches_tracked_lookup_into_one_query(
+        client, container, token_env, monkeypatch, db):
+    """Call-count assertion: N items in the list must cost exactly ONE call into the
+    shared tracked-lookup helper (task_start_core.find_open_gh_tasks), not N — the
+    whole point of the batched helper over a find_open_gh_task-per-row loop. Wraps the
+    helper itself (still delegating to the real implementation) rather than the
+    cursor's `execute` — psycopg's Cursor.execute is a read-only C-level attribute and
+    can't be monkeypatched per-instance."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    numbers = list(range(1, 11))
+    monkeypatch.setattr(hub, "_gh_get", lambda p, t: [
+        {**_pr_object(n), "number": n} for n in numbers
+    ])
+
+    calls = {"n": 0}
+    real_find = hub.find_open_gh_tasks
+
+    def counting_find(cur, container_id, nums):
+        calls["n"] += 1
+        return real_find(cur, container_id, nums)
+
+    # Patch the name INSIDE github_hub_routes's own namespace (where
+    # _with_tracked_list/_with_tracked_one actually resolve it from) — a
+    # `from ... import find_open_gh_tasks` binds a separate reference in this
+    # module's globals, so patching task_start_core.find_open_gh_tasks directly
+    # would silently miss it (same pitfall slack_routes.py's _gh_get had).
+    monkeypatch.setattr(hub, "find_open_gh_tasks", counting_find)
+    r = await client.get(f"/api/containers/{cid}/github/pulls")
+    assert r.status_code == 200, r.text
+    assert len(r.json()["pulls"]) == 10
+    assert calls["n"] == 1   # ONE call for all 10 numbers, not 10
 
 
 async def test_start_with_assignee_assigns_and_wakes(client, container, make_agent, db):

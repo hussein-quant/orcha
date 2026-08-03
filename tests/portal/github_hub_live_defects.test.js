@@ -559,12 +559,58 @@ async function listNotConnectedStillRendersOnRealResponseTest() {
     "a genuine available:false reason:\"repo_not_connected\" response still renders the connect-a-repo card once it actually arrives");
 }
 
+/* ---------------- founder-caught gap: server-known tracked state on load -----------
+   Reproduces the SECOND founder report: issue #232 was started via Slack (a
+   completely separate dispatch path, in a separate request, possibly a separate
+   session) — the hub's list/detail pages, on a FRESH load, must already show it as
+   tracked. Before this fix, `startedOf()` only ever consulted this page's own
+   in-session startedIssue/startedPull cache (populated exclusively by a Start click
+   made in THIS session) — a fresh load had no way to know. The backend now stamps
+   `tracked_task_id` on every list row and detail payload (github_hub_routes.py); this
+   suite proves the FRONTEND actually reads it, end to end through the real fetch ->
+   render pipeline, not just that github-state.js's pure builder CAN render a
+   taskState object (github_hub.test.js already covers that in isolation). */
+async function trackedTaskIdFromServerTest() {
+  console.log("\n-- a task tracked by ANY path (e.g. Slack) shows tracked on a FRESH hub load, no click needed --");
+  const { ghlist } = boot((url) => {
+    if (/\/github\/issues$/.test(url)) {
+      return Promise.resolve({
+        ok: true, status: 200,
+        json: () => Promise.resolve({
+          available: true, repo: "acme/demo",
+          issues: [
+            { number: 232, title: "Clinician dashboard: add filters", labels: [], assignee: null,
+              updated_at: "2026-08-01T00:00:00Z",
+              html_url: "https://github.com/acme/demo/issues/232",
+              tracked_task_id: "11111111-2222-3333-4444-555555555555" },
+            { number: 50, title: "untouched issue", labels: [], assignee: null,
+              updated_at: "2026-08-01T00:00:00Z",
+              html_url: "https://github.com/acme/demo/issues/50",
+              tracked_task_id: null },
+          ],
+        }),
+      });
+    }
+    return new Promise(() => {});
+  });
+  await settle();
+  assert(ghlist.innerHTML.indexOf("11111111") !== -1,
+    "the SERVER-supplied tracked_task_id (never clicked in this session) renders the task-id chip");
+  assert(ghlist.innerHTML.indexOf("already tracked") !== -1,
+    "a server-tracked (never-clicked-this-session) item renders the SAME 'already tracked' label a post-click existing:true would");
+  // #50 (tracked_task_id: null) must still show the ordinary Start button, not a chip.
+  const rows = ghlist.innerHTML.split('data-gh-row="issue:50"');
+  assert(rows.length > 1 && rows[1].indexOf("gh-start\"") !== -1,
+    "an UNtracked item (#50) still renders the plain Start button, not a false-positive chip");
+}
+
 async function run() {
   await clickNavigationTests();
   await staleDetailErrorTest();
   liveShapeChecksReviewersTest();
   await listSkeletonOrderingTest();
   await listNotConnectedStillRendersOnRealResponseTest();
+  await trackedTaskIdFromServerTest();
   if (failures) { console.error("\n" + failures + " failure(s)"); process.exit(1); }
   console.log("\nall github hub live-defect regression tests passed");
 }
