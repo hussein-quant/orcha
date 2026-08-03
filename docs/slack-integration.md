@@ -49,7 +49,7 @@ client-supplied `title`/`body_excerpt`/`html_url` fields remain in `GithubStartB
 purely as the fallback when the live fetch itself fails.
 
 **Inbound — `POST /api/slack/interactions`** (message shortcuts, modal submission,
-button clicks) — see "Creating issues from Slack" below.
+button clicks) — see "Creating issues and tasks from Slack" below.
 
 **Ack-first, work-after (interactions endpoint).** Every `/api/slack/interactions`
 payload type acks Slack's HTTP response IMMEDIATELY and does its actual work —
@@ -59,16 +59,16 @@ scheduled only AFTER that response is already built:
     that visibly opens the modal) fires a beat later in the background. Slack shows
     no "trouble connecting" banner even when the modal takes a moment to appear.
   - **view_submission**: `{"response_action": "clear"}` returns first (closing the
-    modal); the WHOLE pipeline — AI title/body refinement, screenshot download +
-    GitHub commit, the issue POST itself, and (for "Create Orcha task") the chained
-    task start — runs in the background. The result (or an honest failure card) is
-    delivered afterward as a `chat.postMessage` DM to the submitting user.
+    modal); the WHOLE pipeline — screenshot download, and then either the GitHub
+    issue POST ("Create GitHub issue") or direct Orcha task creation ("Create Orcha
+    task", task-first — see below) — runs in the background. The result (or an
+    honest failure card) is delivered afterward as a `chat.postMessage` DM to the
+    submitting user.
   - **block_actions** (the "Start Orcha task" button): a minimal, blocks-free
     ephemeral acks immediately; the live GitHub title fetch + task_start_core call run
     in the background, with the result card DMed to the clicking user.
 `/orcha issue` (the SLASH COMMAND) intentionally keeps its pre-existing synchronous,
-inline-reply contract — it does not do AI refinement and is not part of this
-ack-timing rework (see "AI-refined issue titles/bodies" below for why).
+inline-reply contract and is not part of this ack-timing rework.
 
 **Outbound — needs_verification ping**: when a task transitions to `needs_verification`
 (the `plan`/`pr` autonomy default — an agent finished and a human must verify), and the
@@ -94,11 +94,14 @@ swallowed — a dead comment never breaks task creation. Requires the GitHub App
 `docs/byoc-guide.md`'s permission table); PR comments ride the same
 `issues/{number}/comments` endpoint GitHub uses for both issues and PRs.
 
-## Creating issues from Slack
+## Creating issues and tasks from Slack
 
 Two ways to file a GitHub issue in the container's connected repo without leaving
-Slack, both attributed to the linked member via a footer line on the issue body
-("_Filed from Slack by \<github_login\> via Orcha_"):
+Slack (`/orcha issue` and the "Create GitHub issue" message shortcut), both
+attributed to the linked member via a footer line on the issue body
+("_Filed from Slack by \<github_login\> via Orcha_") — plus the "Create Orcha task"
+message shortcut, which captures a report as an Orcha TASK directly (task-first; the
+agent files the GitHub issue later, see below):
 
 ### 1. Slash command — `/orcha issue <title> [-- <body>]`
 
@@ -124,68 +127,95 @@ shortcuts:
   card back.
 - **"Create Orcha task"** opens the SAME modal plus an optional **Assignee** picker
   (the container's live AI agents, or "Let the orchestrator route it" for unassigned)
-  → **Create task** does the FULL pipeline: creates the GitHub issue (same footer),
-  then immediately starts an Orcha task from it through the shared
-  `task_start_core` path (passing the chosen assignee, if any) — which also fires the
-  existing non-fatal dispatch comment on the fresh issue. The confirmation card is
-  "🚀 Task created" with links to BOTH the GitHub issue and the Orcha task. If the
-  issue is created but starting the task fails, the card says so honestly (issue link
-  + "starting the Orcha task failed — run `/orcha start issue <N>` to retry") — it
-  never silently half-succeeds by showing a task link that doesn't resolve.
+  → **Create task** creates the Orcha task DIRECTLY (task-first): raw title/body +
+  Slack provenance, screenshots landed on the task's own attachment store, no GitHub
+  issue filed by the portal at all — the dispatched/routed agent files the polished
+  issue itself, per the task's own DoD (see "Task-first capture" below). The
+  confirmation card is "🚀 Task created" with a link to the Orcha task and a context
+  line noting the agent files the refined GitHub issue.
 
 Both shortcuts share one modal layout (`slack_notify.build_create_issue_modal`);
-`view_submission` routes on the submitted view's own callback_id to either just file
-the issue, or file it AND start the task.
+`view_submission` routes on the submitted view's own callback_id to either file
+the issue (issue-only), or create the Orcha task directly (task-first).
 
-### AI-refined issue titles/bodies (both message shortcuts only)
+### Task-first capture, agent-refined issues (the "Create Orcha task" shortcut)
 
-Before filing, the modal's title/body (the user's own edits, if any — their intent is
-the input) are passed through the portal's existing universal LLM client
-(`llm_util`/`llm_catalog`/`llm_decisions` — the SAME provider-key resolution and
-model-selection convention `onboarding_routes.py` uses: a stored per-container
-`slack_issue_refine` model override, falling back to the shipped default (Haiku);
-`container_provider_keys`, falling back to `ORCHA_LLM_API_KEY`/the provider's own env
-var). The rewrite is a forced structured tool-call (`llm_decisions.refine_slack_issue`
-— the schema itself is what keeps this deterministic; the client has no separate
-temperature knob) that turns a raw pasted message like "Hey Kedar, have you noticed an
-issue on the android and iOS app we are not able" into an imperative, ≤80-char title
-and a `## Summary` / `## Observed` / `## Expected` / `## Technical context` markdown
-body — using ONLY facts the source message actually supports (the model is instructed
-to omit a section rather than invent repro steps, versions, or causes). The reporter's
-raw message ALWAYS survives verbatim under a `## Reporter's original message` heading,
-composed in Python (never left to the model), regardless of what the model returns.
+The "Create Orcha task" shortcut's modal submission creates the Orcha task
+**directly** — the portal does not call an LLM and does not file a GitHub issue at
+capture time. The task's title is the modal's own title field, used verbatim; its
+description is the modal's body text plus a Slack-provenance footer
+("_Captured from Slack by \<github_login\> via Orcha_"). Any screenshots on the
+source message are downloaded (same `slack_files` pipeline as always) and land
+directly on the new task's own attachment store — never committed to a repo at this
+point, since no GitHub issue exists yet to embed them into.
 
-This runs entirely in the BACKGROUND pipeline (see "Ack-first, work-after" above) — the
-~20s worst-case model timeout was never safe to run inline. Fails closed on any error
-(no key configured, provider error, timeout): the RAW title/body are filed unchanged,
-and the confirmation card says "AI refinement unavailable" instead of "✨ AI-refined".
-The dispatched agent's own DoD (see "Codebase triage-first" below) is the deliberate
-second half of this division of labor: fast, cheap wording polish up front from the
-LLM refine pass (codebase-blind by design); real investigation from inside the repo
-once an agent actually picks the work up.
+The task's `definition_of_done` (`task_start_core.build_slack_captured_dod` — a
+distinct template from `_ISSUE_DOD`/`_PULL_DOD`, which both assume a GitHub
+issue/PR already exists) instructs the dispatched or orchestrator-routed agent, in
+order:
 
-**`/orcha issue` (the slash command) does NOT get this** — it keeps its pre-existing
-synchronous, 3s-budget, inline-reply contract, and an LLM call risks blowing that
-budget exactly the way this whole ack-timing fix exists to prevent. Backgrounding a
-slash command's reply is a differently-shaped change (Slack's `response_url` +
-"Working on it…" + `replace_original` idiom, not the `response_action`/DM idiom the
-interactions endpoint uses) — a documented follow-up, not shipped here. A member typing
-`/orcha issue <title>` is composing that title deliberately; raw is an acceptable
-default there.
+1. **File a professional GitHub issue** in the connected repo for this report:
+   imperative title, a structured Summary/Observed/Expected/Technical-context body
+   grounded in the actual codebase, the task's attached screenshots embedded
+   (committed under the repo's `.github/orcha-attachments/` convention, same layout
+   the old portal-side commit step used), the reporter's original message quoted
+   verbatim, and a provenance footer. Post the new issue's link back as a message on
+   the Orcha task's own thread.
+2. **Then** post a codebase-grounded triage comment on that issue (same convention
+   as every other GitHub-issue-kind task's `_ISSUE_DOD`).
+3. **Then** implement per the standard protocol: PR, fresh-session review, human
+   review, never merge without a human verifying.
+
+This moves the wording-refinement work that used to run as a portal-side LLM call
+(`slack_issue_refine`, now deleted entirely — see "Removed: portal-side LLM
+refinement" below) onto the agent itself, which has actual repo access and can
+ground the issue in real code rather than guessing from a raw pasted message alone.
+
+**The confirmation card** ("🚀 Task created") links straight to the Orcha task —
+there is no GitHub issue link yet — with a context line: "the agent files the
+refined GitHub issue — link arrives in the task thread." The screenshot-count
+honesty line (e.g. "2 screenshots attached") is unchanged in spirit, just now
+describing what landed on the TASK rather than on a GitHub issue.
+
+**Idempotency note (accepted behavior):** a slack-captured task carries no `GH #N:`
+title prefix at creation — `task_start_core.find_open_gh_task`'s idempotency probe
+(which matches on that exact prefix) simply does not apply to it. A slack-captured
+task is not tracked against any GitHub issue number until the agent files one; a
+double-submission of the same shortcut creates two separate Orcha tasks (no
+dedup) — this is accepted, not a regression, since the previous behavior for this
+exact case (no prior GH issue) had no dedup key either.
+
+**`/orcha issue` (the slash command) and the "Create GitHub issue" message
+shortcut are both unaffected by this redesign** — they keep filing a GitHub issue
+directly, raw title/body as typed.
+
+### Removed: portal-side LLM refinement
+
+An earlier version of the "Create Orcha task" / "Create GitHub issue" shortcuts ran
+the modal's title/body through the portal's universal LLM client
+(`slack_issue_refine` use case in `llm_catalog`/`llm_decisions`/`llm_util`) before
+filing, rewriting a raw pasted Slack message into a professional technical report.
+This has been removed entirely — no portal Slack path calls an LLM anymore. For the
+task-first flow this responsibility moved to the dispatched agent itself (see above,
+which also gives the agent real codebase access the portal-side rewrite never had);
+for the issue-only shortcut and `/orcha issue`, the raw title/body are filed as
+typed, matching their behavior from before AI refinement was ever added.
 
 **Screenshots travel with the work.** If the source message carries images (the first
 5, `image/*` mimetypes only, each ≤10MB — see "Screenshot download hardening" below for
 why), they're downloaded and:
-  - Committed into the connected repo under
+  - For the **"Create GitHub issue"** shortcut: committed into the connected repo under
     `.github/orcha-attachments/<issue-slug>/` via the GitHub Contents API and embedded
     as markdown images in the issue body (`### Screenshots` + one `![name](url)` per
     landed file) — **private repo, so visibility follows the repo's own access**, same
     as every other file in it.
-  - For the "Create Orcha task" shortcut ONLY, the same downloaded images are *also*
-    attached to the created task via the portal's existing task-attachments machinery
-    — the same store `POST /api/tasks/{tid}/attachments` writes to — so a sandboxed
-    agent working the task can fetch and actually look at the screenshot (the whole
-    point: the AI reviews the image, not just a link to it).
+  - For the **"Create Orcha task"** shortcut: attached to the created task via the
+    portal's existing task-attachments machinery — the same store
+    `POST /api/tasks/{tid}/attachments` writes to — so a sandboxed agent working the
+    task can fetch and actually look at the screenshot (the whole point: the AI
+    reviews the image, not just a link to it). Nothing is committed to the repo at
+    capture time — the agent commits/embeds them itself when it files the issue, per
+    the task's DoD.
 
 Downloading a Slack file requires the **`files:read`** OAuth scope (see the updated
 scope list below) — **without it, the issue/task is still filed, just without
@@ -275,7 +305,7 @@ escaped (`_mrkdwn_escape`) before landing in a block.
    - `chat:write` — for any bot-authored messages (including the modal-submission
      confirmation DMs).
    - `files:read` — **new**, required to download image attachments (screenshots) off
-     a Slack message for the "Creating issues from Slack" flow. Without it, issue/task
+     a Slack message for the "Creating issues and tasks from Slack" flow. Without it, issue/task
      creation still works — images are simply skipped and the confirmation card says
      so ("N screenshots skipped — add the files:read scope and reinstall the App").
    Install the app to the workspace; copy the **Bot User OAuth Token** (`xoxb-…`) — this
@@ -354,18 +384,20 @@ frontend's surface; the column and the mapping are here.)
 
 ## Codebase triage-first (all GitHub-originated ISSUE tasks)
 
-Every issue-kind task's `definition_of_done` (`task_start_core._ISSUE_DOD` — shared by
-the hub's Start button, `/orcha start issue <N>`, and both message shortcuts' chained
-"Create Orcha task" flow) now opens with an explicit instruction: before writing any
-code, post a triage comment on the GitHub issue with codebase-grounded analysis — the
-specific modules/files involved, the most likely cause ranked against the actual code,
-and what logs/repro would confirm it. This is the deliberate second half of the AI
-issue-refinement division of labor: the LLM refine pass polishes WORDING in seconds and
-is codebase-blind by design (it never sees the repo); the dispatched agent is the one
-with actual repo access, so its first move is real investigation from inside the code,
-not more wording. PR/Fix tasks (`_PULL_DOD`, and any `dod_override` the hub's PR-Fix
-path supplies) are unchanged — a PR is reacting to CI/review feedback on code that
-already exists, not triaging a fresh report.
+Every GitHub-originated issue-kind task's `definition_of_done`
+(`task_start_core._ISSUE_DOD` — shared by the hub's Start button, `/orcha start
+issue <N>`, and the "Start Orcha task" button on an issue-filed card) opens with an
+explicit instruction: before writing any code, post a triage comment on the GitHub
+issue with codebase-grounded analysis — the specific modules/files involved, the
+most likely cause ranked against the actual code, and what logs/repro would confirm
+it. The dispatched agent is the one with actual repo access, so its first move is
+real investigation from inside the code, not more wording. PR/Fix tasks
+(`_PULL_DOD`, and any `dod_override` the hub's PR-Fix path supplies) are unchanged —
+a PR is reacting to CI/review feedback on code that already exists, not triaging a
+fresh report. Slack-captured tasks (the "Create Orcha task" shortcut) use their own
+`build_slack_captured_dod` template instead — same triage discipline, but preceded
+by the file-the-issue-first step, since no GitHub issue exists yet for that flow
+(see "Task-first capture" above).
 
 ## Cross-seam consistency: the hub also knows about a Slack start
 
@@ -386,14 +418,17 @@ core exists to guarantee.
   issue`), member mapping, the live GitHub title fetch for `/orcha start`, GitHub
   issue creation (`create_github_issue`, `_gh_post_issue`), the Contents-API
   screenshot commit (`_gh_put_contents`, `_commit_images_to_repo`,
-  `_embed_images_markdown`), AI issue refinement (`_refine_issue_for_filing`), the
-  ack-first shortcut/view_submission/block_actions split (`_prepare_interaction`,
+  `_embed_images_markdown`, used only by the issue-only pipeline), the ack-first
+  shortcut/view_submission/block_actions split (`_prepare_interaction`,
   `_build_shortcut_modal_view`/`_open_modal_background`,
-  `_prepare_view_submission`/`_run_view_submission_pipeline`,
-  `_prepare_block_action`/`_run_block_action_pipeline`, all scheduled through the ONE
-  `_schedule_background` seam), the shortcut-time per-file verdict instrumentation
-  (`_log_shortcut_file_verdicts`), the private_metadata byte-budget guard
-  (`_private_metadata_files`), and task-attachment landing (`_land_images_on_task`).
+  `_prepare_view_submission`/`_run_view_submission_pipeline` — which branches into
+  `_run_issue_only_pipeline` (files a GitHub issue) and `_run_task_first_pipeline`
+  (creates the Orcha task directly, no GitHub issue — see "Task-first capture"
+  above) — `_prepare_block_action`/`_run_block_action_pipeline`, all scheduled
+  through the ONE `_schedule_background` seam), the shortcut-time per-file verdict
+  instrumentation (`_log_shortcut_file_verdicts`), the private_metadata byte-budget
+  guard (`_private_metadata_files`), and task-attachment landing
+  (`_land_images_on_task`).
 - `portal_backend/slack_notify.py` — the Block Kit composers (inbound ephemeral
   replies, modal views, and the outbound ping) + the non-fatal outbound webhook POST +
   `call_slack_api` (the authenticated Slack Web API leaf for `views.open`/
@@ -403,14 +438,13 @@ core exists to guarantee.
   instrumentation) and download (`files:read`-gated, with the scope-missing
   degradation path; `_AuthPreservingRedirectHandler` + Content-Type/magic-byte
   validation per the task 394d1063 hardening).
-- `portal_backend/task_start_core.py` — the shared start internals (also used by the
-  GitHub hub and the "Create Orcha task" shortcut): task creation/idempotency, the
-  batched `find_open_gh_tasks` tracked-state lookup, the non-fatal GitHub round-trip
-  comment, and the codebase-triage-first `_ISSUE_DOD` clause.
-- `orcha_cli/llm_catalog.py` / `llm_decisions.py` / `llm_util.py` — the
-  `slack_issue_refine` use case (model default, Settings registry entry) and
-  `refine_slack_issue` (the fail-closed structured-output rewrite), reusing the SAME
-  provider-neutral client every other LLM use case in the portal goes through.
+- `portal_backend/task_start_core.py` — the shared start internals: task
+  creation/idempotency, the batched `find_open_gh_tasks` tracked-state lookup, the
+  non-fatal GitHub round-trip comment, the codebase-triage-first `_ISSUE_DOD` clause
+  (GitHub hub + `/orcha start` + the issue-filed card's "Start Orcha task" button,
+  all genuinely GH-issue/PR-triggered), and the separate task-first
+  `start_task_from_slack_capture` / `build_slack_captured_dod` used ONLY by the
+  "Create Orcha task" shortcut (no GH issue exists at creation time for that path).
 - `portal_backend/github_hub_routes.py` — `tracked_task_id` on the issues/pulls list
   and detail endpoints (`_with_tracked_list`/`_with_tracked_one`); the authoritative
   server-side title/body/url fetch (`_fetch_gh_item`, shared with `slack_routes.py`)
@@ -430,11 +464,6 @@ core exists to guarantee.
   `tests/portal/github_hub_live_defects.test.js`.
 
 ## Known follow-up (not shipped here)
-
-`/orcha issue` (the slash command) does not get AI refinement — see "AI-refined issue
-titles/bodies" above for the reasoning (backgrounding a slash command's reply needs
-Slack's `response_url` idiom, a differently-shaped change from the interactions
-endpoint's `response_action`/DM idiom this PR adds). A future PR could add it.
 
 A `conversations.history` fallback for message-shortcut screenshot handling (in case a
 future incident shows Slack ever delivers a `message_action` payload with a TRIMMED
