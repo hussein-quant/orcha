@@ -37,15 +37,18 @@ three Slack payload shapes, all delivered form-encoded as a single `payload` JSO
           - "Create GitHub issue" (callback_id create_github_issue) — files the issue
             only.
           - "Create Orcha task" (callback_id create_orcha_task) — the SAME modal plus
-            an optional assignee picker; on submit it chain-creates the issue AND
-            immediately starts an Orcha task from it (task_start_core — same shared
-            core, same dispatch comment on the issue).
+            an optional assignee picker; on submit it creates the Orcha TASK directly
+            (task-first: raw title/body + Slack provenance, screenshots landed on the
+            task's own attachment store, NO GitHub issue and NO LLM call — the task's
+            DoD, task_start_core.build_slack_captured_dod, instructs the agent to
+            file the polished issue itself and post its link to the task's thread).
   * view_submission            → routes on the SUBMITTED VIEW's own callback_id (see
-        slack_notify.MODAL_CALLBACK_ID / MODAL_CALLBACK_ID_WITH_TASK) to either just
-        create the issue, or create the issue THEN start the task from it. Returns a
-        response_action so Slack closes the modal; the confirmation card follows as a
-        DM/ephemeral, not inline in the modal response (Slack's view_submission body
-        has no room for a Block Kit card of this shape).
+        slack_notify.MODAL_CALLBACK_ID / MODAL_CALLBACK_ID_WITH_TASK) to either
+        create the issue (issue-only), or create the Orcha task directly
+        (task-first). Returns a response_action so Slack closes the modal; the
+        confirmation card follows as a DM/ephemeral, not inline in the modal
+        response (Slack's view_submission body has no room for a Block Kit card of
+        this shape).
   * block_actions               → the "Start Orcha task" button on an issue-filed card;
         routes through the SAME task_start_core.start_task_from_github every other
         dispatch path uses.
@@ -58,10 +61,10 @@ Try again?" even though the eventual POST would have succeeded):
         (`asyncio.create_task`, started AFTER the ack is built, never awaited by the
         request). The modal appears a beat later — no banner, no lost work.
   * view_submission           → the handler returns `{"response_action": "clear"}`
-        immediately; the WHOLE pipeline (image download/commit, issue creation, task
-        start) runs in a background task. The result (or an honest failure) is
-        delivered afterward as an ephemeral `chat.postMessage` DM to the submitting
-        user — same composers, same copy, as before this fix; only the timing moved.
+        immediately; the WHOLE pipeline (image download, GitHub issue creation for
+        the issue-only shortcut, direct task creation for the task-first shortcut)
+        runs in a background task. The result (or an honest failure) is delivered
+        afterward as an ephemeral `chat.postMessage` DM to the submitting user.
   * block_actions              → the handler acks immediately (an empty ephemeral
         `{"response_type": "ephemeral", ...}` with no blocks Slack renders as nothing
         new); the actual GitHub fetch + task_start_core call runs in a background
@@ -104,8 +107,6 @@ from portal_backend.database import db_cursor
 from portal_backend.github_hub_routes import _excerpt
 from portal_backend.guards import valid_uuid
 from portal_backend.limits import MAX_NAME_LEN
-from portal_backend.model_setting_routes import _resolve_use_case_model
-from portal_backend.provider_keys import provider_api_key as _provider_api_key
 from portal_backend.slack_notify import (
     ASSIGNEE_ACTION_ID,
     ASSIGNEE_BLOCK_ID,
@@ -133,11 +134,6 @@ from portal_backend.slack_files import (
     select_image_files_verdicts,
 )
 from portal_backend.task_start_core import start_task_from_github, start_task_from_slack_capture
-
-try:
-    import llm_util
-except ImportError:
-    from orcha_cli import llm_util
 
 SLACK_LOG = logging.getLogger("orcha.slack")
 
@@ -431,65 +427,6 @@ def create_github_issue(cur, container_id, title: str, body: str, member,
         "title": raw.get("title") or title,
     }
 
-
-_REPORTER_QUOTE_HEADING = "## Reporter's original message"
-
-
-def _refine_issue_for_filing(cur, container_id: str, title: str, body: str) -> dict:
-    """AI-refine a Slack-sourced issue title/body into a professional technical report
-    BEFORE it's filed on GitHub (issue #234: a raw pasted Slack message — "Hey Kedar,
-    have you noticed an issue on the android and iOS app we are not able" — filed
-    verbatim as both title and body reads as unprofessional). Only called from the
-    message-shortcut modal paths (`_run_view_submission_pipeline`), never from `/orcha
-    issue` (that command keeps its synchronous 3s-budget contract — see the module
-    docstring's ack-first section; backgrounding a slash command's reply is a
-    differently-shaped change, deliberately out of scope here).
-
-    Runs in the BACKGROUND pipeline (post-ack — see the module docstring), so the
-    ~20s worst-case LLM timeout is free; it was never safe to run inline.
-
-    Resolves the workspace's configured model/key EXACTLY like onboarding_routes.py's
-    propose_onboarding_roster: a stored per-container use-case override (settings
-    UI) falling back to the shipped default, then an explicit stored provider key
-    falling back to ORCHA_LLM_API_KEY / the provider's own env var. Uses the SAME
-    forced-tool-call `classify()` seam (structured output — the schema itself is what
-    keeps this deterministic/low-variance; the client has no separate temperature
-    knob to plumb through) every other decision use case in llm_util goes through.
-
-    Returns {"title": str, "body": str, "refined": bool}. `refined` is False on ANY
-    failure (no key configured, provider error, timeout, malformed output) or when
-    the model returns nothing usable — the caller then files the RAW title/body
-    unchanged and the confirmation card says so ("AI refinement unavailable"). This
-    function NEVER raises; a wording pass must never block issue creation.
-
-    The refined body ALWAYS ends with a verbatim quote of the reporter's original
-    message under `_REPORTER_QUOTE_HEADING` — the model is instructed not to invent
-    facts, but this quote is composed HERE, in Python, not left to the model, so the
-    original text survives byte-for-byte regardless of what the model does.
-    """
-    quote_section = f"{_REPORTER_QUOTE_HEADING}\n\n{body}" if body else ""
-    try:
-        model_override = _resolve_use_case_model(cur, container_id, "slack_issue_refine")
-        config = {"slack_issue_refine": model_override} if model_override else None
-        spec = llm_util.resolve_spec("slack_issue_refine", config=config)
-        stored_key = _provider_api_key(cur, container_id, spec.provider)
-        api_key = llm_util.resolve_api_key(spec.provider, explicit=stored_key)
-    except llm_util.LLMError as exc:
-        SLACK_LOG.info("slack issue refine: no api key (%s) — filing raw", exc)
-        return {"title": title, "body": body, "refined": False}
-
-    result = llm_util.refine_slack_issue(
-        title, body,
-        config=config,
-        api_key=api_key,
-    )
-    if result is None:
-        return {"title": title, "body": body, "refined": False}
-
-    refined_body = result["body"]
-    if quote_section:
-        refined_body = f"{refined_body}\n\n{quote_section}" if refined_body else quote_section
-    return {"title": result["title"], "body": refined_body, "refined": True}
 
 
 def _parse_issue_command(text: str):

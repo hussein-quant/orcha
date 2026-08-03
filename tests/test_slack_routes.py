@@ -1246,96 +1246,44 @@ async def test_view_submission_github_403_acks_clear_then_dms_failure_card(
 
 
 # ====================================================================================
-# Feature: AI refinement of Slack-filed issues (issue #234 — a raw pasted Slack
-# message filed verbatim as both title and body reads as unprofessional)
-#
-# Only the plumbing is under test here, per the spec's own framing — the "never
-# invent facts" guard is a PROMPT-level instruction to the model (llm_decisions.
-# _REFINE_SLACK_ISSUE_SYSTEM), not something a fake classify() can meaningfully
-# exercise; what these tests CAN and DO pin: refinement is applied when a key is
-# configured (title/body come from the fake model, not the raw input), the reporter's
-# original text survives byte-for-byte under its own heading regardless of what the
-# model returns, and every fallback path (no key, model error) files the RAW
-# title/body unchanged with the card saying so — across all paths this feature
-# actually touches (both message shortcuts; NOT /orcha issue, out of scope per the
-# module docstring).
+# Feature: portal-side LLM refinement REMOVED (agent-first redesign) — the
+# "Create Orcha task" shortcut used to run a wording pass through llm_util before
+# filing; that pass, and the whole slack_issue_refine use case, no longer exist
+# anywhere in the portal. The agent itself does the refinement now (per the new
+# task_start_core.build_slack_captured_dod), when it files the real GitHub issue.
 # ====================================================================================
 
-def _fake_refine_classify(title="Refined: cannot install app", body="## Summary\n\nUsers cannot install the app."):
-    """A fake `llm_util.classify` that returns a plausible refine_slack_issue tool-call
-    result, asserting it was called for the 'slack_issue_refine' use case with the
-    expected schema shape (mirrors llm_decisions.REFINE_SLACK_ISSUE_SCHEMA's
-    required fields)."""
-    calls = []
-
-    def fake(use_case, *, system, user, schema, tool_name="emit_result", config=None,
-             api_key=None, provider=None):
-        calls.append({"use_case": use_case, "user": user, "tool_name": tool_name,
-                      "api_key": api_key})
-        assert use_case == "slack_issue_refine"
-        assert schema["required"] == ["title", "body"]
-        return {"title": title, "body": body}
-
-    fake.calls = calls
-    return fake
+def test_slack_routes_has_no_llm_util_dependency():
+    """The plumbing pin: slack_routes.py must not import llm_util at all anymore —
+    the only use case it ever needed llm_util for (slack_issue_refine) is deleted."""
+    assert not hasattr(slack_routes, "llm_util")
 
 
-async def test_view_submission_refines_issue_when_key_configured(
+def test_slack_routes_has_no_refine_issue_function():
+    """The function itself is gone, not just unused."""
+    assert not hasattr(slack_routes, "_refine_issue_for_filing")
+
+
+def test_reporter_quote_heading_constant_removed():
+    """_REPORTER_QUOTE_HEADING was only used by the deleted refine path (the raw
+    reporter's message now lives directly in the task description for a task-first
+    capture, or as the plain modal body for the issue-only shortcut — neither needs
+    a separate 'quoted verbatim under a heading' composition step in the portal; the
+    new task-first DoD asks the AGENT to quote the reporter verbatim when it writes
+    the real issue)."""
+    assert not hasattr(slack_routes, "_REPORTER_QUOTE_HEADING")
+
+
+async def test_view_submission_issue_only_files_raw_title_and_body_unchanged(
         client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """The issue-only shortcut ('Create GitHub issue') files the RAW modal
+    title/body verbatim — there is no refinement pass to apply anymore, on this
+    path or any other. Holds even WITH an LLM key in the environment (the strongest
+    form of the pin: a configured key must not resurrect any refine behavior)."""
     await _bind_repo(client, container["id"])
     monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
-    fake_classify = _fake_refine_classify(
-        title="App install fails on Android and iOS",
-        body="## Summary\n\nUsers report install failures on both platforms.",
-    )
-    monkeypatch.setattr(slack_routes.llm_util, "classify", fake_classify)
-    fake_issue = _fake_issue_post(number=234, title="placeholder")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    dm_calls = []
-    monkeypatch.setattr(slack_routes, "call_slack_api",
-                        lambda method, token, payload: (dm_calls.append(payload) if method == "chat.postMessage" else None, {"ok": True})[1])
-    await _link_slack_member(client, container, make_agent, db, "U-linked")
-
-    raw_title = "Hey Kedar, have you noticed an issue on the android and iOS app we are not able"
-    raw_body = raw_title  # the production shape: the raw message IS both title and body
-    payload = _submission_payload(
-        "create_github_issue_submit", container["id"], "U-linked", raw_title, raw_body,
-    )
-    headers, body = _sign(_payload_form(payload))
-    r = await client.post("/api/slack/interactions", content=body, headers=headers)
-    assert r.status_code == 200, r.text
-
-    # The REFINED title/body were filed — not the raw pasted message.
-    assert len(fake_issue.calls) == 1
-    assert fake_issue.calls[0]["title"] == "App install fails on Android and iOS"
-    filed_body = fake_issue.calls[0]["body"]
-    assert "## Summary" in filed_body
-    assert "Users report install failures on both platforms." in filed_body
-
-    # The reporter's raw text survives VERBATIM under its own heading, regardless of
-    # what the model returned — composed in Python, never left to the model.
-    assert slack_routes._REPORTER_QUOTE_HEADING in filed_body
-    assert raw_body in filed_body
-
-    # The confirmation card notes the refinement happened.
-    assert len(dm_calls) == 1
-    joined = " ".join(
-        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
-    )
-    assert "✨ AI-refined" in joined
-
-
-async def test_view_submission_no_llm_key_files_raw_with_unavailable_note(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """No workspace/env LLM key at all (the _no_llm_key_by_default autouse fixture's
-    baseline) — refinement fails closed, the RAW modal title/body are filed unchanged,
-    and the card is honest about why."""
-    await _bind_repo(client, container["id"])
     fake_issue = _fake_issue_post(number=235, title="placeholder")
     monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    dm_calls = []
-    monkeypatch.setattr(slack_routes, "call_slack_api",
-                        lambda method, token, payload: (dm_calls.append(payload) if method == "chat.postMessage" else None, {"ok": True})[1])
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
     payload = _submission_payload(
@@ -1348,91 +1296,16 @@ async def test_view_submission_no_llm_key_files_raw_with_unavailable_note(
 
     assert fake_issue.calls[0]["title"] == "Raw title unchanged"
     assert "Raw body unchanged" in fake_issue.calls[0]["body"]
-    # No reporter-quote section — that's only appended by the refine path.
-    assert slack_routes._REPORTER_QUOTE_HEADING not in fake_issue.calls[0]["body"]
-
-    joined = " ".join(
-        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
-    )
-    assert "AI refinement unavailable" in joined
-    assert "✨ AI-refined" not in joined
+    # No reporter-quote heading — that was only ever composed by the deleted
+    # refine path.
+    assert "## Reporter's original message" not in fake_issue.calls[0]["body"]
 
 
-async def test_view_submission_llm_error_files_raw_with_unavailable_note(
+async def test_orcha_issue_slash_command_unaffected_by_refine_removal(
         client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """A configured key, but the model call itself fails (timeout, provider error) —
-    still fails closed to the raw title/body, never blocks issue creation, never
-    invents content."""
+    """Regression pin: /orcha issue never had refinement and is fully unaffected by
+    its removal — still synchronous, still files the raw title exactly as typed."""
     await _bind_repo(client, container["id"])
-    monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
-
-    def boom(use_case, **kwargs):
-        raise RuntimeError("model timed out")
-
-    monkeypatch.setattr(slack_routes.llm_util, "classify", boom)
-    fake_issue = _fake_issue_post(number=236, title="placeholder")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    dm_calls = []
-    monkeypatch.setattr(slack_routes, "call_slack_api",
-                        lambda method, token, payload: (dm_calls.append(payload) if method == "chat.postMessage" else None, {"ok": True})[1])
-    await _link_slack_member(client, container, make_agent, db, "U-linked")
-
-    payload = _submission_payload(
-        "create_github_issue_submit", container["id"], "U-linked",
-        "Raw title survives model error", "body text",
-    )
-    headers, body = _sign(_payload_form(payload))
-    r = await client.post("/api/slack/interactions", content=body, headers=headers)
-    assert r.status_code == 200, r.text
-
-    assert fake_issue.calls[0]["title"] == "Raw title survives model error"
-    joined = " ".join(
-        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
-    )
-    assert "AI refinement unavailable" in joined
-
-
-async def test_view_submission_with_task_refines_before_chaining_to_task_start(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """The 'Create Orcha task' shortcut ALSO refines (both shortcuts, per spec) — and
-    the task started from the just-filed issue inherits the REFINED title (via the
-    existing start path, automatically — task_start_core reads issue['title'], which
-    is the GitHub API's echo of what was actually filed)."""
-    await _bind_repo(client, container["id"])
-    monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
-    fake_classify = _fake_refine_classify(
-        title="Refined task title", body="## Summary\n\nRefined body.",
-    )
-    monkeypatch.setattr(slack_routes.llm_util, "classify", fake_classify)
-    fake_issue = _fake_issue_post(number=237, title="placeholder")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
-    await _link_slack_member(client, container, make_agent, db, "U-linked")
-
-    payload = _submission_payload(
-        "create_orcha_task_submit", container["id"], "U-linked",
-        "raw title", "raw body",
-    )
-    headers, body = _sign(_payload_form(payload))
-    r = await client.post("/api/slack/interactions", content=body, headers=headers)
-    assert r.status_code == 200, r.text
-
-    assert fake_issue.calls[0]["title"] == "Refined task title"
-    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #237:")][0]
-    assert t["title"] == "GH #237: Refined task title"
-
-
-async def test_orcha_issue_slash_command_never_refines(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """Explicit scope pin: /orcha issue keeps its synchronous 3s-budget contract and
-    files the RAW title/body — refinement only runs on the message-shortcut modal
-    paths (see the module docstring's ack-first section). Even WITH a key configured
-    and a classify stub in place, the slash command must never call it."""
-    await _bind_repo(client, container["id"])
-    monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
-    fake_classify = _fake_refine_classify()
-    monkeypatch.setattr(slack_routes.llm_util, "classify", fake_classify)
     fake = _fake_issue_post(number=238, title="Raw slash command title")
     monkeypatch.setattr(slack_routes, "_gh_post_issue", fake)
     await _link_slack_member(client, container, make_agent, db, "U-linked")
@@ -1442,7 +1315,6 @@ async def test_orcha_issue_slash_command_never_refines(
     assert r.status_code == 200, r.text
 
     assert fake.calls[0]["title"] == "Raw slash command title"
-    assert fake_classify.calls == []  # never invoked
 
 
 # ------------------------- view_submission: task-first capture (Create Orcha task) -------------------------
