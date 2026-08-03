@@ -504,6 +504,15 @@ orcha.example.com {
         }
     }
 
+    # Slack lane: unauthenticated-but-signed inbound webhooks (Slack commands +
+    # interactivity). Slack can't complete OAuth or send a bearer token, so this
+    # bypasses forward_auth entirely — the app-level Slack v0 HMAC signature check
+    # (slack_routes.verify_slack_signature) is the real gate, and the whole surface
+    # stays 503 unless SLACK_SIGNING_SECRET + SLACK_BOT_TOKEN are configured.
+    handle /api/slack/* {
+        reverse_proxy 127.0.0.1:8001
+    }
+
     # Everything else: browsers behind forward_auth.
     handle {
         forward_auth 127.0.0.1:4180 {
