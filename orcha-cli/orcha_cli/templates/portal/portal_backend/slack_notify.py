@@ -22,6 +22,16 @@ Outbound contract — non-fatal, by construction, exactly like push_outbox:
 
 The webhook URL is a container-level Slack Incoming Webhook (mig 044). We POST the Block
 Kit JSON with stdlib urllib (no httpx dependency), a short timeout, and never raise.
+
+Issue-creation composers (`blocks_issue_filed`, `blocks_github_permission_error`,
+`blocks_issue_usage_help`, `build_create_issue_modal`) extend the same design language
+to the "file a GitHub issue from Slack" flow (`/orcha issue ...` and the "Create GitHub
+issue" message shortcut, both in slack_routes.py) — still pure functions, still one
+escaping seam. `call_slack_api` is the ONE network leaf for authenticated Slack Web API
+calls (`views.open`, `views.update`, `chat.postEphemeral`) the interactive flow needs,
+kept separate from `_post_webhook` (which posts to a container's incoming webhook with
+no auth) because Web API calls carry `SLACK_BOT_TOKEN` and CAN be on the fatal path
+(e.g. a modal that fails to open should surface, not vanish silently).
 """
 
 import json
@@ -32,6 +42,11 @@ import urllib.request
 from portal_backend.database import db_cursor
 
 SLACK_POST_TIMEOUT_SECONDS = 5
+# The modal body textarea's practical cap (Slack's own plain_text_input hard limit is
+# 3000 chars; GitHub issue bodies can run far longer, but a Slack conversation excerpt
+# has no business being that large — this keeps the modal render snappy and leaves
+# headroom for the provenance footer this module's caller appends).
+MAX_ISSUE_BODY_CHARS = 2800
 # The portal base URL for deep links. Slack buttons need an ABSOLUTE, externally
 # reachable URL (Slack's servers fetch/redirect through it — unlike phone LAN pairing,
 # there is no "derive from the inbound request host" that is safe here: a box behind a
@@ -101,6 +116,38 @@ def _button(text: str, url: str, style: str = None) -> dict:
     return {"type": "actions", "elements": [button]}
 
 
+def _link_button_el(text: str, url: str, style: str = None) -> dict:
+    """A single link-button ELEMENT (not wrapped in its own `actions` block) — for
+    composing a multi-button row via `_actions_row` alongside an interactive button."""
+    button = {"type": "button", "text": {"type": "plain_text", "text": text}, "url": url}
+    if style:
+        button["style"] = style
+    return button
+
+
+def _action_button_el(text: str, action_id: str, value: str, style: str = None) -> dict:
+    """A single INTERACTIVE button element — routes through POST /api/slack/interactions
+    as a `block_actions` payload (action_id + value) rather than a URL. Used for the
+    "Start Orcha task" button on the issue-filed card, so a click drives the SAME shared
+    start core (task_start_core.start_task_from_github) every other dispatch path uses,
+    without the caller needing to know Orcha's URLs."""
+    button = {
+        "type": "button",
+        "text": {"type": "plain_text", "text": text},
+        "action_id": action_id,
+        "value": value,
+    }
+    if style:
+        button["style"] = style
+    return button
+
+
+def _actions_row(*elements: dict) -> dict:
+    """One `actions` block holding MULTIPLE button elements side by side (as opposed to
+    `_button`, which always wraps a single link button in its own block)."""
+    return {"type": "actions", "elements": list(elements)}
+
+
 # ---- composers: outbound needs_verification ping -----------------------------------
 
 def blocks_needs_verification(container_name: str, task_title: str, task_link,
@@ -168,16 +215,271 @@ def blocks_unlinked_user() -> list:
     ]
 
 
+def build_unlinked_user_modal() -> dict:
+    """A minimal informational modal opened when a message-shortcut invocation
+    (views.open IS the ack for a shortcut — there is no other way to respond within
+    Slack's 3s window for that payload type) comes from an unlinked Slack user. Reuses
+    blocks_unlinked_user's copy so the message matches the slash-command version of
+    this same explainer; no "submit" action — Cancel is the only way out, since an
+    unlinked caller can never act."""
+    return {
+        "type": "modal",
+        "title": {"type": "plain_text", "text": "Not linked"},
+        "close": {"type": "plain_text", "text": "OK"},
+        "blocks": blocks_unlinked_user(),
+    }
+
+
 def blocks_usage_help() -> list:
-    """Compact usage block for bad/empty slash-command args — the three commands."""
+    """Compact usage block for bad/empty slash-command args — the four commands."""
     return [
         _header("❔", "Orcha commands"),
         _section_mrkdwn(
             "*`/orcha start issue <N>`*  —  start a task from GitHub issue #N\n"
             "*`/orcha start pr <N>`*  —  start a task from GitHub PR #N\n"
+            "*`/orcha issue <title> [-- <body>]`*  —  file a new GitHub issue\n"
             "*`/orcha tasks`*  —  what needs you in this project"
         ),
     ]
+
+
+# ---- composers: /orcha issue (+ the message-shortcut modal flow) --------------------
+
+def blocks_issue_filed(number: int, html_url: str, issue_title: str, task_link,
+                       start_command: str = None, screenshot_note: str = None) -> list:
+    """'📝 Issue filed' — the created GitHub issue as a mrkdwn link, an 'Open on GitHub'
+    button, and a second action: a real 'Start Orcha task' button (routes through
+    POST /api/slack/interactions as a block_actions click, driving the SAME shared
+    task_start_core.start_task_from_github every other dispatch path uses) when
+    `task_link` is falsy-irrelevant here — the button is ALWAYS interactive, never a
+    URL, so it's offered whenever we have a valid `number` to start from. When
+    `start_command` is given instead (no interactivity endpoint reachable — not the
+    normal path once /api/slack/interactions ships, but kept for callers that pass
+    it), the context line tells the member to run that command instead of showing a
+    non-functional button.
+
+    `screenshot_note`, when given (e.g. "2 screenshots attached" or "1/2 screenshots
+    attached (some skipped)" — slack_routes._screenshot_status_note), appends ONE more
+    muted context line reporting the image-attachment honesty count. Omitted (None)
+    when the source message carried no images at all, so a card for a plain-text
+    message looks exactly as it did before screenshots existed.
+    """
+    item_text = _mrkdwn_link(html_url, f"#{number} {issue_title}".strip()) if html_url \
+        else _mrkdwn_escape(f"#{number} {issue_title}".strip())
+    blocks = [
+        _header("📝", "Issue filed"),
+        _section_mrkdwn(item_text),
+    ]
+    if start_command:
+        blocks.append(_context(f"run `{start_command}` to start an Orcha task from this"))
+        if screenshot_note:
+            blocks.append(_context(screenshot_note))
+        if html_url:
+            blocks.append(_button("Open on GitHub", html_url))
+        return blocks
+
+    if screenshot_note:
+        blocks.append(_context(screenshot_note))
+    buttons = []
+    if html_url:
+        buttons.append(_link_button_el("Open on GitHub", html_url))
+    buttons.append(_action_button_el(
+        "Start Orcha task", "slack_start_issue", str(number), style="primary",
+    ))
+    blocks.append(_actions_row(*buttons))
+    return blocks
+
+
+def blocks_github_permission_error() -> list:
+    """A friendly ephemeral card for a 403 from GitHub on issue creation — the GitHub
+    App installation lacks the Issues:write permission. Never a stack trace/raw error:
+    Slack members aren't expected to read GitHub API error bodies."""
+    return [
+        _header("🔒", "Can't file that issue"),
+        _section_mrkdwn(
+            "The GitHub App needs the *Issues: Read and write* permission to file "
+            "issues from Slack. Ask an owner to grant it (GitHub → App settings → "
+            "Permissions) and reinstall the App, then try again."
+        ),
+    ]
+
+
+def blocks_task_created(number: int, issue_html_url: str, issue_title: str,
+                        task_link, *, start_failed: bool = False,
+                        gh_number_for_retry: int = None,
+                        screenshot_note: str = None) -> list:
+    """'🚀 Task created' — the "Create Orcha task" shortcut's confirmation: the newly
+    filed GitHub issue AND the Orcha task it started, both linked, from the ONE chained
+    pipeline (issue create -> task_start_core.start_task_from_github).
+
+    Honesty contract: if the issue was created but starting the task failed
+    (`start_failed=True`), this does NOT pretend the task exists — it shows the issue
+    link plus a plain-text line telling the member to run `/orcha start issue <N>`
+    themselves, exactly like the degraded-fallback copy elsewhere in this module. It
+    never silently half-succeeds by rendering a task link that doesn't resolve.
+
+    `screenshot_note`, when given, appends ONE more muted context line reporting the
+    image-attachment honesty count (same convention as blocks_issue_filed) — shown
+    either way (success or start_failed), since the images landed on the GitHub issue
+    independently of whether the task-start step itself succeeded.
+    """
+    item_text = _mrkdwn_link(issue_html_url, f"#{number} {issue_title}".strip()) if issue_html_url \
+        else _mrkdwn_escape(f"#{number} {issue_title}".strip())
+    blocks = [
+        _header("🚀", "Task created"),
+        _section_mrkdwn(f"Issue {item_text}"),
+    ]
+    if start_failed:
+        retry_n = gh_number_for_retry if gh_number_for_retry is not None else number
+        blocks.append(_context(
+            f"issue filed, but starting the Orcha task failed — run "
+            f"`/orcha start issue {retry_n}` to retry"
+        ))
+        if screenshot_note:
+            blocks.append(_context(screenshot_note))
+        if issue_html_url:
+            blocks.append(_button("Open issue on GitHub", issue_html_url))
+        return blocks
+
+    blocks.append(_context("assigned: Atlas routes it · a human verifies before anything merges"))
+    if screenshot_note:
+        blocks.append(_context(screenshot_note))
+    buttons = []
+    if issue_html_url:
+        buttons.append(_link_button_el("Open issue on GitHub", issue_html_url))
+    if task_link:
+        buttons.append(_link_button_el("Open task in Orcha", task_link))
+    if buttons:
+        blocks.append(_actions_row(*buttons))
+    return blocks
+
+
+def blocks_github_unreachable_error() -> list:
+    """A friendly ephemeral card for a non-403 GitHub/network failure while filing an
+    issue (rate limit, timeout, 5xx) — distinct from blocks_github_permission_error
+    (that one names a specific fix: grant Issues:write); this one just says try again,
+    since there's nothing actionable for the member to configure."""
+    return [
+        _header("⚠️", "Couldn't file that issue"),
+        _section_mrkdwn("Couldn't reach GitHub just now. Try again in a moment."),
+    ]
+
+
+def blocks_issue_usage_help() -> list:
+    """Usage card for `/orcha issue` called with no title (or an all-whitespace one)."""
+    return [
+        _header("❔", "Usage: /orcha issue"),
+        _section_mrkdwn(
+            "*`/orcha issue <title> [-- <body>]`*\n"
+            "Everything before an optional ` -- ` becomes the issue title; anything "
+            "after becomes the issue body.\n"
+            "Example: `/orcha issue Login button is misaligned -- happens only on "
+            "Safari, see screenshot`"
+        ),
+    ]
+
+
+# Two message shortcuts share this ONE modal layout, distinguished by the view's own
+# `callback_id` (view_submission's routing key — see slack_routes._handle_view_submission):
+#   * "Create GitHub issue" -> MODAL_CALLBACK_ID           -> files the issue only.
+#   * "Create Orcha task"   -> MODAL_CALLBACK_ID_WITH_TASK -> files the issue AND
+#     immediately starts an Orcha task from it (task_start_core, same as every other
+#     dispatch path), with an optional assignee picked in-modal.
+MODAL_CALLBACK_ID = "create_github_issue_submit"
+MODAL_CALLBACK_ID_WITH_TASK = "create_orcha_task_submit"
+_MODAL_TITLE_MAX = 80
+ASSIGNEE_ACTION_ID = "assignee_select"
+ASSIGNEE_BLOCK_ID = "assignee_block"
+# static_select's "no selection" sentinel value — Slack has no built-in "unassigned"
+# semantics; the caller reads back option "value" and treats this literal as None.
+ASSIGNEE_UNASSIGNED_VALUE = "__unassigned__"
+
+
+def build_create_issue_modal(prefill_title: str, prefill_body: str, *, private_metadata: str = "",
+                             with_task: bool = False, assignee_options: list = None) -> dict:
+    """The 'Create GitHub issue' / 'Create Orcha task' modal view (views.open payload's
+    `view` field) opened from either message shortcut. `prefill_title` is the source
+    message's first line, truncated to Slack's plain_text_input practical limit;
+    `prefill_body` already carries the full message text + the "— from Slack
+    conversation" provenance footer (composed by the caller — this function only lays
+    out the view, it doesn't know about Slack messages). `private_metadata` carries
+    whatever the submission handler needs back (here: the container_id string) since
+    view_submission payloads don't otherwise carry request-time context.
+
+    `with_task=True` (the "Create Orcha task" shortcut) adds an OPTIONAL assignee
+    static_select ("Let the orchestrator route it" placeholder — omitting a selection
+    means unassigned, Atlas routes it, exactly like a bare `/orcha start`) and changes
+    the submit label to "Create task" / title to "Create Orcha task". `assignee_options`
+    is a list of {id, alias} dicts for the container's live AI agents — required when
+    `with_task=True` (may be empty: an empty roster just means no one to pick, the
+    select still renders with only the unassigned option).
+    """
+    title = (prefill_title or "").strip()[:_MODAL_TITLE_MAX]
+    blocks = [
+        {
+            "type": "input",
+            "block_id": "title_block",
+            "label": {"type": "plain_text", "text": "Title"},
+            "element": {
+                "type": "plain_text_input",
+                "action_id": "title_input",
+                "initial_value": title,
+                "max_length": 256,
+            },
+        },
+        {
+            "type": "input",
+            "block_id": "body_block",
+            "label": {"type": "plain_text", "text": "Body"},
+            "optional": True,
+            "element": {
+                "type": "plain_text_input",
+                "action_id": "body_input",
+                "multiline": True,
+                "initial_value": (prefill_body or "")[:MAX_ISSUE_BODY_CHARS],
+            },
+        },
+    ]
+    if with_task:
+        options = [
+            {"text": {"type": "plain_text", "text": a["alias"]}, "value": str(a["id"])}
+            for a in (assignee_options or [])
+        ]
+        blocks.append({
+            "type": "input",
+            "block_id": ASSIGNEE_BLOCK_ID,
+            "label": {"type": "plain_text", "text": "Assignee"},
+            "optional": True,
+            "element": {
+                "type": "static_select",
+                "action_id": ASSIGNEE_ACTION_ID,
+                "placeholder": {"type": "plain_text", "text": "Let the orchestrator route it"},
+                "options": options,
+            } if options else {
+                # Slack rejects a static_select with an empty `options` array — with no
+                # AI agents in the container, degrade to a single disabled-in-spirit
+                # "unassigned" option rather than omitting the block (keeps the modal
+                # shape/block_id stable for the submission handler either way).
+                "type": "static_select",
+                "action_id": ASSIGNEE_ACTION_ID,
+                "placeholder": {"type": "plain_text", "text": "Let the orchestrator route it"},
+                "options": [{
+                    "text": {"type": "plain_text", "text": "Unassigned (orchestrator routes it)"},
+                    "value": ASSIGNEE_UNASSIGNED_VALUE,
+                }],
+            },
+        })
+
+    return {
+        "type": "modal",
+        "callback_id": MODAL_CALLBACK_ID_WITH_TASK if with_task else MODAL_CALLBACK_ID,
+        "private_metadata": private_metadata,
+        "title": {"type": "plain_text",
+                  "text": "Create Orcha task" if with_task else "Create GitHub issue"},
+        "submit": {"type": "plain_text", "text": "Create task" if with_task else "File issue"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": blocks,
+    }
 
 
 # ---- composers: /orcha tasks ---------------------------------------------------------
@@ -233,6 +535,40 @@ def _post_webhook(webhook_url: str, payload: dict) -> None:
     )
     with urllib.request.urlopen(request, timeout=SLACK_POST_TIMEOUT_SECONDS) as response:
         response.read()  # drain; Slack replies 'ok'
+
+
+SLACK_API = "https://slack.com/api"
+
+
+def call_slack_api(method: str, bot_token: str, payload: dict) -> dict:
+    """POST a Slack Web API method (`views.open`, `views.update`, `chat.postEphemeral`,
+    `chat.postMessage`, …) authenticated with the bot token (`SLACK_BOT_TOKEN`) — the
+    interactive counterpart to `_post_webhook` (which posts to a container's incoming
+    webhook with no auth at all). Slack's Web API always replies HTTP 200 with a JSON
+    body carrying `ok: bool`; a non-2xx or a network failure raises RuntimeError so the
+    caller can decide fatal-vs-swallow per call site (unlike the outbound ping, some of
+    these ARE on the interactive request path and their failure should surface as an
+    ephemeral error rather than silently vanish). This is the ONE network leaf for
+    calls; tests monkeypatch this function, never urllib directly.
+    """
+    url = f"{SLACK_API}/{method}"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": "orcha-portal",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=SLACK_POST_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"slack_api_status:{exc.code}") from exc
+    except Exception as exc:  # DNS, timeout, TLS, bad JSON — one graceful shape
+        raise RuntimeError(f"slack_api_unreachable:{exc}") from exc
 
 
 def notify_task_needs_verification(container_id, task_id) -> None:

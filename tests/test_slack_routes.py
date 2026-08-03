@@ -19,7 +19,7 @@ import urllib.parse
 import pytest
 
 from portal_backend import github_hub_routes as hub
-from portal_backend import slack_notify, slack_routes
+from portal_backend import slack_files, slack_notify, slack_routes
 from portal_backend import task_start_core as core
 
 SIGNING_SECRET = "shhh-test-secret"
@@ -703,3 +703,1212 @@ async def test_outbound_failure_never_breaks_transition(
     _, tid = await _drive_task_to_needs_verification(client, container, make_agent, work_headers)
     rows = db.execute("SELECT status FROM tasks WHERE id=%s", (tid,))
     assert rows[0]["status"] == "needs_verification"
+
+
+# ====================================================================================
+# Feature: create GitHub issues from Slack
+#   (1) /orcha issue <title> [-- <body>] slash command
+#   (2) "Create GitHub issue" / "Create Orcha task" message shortcuts via
+#       POST /api/slack/interactions (shortcut -> modal -> view_submission)
+# ====================================================================================
+
+import json as _json
+
+
+def _fake_issue_post(number=501, title="issue title", html_url=None):
+    """A fake `_gh_post_issue` leaf: asserts the POST shape, returns a GitHub-looking
+    issue payload. `html_url` defaults to a URL derived from `number`."""
+    calls = []
+
+    def fake(repo, token, title_arg, body_arg):
+        calls.append({"repo": repo, "token": token, "title": title_arg, "body": body_arg})
+        return {
+            "number": number,
+            "title": title_arg,
+            "html_url": html_url or f"https://github.com/{repo}/issues/{number}",
+            "body": body_arg,
+        }
+    fake.calls = calls
+    return fake
+
+
+def _payload_form(payload: dict) -> str:
+    """Slack's interactions body shape: form-encoded with a single `payload` field
+    holding the JSON blob (never raw JSON)."""
+    return urllib.parse.urlencode({"payload": _json.dumps(payload)})
+
+
+# ------------------------- /orcha issue: command parsing -------------------------
+
+def test_parse_issue_command_title_only():
+    assert slack_routes._parse_issue_command("Login button broken") == \
+        ("Login button broken", "")
+
+
+def test_parse_issue_command_title_and_body():
+    assert slack_routes._parse_issue_command(
+        "Login button broken -- happens only on Safari"
+    ) == ("Login button broken", "happens only on Safari")
+
+
+def test_parse_issue_command_empty_title_rejected():
+    assert slack_routes._parse_issue_command("   ") == (None, None)
+    assert slack_routes._parse_issue_command("") == (None, None)
+
+
+def test_parse_issue_command_title_with_literal_hyphens_not_split():
+    # Only the ' -- ' (space-dash-dash-space) token is the separator; a bare '-' or a
+    # word like 'well-known' must not be mistaken for it.
+    title, body = slack_routes._parse_issue_command("Fix well-known-file handling")
+    assert title == "Fix well-known-file handling"
+    assert body == ""
+
+
+def test_parse_issue_command_only_first_separator_splits():
+    title, body = slack_routes._parse_issue_command("A -- B -- C")
+    assert title == "A"
+    assert body == "B -- C"
+
+
+# ------------------------- /orcha issue: end-to-end via the slash command -------------------------
+
+async def test_orcha_issue_empty_title_returns_usage(client, container, make_agent, db, slack_enabled):
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    headers, body = _sign(_form(user_id="U-linked", text="issue"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert "Usage: /orcha issue" in j["blocks"][0]["text"]["text"]
+
+
+async def test_orcha_issue_whitespace_title_returns_usage(client, container, make_agent, db, slack_enabled):
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    headers, body = _sign(_form(user_id="U-linked", text="issue    "))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert "Usage: /orcha issue" in r.json()["blocks"][0]["text"]["text"]
+
+
+async def test_orcha_issue_creates_issue_with_footer(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    fake = _fake_issue_post(number=77, title="Fix the thing")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake)
+    agent_id = await _link_slack_member(client, container, make_agent, db, "U-linked")
+    db.execute("UPDATE agents SET github_login=%s WHERE id=%s", ("octocat", agent_id))
+
+    headers, body = _sign(_form(user_id="U-linked", text="issue Fix the thing -- extra detail here"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    assert len(fake.calls) == 1
+    call = fake.calls[0]
+    assert call["repo"] == "acme/site"
+    assert call["title"] == "Fix the thing"
+    assert "extra detail here" in call["body"]
+    assert "_Filed from Slack by octocat via Orcha_" in call["body"]
+
+    j = r.json()
+    assert j["blocks"][0]["text"]["text"] == "📝 Issue filed"
+    section_text = j["blocks"][1]["text"]["text"]
+    assert "#77 Fix the thing" in section_text
+    # A REAL interactive Start button (not a hint to run a command) since the
+    # interactions endpoint ships in this same PR.
+    actions = j["blocks"][-1]["elements"]
+    action_ids = [el.get("action_id") for el in actions if "action_id" in el]
+    assert slack_routes.START_ISSUE_ACTION_ID in action_ids
+    start_btn = [el for el in actions if el.get("action_id") == slack_routes.START_ISSUE_ACTION_ID][0]
+    assert start_btn["value"] == "77"
+
+
+async def test_orcha_issue_footer_falls_back_to_alias_without_github_login(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    fake = _fake_issue_post(number=1)
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake)
+    await _link_slack_member(client, container, make_agent, db, "U-linked", alias="opsy")
+    headers, body = _sign(_form(user_id="U-linked", text="issue No login on file"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert "_Filed from Slack by opsy via Orcha_" in fake.calls[0]["body"]
+
+
+async def test_orcha_issue_no_body_footer_only(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    fake = _fake_issue_post(number=2)
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    headers, body = _sign(_form(user_id="U-linked", text="issue Title only, no body"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert fake.calls[0]["body"].strip().startswith("_Filed from Slack by")
+
+
+async def test_orcha_issue_403_shows_friendly_permission_card(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+
+    def forbidden(repo, token, title, body):
+        raise slack_routes.GithubPermissionError("403")
+
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", forbidden)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    headers, body = _sign(_form(user_id="U-linked", text="issue This will 403"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text  # never a raw error / stack trace
+    j = r.json()
+    assert j["blocks"][0]["text"]["text"] == "🔒 Can't file that issue"
+    assert "Issues: Read and write" in j["blocks"][1]["text"]["text"]
+
+
+async def test_orcha_issue_no_repo_bound_shows_friendly_card(
+        client, container, make_agent, db, slack_enabled):
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    headers, body = _sign(_form(user_id="U-linked", text="issue No repo bound here"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["blocks"][0]["text"]["text"] == "🔒 Can't file that issue"
+
+
+async def test_orcha_issue_generic_github_failure_shows_friendly_card_not_500(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+
+    def unreachable(repo, token, title, body):
+        raise RuntimeError("github_status:500")
+
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", unreachable)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    headers, body = _sign(_form(user_id="U-linked", text="issue Will blow up"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert "Couldn't file" in r.json()["blocks"][0]["text"]["text"]
+
+
+async def test_orcha_issue_gated_by_linked_member(client, container, slack_enabled):
+    headers, body = _sign(_form(user_id="U-unknown", text="issue Some title"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert "link" in r.json()["text"].lower()
+
+
+async def test_usage_help_lists_orcha_issue(client, container, make_agent, db, slack_enabled):
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    headers, body = _sign(_form(user_id="U-linked", text="frobnicate"))
+    r = await client.post("/api/slack/commands", content=body, headers=headers)
+    body_text = r.json()["blocks"][1]["text"]["text"]
+    assert "/orcha issue <title> [-- <body>]" in body_text
+
+
+# ------------------------- POST /api/slack/interactions: plumbing -------------------------
+
+async def test_interactions_disabled_without_secrets_503(client, monkeypatch):
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    r = await client.post("/api/slack/interactions", content="payload=%7B%7D")
+    assert r.status_code == 503
+
+
+async def test_interactions_bad_signature_401(client, slack_enabled):
+    body = _payload_form({"type": "block_actions"})
+    headers, body = _sign(body)
+    headers["X-Slack-Signature"] = "v0=deadbeef"
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 401
+
+
+async def test_interactions_missing_signature_401(client, slack_enabled):
+    body = _payload_form({"type": "block_actions"})
+    r = await client.post(
+        "/api/slack/interactions", content=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert r.status_code == 401
+
+
+async def test_interactions_malformed_payload_400(client, slack_enabled):
+    headers, body = _sign("payload=not-json")
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 400
+
+
+async def test_interactions_3s_contract_ack_before_slow_work(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    """Order-of-calls proof for the 3s ack contract: for a shortcut, views.open (the
+    ack) must be the ONLY Slack Web API call made synchronously in the request path —
+    no DB write / GitHub call happens BEFORE it. We assert call order via a shared
+    list both the Slack-API stub and a DB-touching stub append to."""
+    order = []
+
+    def fake_call_slack_api(method, token, payload):
+        order.append(("slack_api", method))
+        return {"ok": True}
+
+    monkeypatch.setattr(slack_routes, "call_slack_api", fake_call_slack_api)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = {
+        "type": "shortcut",
+        "callback_id": slack_routes.SHORTCUT_CALLBACK_ID,
+        "trigger_id": "trig1",
+        "user": {"id": "U-linked"},
+        "message": {"text": "Something broke\nmore detail"},
+    }
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert order == [("slack_api", "views.open")]
+
+
+# ------------------------- shortcut -> modal (both callback_ids) -------------------------
+
+async def test_shortcut_create_github_issue_opens_modal_prefilled(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    opened = {}
+
+    def fake_call_slack_api(method, token, payload):
+        opened["method"] = method
+        opened["payload"] = payload
+        return {"ok": True}
+
+    monkeypatch.setattr(slack_routes, "call_slack_api", fake_call_slack_api)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = {
+        "type": "shortcut",
+        "callback_id": slack_routes.SHORTCUT_CALLBACK_ID,
+        "trigger_id": "trig123",
+        "user": {"id": "U-linked"},
+        "message": {"text": "The login button is broken\nhappens on every browser"},
+    }
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    assert opened["method"] == "views.open"
+    assert opened["payload"]["trigger_id"] == "trig123"
+    view = opened["payload"]["view"]
+    assert view["callback_id"] == "create_github_issue_submit"
+    assert view["title"]["text"] == "Create GitHub issue"
+    assert view["submit"]["text"] == "File issue"
+    title_el = view["blocks"][0]["element"]
+    assert title_el["initial_value"] == "The login button is broken"
+    body_el = view["blocks"][1]["element"]
+    assert "happens on every browser" in body_el["initial_value"]
+    assert "— from Slack conversation" in body_el["initial_value"]
+    # No assignee picker on the issue-only shortcut.
+    assert len(view["blocks"]) == 2
+    # container_id + slack_user_id (+ any selected image files) ride private_metadata
+    # as JSON for view_submission to recover (Slack payloads carry no other context).
+    meta = _json.loads(view["private_metadata"])
+    assert meta["cid"] == container["id"]
+    assert meta["slack_user_id"] == "U-linked"
+    assert meta["files"] == []
+
+
+async def test_shortcut_create_orcha_task_opens_modal_with_assignee_picker(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    opened = {}
+    monkeypatch.setattr(slack_routes, "call_slack_api",
+                        lambda method, token, payload: (opened.update(method=method, payload=payload), {"ok": True})[1])
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    ai = await make_agent("atlas", kind="ai")
+
+    payload = {
+        "type": "message_action",
+        "callback_id": slack_routes.SHORTCUT_CALLBACK_ID_WITH_TASK,
+        "trigger_id": "trig456",
+        "user": {"id": "U-linked"},
+        "message": {"text": "Deploy is failing"},
+    }
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    view = opened["payload"]["view"]
+    assert view["callback_id"] == "create_orcha_task_submit"
+    assert view["title"]["text"] == "Create Orcha task"
+    assert view["submit"]["text"] == "Create task"
+    assert len(view["blocks"]) == 3  # title, body, assignee
+    assignee_block = view["blocks"][2]
+    assert assignee_block["block_id"] == slack_routes.ASSIGNEE_BLOCK_ID
+    options = assignee_block["element"]["options"]
+    assert any(o["text"]["text"] == "atlas" for o in options)
+    assert assignee_block["element"]["placeholder"]["text"] == "Let the orchestrator route it"
+
+
+async def test_shortcut_unlinked_user_opens_not_linked_modal_never_drafts(
+        client, container, slack_enabled, monkeypatch):
+    """An unlinked caller must never see the drafting form — the "never acts for an
+    unlinked caller" contract holds even for the shortcut path, where views.open is the
+    only available ack mechanism."""
+    opened = {}
+    monkeypatch.setattr(slack_routes, "call_slack_api",
+                        lambda method, token, payload: (opened.update(method=method, payload=payload), {"ok": True})[1])
+    payload = {
+        "type": "shortcut",
+        "callback_id": slack_routes.SHORTCUT_CALLBACK_ID,
+        "trigger_id": "trig-unlinked",
+        "user": {"id": "U-unknown"},
+        "message": {"text": "hello"},
+    }
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    view = opened["payload"]["view"]
+    assert view["title"]["text"] == "Not linked"
+    assert "callback_id" not in view or view.get("callback_id") is None
+    # No title/body input blocks — never a drafting form for an unlinked caller.
+    block_ids = [b.get("block_id") for b in view["blocks"]]
+    assert "title_block" not in block_ids
+
+
+# ------------------------- view_submission: issue-only -------------------------
+
+def _private_metadata(cid, slack_user_id, files=None):
+    """Build the JSON private_metadata blob slack_routes._handle_shortcut composes
+    (slack_routes._parse_private_metadata is the decode side)."""
+    return _json.dumps({"cid": cid, "slack_user_id": slack_user_id, "files": files or []})
+
+
+def _submission_payload(callback_id, cid, slack_user_id, title, body, assignee_value=None,
+                        files=None):
+    values = {
+        "title_block": {"title_input": {"value": title}},
+        "body_block": {"body_input": {"value": body}},
+    }
+    if assignee_value is not None:
+        values[slack_routes.ASSIGNEE_BLOCK_ID] = {
+            slack_routes.ASSIGNEE_ACTION_ID: {
+                "selected_option": {"value": assignee_value, "text": {"type": "plain_text", "text": "x"}}
+            }
+        }
+    return {
+        "type": "view_submission",
+        "user": {"id": slack_user_id},
+        "view": {
+            "callback_id": callback_id,
+            "private_metadata": _private_metadata(cid, slack_user_id, files),
+            "state": {"values": values},
+        },
+    }
+
+
+async def test_view_submission_issue_only_creates_issue_and_dms_confirmation(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=88, title="From the modal")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    dm_calls = []
+
+    def fake_call_slack_api(method, token, payload):
+        if method == "chat.postMessage":
+            dm_calls.append(payload)
+        return {"ok": True}
+
+    monkeypatch.setattr(slack_routes, "call_slack_api", fake_call_slack_api)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_github_issue_submit", container["id"], "U-linked",
+        "From the modal", "extra body text",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"response_action": "clear"}
+
+    assert fake_issue.calls[0]["title"] == "From the modal"
+    assert "extra body text" in fake_issue.calls[0]["body"]
+
+    # No Orcha task was created — issue-only shortcut.
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    assert not any("From the modal" in t["title"] for t in listed)
+
+    assert len(dm_calls) == 1
+    assert dm_calls[0]["channel"] == "U-linked"
+    assert dm_calls[0]["blocks"][0]["text"]["text"] == "📝 Issue filed"
+
+
+async def test_view_submission_empty_title_returns_validation_error(
+        client, container, make_agent, db, slack_enabled):
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    payload = _submission_payload(
+        "create_github_issue_submit", container["id"], "U-linked", "   ", "",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["response_action"] == "errors"
+    assert "title_block" in j["errors"]
+
+
+async def test_view_submission_unlinked_member_fails_closed(
+        client, container, slack_enabled):
+    payload = _submission_payload(
+        "create_github_issue_submit", container["id"], "U-not-linked", "A title", "",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["response_action"] == "errors"
+
+
+async def test_view_submission_github_403_returns_validation_error_not_stack_trace(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+
+    def forbidden(repo, token, title, body):
+        raise slack_routes.GithubPermissionError("403")
+
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", forbidden)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    payload = _submission_payload(
+        "create_github_issue_submit", container["id"], "U-linked", "Title", "",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["response_action"] == "errors"
+    assert "Issues write permission" in j["errors"]["title_block"]
+
+
+# ------------------------- view_submission: chained issue + task (Create Orcha task) -------------------------
+
+async def test_view_submission_with_task_chains_issue_then_task_same_shared_core(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """The pipeline pin: issue creation happens, THEN task_start_core.start_task_from_github
+    is called with the freshly created issue's number/title/html_url — proving the
+    'Create Orcha task' shortcut is not a separate, drifted implementation."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=99, title="Chained flow")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+
+    start_calls = []
+    real_start = slack_routes.start_task_from_github
+
+    def spy_start(cur, cid, **kwargs):
+        start_calls.append(kwargs)
+        return real_start(cur, cid, **kwargs)
+
+    monkeypatch.setattr(slack_routes, "start_task_from_github", spy_start)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Chained flow", "body text",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"response_action": "clear"}
+
+    assert len(start_calls) == 1
+    assert start_calls[0]["number"] == 99
+    assert start_calls[0]["gh_title"] == "Chained flow"
+    assert start_calls[0]["kind"] == "issue"
+    assert start_calls[0]["source"] == "slack"
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #99:")]
+    assert len(t) == 1
+    assert t[0]["title"] == "GH #99: Chained flow"
+
+
+async def test_view_submission_with_task_passes_selected_assignee(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=100, title="Assign me")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    ai = await make_agent("atlas", kind="ai")
+    ai_id = ai["agent_id"]
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Assign me", "", assignee_value=ai_id,
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #100:")][0]
+    assert t["status"] == "in_progress"  # assigned tasks start in_progress, not ready
+    at = db.execute("SELECT agent_id FROM agent_tasks WHERE task_id=%s", (t["id"],))
+    assert str(at[0]["agent_id"]) == ai_id
+
+
+async def test_view_submission_with_task_retired_assignee_degrades_to_unassigned(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """A modal can sit open indefinitely — if the picked agent was RETIRED between
+    modal-open and submit, the stale selection must degrade to unassigned (Atlas
+    routes it) rather than assign work to a dead agent or crash the submission."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=110, title="Retired assignee")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    ai = await make_agent("atlas", kind="ai")
+    ai_id = ai["agent_id"]
+    db.execute("UPDATE agents SET terminated_at=now() WHERE id=%s", (ai_id,))
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Retired assignee", "", assignee_value=ai_id,
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #110:")][0]
+    assert t["status"] == "ready"  # degraded to unassigned, not assigned to the retiree
+    at = db.execute("SELECT agent_id FROM agent_tasks WHERE task_id=%s", (t["id"],))
+    assert at == []
+
+
+async def test_view_submission_with_task_cross_container_assignee_degrades_to_unassigned(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """A modal-selected assignee id from a DIFFERENT container (should be impossible
+    via the modal's own options, but a client could still submit an arbitrary value)
+    must never be trusted — degrade to unassigned rather than cross a container
+    boundary."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=111, title="Cross container")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    other = await client.post("/api/containers", json={"name": "other", "additional": True})
+    assert other.status_code == 201, other.text
+    other_cid = other.json()["container_id"]
+    r_agent = await client.post(f"/api/containers/{other_cid}/agents",
+                                json={"alias": "outsider", "role": "worker", "kind": "ai",
+                                      "prompt": "x"})
+    assert r_agent.status_code in (200, 201), r_agent.text
+    outsider_id = r_agent.json()["agent_id"]
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Cross container", "", assignee_value=outsider_id,
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #111:")][0]
+    assert t["status"] == "ready"  # degraded to unassigned, never cross-container
+
+
+async def test_view_submission_with_task_unassigned_sentinel_means_no_assignee(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=101, title="No assignee")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "No assignee", "", assignee_value=slack_routes.ASSIGNEE_UNASSIGNED_VALUE,
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #101:")][0]
+    assert t["status"] == "ready"  # unassigned → Atlas routes it
+
+
+async def test_view_submission_with_task_confirmation_card_links_both(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=102, title="Both links")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setenv("ORCHA_PORTAL_BASE_URL", "https://app.example.com")
+    dm_calls = []
+
+    def fake_call_slack_api(method, token, payload):
+        if method == "chat.postMessage":
+            dm_calls.append(payload)
+        return {"ok": True}
+
+    monkeypatch.setattr(slack_routes, "call_slack_api", fake_call_slack_api)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked", "Both links", "",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    assert len(dm_calls) == 1
+    blocks = dm_calls[0]["blocks"]
+    assert blocks[0]["text"]["text"] == "🚀 Task created"
+    buttons = blocks[-1]["elements"]
+    urls = [b["url"] for b in buttons]
+    assert any("github.com" in u for u in urls)
+    assert any(u.startswith("https://app.example.com/tasks?") for u in urls)
+
+
+async def test_view_submission_with_task_half_failure_is_honest_not_silent(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """If issue creation succeeds but starting the task fails, the confirmation card
+    must say so honestly (issue link + explicit retry instruction) — never render a
+    task link that doesn't resolve, and never pretend the task exists."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=103, title="Half failure")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+
+    def boom_start(cur, cid, **kwargs):
+        raise RuntimeError("task start blew up")
+
+    monkeypatch.setattr(slack_routes, "start_task_from_github", boom_start)
+    dm_calls = []
+
+    def fake_call_slack_api(method, token, payload):
+        if method == "chat.postMessage":
+            dm_calls.append(payload)
+        return {"ok": True}
+
+    monkeypatch.setattr(slack_routes, "call_slack_api", fake_call_slack_api)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked", "Half failure", "",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"response_action": "clear"}  # the issue DID get created; ack normally
+
+    # The GitHub issue WAS created (not rolled back).
+    assert len(fake_issue.calls) == 1
+
+    # No Orcha task exists for it.
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    assert not any("GH #103:" in t["title"] for t in listed)
+
+    assert len(dm_calls) == 1
+    blocks = dm_calls[0]["blocks"]
+    assert blocks[0]["text"]["text"] == "🚀 Task created"
+    ctx_text = blocks[2]["elements"][0]["text"]
+    assert "starting the Orcha task failed" in ctx_text
+    assert "/orcha start issue 103" in ctx_text
+    # Only the GitHub issue link is offered — no task-link button.
+    assert not any(b["type"] == "actions" and len(b["elements"]) > 1 for b in blocks)
+
+
+async def test_view_submission_with_task_partial_db_failure_leaves_no_orphaned_task_row(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """Tighter than the half-failure test above: this fails PARTWAY through
+    start_task_from_github — after its `tasks` INSERT (and, with an assignee, its
+    `agent_tasks` INSERT) have already run in the still-open transaction — rather
+    than before any write happens at all. The handler must roll back on this path so
+    no orphaned `tasks` row survives the commit; otherwise a member who retries
+    `/orcha start issue <N>` would bounce off the idempotency check and be told the
+    (broken, audit-trail-less) task already exists."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=105, title="Partial DB failure")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+    ai = await make_agent("atlas", kind="ai")
+    ai_id = ai["agent_id"]
+
+    from portal_backend import task_start_core as core
+
+    def boom_after_insert(cur, agent_id):
+        raise RuntimeError("recompute blew up after the tasks row was already inserted")
+
+    # recompute_agent_status runs AFTER the tasks + agent_tasks INSERTs (see
+    # task_start_core.start_task_from_github) — patching it to raise reproduces a
+    # failure partway through, with real uncommitted writes already staged.
+    monkeypatch.setattr(core, "recompute_agent_status", boom_after_insert)
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Partial DB failure", "", assignee_value=ai_id,
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"response_action": "clear"}
+
+    # No orphaned task row: the rollback must have discarded the partial INSERT.
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    assert not any("GH #105:" in t["title"] for t in listed)
+    rows = db.execute(
+        "SELECT count(*) AS n FROM tasks WHERE title LIKE %s", ("GH #105:%",)
+    )
+    assert rows[0]["n"] == 0
+
+
+# ====================================================================================
+# Feature: screenshots travel with the work (message-shortcut images)
+# ====================================================================================
+
+import main as _main  # noqa: E402  (module-level import, mirrors test_iss301_attachments.py)
+
+
+@pytest.fixture
+def att_dir(tmp_path, monkeypatch):
+    """Redirect the task-attachments store to a per-test tmp dir — mirrors
+    test_iss301_attachments.py's fixture of the same name/shape (main.ATTACHMENTS_DIR
+    is read fresh on every call through attachment_config's provider lambda)."""
+    d = tmp_path / "orcha-attachments"
+    d.mkdir()
+    monkeypatch.setattr(_main, "ATTACHMENTS_DIR", d)
+    return d
+
+
+def _slack_image_file(name="shot.png", mimetype="image/png", size=1024,
+                      url="https://files.slack.com/x/download"):
+    return {"name": name, "mimetype": mimetype, "size": size, "url_private_download": url}
+
+
+async def test_shortcut_private_metadata_carries_selected_image_files(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    """The shortcut payload's message.files[] survive into private_metadata (as
+    lightweight metadata, not bytes) — proving download is deferred to submission
+    time, not attempted during the 3s shortcut ack."""
+    opened = {}
+    monkeypatch.setattr(slack_routes, "call_slack_api",
+                        lambda method, token, payload: (opened.update(payload=payload), {"ok": True})[1])
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = {
+        "type": "shortcut",
+        "callback_id": slack_routes.SHORTCUT_CALLBACK_ID,
+        "trigger_id": "trigX",
+        "user": {"id": "U-linked"},
+        "message": {
+            "text": "Bug report",
+            "files": [_slack_image_file(name="screenshot.png"), _slack_image_file(name="doc.pdf", mimetype="application/pdf")],
+        },
+    }
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    view = opened["payload"]["view"]
+    meta = _json.loads(view["private_metadata"])
+    # Only the image (not the pdf) made it into the metadata's file selection.
+    assert len(meta["files"]) == 1
+    assert meta["files"][0]["name"] == "screenshot.png"
+    assert "data" not in meta["files"][0]  # no bytes — metadata only
+
+
+async def test_view_submission_embeds_images_as_markdown_in_issue_body(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=200, title="With screenshot")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    monkeypatch.setattr(slack_files, "download_slack_file", lambda url, token: b"\x89PNGfakebytes")
+
+    put_calls = []
+
+    def fake_put(repo, token, path, data, message):
+        put_calls.append({"repo": repo, "path": path, "data": data})
+        return {"content": {"download_url": f"https://raw.githubusercontent.com/{repo}/main/{path}"}}
+
+    monkeypatch.setattr(slack_routes, "_gh_put_contents", fake_put)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_github_issue_submit", container["id"], "U-linked",
+        "With screenshot", "the bug",
+        files=[_slack_image_file(name="bug.png")],
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"response_action": "clear"}
+
+    assert len(put_calls) == 1
+    assert put_calls[0]["repo"] == "acme/site"
+    assert ".github/orcha-attachments/" in put_calls[0]["path"]
+    assert put_calls[0]["data"] == b"\x89PNGfakebytes"
+
+    issue_body = fake_issue.calls[0]["body"]
+    assert "### Screenshots" in issue_body
+    assert "![bug.png](https://raw.githubusercontent.com/acme/site/main/" in issue_body
+    assert "the bug" in issue_body  # original body text preserved alongside the images
+
+
+async def test_view_submission_files_read_missing_degrades_gracefully(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """No files:read scope (Slack 403s the download) — the issue/task still gets
+    created, just without images, and the confirmation card says so explicitly."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=201, title="No scope")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    dm_calls = []
+
+    def fake_call_slack_api(method, token, payload):
+        if method == "chat.postMessage":
+            dm_calls.append(payload)
+        return {"ok": True}
+
+    monkeypatch.setattr(slack_routes, "call_slack_api", fake_call_slack_api)
+
+    def denied(url, token):
+        raise slack_files.SlackFilesScopeMissing("403")
+
+    monkeypatch.setattr(slack_files, "download_slack_file", denied)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_github_issue_submit", container["id"], "U-linked",
+        "No scope", "body",
+        files=[_slack_image_file(name="a.png"), _slack_image_file(name="b.png")],
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"response_action": "clear"}  # issue creation still succeeds
+
+    assert "### Screenshots" not in fake_issue.calls[0]["body"]
+
+    assert len(dm_calls) == 1
+    joined = " ".join(
+        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
+    )
+    assert "files:read" in joined
+    assert "reinstall" in joined
+
+
+async def test_view_submission_partial_screenshot_failure_counted_honestly(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """2 of 3 screenshots land — the confirmation card must say '2/3', never claim
+    all 3 landed and never fail the whole issue-filing flow."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=202, title="Partial")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    dm_calls = []
+    monkeypatch.setattr(slack_routes, "call_slack_api",
+                        lambda method, token, payload: (dm_calls.append(payload) if method == "chat.postMessage" else None, {"ok": True})[1])
+    monkeypatch.setattr(slack_files, "download_slack_file", lambda url, token: b"bytes")
+
+    calls = {"n": 0}
+
+    def flaky_put(repo, token, path, data, message):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise slack_routes.GithubPermissionError("403")
+        return {"content": {"download_url": f"https://raw.githubusercontent.com/{repo}/main/{path}"}}
+
+    monkeypatch.setattr(slack_routes, "_gh_put_contents", flaky_put)
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_github_issue_submit", container["id"], "U-linked",
+        "Partial", "",
+        files=[_slack_image_file(name=f"s{i}.png") for i in range(3)],
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    issue_body = fake_issue.calls[0]["body"]
+    assert issue_body.count("![") == 2  # only the 2 that landed are embedded
+
+    joined = " ".join(
+        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
+    )
+    assert "2/3 screenshots attached" in joined
+
+
+async def test_view_submission_with_task_lands_images_on_task_attachments(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch, att_dir):
+    """The founder's actual goal: for the 'Create Orcha task' shortcut, downloaded
+    images ALSO land on the created task's own attachment store (not just the GitHub
+    issue) — the same machinery POST /api/tasks/{tid}/attachments uses, so a
+    sandboxed agent can fetch and review them."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=203, title="Task with screenshot")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    monkeypatch.setattr(slack_files, "download_slack_file", lambda url, token: b"\x89PNGrealbytes")
+    monkeypatch.setattr(slack_routes, "_gh_put_contents",
+                        lambda repo, token, path, data, message: {"content": {"download_url": "https://raw/x"}})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Task with screenshot", "",
+        files=[_slack_image_file(name="proof.png")],
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #203:")][0]
+    msgs = (await client.get(f"/api/tasks/{t['id']}/messages")).json()["messages"]
+    attach_msgs = [m for m in msgs if m.get("attachments")]
+    assert len(attach_msgs) == 1
+    refs = attach_msgs[0]["attachments"]
+    assert len(refs) == 1
+    assert refs[0]["name"] == "proof.png"
+    assert refs[0]["kind"] == "image"
+    # The stored bytes are actually on disk under this task's attachment dir.
+    stored_path = att_dir / t["id"] / refs[0]["id"]
+    assert stored_path.exists()
+    assert stored_path.read_bytes() == b"\x89PNGrealbytes"
+
+
+async def test_view_submission_with_task_screenshot_disallowed_extension_skipped(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch, att_dir):
+    """End-to-end: a Slack file reporting mimetype image/svg+xml (which passes the
+    upstream image/* selection filter) but named with a disallowed extension must be
+    skipped by the task-attachment landing step — never written into the attachment
+    store un-gated. (SVG is deliberately excluded from ATTACHMENT_TYPES — 'never
+    served renderable' per attachment_routes.upload_attachment's docstring.)"""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=210, title="Disallowed ext")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    monkeypatch.setattr(slack_files, "download_slack_file", lambda url, token: b"<svg onload=alert(1)></svg>")
+    monkeypatch.setattr(slack_routes, "_gh_put_contents",
+                        lambda repo, token, path, data, message: {"content": {"download_url": "https://raw/x"}})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Disallowed ext", "",
+        files=[_slack_image_file(name="exploit.svg", mimetype="image/svg+xml")],
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #210:")][0]
+    msgs = (await client.get(f"/api/tasks/{t['id']}/messages")).json()["messages"]
+    # No attachment message at all — the one candidate file was rejected outright.
+    assert not any(m.get("attachments") for m in msgs)
+    # Nothing landed on disk under this task's attachment dir either.
+    task_dir = att_dir / t["id"]
+    assert not task_dir.exists() or not any(task_dir.iterdir())
+
+
+async def test_view_submission_issue_only_shortcut_does_not_touch_task_attachments(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch, att_dir):
+    """The issue-only shortcut ('Create GitHub issue') must NOT land images on any
+    task attachment store — there is no task. Only the chained 'Create Orcha task'
+    shortcut does that."""
+    await _bind_repo(client, container["id"])
+    fake_issue = _fake_issue_post(number=204, title="Issue only, no task")
+    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    monkeypatch.setattr(slack_files, "download_slack_file", lambda url, token: b"bytes")
+    monkeypatch.setattr(slack_routes, "_gh_put_contents",
+                        lambda repo, token, path, data, message: {"content": {"download_url": "https://raw/x"}})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_github_issue_submit", container["id"], "U-linked",
+        "Issue only, no task", "",
+        files=[_slack_image_file(name="shot.png")],
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    assert not any("GH #204:" in t["title"] for t in listed)
+    # Nothing was ever written under the attachments root for this container's tasks.
+    assert not any(att_dir.iterdir())
+
+
+# ------------------------- block_actions: Start Orcha task button -------------------------
+
+async def test_block_action_start_issue_creates_task(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    monkeypatch.setattr(hub, "_gh_get", _fake_issue_get(55, "Started via button"))
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = {
+        "type": "block_actions",
+        "user": {"id": "U-linked"},
+        "actions": [{"action_id": slack_routes.START_ISSUE_ACTION_ID, "value": "55"}],
+    }
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["blocks"][0]["text"]["text"] == "🚀 Task started"
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #55:")][0]
+    assert t["title"] == "GH #55: Started via button"
+
+
+async def test_block_action_start_issue_idempotent_shows_already_tracked(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    await _bind_repo(client, container["id"])
+    monkeypatch.setattr(hub, "_gh_get", _fake_issue_get(56, "dup via button"))
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = {
+        "type": "block_actions",
+        "user": {"id": "U-linked"},
+        "actions": [{"action_id": slack_routes.START_ISSUE_ACTION_ID, "value": "56"}],
+    }
+    headers, body = _sign(_payload_form(payload))
+    for _ in range(2):
+        headers, body = _sign(_payload_form(payload))
+        r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.json()["blocks"][0]["text"]["text"] == "↩️ Already tracked"
+
+
+async def test_block_action_start_issue_reuses_shared_start_core(
+        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """Confirms the block_actions Start button is not a separate/drifted implementation
+    — it produces a task with the SAME title/DoD template as any other GH-issue start
+    path (e.g. the slash command)."""
+    await _bind_repo(client, container["id"])
+    monkeypatch.setattr(hub, "_gh_get", _fake_issue_get(200, "Shared core proof"))
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = {
+        "type": "block_actions",
+        "user": {"id": "U-linked"},
+        "actions": [{"action_id": slack_routes.START_ISSUE_ACTION_ID, "value": "200"}],
+    }
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"].startswith("GH #200:")][0]
+    assert "Fix GH #200 per its description" in t["definition_of_done"]
+
+
+async def test_block_action_unlinked_user_gets_ephemeral_never_acts(
+        client, container, slack_enabled):
+    payload = {
+        "type": "block_actions",
+        "user": {"id": "U-unlinked"},
+        "actions": [{"action_id": slack_routes.START_ISSUE_ACTION_ID, "value": "1"}],
+    }
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+    assert "link" in r.json()["text"].lower()
+
+
+# ------------------------- Block Kit composers: pure-function unit tests -------------------------
+
+def test_blocks_issue_filed_structure_with_interactive_button():
+    blocks = slack_notify.blocks_issue_filed(
+        42, "https://github.com/acme/site/issues/42", "Fix the thing", None,
+    )
+    assert blocks[0]["text"]["text"] == "📝 Issue filed"
+    assert "<https://github.com/acme/site/issues/42|#42 Fix the thing>" in blocks[1]["text"]["text"]
+    actions = blocks[2]["elements"]
+    start_btn = [el for el in actions if el.get("action_id") == "slack_start_issue"][0]
+    assert start_btn["value"] == "42"
+    assert start_btn["style"] == "primary"
+    open_btn = [el for el in actions if el.get("url")][0]
+    assert open_btn["text"]["text"] == "Open on GitHub"
+
+
+def test_blocks_issue_filed_start_command_variant_no_interactive_button():
+    blocks = slack_notify.blocks_issue_filed(
+        42, "https://github.com/acme/site/issues/42", "Fix the thing", None,
+        start_command="/orcha start issue 42",
+    )
+    ctx = blocks[2]["elements"][0]["text"]
+    assert "/orcha start issue 42" in ctx
+    assert not any(el.get("action_id") for b in blocks if b["type"] == "actions" for el in b["elements"])
+
+
+def test_blocks_github_permission_error_structure():
+    blocks = slack_notify.blocks_github_permission_error()
+    assert blocks[0]["text"]["text"] == "🔒 Can't file that issue"
+    assert "Issues: Read and write" in blocks[1]["text"]["text"]
+
+
+def test_blocks_issue_usage_help_shows_syntax():
+    blocks = slack_notify.blocks_issue_usage_help()
+    text = blocks[1]["text"]["text"]
+    assert "/orcha issue <title> [-- <body>]" in text
+
+
+def test_blocks_task_created_success_structure():
+    blocks = slack_notify.blocks_task_created(
+        9, "https://github.com/acme/site/issues/9", "A title",
+        "https://app.example.com/tasks?cid=c&task=t",
+    )
+    assert blocks[0]["text"]["text"] == "🚀 Task created"
+    assert "#9 A title" in blocks[1]["text"]["text"]
+    urls = [el["url"] for el in blocks[-1]["elements"]]
+    assert "https://github.com/acme/site/issues/9" in urls
+    assert "https://app.example.com/tasks?cid=c&task=t" in urls
+
+
+def test_blocks_task_created_half_failure_structure():
+    blocks = slack_notify.blocks_task_created(
+        9, "https://github.com/acme/site/issues/9", "A title", None,
+        start_failed=True, gh_number_for_retry=9,
+    )
+    assert blocks[0]["text"]["text"] == "🚀 Task created"
+    ctx = blocks[-2]["elements"][0]["text"] if blocks[-1]["type"] == "actions" else blocks[-1]["elements"][0]["text"]
+    assert "run `/orcha start issue 9` to retry" in ctx
+    # no task-link button in the half-failure card
+    assert not any(
+        el.get("url", "").startswith("https://app.example.com/tasks")
+        for b in blocks if b["type"] == "actions" for el in b["elements"]
+    )
+
+
+def test_build_create_issue_modal_issue_only_shape():
+    view = slack_notify.build_create_issue_modal("A title", "A body", private_metadata="c1|U1")
+    assert view["callback_id"] == "create_github_issue_submit"
+    assert view["private_metadata"] == "c1|U1"
+    assert len(view["blocks"]) == 2
+    assert view["blocks"][0]["element"]["initial_value"] == "A title"
+
+
+def test_build_create_issue_modal_truncates_long_title():
+    view = slack_notify.build_create_issue_modal("x" * 200, "", private_metadata="")
+    assert len(view["blocks"][0]["element"]["initial_value"]) == 80
+
+
+def test_build_create_issue_modal_with_task_adds_assignee_select():
+    view = slack_notify.build_create_issue_modal(
+        "T", "B", private_metadata="c1|U1", with_task=True,
+        assignee_options=[{"id": "a1", "alias": "atlas"}],
+    )
+    assert view["callback_id"] == "create_orcha_task_submit"
+    assert view["submit"]["text"] == "Create task"
+    assert len(view["blocks"]) == 3
+    options = view["blocks"][2]["element"]["options"]
+    assert options[0]["text"]["text"] == "atlas"
+    assert options[0]["value"] == "a1"
+
+
+def test_build_create_issue_modal_with_task_empty_roster_still_renders_select():
+    view = slack_notify.build_create_issue_modal(
+        "T", "B", private_metadata="c1|U1", with_task=True, assignee_options=[],
+    )
+    options = view["blocks"][2]["element"]["options"]
+    assert len(options) == 1
+    assert options[0]["value"] == slack_notify.ASSIGNEE_UNASSIGNED_VALUE
+
+
+def test_build_unlinked_user_modal_reuses_unlinked_copy():
+    view = slack_notify.build_unlinked_user_modal()
+    assert view["title"]["text"] == "Not linked"
+    assert view["blocks"] == slack_notify.blocks_unlinked_user()

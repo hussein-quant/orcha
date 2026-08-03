@@ -1,5 +1,6 @@
-"""Slack trigger seam (Feature B) — slash commands that TRIGGER Orcha, feature-flagged
-OFF unless both SLACK_SIGNING_SECRET and SLACK_BOT_TOKEN are configured.
+"""Slack trigger seam (Feature B) — slash commands + interactive components that
+TRIGGER Orcha, feature-flagged OFF unless both SLACK_SIGNING_SECRET and
+SLACK_BOT_TOKEN are configured.
 
 Security model:
   * Every request's Slack signature is verified (v0 HMAC-SHA256 over
@@ -9,7 +10,7 @@ Security model:
     (mig 044). An unknown/unlinked caller gets an EPHEMERAL "link your Slack in
     Settings" reply and never acts — Slack can trigger, but only for a linked member.
 
-Commands (respond within Slack's 3s contract — task creation is fast, done inline):
+Slash commands (respond within Slack's 3s contract — task creation is fast, done inline):
   * /orcha start issue <N>   → start an Orcha task from GitHub issue #N
   * /orcha start pr <N>      → start an Orcha task from GitHub PR #N
         (both call the SAME start internals the hub uses — task_start_core — so a
@@ -18,19 +19,52 @@ Commands (respond within Slack's 3s contract — task creation is fast, done inl
          rendered — Slack gives us only a bare number, so this seam does the ONE
          extra live GitHub fetch the hub path gets for free from its caller, reusing
          github_hub_routes' token/GET leaves so both seams hit GitHub the same way.)
+  * /orcha issue <title> [-- <body>]  → file a NEW GitHub issue in the container's
+        connected repo (Issues:write). Everything before an optional ` -- ` separator
+        is the title; the rest is the body. The reply's "Start Orcha task" button is a
+        REAL interactive button (POST /api/slack/interactions), not just a hint.
   * /orcha tasks             → what needs you: up to 5 needs_verification tasks
                                 (linked), open-request and ready-unassigned counts.
 
+POST /api/slack/interactions (same signature + linked-member gate as /commands) handles
+three Slack payload shapes, all delivered form-encoded as a single `payload` JSON field:
+  * shortcut / message_action  → TWO message shortcuts open a views.open modal (title
+        pre-filled from the message's first line, body pre-filled with the full
+        message text + a provenance footer):
+          - "Create GitHub issue" (callback_id create_github_issue) — files the issue
+            only.
+          - "Create Orcha task" (callback_id create_orcha_task) — the SAME modal plus
+            an optional assignee picker; on submit it chain-creates the issue AND
+            immediately starts an Orcha task from it (task_start_core — same shared
+            core, same dispatch comment on the issue).
+  * view_submission            → routes on the SUBMITTED VIEW's own callback_id (see
+        slack_notify.MODAL_CALLBACK_ID / MODAL_CALLBACK_ID_WITH_TASK) to either just
+        create the issue, or create the issue THEN start the task from it. Returns a
+        response_action so Slack closes the modal; the confirmation card follows as a
+        DM/ephemeral, not inline in the modal response (Slack's view_submission body
+        has no room for a Block Kit card of this shape).
+  * block_actions               → the "Start Orcha task" button on an issue-filed card;
+        routes through the SAME task_start_core.start_task_from_github every other
+        dispatch path uses.
+Every interaction handler acks within Slack's 3s window — the modal open (views.open)
+IS the ack path for a shortcut; view_submission's `response_action` return IS its ack;
+block_actions replies inline (task creation is fast, same as the slash commands).
+
 External systems TRIGGER and OBSERVE Orcha; the verification/merge gates stay in Orcha.
-A Slack start creates a task the same way the hub does — it never completes or merges.
+A Slack start/issue-file acts the same way the hub does — it never completes or merges.
 """
 
+import asyncio
+import base64
 import hashlib
 import hmac
+import json
 import os
 import re
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 
 from fastapi import HTTPException, Request
 
@@ -38,13 +72,32 @@ from portal_backend import github_hub_routes as _hub
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.github_hub_routes import _excerpt
+from portal_backend.guards import valid_uuid
+from portal_backend.limits import MAX_NAME_LEN
 from portal_backend.slack_notify import (
+    ASSIGNEE_ACTION_ID,
+    ASSIGNEE_BLOCK_ID,
+    ASSIGNEE_UNASSIGNED_VALUE,
+    MODAL_CALLBACK_ID_WITH_TASK,
+    build_create_issue_modal,
+    build_unlinked_user_modal,
     blocks_already_tracked,
+    blocks_github_permission_error,
+    blocks_github_unreachable_error,
+    blocks_issue_filed,
+    blocks_issue_usage_help,
     blocks_start_success,
+    blocks_task_created,
     blocks_tasks_summary,
     blocks_unlinked_user,
     blocks_usage_help,
+    call_slack_api,
     portal_task_link,
+)
+from portal_backend.slack_files import (
+    SlackFilesScopeMissing,
+    fetch_selected_images,
+    select_image_files,
 )
 from portal_backend.task_start_core import start_task_from_github
 
@@ -54,6 +107,28 @@ SIGNATURE_MAX_SKEW_SECONDS = 300
 
 _START_RE = re.compile(r"^start\s+(issue|pr)\s+#?(\d+)\s*$", re.IGNORECASE)
 _TASKS_RE = re.compile(r"^tasks\s*$", re.IGNORECASE)
+# \b + \s*: "issue" alone (no title at all) must still match this branch — so it routes
+# to the issue-specific usage card, not the generic /orcha commands help block — while
+# the \b word boundary keeps a command like "issued" or "issuefoo" from false-matching
+# as "issue" + a title.
+_ISSUE_RE = re.compile(r"^issue\b\s*(.*)$", re.IGNORECASE | re.DOTALL)
+
+# The message-shortcut callback_ids the founder configures in the Slack app's UI
+# (Interactivity & Shortcuts → Create New Shortcut → On messages, one shortcut each) —
+# must match exactly what's registered there; see docs/slack-integration.md's
+# app-config steps. Both open the SAME modal layout (slack_notify.build_create_issue_modal);
+# only the "Create Orcha task" one sets with_task=True (assignee picker + chained start).
+SHORTCUT_CALLBACK_ID = "create_github_issue"
+SHORTCUT_CALLBACK_ID_WITH_TASK = "create_orcha_task"
+# The Start-button block_actions action_id, matching slack_notify._action_button_el's
+# call in blocks_issue_filed.
+START_ISSUE_ACTION_ID = "slack_start_issue"
+GITHUB_API = "https://api.github.com"
+GITHUB_ISSUE_TIMEOUT_SECONDS = 10
+# Message-text truncation for the modal's title prefill (first line, ~80 chars — Slack
+# plain_text_input has no hard character cap on initial_value but a title beyond this
+# is unreadable as an issue title; MODAL builder also caps defensively).
+TITLE_PREFILL_MAX = 80
 
 
 def _slack_enabled() -> bool:
@@ -151,6 +226,210 @@ def _fetch_gh_item(cur, container_id, kind: str, number: int):
     }
 
 
+class GithubPermissionError(Exception):
+    """Raised by `_gh_post_issue` on a 403 from GitHub — the installation lacks
+    Issues:write. A distinct type (rather than a bare RuntimeError, as the read-only
+    `_gh_get`/`_hub._gh_get` leaves use) so callers can route it to the friendly
+    "needs the Issues write permission" card without string-sniffing an error code."""
+
+
+def _gh_post_issue(repo: str, token: str, title: str, body: str) -> dict:
+    """POST a new issue to `repo` via the installation token. Raises
+    GithubPermissionError on a 403 (the App's Issues:write permission is missing —
+    the ONE error shape this whole feature is asked to degrade gracefully on) and
+    plain RuntimeError on any other GitHub/network failure. stdlib urllib, matching
+    every other GitHub leaf in this codebase (_gh_get, _gh_post_comment). This is the
+    ONLY network leaf for issue creation; tests monkeypatch this function.
+    """
+    url = f"{GITHUB_API}/repos/{repo}/issues"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps({"title": title, "body": body}).encode("utf-8"),
+        headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "orcha-portal",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=GITHUB_ISSUE_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            raise GithubPermissionError("github issue creation forbidden (403)") from exc
+        raise RuntimeError(f"github_status:{exc.code}") from exc
+    except GithubPermissionError:
+        raise
+    except Exception as exc:  # DNS, timeout, TLS, bad JSON — one graceful shape
+        raise RuntimeError(f"github_unreachable:{exc}") from exc
+
+
+def _gh_put_contents(repo: str, token: str, path: str, content_bytes: bytes, message: str) -> dict:
+    """PUT a file into `repo` via the GitHub Contents API (`PUT
+    /repos/{repo}/contents/{path}`) — creates it (no `sha` passed: this module never
+    OVERWRITES an existing attachment, every path is uniquely named). Requires the
+    App's Contents:write permission, which rides the SAME repo-write grant Issues:write
+    does on a standard GitHub App installation (no separate permission to document).
+    Raises GithubPermissionError on 403, RuntimeError on any other failure. stdlib
+    urllib + base64, matching every other GitHub leaf in this module.
+    """
+    url = f"{GITHUB_API}/repos/{repo}/contents/{path}"
+    payload = {
+        "message": message,
+        "content": base64.b64encode(content_bytes).decode("ascii"),
+    }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "orcha-portal",
+        },
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=GITHUB_ISSUE_TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            raise GithubPermissionError("github contents write forbidden (403)") from exc
+        raise RuntimeError(f"github_status:{exc.code}") from exc
+    except GithubPermissionError:
+        raise
+    except Exception as exc:  # DNS, timeout, TLS, bad JSON — one graceful shape
+        raise RuntimeError(f"github_unreachable:{exc}") from exc
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _issue_slug(title: str, number) -> str:
+    """A short, filesystem/URL-safe slug for the attachments subdirectory: the issue
+    title, lowercased and dash-joined, falling back to a numeric/timestamp form when
+    the title has no alnum content at all (e.g. an emoji-only title) — the directory
+    name only needs to be STABLE and collision-avoiding, not pretty."""
+    slug = _SLUG_RE.sub("-", (title or "").lower()).strip("-")[:60]
+    if slug:
+        return slug
+    if number is not None:
+        return f"issue-{number}"
+    return f"issue-{int(time.time())}"
+
+
+def _commit_images_to_repo(repo: str, token: str, issue_slug: str, images: list) -> list:
+    """Commit each downloaded Slack image to
+    `.github/orcha-attachments/<issue_slug>/<NN-name>` via the Contents API, returning
+    the ones that landed successfully as {"name", "raw_url"} — a per-file failure is
+    swallowed and simply excluded from the return list (the spec's per-file isolation:
+    one bad commit must never fail the whole issue-filing flow). `raw_url` is the
+    Contents API response's `content.download_url` — a stable raw-blob link GitHub
+    serves directly, which is what gets embedded as a markdown image in the issue body.
+    Private-repo visibility follows the repo's own access (see docs/slack-integration.md).
+    """
+    landed = []
+    for i, img in enumerate(images):
+        safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", img["name"])[:80] or f"image-{i}.png"
+        path = f".github/orcha-attachments/{issue_slug}/{i:02d}-{safe_name}"
+        try:
+            result = _gh_put_contents(
+                repo, token, path, img["data"],
+                message=f"Add Slack screenshot {safe_name} (via Orcha)",
+            )
+        except (GithubPermissionError, RuntimeError):
+            continue
+        raw_url = ((result or {}).get("content") or {}).get("download_url")
+        if raw_url:
+            landed.append({"name": safe_name, "raw_url": raw_url})
+    return landed
+
+
+def _embed_images_markdown(body: str, landed_images: list) -> str:
+    """Append a '### Screenshots' section with one markdown image per landed file.
+    Pure — no network. Returns `body` unchanged when `landed_images` is empty."""
+    if not landed_images:
+        return body
+    lines = ["### Screenshots"]
+    for img in landed_images:
+        lines.append(f"![{img['name']}]({img['raw_url']})")
+    section = "\n\n".join(lines)
+    return f"{body}\n\n{section}" if body else section
+
+
+_ISSUE_FOOTER = "_Filed from Slack by {who} via Orcha_"
+
+
+def create_github_issue(cur, container_id, title: str, body: str, member,
+                        *, repo: str = None, token: str = None) -> dict:
+    """Shared core: create a GitHub issue in the container's connected repo, attributed
+    to the linked member (footer line: "Filed from Slack by <github_login> via
+    Orcha"). Used by BOTH the `/orcha issue` slash command and the message-shortcut
+    modal's view_submission — one place composes the footer and resolves the repo
+    token, so the two entry points can never drift on copy or auth.
+
+    `repo`/`token`, when BOTH given, skip this function's own repo/token resolution —
+    `_handle_view_submission` already resolves them once (to also drive the image
+    pipeline) and passes them through here so a submission never resolves the same
+    repo/token twice. Omit either (the `/orcha issue` slash command's call site,
+    which has no other reason to pre-resolve them) and this function resolves both
+    itself, exactly as before.
+
+    Returns {"number": int, "html_url": str, "title": str} on success.
+    Raises:
+      * ValueError("no_repo")  — the container has no bound GitHub repo.
+      * ValueError("no_token") — the App isn't wired with an installation token for
+        this repo's owner.
+      * GithubPermissionError  — GitHub 403'd (Issues:write missing).
+      * RuntimeError           — any other GitHub/network failure.
+    Read-only w.r.t. Orcha's own DB (only reads containers.github_repo, and only when
+    `repo`/`token` weren't already supplied); the GitHub POST itself is the only
+    write, and it is NOT part of the caller's DB transaction (a GitHub issue cannot be
+    rolled back — callers should create it before any Orcha row that depends on it,
+    mirroring task_start_core's non-fatal-comment ordering, except here the issue
+    creation itself IS the primary action, not a best-effort side effect, so failures
+    ARE surfaced to the Slack caller rather than swallowed).
+    """
+    if not (repo and token):
+        cur.execute("SELECT github_repo FROM containers WHERE id=%s", (container_id,))
+        row = cur.fetchone()
+        repo = row["github_repo"] if row else None
+        if not repo:
+            raise ValueError("no_repo")
+        token = _hub._resolve_repo_token(repo)
+        if not token:
+            raise ValueError("no_token")
+    who = member.get("github_login") or member.get("alias") or "an Orcha member"
+    footer = _ISSUE_FOOTER.format(who=who)
+    full_body = f"{body}\n\n{footer}" if body else footer
+    raw = _gh_post_issue(repo, token, title, full_body)
+    return {
+        "number": raw.get("number"),
+        "html_url": raw.get("html_url") or "",
+        "title": raw.get("title") or title,
+    }
+
+
+def _parse_issue_command(text: str):
+    """Split `<title> [-- <body>]` on the FIRST ` -- ` separator (title/body may
+    themselves contain literal hyphens; only the space-dash-dash-space token is the
+    separator). Returns (title, body) with both trimmed; body is "" when absent.
+    Returns (None, None) when the title would be empty (bad/empty input) — the caller
+    replies with the usage card rather than filing a titleless issue."""
+    text = (text or "").strip()
+    if " -- " in text:
+        title, body = text.split(" -- ", 1)
+    else:
+        title, body = text, ""
+    title = title.strip()
+    body = body.strip()
+    if not title:
+        return None, None
+    return title, body
+
+
 def _needs_attention_summary(cur, container_id) -> dict:
     """Data for `/orcha tasks`: up to 5 needs_verification tasks (id + title, for
     linking), plus ready-unassigned and open-request counts — the same "needs you"
@@ -225,6 +504,39 @@ def _handle_command(cur, member, text: str) -> dict:
             f"Started an Orcha task for {label} #{number}: {gh_title}",
         )
 
+    m = _ISSUE_RE.match(text)
+    if m:
+        title, body = _parse_issue_command(m.group(1))
+        if title is None:
+            return _ephemeral(blocks_issue_usage_help(), "Usage: /orcha issue <title> [-- <body>]")
+        if len(title) > MAX_NAME_LEN:
+            title = title[:MAX_NAME_LEN]
+        try:
+            issue = create_github_issue(cur, cid, title, body, member)
+        except ValueError:
+            # no_repo / no_token — not the founder-called-out 403 case, but the same
+            # "never a stack trace" contract: a friendly card either way.
+            return _ephemeral(
+                blocks_github_permission_error(),
+                "This project has no connected GitHub repo (or no installation token) to file issues in.",
+            )
+        except GithubPermissionError:
+            return _ephemeral(
+                blocks_github_permission_error(),
+                "The GitHub App needs the Issues write permission to file issues from Slack.",
+            )
+        except RuntimeError:
+            # Any other GitHub/network failure (rate limit, timeout, 5xx) — never a
+            # stack trace in Slack; a short, honest ephemeral instead.
+            return _ephemeral(
+                blocks_github_unreachable_error(),
+                "Couldn't reach GitHub to file that issue — try again in a moment.",
+            )
+        return _ephemeral(
+            blocks_issue_filed(issue["number"], issue["html_url"], issue["title"], None),
+            f"Filed GitHub issue #{issue['number']}: {issue['title']}",
+        )
+
     if _TASKS_RE.match(text):
         s = _needs_attention_summary(cur, cid)
         blocks = blocks_tasks_summary(
@@ -234,6 +546,30 @@ def _handle_command(cur, member, text: str) -> dict:
         return _ephemeral(blocks, "Needs you in this project")
 
     return _ephemeral(blocks_usage_help(), "Orcha commands")
+
+
+def _dispatch_command(slack_user_id: str, text: str) -> dict:
+    """The synchronous, potentially-blocking body of slack_commands: DB cursor open
+    (psycopg is sync throughout this codebase) through to the shared-core dispatch,
+    which — for `/orcha issue`/`/orcha start` — makes real outbound GitHub HTTP calls
+    (`_gh_post_issue`, `_hub._gh_get`) via blocking `urllib`. Split out so the route
+    handler can run this whole span via `asyncio.to_thread` rather than blocking the
+    single asyncio event loop for the duration of a slow/rate-limited GitHub round
+    trip (matches this codebase's established pattern for blocking work inside an
+    `async def` route — e.g. attachment_routes.py's `asyncio.to_thread(_attachment_ref, ...)`).
+    """
+    with db_cursor() as (conn, cur):
+        member = _member_for_slack_user(cur, slack_user_id)
+        if member is None:
+            # 200 with an ephemeral body — Slack shows the text; never a 4xx (that would
+            # surface a red error in the channel instead of a helpful nudge).
+            return _ephemeral(
+                blocks_unlinked_user(),
+                "Your Slack account isn't linked to an Orcha member yet.",
+            )
+        response = _handle_command(cur, member, text)
+        conn.commit()
+    return response
 
 
 @app.post("/api/slack/commands")
@@ -259,15 +595,556 @@ async def slack_commands(request: Request):
     slack_user_id = form.get("user_id", "")
     text = form.get("text", "")
 
-    with db_cursor() as (conn, cur):
-        member = _member_for_slack_user(cur, slack_user_id)
-        if member is None:
-            # 200 with an ephemeral body — Slack shows the text; never a 4xx (that would
-            # surface a red error in the channel instead of a helpful nudge).
-            return _ephemeral(
-                blocks_unlinked_user(),
-                "Your Slack account isn't linked to an Orcha member yet.",
+    # Off the event loop: DB + any outbound GitHub call this command makes are both
+    # synchronous/blocking (psycopg, urllib) — see _dispatch_command's docstring.
+    return await asyncio.to_thread(_dispatch_command, slack_user_id, text)
+
+
+# ------------------------------------------------------------------------------------
+# POST /api/slack/interactions — message shortcuts, modal submission, block actions.
+# ------------------------------------------------------------------------------------
+
+def _live_ai_agents(cur, container_id) -> list:
+    """The container's live AI agents ({id, alias}), for the 'Create Orcha task'
+    modal's assignee static_select. Same 'live' filter (terminated_at IS NULL) every
+    other assignee-resolution query in this codebase uses (task_assignment_routes,
+    task_start_core's own assignee lookups)."""
+    cur.execute(
+        """SELECT id, alias FROM agents
+           WHERE container_id=%s AND kind='ai' AND terminated_at IS NULL
+           ORDER BY alias""",
+        (container_id,),
+    )
+    return [{"id": str(r["id"]), "alias": r["alias"]} for r in cur.fetchall()]
+
+
+def _validate_assignee(cur, container_id: str, assignee_id):
+    """Re-validate a modal-selected assignee at SUBMIT time (not just at open time —
+    a Slack modal can sit open indefinitely, so the agent it named could be retired,
+    deleted, or moved to a different container by the time 'Create task' is clicked).
+    Mirrors github_hub_routes.py's POST /github/start assignee guard exactly (live,
+    in-container, kind='ai'), except degrading to None (unassigned — Atlas routes it)
+    instead of raising an HTTPException: a stale assignee selection is not the kind of
+    error that should fail the whole submission over, it should just fall back to the
+    same safe default a bare Start already has."""
+    if not assignee_id or not valid_uuid(assignee_id):
+        return None
+    cur.execute(
+        "SELECT kind, container_id, terminated_at FROM agents WHERE id=%s",
+        (assignee_id,),
+    )
+    a = cur.fetchone()
+    if not a or str(a["container_id"]) != str(container_id) \
+            or a["terminated_at"] is not None or a["kind"] != "ai":
+        return None
+    return assignee_id
+
+
+def _land_images_on_task(cur, task_id: str, images: list, footer_author) -> int:
+    """Attach downloaded Slack images to the created task via the SAME storage +
+    ref-building machinery POST /api/tasks/{tid}/attachments uses
+    (attachment_references.task_attachments_dir / attachment_ref), so a sandboxed
+    agent sees these exactly like any other task attachment (fetch each via GET,
+    per render_attachment_feed_line's framing) — the founder's actual goal (the AI
+    reviews the screenshot). This is the in-process equivalent of that upload route
+    (no HTTP round-trip needed; we're already inside the portal process with the
+    bytes in hand) followed by a synthetic task_messages row carrying the refs,
+    exactly like POST /api/tasks/{tid}/messages would after a client-side upload.
+
+    Returns the count of images successfully landed; a per-file storage failure is
+    isolated (skipped, not raised) per the spec's per-file failure isolation.
+
+    Extension allowlist: EVERY file passed through the SAME `attachment_ext` gate
+    attachment_routes.upload_attachment enforces (only extensions in
+    ATTACHMENT_TYPES land — notably SVG/HTML are never on that list, "never served
+    renderable" per that route's own docstring). `slack_files.select_image_files`
+    already filters on Slack's reported `mimetype` being `image/*`, but that field is
+    Slack-supplied metadata, not a guarantee about the actual filename/extension this
+    function writes to disk — re-checking the extension here (not just trusting the
+    upstream mimetype filter) keeps this in-process path exactly as strict as the
+    real HTTP upload route, rather than a laxer shadow of it.
+    """
+    # Imported here (not at module top) to avoid a hard dependency on the attachments
+    # subsystem for every slack_routes import — this path is only exercised when a
+    # shortcut actually carries images.
+    import uuid as _uuid
+
+    from portal_backend.attachment_references import (
+        attachment_ref as _attachment_ref,
+        task_attachments_dir as _task_attachments_dir,
+    )
+    from portal_backend.attachment_storage import (
+        attachment_ext as _attachment_ext,
+        contained_path as _contained_path,
+        sanitize_attachment_name as _sanitize_attachment_name,
+    )
+
+    refs = []
+    tdir = _task_attachments_dir(task_id)
+    try:
+        tdir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return 0
+    for img in images:
+        try:
+            display = _sanitize_attachment_name(img["name"])
+            if _attachment_ext(display) is None:
+                continue  # same allowlist gate the real upload route enforces
+            stored = _uuid.uuid4().hex + "_" + display
+            dest = _contained_path(tdir, stored)
+            if dest is None:
+                continue
+            dest.write_bytes(img["data"])
+            refs.append(_attachment_ref(task_id, stored, display, len(img["data"]), dest))
+        except OSError:
+            continue
+    if not refs:
+        return 0
+    who = footer_author or "an Orcha member"
+    cur.execute(
+        "INSERT INTO task_messages (task_id, author_id, body, attachments) "
+        "VALUES (%s, %s, %s, %s)",
+        (task_id, None, f"📎 {len(refs)} screenshot(s) filed from Slack by {who}.",
+         json.dumps(refs)),
+    )
+    return len(refs)
+
+
+def _message_prefill(message_text: str) -> tuple:
+    """Split a Slack message's text into (title, body) for the create-issue modal:
+    title = the first line, truncated to TITLE_PREFILL_MAX; body = the full message
+    text with a provenance footer appended. Pure — no Slack/DB access."""
+    text = message_text or ""
+    first_line = text.splitlines()[0] if text.strip() else ""
+    title = first_line.strip()[:TITLE_PREFILL_MAX]
+    footer = "— from Slack conversation"
+    body = f"{text}\n\n{footer}" if text.strip() else footer
+    return title, body
+
+
+def _open_modal(bot_token: str, trigger_id: str, view: dict) -> None:
+    """views.open — the modal-open call that IS a shortcut's ack (must happen within
+    Slack's 3s window; the caller invokes this synchronously in the request handler,
+    same as every other Slack call in this module — no background queue exists here).
+    Raises RuntimeError on failure (propagated to the caller, which is the request
+    handler itself — a failed views.open has nothing useful to degrade to, unlike the
+    best-effort outbound leaves elsewhere in this codebase)."""
+    result = call_slack_api("views.open", bot_token, {"trigger_id": trigger_id, "view": view})
+    if not result.get("ok"):
+        raise RuntimeError(f"views.open failed: {result.get('error')}")
+
+
+def _dm_or_ephemeral(bot_token: str, slack_user_id: str, blocks: list, fallback_text: str) -> None:
+    """Best-effort confirmation after a modal submission closes: a DM to the submitting
+    user (chat.postMessage to their user id opens/uses the Slack-App DM channel — no
+    channel_id is available from a view_submission payload, only the user). Non-fatal:
+    the issue/task was already created by the time this runs, so a failed DM must never
+    look like the whole action failed — mirrors slack_notify's outbound-ping contract."""
+    try:
+        call_slack_api("chat.postMessage", bot_token, {
+            "channel": slack_user_id, "blocks": blocks, "text": fallback_text,
+        })
+    except RuntimeError:
+        pass
+
+
+def _private_metadata_files(files: list) -> list:
+    """The SUBSET of a Slack file's fields we carry through `private_metadata` to
+    view_submission time (where the actual download happens) — just enough for
+    `slack_files.select_image_files`/`download_slack_file`, never the file bytes
+    themselves (private_metadata is a ~3000-char Slack-imposed string budget)."""
+    out = []
+    for f in select_image_files(files):
+        out.append({
+            "name": f.get("name") or f.get("title") or "screenshot.png",
+            "mimetype": f.get("mimetype") or "",
+            "size": f.get("size"),
+            "url_private_download": f.get("url_private_download"),
+        })
+    return out
+
+
+def _handle_shortcut(cur, member, payload: dict, bot_token: str) -> dict:
+    """A message shortcut invocation ('shortcut'/'message_action' type) — open the
+    create-issue-or-task modal, pre-filled from the source message. `private_metadata`
+    is a small JSON blob (Slack imposes a ~3000-char budget on this field) carrying
+    everything view_submission needs but can't otherwise recover: container_id,
+    the triggering slack_user_id (view_submission has no other channel/user context
+    to DM the confirmation back to), and the message's image files (metadata only —
+    download happens at submission time, not here, since Slack's 3s ack window for a
+    shortcut has no room for N file downloads).
+    """
+    callback_id = payload.get("callback_id", "")
+    message = payload.get("message") or {}
+    message_text = message.get("text", "")
+    title, body = _message_prefill(message_text)
+    cid = str(member["container_id"])
+    slack_user_id = (payload.get("user") or {}).get("id", "")
+    files = _private_metadata_files(message.get("files") or [])
+    private_metadata = json.dumps({
+        "cid": cid, "slack_user_id": slack_user_id, "files": files,
+    })
+
+    with_task = callback_id == SHORTCUT_CALLBACK_ID_WITH_TASK
+    assignee_options = _live_ai_agents(cur, cid) if with_task else None
+    view = build_create_issue_modal(
+        title, body, private_metadata=private_metadata,
+        with_task=with_task, assignee_options=assignee_options,
+    )
+    trigger_id = payload.get("trigger_id", "")
+    _open_modal(bot_token, trigger_id, view)
+    return {}  # Slack expects an empty 200 body to ack a shortcut once the modal opens
+
+
+def _parse_private_metadata(raw: str) -> dict:
+    """Decode `_handle_shortcut`'s private_metadata JSON blob, defaulting every field
+    so a malformed/legacy value degrades to 'no files, no context' rather than
+    raising — view_submission's caller already fails closed on a missing cid."""
+    try:
+        data = json.loads(raw or "{}")
+    except ValueError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "cid": str(data.get("cid") or ""),
+        "slack_user_id": str(data.get("slack_user_id") or ""),
+        "files": data.get("files") if isinstance(data.get("files"), list) else [],
+    }
+
+
+def _extract_modal_values(view: dict) -> dict:
+    """Pull {title, body, assignee_agent_id} out of a view_submission's `view.state.values`
+    — Slack's nested block_id -> action_id -> {value} shape. `assignee_agent_id` is None
+    when the block is absent (the issue-only modal) OR no option was selected OR the
+    sentinel 'unassigned' option was chosen."""
+    values = ((view.get("state") or {}).get("values")) or {}
+    title = ((values.get("title_block") or {}).get("title_input") or {}).get("value") or ""
+    body = ((values.get("body_block") or {}).get("body_input") or {}).get("value") or ""
+    assignee_agent_id = None
+    selected = ((values.get(ASSIGNEE_BLOCK_ID) or {}).get(ASSIGNEE_ACTION_ID) or {}).get("selected_option")
+    if selected and selected.get("value") and selected["value"] != ASSIGNEE_UNASSIGNED_VALUE:
+        assignee_agent_id = selected["value"]
+    return {"title": title.strip(), "body": body.strip(), "assignee_agent_id": assignee_agent_id}
+
+
+def _fetch_and_land_images(cur, cid: str, repo, token, files: list, issue_slug: str,
+                           bot_token: str):
+    """The shared per-submission image pipeline: download the message's selected
+    images (files:read-gated), commit each to the repo under
+    .github/orcha-attachments/<slug>/, and return everything the caller needs to
+    embed markdown + report an honest count. Any stage failing for a given image
+    just drops that image from the counts — never raises.
+
+    Returns {"landed": [{"name","raw_url"}], "downloaded_images": [raw dicts, for
+    task-attachment landing], "selected": int, "skipped": int, "scope_missing": bool}.
+    `selected` is how many images PASSED the pre-filter (select_image_files) — the
+    denominator the confirmation card's "N/M screenshots" count uses.
+    """
+    if not files:
+        return {"landed": [], "downloaded_images": [], "selected": 0, "skipped": 0,
+               "scope_missing": False}
+    fetch_result = fetch_selected_images(files, bot_token)
+    images = fetch_result["images"]
+    selected = len(images) + fetch_result["skipped"]
+    if not images or not repo or not token:
+        # No repo/token to commit into — every downloaded image is effectively skipped
+        # for the issue-embedding purpose (still counted honestly).
+        return {"landed": [], "downloaded_images": images if (repo and token) else [],
+               "selected": selected,
+               "skipped": fetch_result["skipped"] + (len(images) if not (repo and token) else 0),
+               "scope_missing": fetch_result["scope_missing"]}
+    landed = _commit_images_to_repo(repo, token, issue_slug, images)
+    commit_failures = len(images) - len(landed)
+    return {
+        "landed": landed,
+        "downloaded_images": images,
+        "selected": selected,
+        "skipped": fetch_result["skipped"] + commit_failures,
+        "scope_missing": fetch_result["scope_missing"],
+    }
+
+
+def _screenshot_status_note(selected: int, landed_count: int) -> str:
+    """The honesty-count phrase for a confirmation card's context line, or "" when
+    there were no images to report on at all (the common case — most messages carry
+    no screenshots, so this must not add noise to every card)."""
+    if selected == 0:
+        return ""
+    if landed_count == selected:
+        plural = "screenshot" if selected == 1 else "screenshots"
+        return f"{selected} {plural} attached"
+    return f"{landed_count}/{selected} screenshots attached (some skipped)"
+
+
+def _handle_view_submission(cur, payload: dict, bot_token: str) -> dict:
+    """The modal's submit ('File issue' / 'Create task'). Routes on the SUBMITTED
+    VIEW's own callback_id — MODAL_CALLBACK_ID (issue only) vs
+    MODAL_CALLBACK_ID_WITH_TASK (chained issue + task start). Returns a
+    `response_action` dict so Slack closes the modal (or, on a validation error,
+    re-renders it with an inline error) — that return IS this interaction's ack; the
+    actual confirmation card is DMed separately (see _dm_or_ephemeral) since
+    view_submission's own response has no room for a Block Kit card.
+
+    Any message images (private_metadata's `files`) are downloaded here (submission
+    time — Slack's 3s ack for the SHORTCUT already happened at views.open; this is a
+    separate view_submission request with its own 3s budget, and file downloads +
+    GitHub commits are the "slow work" this module intentionally keeps out of the
+    shortcut-ack path), committed into the issue's repo, and embedded as markdown.
+    """
+    view = payload.get("view") or {}
+    callback_id = view.get("callback_id", "")
+    meta = _parse_private_metadata(view.get("private_metadata", ""))
+    cid, slack_user_id, files = meta["cid"], meta["slack_user_id"], meta["files"]
+    if not cid:
+        # Shouldn't happen (we always set it on open) — fail closed with a validation
+        # error on the title field rather than crash into a 500.
+        return {"response_action": "errors",
+               "errors": {"title_block": "Something went wrong — please reopen the shortcut."}}
+
+    member = _member_for_slack_user(cur, slack_user_id) if slack_user_id else None
+    if member is None or str(member["container_id"]) != cid:
+        return {"response_action": "errors",
+               "errors": {"title_block": "Your Slack account isn't linked to this project anymore."}}
+
+    fields = _extract_modal_values(view)
+    title, body = fields["title"], fields["body"]
+    if not title:
+        return {"response_action": "errors", "errors": {"title_block": "Title can't be empty."}}
+    if len(title) > MAX_NAME_LEN:
+        title = title[:MAX_NAME_LEN]
+
+    # Resolve the repo/token ONCE up front — reused both for issue creation and for
+    # committing any images (avoids re-resolving the same token twice per submission).
+    cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
+    crow = cur.fetchone()
+    repo = crow["github_repo"] if crow else None
+    token = _hub._resolve_repo_token(repo) if repo else None
+
+    images = _fetch_and_land_images(
+        cur, cid, repo, token, files, _issue_slug(title, None), bot_token,
+    )
+    body_with_images = _embed_images_markdown(body, images["landed"])
+
+    try:
+        issue = create_github_issue(cur, cid, title, body_with_images, member,
+                                    repo=repo, token=token)
+    except ValueError:
+        return {"response_action": "errors",
+               "errors": {"title_block": "No GitHub repo (or installation token) is connected to this project."}}
+    except GithubPermissionError:
+        return {"response_action": "errors",
+               "errors": {"title_block": "The GitHub App needs the Issues write permission."}}
+    except RuntimeError:
+        return {"response_action": "errors",
+               "errors": {"title_block": "Couldn't reach GitHub — try again in a moment."}}
+
+    shot_note = _screenshot_status_note(images["selected"], len(images["landed"]))
+    if images["scope_missing"]:
+        shot_note = (shot_note + " · " if shot_note else "") + \
+            "some screenshots skipped — add the files:read scope and reinstall the App"
+
+    if callback_id != MODAL_CALLBACK_ID_WITH_TASK:
+        # Issue-only shortcut: ack closes the modal; confirm via DM.
+        if slack_user_id:
+            _dm_or_ephemeral(
+                bot_token, slack_user_id,
+                blocks_issue_filed(issue["number"], issue["html_url"], issue["title"], None,
+                                   screenshot_note=shot_note or None),
+                f"Filed GitHub issue #{issue['number']}: {issue['title']}",
             )
-        response = _handle_command(cur, member, text)
-        conn.commit()
-    return response
+        return {"response_action": "clear"}
+
+    # Chained "Create Orcha task": start the task from the just-filed issue, through
+    # the SAME shared core as every other dispatch path. The issue is already created
+    # and cannot be rolled back on a task-start failure — the honesty contract
+    # (blocks_task_created's start_failed path) tells the member exactly that, with a
+    # retry command, rather than pretending a task exists.
+    #
+    # `start_task_from_github` is several DB writes deep (tasks INSERT, then
+    # agent_tasks/recompute_agent_status/publish_event/log_event when assigned) — if
+    # it raises PARTWAY through (e.g. after the tasks row lands but before it
+    # returns), catching the exception here and returning normally would let the
+    # caller's `conn.commit()` land that half-built task: an orphaned `tasks` row
+    # with no agent_tasks/audit trail, while the member is told the start "failed"
+    # and to retry — and a retry would then bounce off find_open_gh_task's
+    # idempotency probe and falsely report success on the broken row. Roll back
+    # explicitly on the way out so a failed start leaves NO task row behind, matching
+    # what would happen if this exception had been allowed to propagate to a 500 (the
+    # `db_cursor` context manager rolls back on an unhandled exception) — except we
+    # still want to reply with a friendly card instead of a raw error, so we catch,
+    # roll back by hand, then return normally.
+    assignee_id = _validate_assignee(cur, cid, fields["assignee_agent_id"])
+    try:
+        result = start_task_from_github(
+            cur, cid,
+            kind="issue",
+            number=issue["number"],
+            gh_title=issue["title"],
+            body_excerpt=_excerpt(body_with_images),
+            html_url=issue["html_url"],
+            created_by_agent_id=str(member["id"]),
+            assignee_agent_id=assignee_id,
+            source="slack",
+        )
+    except Exception:
+        cur.connection.rollback()
+        if slack_user_id:
+            _dm_or_ephemeral(
+                bot_token, slack_user_id,
+                blocks_task_created(issue["number"], issue["html_url"], issue["title"], None,
+                                    start_failed=True, gh_number_for_retry=issue["number"]),
+                f"Filed GitHub issue #{issue['number']}, but starting the Orcha task failed.",
+            )
+        return {"response_action": "clear"}
+
+    # The founder's actual goal: the AI reviews the screenshot. Land the SAME
+    # downloaded images on the task's own attachment store too (independent of
+    # whether they landed on GitHub — a task-attachment failure and a GitHub-commit
+    # failure are isolated from each other, per the per-file honesty contract).
+    if images["downloaded_images"]:
+        _land_images_on_task(
+            cur, result["task_id"], images["downloaded_images"],
+            member.get("github_login") or member.get("alias"),
+        )
+
+    task_link = portal_task_link(cid, result["task_id"])
+    if slack_user_id:
+        _dm_or_ephemeral(
+            bot_token, slack_user_id,
+            blocks_task_created(issue["number"], issue["html_url"], issue["title"], task_link,
+                                screenshot_note=shot_note or None),
+            f"Created an Orcha task from GitHub issue #{issue['number']}: {issue['title']}",
+        )
+    return {"response_action": "clear"}
+
+
+def _handle_block_action(cur, member, payload: dict) -> dict:
+    """A `block_actions` click — today, exactly one: the "Start Orcha task" button on
+    an issue-filed card (action_id START_ISSUE_ACTION_ID, value = the GitHub issue
+    number as a string). Routes through the SAME task_start_core start core, then
+    replies ephemerally (task creation is fast — same 3s-contract shape as the slash
+    commands, not a background job)."""
+    actions = payload.get("actions") or []
+    if not actions:
+        return _ephemeral(blocks_usage_help(), "Orcha commands")
+    action = actions[0]
+    cid = str(member["container_id"])
+
+    if action.get("action_id") == START_ISSUE_ACTION_ID:
+        try:
+            number = int(action.get("value"))
+        except (TypeError, ValueError):
+            return _ephemeral(blocks_usage_help(), "Orcha commands")
+        gh_item = _fetch_gh_item(cur, cid, "issue", number)
+        gh_title = (gh_item or {}).get("title") or f"#{number}"
+        html_url = (gh_item or {}).get("html_url") or ""
+        body_excerpt = (gh_item or {}).get("body_excerpt") or ""
+        result = start_task_from_github(
+            cur, cid,
+            kind="issue",
+            number=number,
+            gh_title=gh_title,
+            body_excerpt=body_excerpt,
+            html_url=html_url,
+            created_by_agent_id=str(member["id"]),
+            assignee_agent_id=None,
+            source="slack",
+        )
+        task_link = portal_task_link(cid, result["task_id"])
+        if result["existing"]:
+            return _ephemeral(
+                blocks_already_tracked("issue", number, task_link),
+                f"Already tracked: issue #{number} has an open Orcha task.",
+            )
+        return _ephemeral(
+            blocks_start_success("issue", number, html_url, gh_title, task_link),
+            f"Started an Orcha task for issue #{number}: {gh_title}",
+        )
+
+    return _ephemeral(blocks_usage_help(), "Orcha commands")
+
+
+def _dispatch_interaction(payload: dict, bot_token: str) -> dict:
+    """The synchronous, potentially-blocking body of slack_interactions: DB cursor
+    open through to shortcut/view_submission/block_actions dispatch. This span makes
+    real blocking network calls — `call_slack_api` (views.open/chat.postMessage),
+    `_gh_post_issue`, and (for messages carrying screenshots) up to 5 sequential
+    `download_slack_file` + `_gh_put_contents` round trips — so the route handler
+    runs this whole span via `asyncio.to_thread` rather than blocking the single
+    asyncio event loop for however long Slack/GitHub take to answer. Split out for
+    the same reason as slack_commands' `_dispatch_command`.
+    """
+    payload_type = payload.get("type", "")
+
+    with db_cursor() as (conn, cur):
+        # view_submission resolves its member from private_metadata (set at modal-open
+        # time) rather than this top-level lookup, since the modal may be submitted by
+        # the SAME user who opened it — but resolving here first keeps the linked-member
+        # gate uniform across all three payload types for shortcut/block_actions.
+        member = _member_for_slack_user(cur, (payload.get("user") or {}).get("id", ""))
+
+        if payload_type in ("shortcut", "message_action"):
+            if member is None:
+                # views.open IS the ack for a shortcut — there's no ephemeral-reply path
+                # for this payload type the way slash commands and block_actions have.
+                # Open a small informational modal instead of a drafting form, so the
+                # "Slack never acts for an unlinked caller" contract holds: the member
+                # can SEE why nothing happened, but the title/body form is never shown.
+                _open_modal(bot_token, payload.get("trigger_id", ""), build_unlinked_user_modal())
+                return {}
+            response = _handle_shortcut(cur, member, payload, bot_token)
+            conn.commit()
+            return response
+
+        if payload_type == "view_submission":
+            response = _handle_view_submission(cur, payload, bot_token)
+            conn.commit()
+            return response
+
+        if payload_type == "block_actions":
+            if member is None:
+                return _ephemeral(
+                    blocks_unlinked_user(),
+                    "Your Slack account isn't linked to an Orcha member yet.",
+                )
+            response = _handle_block_action(cur, member, payload)
+            conn.commit()
+            return response
+
+    # Unknown/unsupported interaction type — ack with an empty 200 (never a 4xx; an
+    # unrecognized-but-benign payload shape should not read as a broken integration).
+    return {}
+
+
+@app.post("/api/slack/interactions")
+async def slack_interactions(request: Request):
+    """Slack interactivity endpoint (Feature B continued): message shortcuts, modal
+    submissions, and block-action button clicks. Same feature flag, signature
+    verification, and linked-member gate as /api/slack/commands. Slack delivers every
+    interaction payload the SAME way: form-encoded body with a single `payload` field
+    holding a JSON blob (never raw JSON, unlike most Slack Events API traffic) — see
+    docs/slack-integration.md.
+    """
+    if not _slack_enabled():
+        raise HTTPException(503, "Slack integration is not configured")
+
+    raw = await request.body()
+    if not verify_slack_signature(
+        raw,
+        request.headers.get("X-Slack-Request-Timestamp", ""),
+        request.headers.get("X-Slack-Signature", ""),
+    ):
+        raise HTTPException(401, "invalid Slack signature")
+
+    form = dict(urllib.parse.parse_qsl(raw.decode("utf-8"), keep_blank_values=True))
+    try:
+        payload = json.loads(form.get("payload", "{}"))
+    except ValueError:
+        raise HTTPException(400, "malformed interaction payload")
+
+    bot_token = (os.environ.get(BOT_TOKEN_ENV) or "").strip()
+
+    # Off the event loop — see _dispatch_interaction's docstring: this span makes real
+    # blocking Slack/GitHub network calls, potentially several in a row (screenshots).
+    return await asyncio.to_thread(_dispatch_interaction, payload, bot_token)
