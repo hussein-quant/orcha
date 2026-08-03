@@ -13,8 +13,13 @@ Commands (respond within Slack's 3s contract — task creation is fast, done inl
   * /orcha start issue <N>   → start an Orcha task from GitHub issue #N
   * /orcha start pr <N>      → start an Orcha task from GitHub PR #N
         (both call the SAME start internals the hub uses — task_start_core — so a
-         Slack-started task is byte-identical to a hub-started one.)
-  * /orcha tasks             → a summary of this project's needs-attention counts.
+         Slack-started task is byte-identical to a hub-started one. Unlike the hub —
+         whose frontend already has the issue/PR row in hand from the list it just
+         rendered — Slack gives us only a bare number, so this seam does the ONE
+         extra live GitHub fetch the hub path gets for free from its caller, reusing
+         github_hub_routes' token/GET leaves so both seams hit GitHub the same way.)
+  * /orcha tasks             → what needs you: up to 5 needs_verification tasks
+                                (linked), open-request and ready-unassigned counts.
 
 External systems TRIGGER and OBSERVE Orcha; the verification/merge gates stay in Orcha.
 A Slack start creates a task the same way the hub does — it never completes or merges.
@@ -29,8 +34,18 @@ import urllib.parse
 
 from fastapi import HTTPException, Request
 
+from portal_backend import github_hub_routes as _hub
 from portal_backend.application import app
 from portal_backend.database import db_cursor
+from portal_backend.github_hub_routes import _excerpt
+from portal_backend.slack_notify import (
+    blocks_already_tracked,
+    blocks_start_success,
+    blocks_tasks_summary,
+    blocks_unlinked_user,
+    blocks_usage_help,
+    portal_task_link,
+)
 from portal_backend.task_start_core import start_task_from_github
 
 SIGNING_SECRET_ENV = "SLACK_SIGNING_SECRET"
@@ -91,20 +106,63 @@ def _member_for_slack_user(cur, slack_user_id: str):
     return cur.fetchone()
 
 
-def _ephemeral(text: str) -> dict:
-    """A private (ephemeral) Slack slash-command reply — only the caller sees it."""
-    return {"response_type": "ephemeral", "text": text}
+def _ephemeral(blocks: list, fallback_text: str) -> dict:
+    """A private (ephemeral) Slack slash-command reply — only the caller sees it.
+    `fallback_text` is Slack's plain-text notification-preview fallback (required
+    whenever `blocks` is present; never rendered when the client can show blocks)."""
+    return {"response_type": "ephemeral", "blocks": blocks, "text": fallback_text}
+
+
+def _fetch_gh_item(cur, container_id, kind: str, number: int):
+    """Live-fetch a GitHub issue/PR's {title, html_url, body_excerpt} for the Slack
+    start path — Slack gives us only a bare number, unlike the hub whose frontend
+    already has the row (title, html_url, body_excerpt) in hand from the list it just
+    rendered and passes straight through (github_hub_routes.GithubStartBody). Reuses
+    the SAME token/GET leaves the hub uses (github_hub_routes._resolve_repo_token /
+    _gh_get) so both seams hit GitHub identically.
+
+    Returns None on ANY failure (no bound repo, no installation token, GitHub
+    unreachable/rate-limited/404) — the caller degrades to the bare '#N' title rather
+    than fail the whole command; Slack's 3s contract has no room for a retry loop.
+
+    NOTE: calls `_hub._resolve_repo_token` / `_hub._gh_get` through the MODULE (not a
+    direct `from ... import` of the names) so that tests monkeypatching
+    `github_hub_routes._gh_get` (the established convention in test_github_hub_routes.py)
+    transparently cover this seam too — a direct-name import would have frozen a
+    reference to the pre-patch function at import time.
+    """
+    cur.execute("SELECT github_repo FROM containers WHERE id=%s", (container_id,))
+    row = cur.fetchone()
+    repo = row["github_repo"] if row else None
+    if not repo:
+        return None
+    token = _hub._resolve_repo_token(repo)
+    if not token:
+        return None
+    path = f"/repos/{repo}/pulls/{number}" if kind == "pull" else f"/repos/{repo}/issues/{number}"
+    try:
+        raw = _hub._gh_get(path, token)
+    except RuntimeError:
+        return None
+    return {
+        "title": raw.get("title") or "",
+        "html_url": raw.get("html_url") or "",
+        "body_excerpt": _excerpt(raw.get("body")),
+    }
 
 
 def _needs_attention_summary(cur, container_id) -> dict:
-    """Counts for `/orcha tasks`: tasks parked at needs_verification, ready-unassigned
-    work, and open requests targeting a human — the same "needs you" signals the portal
-    surfaces. Read-only OBSERVE; no state change."""
+    """Data for `/orcha tasks`: up to 5 needs_verification tasks (id + title, for
+    linking), plus ready-unassigned and open-request counts — the same "needs you"
+    signals the portal surfaces. Read-only OBSERVE; no state change."""
     cur.execute(
-        "SELECT count(*) AS n FROM tasks WHERE container_id=%s AND status='needs_verification'",
+        """SELECT id, title FROM tasks
+           WHERE container_id=%s AND status='needs_verification'
+           ORDER BY started_at ASC NULLS LAST, created_at ASC
+           LIMIT 5""",
         (container_id,),
     )
-    needs_verification = cur.fetchone()["n"]
+    needs_verification = [{"id": str(r["id"]), "title": r["title"]} for r in cur.fetchall()]
     cur.execute(
         """SELECT count(*) AS n FROM tasks t
            WHERE t.container_id=%s AND t.status='ready' AND t.is_root=false
@@ -135,44 +193,47 @@ def _handle_command(cur, member, text: str) -> dict:
     if m:
         kind_word, number = m.group(1).lower(), int(m.group(2))
         kind = "pull" if kind_word == "pr" else "issue"
+        # The title-bug fix: fetch the REAL issue/PR title before composing the task,
+        # exactly like the hub does (there, the frontend already has it in hand from
+        # the list it just rendered and passes it straight through). Slack only gives
+        # us a bare number, so this is the one extra live fetch the hub gets for free.
+        gh_item = _fetch_gh_item(cur, cid, kind, number)
+        gh_title = (gh_item or {}).get("title") or f"#{number}"
+        html_url = (gh_item or {}).get("html_url") or ""
+        body_excerpt = (gh_item or {}).get("body_excerpt") or ""
         result = start_task_from_github(
             cur,
             cid,
             kind=kind,
             number=number,
-            gh_title=f"#{number}",   # Slack has no title; the DoD + link carry the detail
-            body_excerpt="",
-            html_url="",
+            gh_title=gh_title,
+            body_excerpt=body_excerpt,
+            html_url=html_url,
             created_by_agent_id=str(member["id"]),
             assignee_agent_id=None,  # Slack start is unassigned — Atlas routes it
             source="slack",
         )
         label = "PR" if kind == "pull" else "issue"
+        task_link = portal_task_link(cid, result["task_id"])
         if result["existing"]:
             return _ephemeral(
-                f"Already tracked: {label} #{number} has an open Orcha task "
-                f"(task {result['task_id']}). Nothing new created."
+                blocks_already_tracked(label, number, task_link),
+                f"Already tracked: {label} #{number} has an open Orcha task.",
             )
         return _ephemeral(
-            f"Started an Orcha task for {label} #{number} (task {result['task_id']}). "
-            "A human still verifies before anything merges."
+            blocks_start_success(label, number, html_url, gh_title, task_link),
+            f"Started an Orcha task for {label} #{number}: {gh_title}",
         )
 
     if _TASKS_RE.match(text):
         s = _needs_attention_summary(cur, cid)
-        return _ephemeral(
-            "Needs attention in this project:\n"
-            f"• {s['needs_verification']} task(s) awaiting your verification\n"
-            f"• {s['ready_unassigned']} ready task(s) with no assignee\n"
-            f"• {s['open_requests']} open request(s) for you"
+        blocks = blocks_tasks_summary(
+            s["needs_verification"], s["open_requests"], s["ready_unassigned"],
+            lambda task_id: portal_task_link(cid, task_id),
         )
+        return _ephemeral(blocks, "Needs you in this project")
 
-    return _ephemeral(
-        "Unknown command. Try:\n"
-        "• `/orcha start issue <N>`\n"
-        "• `/orcha start pr <N>`\n"
-        "• `/orcha tasks`"
-    )
+    return _ephemeral(blocks_usage_help(), "Orcha commands")
 
 
 @app.post("/api/slack/commands")
@@ -204,8 +265,8 @@ async def slack_commands(request: Request):
             # 200 with an ephemeral body — Slack shows the text; never a 4xx (that would
             # surface a red error in the channel instead of a helpful nudge).
             return _ephemeral(
-                "Your Slack account isn't linked to an Orcha member yet. "
-                "Open Orcha → Settings → link your Slack, then try again."
+                blocks_unlinked_user(),
+                "Your Slack account isn't linked to an Orcha member yet.",
             )
         response = _handle_command(cur, member, text)
         conn.commit()

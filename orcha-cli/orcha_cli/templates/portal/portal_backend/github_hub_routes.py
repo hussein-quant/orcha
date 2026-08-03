@@ -54,7 +54,11 @@ from portal_backend.guards import require_container, valid_uuid
 from portal_backend.github_routes import _read_token, _read_token_map
 from portal_backend.identity_routes import require_member_read, trusted_actor
 from portal_backend.schemas.github_hub import GithubStartBody
-from portal_backend.task_start_core import find_open_gh_task, start_task_from_github
+from portal_backend.task_start_core import (
+    find_open_gh_task,
+    find_open_gh_tasks,
+    start_task_from_github,
+)
 
 GITHUB_API = "https://api.github.com"
 GITHUB_TIMEOUT_SECONDS = 10
@@ -203,6 +207,33 @@ def _not_connected():
     """The container has no bound repo — a clean, renderable off state (not an error)."""
     return {"available": False, "reason": "repo_not_connected",
             "detail": "no GitHub repo is connected to this project"}
+
+
+def _with_tracked_list(cid: str, items: list) -> list:
+    """Stamp `tracked_task_id` (str | None) onto every row of an issues/pulls LIST
+    payload, batched into ONE query via task_start_core.find_open_gh_tasks — the SAME
+    open-task lookup POST /start's idempotency check uses, so "tracked" here and
+    "existing:true" there can never disagree. Deliberately applied OUTSIDE the 60s
+    GitHub-list cache (called on every request, cached or fresh): tracked state is a
+    local Postgres read, not a GitHub call, so keeping it live costs nothing and means
+    a Slack-started task shows as tracked on this container's very next hub page load
+    instead of waiting out the list's GitHub cache TTL.
+    """
+    if not items:
+        return items
+    numbers = [it["number"] for it in items if it.get("number") is not None]
+    with db_cursor() as (_, cur):
+        tracked = find_open_gh_tasks(cur, cid, numbers)
+    return [{**it, "tracked_task_id": tracked.get(it.get("number"))} for it in items]
+
+
+def _with_tracked_one(cid: str, number, item: dict) -> dict:
+    """Single-item form of _with_tracked_list for the detail routes (one number, but
+    the SAME shared find_open_gh_tasks lookup — never a separate/duplicated query
+    shape from the list path)."""
+    with db_cursor() as (_, cur):
+        tracked = find_open_gh_tasks(cur, cid, [number])
+    return {**item, "tracked_task_id": tracked.get(number)}
 
 
 def _labels(issue: dict) -> list:
@@ -583,16 +614,20 @@ def list_github_issues(cid: str, request: Request):
     """Open issues of the container's connected repo — the hub's Issues tab.
 
     Returns {available, repo, issues:[{number,title,labels,assignee,updated_at,
-    html_url,body_excerpt}]}. Not-connected / rate-limited / GitHub error all resolve
-    to a clean {available:false, reason, detail} the UI renders (never a 5xx). Cached
-    60s per (cid,'issues')."""
+    html_url,body_excerpt,tracked_task_id}]}. `tracked_task_id` (str | None) is the
+    OPEN Orcha task already tracking this issue, if any — computed fresh on every
+    request (see _with_tracked_list), even when the GitHub-sourced fields below it are
+    served from the 60s cache, so a task started via ANY path (hub, Slack, a re-run of
+    this same fetch) shows as tracked without waiting on the GitHub cache TTL.
+    Not-connected / rate-limited / GitHub error all resolve to a clean
+    {available:false, reason, detail} the UI renders (never a 5xx)."""
     with db_cursor() as (_, cur):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
     cached = _cache_get(cid, "issues")
     if cached is not None:
-        return cached
+        return {**cached, "issues": _with_tracked_list(cid, cached["issues"])}
     token = _resolve_repo_token(repo)
     if not token:
         return _not_connected()
@@ -605,7 +640,7 @@ def list_github_issues(cid: str, request: Request):
     issues = [_issue_entry(i) for i in raw if "pull_request" not in i]
     payload = {"available": True, "repo": repo, "issues": issues}
     _cache_put(cid, "issues", payload)
-    return payload
+    return {**payload, "issues": _with_tracked_list(cid, issues)}
 
 
 def _fetch_and_cache_pulls_list(cid: str, repo: str, token: str):
@@ -643,18 +678,20 @@ def list_github_pulls(cid: str, request: Request):
     """Open PRs of the container's connected repo — the hub's PRs tab.
 
     Returns {available, repo, pulls:[{number,title,head,draft,updated_at,html_url,
-    requested_reviewers,checks:null,mergeable_state}]}. `checks` is ALWAYS null here —
-    "not loaded yet" — never a rollup: this route makes exactly ONE GitHub call (the
-    /pulls list itself); the checks rollup is fetched separately and progressively via
-    GET .../github/checks (see that route's docstring + the module header's PERFORMANCE
-    note). Same clean-error contract + 60s cache as the issues route."""
+    requested_reviewers,checks:null,mergeable_state,tracked_task_id}]}. `checks` is
+    ALWAYS null here — "not loaded yet" — never a rollup: this route makes exactly ONE
+    GitHub call (the /pulls list itself); the checks rollup is fetched separately and
+    progressively via GET .../github/checks (see that route's docstring + the module
+    header's PERFORMANCE note). `tracked_task_id` (str | None) is computed fresh on
+    every request, same as the issues list — see _with_tracked_list's docstring. Same
+    clean-error contract + 60s GitHub-cache as the issues route."""
     with db_cursor() as (_, cur):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
     cached = _cache_get(cid, "pulls")
     if cached is not None:
-        return cached
+        return {**cached, "pulls": _with_tracked_list(cid, cached["pulls"])}
     token = _resolve_repo_token(repo)
     if not token:
         return _not_connected()
@@ -662,7 +699,7 @@ def list_github_pulls(cid: str, request: Request):
         payload, _raw = _fetch_and_cache_pulls_list(cid, repo, token)
     except RuntimeError as exc:
         return {**_error_payload(exc), "repo": repo}
-    return payload
+    return {**payload, "pulls": _with_tracked_list(cid, payload["pulls"])}
 
 
 @app.get("/api/containers/{cid}/github/checks")
@@ -742,17 +779,21 @@ def get_github_pull(cid: str, number: int, request: Request):
     GitHub itself never sent one (binary/oversized single file, `patch_omitted:true`) or the
     summed patch text crossed PATCH_BUDGET_BYTES (~800KB; same per-file shape, plus
     `files.patches_truncated:true`) — see `_pr_files`'s docstring. Checks
-    reuse the SHARED list-endpoint rollup helper (with per-run breakdown). A GitHub 404 for
-    the number → {available:false, reason:"not_found"}; not-connected / rate-limited resolve
-    to the same clean {available:false,...} shape (never a 5xx). Cached 60s per
-    (cid,'pull',number)."""
+    reuse the SHARED list-endpoint rollup helper (with per-run breakdown). `pull` also
+    carries `tracked_task_id` (str | None, computed fresh every request — see
+    _with_tracked_one), the SAME lookup the list rows and POST /start's idempotency
+    check use, so the detail header's Start button can render "tracked" state up
+    front instead of only after a click. A GitHub 404 for the number →
+    {available:false, reason:"not_found"}; not-connected / rate-limited resolve to
+    the same clean {available:false,...} shape (never a 5xx). GitHub-sourced fields
+    cached 60s per (cid,'pull',number)."""
     with db_cursor() as (_, cur):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
     cached = _cache_get(cid, "pull", number)
     if cached is not None:
-        return cached
+        return {**cached, "pull": _with_tracked_one(cid, number, cached["pull"])}
     token = _resolve_repo_token(repo)
     if not token:
         return _not_connected()
@@ -762,7 +803,7 @@ def get_github_pull(cid: str, number: int, request: Request):
         return {**_detail_error_payload(exc), "repo": repo}
     payload = {"available": True, "repo": repo, "pull": _pull_detail(repo, raw, token)}
     _cache_put(cid, "pull", payload, number)
-    return payload
+    return {**payload, "pull": _with_tracked_one(cid, number, payload["pull"])}
 
 
 @app.get("/api/containers/{cid}/github/issues/{number}")
@@ -771,17 +812,20 @@ def get_github_issue(cid: str, number: int, request: Request):
 
     Returns {available, repo, issue:{number,title,state,body_markdown,author_login,labels,
     assignee,assignees,updated_at,created_at,html_url,comments_count,
-    comments:[{author_login,body_markdown,created_at}]}}. `comments` is the most-recent 20,
-    oldest-first. body_markdown is RAW markdown (rendered client-side). A GitHub 404 →
-    {available:false, reason:"not_found"}; not-connected / rate-limited resolve to the same
-    clean shape. Cached 60s per (cid,'issue',number)."""
+    comments:[{author_login,body_markdown,created_at}],tracked_task_id}}. `comments` is
+    the most-recent 20, oldest-first. body_markdown is RAW markdown (rendered
+    client-side). `tracked_task_id` (str | None, computed fresh every request) is the
+    SAME shared lookup the pulls detail route and POST /start's idempotency check use
+    (task_start_core.find_open_gh_tasks) — see _with_tracked_one's docstring. A GitHub
+    404 → {available:false, reason:"not_found"}; not-connected / rate-limited resolve
+    to the same clean shape. GitHub-sourced fields cached 60s per (cid,'issue',number)."""
     with db_cursor() as (_, cur):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
     cached = _cache_get(cid, "issue", number)
     if cached is not None:
-        return cached
+        return {**cached, "issue": _with_tracked_one(cid, number, cached["issue"])}
     token = _resolve_repo_token(repo)
     if not token:
         return _not_connected()
@@ -791,7 +835,7 @@ def get_github_issue(cid: str, number: int, request: Request):
         return {**_detail_error_payload(exc), "repo": repo}
     payload = {"available": True, "repo": repo, "issue": _issue_detail(repo, raw, token)}
     _cache_put(cid, "issue", payload, number)
-    return payload
+    return {**payload, "issue": _with_tracked_one(cid, number, payload["issue"])}
 
 
 @app.post("/api/containers/{cid}/github/start", status_code=201)

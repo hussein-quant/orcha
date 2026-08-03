@@ -17,10 +17,29 @@ handler on any error.
 Idempotency (spec): an OPEN task whose title already carries the `GH #<N>: `
 prefix for the same (container, number) is returned with existing=True instead of
 creating a duplicate — a double-click on Start, or a Slack retry, is a no-op.
+
+GitHub round-trip comment (fresh starts only): once the task row lands, this posts
+a short "🤖 Orcha started task ..." comment back on the source issue/PR — the ONE
+place every dispatch path (hub Start/Fix, Slack start) goes through, so it fires
+exactly once regardless of caller. It is deliberately posted from HERE, after the
+INSERT but still inside the caller's transaction span (the comment itself is not
+transactional — a GitHub POST cannot be rolled back — but it only fires once the
+task row is built in-memory with a real id, and never on an `existing=True` hit).
+Non-fatal by construction, same contract as slack_notify's outbound ping: any
+failure (repo not bound, no installation token, GitHub 403/404/network error) is
+caught and swallowed — a dead GitHub comment must never break task creation.
 """
+
+import json
+import urllib.error
+import urllib.request
 
 from portal_backend.agent_status import log_event, recompute_agent_status
 from portal_backend.events import publish_event
+from portal_backend.github_routes import _read_token, _read_token_map
+
+GITHUB_API = "https://api.github.com"
+GITHUB_COMMENT_TIMEOUT_SECONDS = 10
 
 # The GitHub-hub / Slack task title prefix. `GH #<number>: <title>` — the prefix is
 # also the idempotency key (a LIKE 'GH #N: %' probe over the container's open tasks).
@@ -70,6 +89,121 @@ def build_task_fields(kind: str, number: int, gh_title: str, body_excerpt: str,
     return {"title": title, "description": description, "definition_of_done": dod}
 
 
+def _resolve_repo_token(repo: str):
+    """The installation token that can read/write `owner/name`, or None when the App
+    isn't wired for this owner. Duplicates github_hub_routes._resolve_repo_token's
+    logic (rather than importing it) to avoid a circular import: github_hub_routes
+    already imports THIS module. Same multi-org-then-legacy-file resolution."""
+    owner = (repo or "").split("/", 1)[0].lower()
+    token_map = _read_token_map()
+    if token_map and owner in token_map:
+        return token_map[owner]
+    return _read_token()
+
+
+def _gh_post_comment(repo: str, number: int, token: str, body: str) -> None:
+    """POST a comment on a GitHub issue OR pull request. GitHub's REST API treats PR
+    comments as issue comments on the SAME endpoint
+    (`/repos/{repo}/issues/{number}/comments`) — no separate PR-comment call needed.
+    Requires the App's Issues:write permission (docs/byoc-guide.md's permission table;
+    already required for `gh issue create`). stdlib urllib, matching every other
+    GitHub leaf in this codebase. Raises on failure; the caller swallows it — this
+    function itself never degrades silently so tests can assert on the raise.
+    """
+    url = f"{GITHUB_API}/repos/{repo}/issues/{number}/comments"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps({"body": body}).encode("utf-8"),
+        headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "orcha-portal",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=GITHUB_COMMENT_TIMEOUT_SECONDS) as response:
+        response.read()
+
+
+def _compose_start_comment(task_id: str, assignee_alias) -> str:
+    """The round-trip comment body: who's on it, and the standing verification gate.
+    `assignee_alias` is None for an unassigned (Atlas-routed) start."""
+    who = f"assigned to **{assignee_alias}**" if assignee_alias \
+        else "unassigned — the orchestrator routes it"
+    short_id = str(task_id)[:8]
+    return (
+        f"🤖 Orcha started task `{short_id}` for this — {who}.\n"
+        "Work arrives as a PR; a human verifies before anything merges."
+    )
+
+
+def _post_start_comment(cur, container_id, kind: str, number: int, task_id: str,
+                        assignee_agent_id) -> None:
+    """Best-effort GitHub round-trip comment on a FRESH start (never on an
+    existing=True re-click — the caller only invokes this after a real INSERT).
+    Non-fatal by construction, same contract as slack_notify's outbound ping: no
+    bound repo, no installation token, or any GitHub/network failure is caught and
+    swallowed — a dead comment must never break task creation. Runs from the shared
+    core so every dispatch path (hub, Slack) gets it exactly once.
+    """
+    try:
+        cur.execute("SELECT github_repo FROM containers WHERE id=%s", (container_id,))
+        row = cur.fetchone()
+        repo = row["github_repo"] if row else None
+        if not repo:
+            return
+        token = _resolve_repo_token(repo)
+        if not token:
+            return
+        assignee_alias = None
+        if assignee_agent_id:
+            cur.execute("SELECT alias FROM agents WHERE id=%s", (assignee_agent_id,))
+            arow = cur.fetchone()
+            assignee_alias = arow["alias"] if arow else None
+        body = _compose_start_comment(task_id, assignee_alias)
+        _gh_post_comment(repo, number, token, body)
+    except Exception:
+        pass  # best-effort by contract — a GitHub comment failure never breaks the start
+
+
+def find_open_gh_tasks(cur, container_id, numbers) -> dict:
+    """Batched form of find_open_gh_task: the container's OPEN task id for EVERY number
+    in `numbers`, in ONE query — {number: task_id} for numbers that have an open task
+    (a number with none is simply absent from the dict, never a None entry). This is
+    THE lookup GitHub-hub list/detail rows use to surface "tracked" state up front
+    (github_hub_routes' `tracked_task_id` field) — sharing this helper with
+    find_open_gh_task (below, which is just this batched form for one number) is
+    deliberate: the idempotency check and the hub's "is this already tracked" display
+    must use the IDENTICAL title-prefix/status rule or the two can silently drift (a
+    row the idempotency check would treat as open but the hub UI doesn't show as
+    tracked, or vice versa).
+
+    Matches each number's `GH #<number>: ` title prefix (the exact string
+    build_task_fields writes) via a single unnest()+LATERAL join — a LIKE-per-number
+    loop would be N queries; this is one, regardless of how many numbers are asked
+    about. Only non-terminal statuses count (mirrors find_open_gh_task). Numbers list
+    may be empty (returns {} without a query).
+    """
+    numbers = [int(n) for n in (numbers or [])]
+    if not numbers:
+        return {}
+    cur.execute(
+        """SELECT v.number AS number, t.id AS task_id
+             FROM (SELECT unnest(%s::int[]) AS number) v
+             JOIN LATERAL (
+               SELECT id FROM tasks
+                WHERE container_id=%s
+                  AND status = ANY(%s)
+                  AND title LIKE %s || v.number::text || ': %%'
+                ORDER BY created_at ASC, id ASC
+                LIMIT 1
+             ) t ON true""",
+        (numbers, container_id, list(_OPEN_STATUSES), GH_TITLE_PREFIX),
+    )
+    return {int(row["number"]): str(row["task_id"]) for row in cur.fetchall()}
+
+
 def find_open_gh_task(cur, container_id, number: int):
     """The container's OPEN task already tracking GH #<number>, or None.
 
@@ -77,18 +211,12 @@ def find_open_gh_task(cur, container_id, number: int):
     writes) so the probe cannot false-match `GH #12` against `GH #123`. Only
     non-terminal tasks count — a finished/cancelled prior task never blocks a
     re-trigger. Returns the task id (str) or None.
+
+    Implemented as the single-number case of find_open_gh_tasks (the batched helper
+    the hub's list/detail endpoints use) so the idempotency check and the "tracked"
+    display can never drift apart — one SQL shape, two call shapes.
     """
-    cur.execute(
-        """SELECT id FROM tasks
-             WHERE container_id=%s
-               AND status = ANY(%s)
-               AND title LIKE %s
-             ORDER BY created_at ASC, id ASC
-             LIMIT 1""",
-        (container_id, list(_OPEN_STATUSES), f"{GH_TITLE_PREFIX}{number}: %"),
-    )
-    row = cur.fetchone()
-    return str(row["id"]) if row else None
+    return find_open_gh_tasks(cur, container_id, [number]).get(number)
 
 
 def start_task_from_github(cur, container_id, *, kind: str, number: int,
@@ -185,4 +313,8 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
             "assignee_agent_id": assignee_id,
         },
     )
+    # Fresh start only (never on an existing=True hit, which returns above before this
+    # point) — the round-trip "Orcha started this" comment. Best-effort; see
+    # _post_start_comment's docstring for the non-fatal contract.
+    _post_start_comment(cur, container_id, kind, number, tid, assignee_id)
     return {"task_id": tid, "existing": False}
