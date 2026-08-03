@@ -119,7 +119,7 @@ from portal_backend.slack_notify import (
     blocks_issue_filed,
     blocks_issue_usage_help,
     blocks_start_success,
-    blocks_task_created,
+    blocks_task_created_from_slack,
     blocks_tasks_summary,
     blocks_unlinked_user,
     blocks_usage_help,
@@ -132,7 +132,7 @@ from portal_backend.slack_files import (
     select_image_files,
     select_image_files_verdicts,
 )
-from portal_backend.task_start_core import start_task_from_github
+from portal_backend.task_start_core import start_task_from_github, start_task_from_slack_capture
 
 try:
     import llm_util
@@ -1106,17 +1106,37 @@ def _prepare_view_submission(cur, payload: dict) -> dict:
 def _run_view_submission_pipeline(prepared: dict, bot_token: str) -> None:
     """The SLOW half of a modal submission — everything Slack's `response_action`
     already acked before this ever runs (see `_prepare_view_submission` /
-    `_dispatch_interaction`): AI title/body refinement, image download + GitHub
-    commit + markdown embed, the GitHub issue POST itself, and (for the "Create Orcha
-    task" shortcut) the chained task start + task-attachment landing. Runs entirely in
-    a background task on its OWN `db_cursor()` connection — the request's cursor is
-    long closed by the time this executes.
+    `_dispatch_interaction`). Branches on the submitted view's callback_id:
+      * create_github_issue_submit (issue-only shortcut) — files a GitHub issue
+        (screenshot download + GitHub commit + markdown embed, the issue POST
+        itself), UNCHANGED from before the task-first redesign except that AI
+        refinement no longer exists anywhere in this codebase (see
+        `_run_issue_only_pipeline`).
+      * create_orcha_task_submit (task-first shortcut) — creates the Orcha TASK
+        directly, no GitHub issue, no LLM call: raw title/description + Slack
+        provenance, screenshots landed straight on the task's own attachment store.
+        The task's own DoD (task_start_core.build_slack_captured_dod) instructs the
+        eventually-assigned agent to file the polished GitHub issue itself, post
+        its link back to this task's thread, triage, then implement (see
+        `_run_task_first_pipeline`).
 
-    Every outcome (success, half-failure, hard failure) is delivered as a follow-up
-    `chat.postMessage` DM via `_dm_or_ephemeral` — the SAME composers/copy this used to
-    return inline before the ack-timing fix; only the timing moved, never the content.
+    Runs entirely in a background task on its OWN `db_cursor()` connection — the
+    request's cursor is long closed by the time this executes. Every outcome is
+    delivered as a follow-up `chat.postMessage` DM via `_dm_or_ephemeral`.
     """
-    callback_id = prepared["callback_id"]
+    if prepared["callback_id"] == MODAL_CALLBACK_ID_WITH_TASK:
+        _run_task_first_pipeline(prepared, bot_token)
+    else:
+        _run_issue_only_pipeline(prepared, bot_token)
+
+
+def _run_issue_only_pipeline(prepared: dict, bot_token: str) -> None:
+    """The 'Create GitHub issue' shortcut's full pipeline: screenshot download +
+    GitHub commit + markdown embed, then the issue POST itself. No LLM refinement
+    (removed outright — see docs/slack-integration.md) and no task creation; this
+    shortcut only ever files an issue, exactly as before the task-first redesign
+    minus the refine step.
+    """
     cid = prepared["cid"]
     slack_user_id = prepared["slack_user_id"]
     files = prepared["files"]
@@ -1126,14 +1146,6 @@ def _run_view_submission_pipeline(prepared: dict, bot_token: str) -> None:
     with db_cursor() as (conn, cur):
         member = prepared["member"]
 
-        # AI refinement (issue #234): a wording pass over the user-edited modal
-        # title/body BEFORE filing — never before the ack, since the worst-case LLM
-        # timeout is ~20s and this function only ever runs after Slack already has its
-        # response_action='clear'. Fails closed to the raw title/body on any error —
-        # see _refine_issue_for_filing's docstring.
-        refine_result = _refine_issue_for_filing(cur, cid, title, body)
-        filed_title, filed_body = refine_result["title"], refine_result["body"]
-
         # Resolve the repo/token ONCE up front — reused both for issue creation and
         # for committing any images (avoids re-resolving the same token twice).
         cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
@@ -1142,12 +1154,12 @@ def _run_view_submission_pipeline(prepared: dict, bot_token: str) -> None:
         token = _hub._resolve_repo_token(repo) if repo else None
 
         images = _fetch_and_land_images(
-            cur, cid, repo, token, files, _issue_slug(filed_title, None), bot_token,
+            cur, cid, repo, token, files, _issue_slug(title, None), bot_token,
         )
-        body_with_images = _embed_images_markdown(filed_body, images["landed"])
+        body_with_images = _embed_images_markdown(body, images["landed"])
 
         try:
-            issue = create_github_issue(cur, cid, filed_title, body_with_images, member,
+            issue = create_github_issue(cur, cid, title, body_with_images, member,
                                         repo=repo, token=token)
         except ValueError:
             conn.rollback()
@@ -1178,84 +1190,87 @@ def _run_view_submission_pipeline(prepared: dict, bot_token: str) -> None:
         if images["scope_missing"]:
             shot_note = (shot_note + " · " if shot_note else "") + \
                 "some screenshots skipped — add the files:read scope and reinstall the App"
-        if not refine_result["refined"]:
-            shot_note = (shot_note + " · " if shot_note else "") + "AI refinement unavailable"
-        else:
-            shot_note = "✨ AI-refined · " + shot_note if shot_note else "✨ AI-refined"
 
-        if callback_id != MODAL_CALLBACK_ID_WITH_TASK:
-            # Issue-only shortcut: confirm via DM (the ack already closed the modal).
-            conn.commit()
-            if slack_user_id:
-                _dm_or_ephemeral(
-                    bot_token, slack_user_id,
-                    blocks_issue_filed(issue["number"], issue["html_url"], issue["title"], None,
-                                       screenshot_note=shot_note or None),
-                    f"Filed GitHub issue #{issue['number']}: {issue['title']}",
-                )
-            return
+        conn.commit()
+        if slack_user_id:
+            _dm_or_ephemeral(
+                bot_token, slack_user_id,
+                blocks_issue_filed(issue["number"], issue["html_url"], issue["title"], None,
+                                   screenshot_note=shot_note or None),
+                f"Filed GitHub issue #{issue['number']}: {issue['title']}",
+            )
 
-        # Chained "Create Orcha task": start the task from the just-filed issue,
-        # through the SAME shared core as every other dispatch path. The issue is
-        # already created and cannot be rolled back on a task-start failure — the
-        # honesty contract (blocks_task_created's start_failed path) tells the member
-        # exactly that, with a retry command, rather than pretending a task exists.
-        #
-        # `start_task_from_github` is several DB writes deep (tasks INSERT, then
-        # agent_tasks/recompute_agent_status/publish_event/log_event when assigned) —
-        # if it raises PARTWAY through (e.g. after the tasks row lands but before it
-        # returns), catching the exception here and returning normally would let a
-        # commit land that half-built task: an orphaned `tasks` row with no
-        # agent_tasks/audit trail, while the member is told the start "failed" and to
-        # retry — and a retry would then bounce off find_open_gh_task's idempotency
-        # probe and falsely report success on the broken row. Roll back explicitly on
-        # the way out so a failed start leaves NO task row behind, matching what would
-        # happen if this exception had been allowed to propagate unhandled (the
-        # `db_cursor` context manager rolls back on an unhandled exception) — except we
-        # still want to DM a friendly card instead of just vanishing, so we catch,
-        # roll back by hand, then return normally.
+
+def _run_task_first_pipeline(prepared: dict, bot_token: str) -> None:
+    """The 'Create Orcha task' shortcut's redesigned pipeline (task-first): create
+    the Orcha task DIRECTLY from the raw modal title/body + Slack provenance — NO
+    GitHub issue, NO LLM call. The task's own DoD
+    (task_start_core.build_slack_captured_dod) tells the agent to file the polished
+    GitHub issue itself once it picks the work up, post its link back to this
+    task's thread, triage, then implement. Screenshots download exactly as before
+    (`slack_files`/`fetch_selected_images` are unchanged) but land ONLY on the
+    task's own attachment store (`_land_images_on_task`) — never committed to a
+    repo at this point, since there is no issue yet for them to embed into.
+
+    Failure contract: a task-creation failure rolls back (no partial rows) and DMs
+    an honest failure card — the ack (`response_action: clear`) already closed the
+    modal before this pipeline ran, so the DM is the only channel left.
+    """
+    cid = prepared["cid"]
+    slack_user_id = prepared["slack_user_id"]
+    files = prepared["files"]
+    files_seen = prepared["files_seen"]
+    title, body = prepared["title"], prepared["body"]
+
+    with db_cursor() as (conn, cur):
+        member = prepared["member"]
+
+        fetch_result = {"images": [], "skipped": 0, "scope_missing": False}
+        if files:
+            fetch_result = fetch_selected_images(files, bot_token)
+        images = fetch_result["images"]
+        selected = len(images) + fetch_result["skipped"]
+
+        who = member.get("github_login") or member.get("alias") or "an Orcha member"
+        footer = f"_Captured from Slack by {who} via Orcha_"
+        description = f"{body}\n\n{footer}" if body else footer
+
         assignee_id = _validate_assignee(cur, cid, prepared["assignee_agent_id_raw"])
         try:
-            result = start_task_from_github(
+            result = start_task_from_slack_capture(
                 cur, cid,
-                kind="issue",
-                number=issue["number"],
-                gh_title=issue["title"],
-                body_excerpt=_excerpt(body_with_images),
-                html_url=issue["html_url"],
+                title=title,
+                description=description,
                 created_by_agent_id=str(member["id"]),
                 assignee_agent_id=assignee_id,
-                source="slack",
             )
         except Exception:
             conn.rollback()
             if slack_user_id:
                 _dm_or_ephemeral(
                     bot_token, slack_user_id,
-                    blocks_task_created(issue["number"], issue["html_url"], issue["title"], None,
-                                        start_failed=True, gh_number_for_retry=issue["number"]),
-                    f"Filed GitHub issue #{issue['number']}, but starting the Orcha task failed.",
+                    blocks_github_unreachable_error(),
+                    "Creating the Orcha task failed — try again in a moment.",
                 )
             return
 
-        # The founder's actual goal: the AI reviews the screenshot. Land the SAME
-        # downloaded images on the task's own attachment store too (independent of
-        # whether they landed on GitHub — a task-attachment failure and a GitHub-commit
-        # failure are isolated from each other, per the per-file honesty contract).
-        if images["downloaded_images"]:
+        if images:
             _land_images_on_task(
-                cur, result["task_id"], images["downloaded_images"],
+                cur, result["task_id"], images,
                 member.get("github_login") or member.get("alias"),
             )
 
         conn.commit()
+        shot_note = _screenshot_status_note(selected, len(images), files_seen)
+        if fetch_result["scope_missing"]:
+            shot_note = (shot_note + " · " if shot_note else "") + \
+                "some screenshots skipped — add the files:read scope and reinstall the App"
         task_link = portal_task_link(cid, result["task_id"])
         if slack_user_id:
             _dm_or_ephemeral(
                 bot_token, slack_user_id,
-                blocks_task_created(issue["number"], issue["html_url"], issue["title"], task_link,
-                                    screenshot_note=shot_note or None),
-                f"Created an Orcha task from GitHub issue #{issue['number']}: {issue['title']}",
+                blocks_task_created_from_slack(title, task_link, screenshot_note=shot_note or None),
+                f"Created an Orcha task from Slack: {title}",
             )
 
 
