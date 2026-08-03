@@ -5,6 +5,10 @@ import Observation
 struct ContainerHealth: Equatable {
     var state: String            // live | polling | unreachable | probing
     var agents: Int = 0
+    /// GH sidebar/iOS count mismatch: open (non-terminal) task count — was
+    /// `snap.tasks.count`, the length of the capped/priority-ordered snapshot array
+    /// (the "counting a fetched page's length instead of a server total" bug); now
+    /// `ContainerSnapshot.taskOpenTotal` (additive server field, graceful fallback).
     var tasks: Int = 0
     var needsYou: Int = 0
     /// The bound GitHub repo ("owner/name"), shown on the card's secondary line.
@@ -544,7 +548,7 @@ final class AppModel {
                 let verifs = snap.tasks.filter { $0.status == "needs_verification" }
                 let reqs = snap.requests.filter { $0.status == "open" && ($0.targetId == stored.humanAgentId || $0.targetId == nil) }
                 containerHealth[stored.id] = ContainerHealth(
-                    state: "polling", agents: snap.agents.count, tasks: snap.tasks.count,
+                    state: "polling", agents: snap.agents.count, tasks: snap.taskOpenTotal,
                     needsYou: plans.count + verifs.count + reqs.count,
                     githubRepo: snap.container.githubRepo
                 )

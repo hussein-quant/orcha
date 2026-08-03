@@ -12,6 +12,33 @@ struct ContainerSnapshot: Decodable {
     var agents: [AgentDto] = []
     var tasks: [TaskDto] = []
     var requests: [RequestDto] = []
+    /// GH sidebar/iOS count mismatch: the server-computed, non-capped OPEN counts —
+    /// non-terminal tasks / status=="open" requests — mirroring the web fix
+    /// (container_snapshot_routes.py). Additive: nil on a pre-fix server (or a
+    /// container endpoint hit directly without them). Raw decoded value — consumers
+    /// should read `taskOpenTotal`/`requestOpenTotal` below, which fall back to
+    /// counting the loaded arrays when this is nil.
+    private var taskOpenTotalRaw: Int?
+    private var requestOpenTotalRaw: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case container, agents, tasks, requests
+        case taskOpenTotalRaw = "task_open_total"
+        case requestOpenTotalRaw = "request_open_total"
+    }
+
+    /// Non-terminal (open) task count. Prefers the server's true count(*) over the
+    /// capped/priority-ordered `tasks` array (default cap 1000 — was the "counting a
+    /// fetched page's length instead of a server total" bug); falls back to counting
+    /// the loaded array when polling an older server that predates the field.
+    var taskOpenTotal: Int {
+        taskOpenTotalRaw ?? tasks.filter { !MobileUx.isTerminalGroup($0.status) }.count
+    }
+    /// Open (status == "open") request count — same authoritative-field-with-fallback
+    /// contract as `taskOpenTotal`.
+    var requestOpenTotal: Int {
+        requestOpenTotalRaw ?? requests.filter { $0.status == "open" }.count
+    }
 }
 
 struct ContainerDto: Decodable {

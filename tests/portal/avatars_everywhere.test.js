@@ -303,6 +303,14 @@ function requestsSandbox(snapshot) {
   vm.runInContext("window.Orcha.esc = esc; window.Orcha.face = face; window.Orcha.avatar = avatar; "
     + "window.Orcha.ghAvatar = ghAvatar; window.Orcha.mdText = (s) => esc(s || ''); "
     + "window.Orcha.linkify = linkify; window.Orcha.rewriteGithubLinks = rewriteGithubLinks;", sandbox);
+  // GH sidebar/iOS count mismatch: requests-state.js's header now reads the bare global
+  // requestOpenTotal() (app-data.js, not loaded by this avatar-focused sandbox) — stub it
+  // the same way tasks()/requests()/agents() above are stubbed, since counting isn't what
+  // this suite exercises.
+  vm.runInContext(
+    "function requestOpenTotal() { return (window.ORCHA.requests || []).filter((r) => r.status === 'open').length; }",
+    sandbox
+  );
   vm.runInContext(read("pages", "requests-state.js"), sandbox, { filename: "requests-state.js" });
   vm.runInContext(read("pages", "requests-actions.js").replace(/^window\.OrchaData\.start.*$/m, ""), sandbox, { filename: "requests-actions.js" });
   return { sandbox, reg };
