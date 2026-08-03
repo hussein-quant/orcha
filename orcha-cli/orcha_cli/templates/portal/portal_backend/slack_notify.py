@@ -354,6 +354,35 @@ def blocks_task_created(number: int, issue_html_url: str, issue_title: str,
     return blocks
 
 
+def blocks_task_created_from_slack(task_title: str, task_link, *,
+                                   screenshot_note: str = None) -> list:
+    """'🚀 Task created' — the TASK-FIRST confirmation card (the 'Create Orcha task'
+    shortcut's redesigned flow: no GitHub issue is filed by the portal anymore; the
+    dispatched/routed agent files it per its own DoD — see
+    task_start_core.build_slack_captured_dod). Unlike `blocks_task_created` (the
+    OLD chained issue-then-task card, no longer used by any production path after
+    this redesign but kept with its own unit coverage), this card links ONLY to the
+    Orcha task — there is no issue link to show yet; a context line tells the
+    member the agent files the refined GitHub issue and posts its link back to the
+    task's thread.
+
+    `screenshot_note`, when given, appends the same mandatory-honesty context line
+    every other confirmation card in this module uses (see
+    slack_routes._screenshot_status_note) — omitted (None) when the source message
+    had no screenshots at all.
+    """
+    blocks = [
+        _header("🚀", "Task created"),
+        _section_mrkdwn(_mrkdwn_escape(task_title)),
+        _context("the agent files the refined GitHub issue — link arrives in the task thread"),
+    ]
+    if screenshot_note:
+        blocks.append(_context(screenshot_note))
+    if task_link:
+        blocks.append(_button("Open task in Orcha", task_link, style="primary"))
+    return blocks
+
+
 def blocks_github_unreachable_error() -> list:
     """A friendly ephemeral card for a non-403 GitHub/network failure while filing an
     issue (rate limit, timeout, 5xx) — distinct from blocks_github_permission_error

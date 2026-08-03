@@ -1246,96 +1246,44 @@ async def test_view_submission_github_403_acks_clear_then_dms_failure_card(
 
 
 # ====================================================================================
-# Feature: AI refinement of Slack-filed issues (issue #234 — a raw pasted Slack
-# message filed verbatim as both title and body reads as unprofessional)
-#
-# Only the plumbing is under test here, per the spec's own framing — the "never
-# invent facts" guard is a PROMPT-level instruction to the model (llm_decisions.
-# _REFINE_SLACK_ISSUE_SYSTEM), not something a fake classify() can meaningfully
-# exercise; what these tests CAN and DO pin: refinement is applied when a key is
-# configured (title/body come from the fake model, not the raw input), the reporter's
-# original text survives byte-for-byte under its own heading regardless of what the
-# model returns, and every fallback path (no key, model error) files the RAW
-# title/body unchanged with the card saying so — across all paths this feature
-# actually touches (both message shortcuts; NOT /orcha issue, out of scope per the
-# module docstring).
+# Feature: portal-side LLM refinement REMOVED (agent-first redesign) — the
+# "Create Orcha task" shortcut used to run a wording pass through llm_util before
+# filing; that pass, and the whole slack_issue_refine use case, no longer exist
+# anywhere in the portal. The agent itself does the refinement now (per the new
+# task_start_core.build_slack_captured_dod), when it files the real GitHub issue.
 # ====================================================================================
 
-def _fake_refine_classify(title="Refined: cannot install app", body="## Summary\n\nUsers cannot install the app."):
-    """A fake `llm_util.classify` that returns a plausible refine_slack_issue tool-call
-    result, asserting it was called for the 'slack_issue_refine' use case with the
-    expected schema shape (mirrors llm_decisions.REFINE_SLACK_ISSUE_SCHEMA's
-    required fields)."""
-    calls = []
-
-    def fake(use_case, *, system, user, schema, tool_name="emit_result", config=None,
-             api_key=None, provider=None):
-        calls.append({"use_case": use_case, "user": user, "tool_name": tool_name,
-                      "api_key": api_key})
-        assert use_case == "slack_issue_refine"
-        assert schema["required"] == ["title", "body"]
-        return {"title": title, "body": body}
-
-    fake.calls = calls
-    return fake
+def test_slack_routes_has_no_llm_util_dependency():
+    """The plumbing pin: slack_routes.py must not import llm_util at all anymore —
+    the only use case it ever needed llm_util for (slack_issue_refine) is deleted."""
+    assert not hasattr(slack_routes, "llm_util")
 
 
-async def test_view_submission_refines_issue_when_key_configured(
+def test_slack_routes_has_no_refine_issue_function():
+    """The function itself is gone, not just unused."""
+    assert not hasattr(slack_routes, "_refine_issue_for_filing")
+
+
+def test_reporter_quote_heading_constant_removed():
+    """_REPORTER_QUOTE_HEADING was only used by the deleted refine path (the raw
+    reporter's message now lives directly in the task description for a task-first
+    capture, or as the plain modal body for the issue-only shortcut — neither needs
+    a separate 'quoted verbatim under a heading' composition step in the portal; the
+    new task-first DoD asks the AGENT to quote the reporter verbatim when it writes
+    the real issue)."""
+    assert not hasattr(slack_routes, "_REPORTER_QUOTE_HEADING")
+
+
+async def test_view_submission_issue_only_files_raw_title_and_body_unchanged(
         client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+    """The issue-only shortcut ('Create GitHub issue') files the RAW modal
+    title/body verbatim — there is no refinement pass to apply anymore, on this
+    path or any other. Holds even WITH an LLM key in the environment (the strongest
+    form of the pin: a configured key must not resurrect any refine behavior)."""
     await _bind_repo(client, container["id"])
     monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
-    fake_classify = _fake_refine_classify(
-        title="App install fails on Android and iOS",
-        body="## Summary\n\nUsers report install failures on both platforms.",
-    )
-    monkeypatch.setattr(slack_routes.llm_util, "classify", fake_classify)
-    fake_issue = _fake_issue_post(number=234, title="placeholder")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    dm_calls = []
-    monkeypatch.setattr(slack_routes, "call_slack_api",
-                        lambda method, token, payload: (dm_calls.append(payload) if method == "chat.postMessage" else None, {"ok": True})[1])
-    await _link_slack_member(client, container, make_agent, db, "U-linked")
-
-    raw_title = "Hey Kedar, have you noticed an issue on the android and iOS app we are not able"
-    raw_body = raw_title  # the production shape: the raw message IS both title and body
-    payload = _submission_payload(
-        "create_github_issue_submit", container["id"], "U-linked", raw_title, raw_body,
-    )
-    headers, body = _sign(_payload_form(payload))
-    r = await client.post("/api/slack/interactions", content=body, headers=headers)
-    assert r.status_code == 200, r.text
-
-    # The REFINED title/body were filed — not the raw pasted message.
-    assert len(fake_issue.calls) == 1
-    assert fake_issue.calls[0]["title"] == "App install fails on Android and iOS"
-    filed_body = fake_issue.calls[0]["body"]
-    assert "## Summary" in filed_body
-    assert "Users report install failures on both platforms." in filed_body
-
-    # The reporter's raw text survives VERBATIM under its own heading, regardless of
-    # what the model returned — composed in Python, never left to the model.
-    assert slack_routes._REPORTER_QUOTE_HEADING in filed_body
-    assert raw_body in filed_body
-
-    # The confirmation card notes the refinement happened.
-    assert len(dm_calls) == 1
-    joined = " ".join(
-        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
-    )
-    assert "✨ AI-refined" in joined
-
-
-async def test_view_submission_no_llm_key_files_raw_with_unavailable_note(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """No workspace/env LLM key at all (the _no_llm_key_by_default autouse fixture's
-    baseline) — refinement fails closed, the RAW modal title/body are filed unchanged,
-    and the card is honest about why."""
-    await _bind_repo(client, container["id"])
     fake_issue = _fake_issue_post(number=235, title="placeholder")
     monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    dm_calls = []
-    monkeypatch.setattr(slack_routes, "call_slack_api",
-                        lambda method, token, payload: (dm_calls.append(payload) if method == "chat.postMessage" else None, {"ok": True})[1])
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
     payload = _submission_payload(
@@ -1348,91 +1296,16 @@ async def test_view_submission_no_llm_key_files_raw_with_unavailable_note(
 
     assert fake_issue.calls[0]["title"] == "Raw title unchanged"
     assert "Raw body unchanged" in fake_issue.calls[0]["body"]
-    # No reporter-quote section — that's only appended by the refine path.
-    assert slack_routes._REPORTER_QUOTE_HEADING not in fake_issue.calls[0]["body"]
-
-    joined = " ".join(
-        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
-    )
-    assert "AI refinement unavailable" in joined
-    assert "✨ AI-refined" not in joined
+    # No reporter-quote heading — that was only ever composed by the deleted
+    # refine path.
+    assert "## Reporter's original message" not in fake_issue.calls[0]["body"]
 
 
-async def test_view_submission_llm_error_files_raw_with_unavailable_note(
+async def test_orcha_issue_slash_command_unaffected_by_refine_removal(
         client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """A configured key, but the model call itself fails (timeout, provider error) —
-    still fails closed to the raw title/body, never blocks issue creation, never
-    invents content."""
+    """Regression pin: /orcha issue never had refinement and is fully unaffected by
+    its removal — still synchronous, still files the raw title exactly as typed."""
     await _bind_repo(client, container["id"])
-    monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
-
-    def boom(use_case, **kwargs):
-        raise RuntimeError("model timed out")
-
-    monkeypatch.setattr(slack_routes.llm_util, "classify", boom)
-    fake_issue = _fake_issue_post(number=236, title="placeholder")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    dm_calls = []
-    monkeypatch.setattr(slack_routes, "call_slack_api",
-                        lambda method, token, payload: (dm_calls.append(payload) if method == "chat.postMessage" else None, {"ok": True})[1])
-    await _link_slack_member(client, container, make_agent, db, "U-linked")
-
-    payload = _submission_payload(
-        "create_github_issue_submit", container["id"], "U-linked",
-        "Raw title survives model error", "body text",
-    )
-    headers, body = _sign(_payload_form(payload))
-    r = await client.post("/api/slack/interactions", content=body, headers=headers)
-    assert r.status_code == 200, r.text
-
-    assert fake_issue.calls[0]["title"] == "Raw title survives model error"
-    joined = " ".join(
-        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
-    )
-    assert "AI refinement unavailable" in joined
-
-
-async def test_view_submission_with_task_refines_before_chaining_to_task_start(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """The 'Create Orcha task' shortcut ALSO refines (both shortcuts, per spec) — and
-    the task started from the just-filed issue inherits the REFINED title (via the
-    existing start path, automatically — task_start_core reads issue['title'], which
-    is the GitHub API's echo of what was actually filed)."""
-    await _bind_repo(client, container["id"])
-    monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
-    fake_classify = _fake_refine_classify(
-        title="Refined task title", body="## Summary\n\nRefined body.",
-    )
-    monkeypatch.setattr(slack_routes.llm_util, "classify", fake_classify)
-    fake_issue = _fake_issue_post(number=237, title="placeholder")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
-    await _link_slack_member(client, container, make_agent, db, "U-linked")
-
-    payload = _submission_payload(
-        "create_orcha_task_submit", container["id"], "U-linked",
-        "raw title", "raw body",
-    )
-    headers, body = _sign(_payload_form(payload))
-    r = await client.post("/api/slack/interactions", content=body, headers=headers)
-    assert r.status_code == 200, r.text
-
-    assert fake_issue.calls[0]["title"] == "Refined task title"
-    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #237:")][0]
-    assert t["title"] == "GH #237: Refined task title"
-
-
-async def test_orcha_issue_slash_command_never_refines(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """Explicit scope pin: /orcha issue keeps its synchronous 3s-budget contract and
-    files the RAW title/body — refinement only runs on the message-shortcut modal
-    paths (see the module docstring's ack-first section). Even WITH a key configured
-    and a classify stub in place, the slash command must never call it."""
-    await _bind_repo(client, container["id"])
-    monkeypatch.setenv("ORCHA_LLM_API_KEY", "sk-test")
-    fake_classify = _fake_refine_classify()
-    monkeypatch.setattr(slack_routes.llm_util, "classify", fake_classify)
     fake = _fake_issue_post(number=238, title="Raw slash command title")
     monkeypatch.setattr(slack_routes, "_gh_post_issue", fake)
     await _link_slack_member(client, container, make_agent, db, "U-linked")
@@ -1442,57 +1315,103 @@ async def test_orcha_issue_slash_command_never_refines(
     assert r.status_code == 200, r.text
 
     assert fake.calls[0]["title"] == "Raw slash command title"
-    assert fake_classify.calls == []  # never invoked
 
 
-# ------------------------- view_submission: chained issue + task (Create Orcha task) -------------------------
+# ------------------------- view_submission: task-first capture (Create Orcha task) -------------------------
 
-async def test_view_submission_with_task_chains_issue_then_task_same_shared_core(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """The pipeline pin: issue creation happens, THEN task_start_core.start_task_from_github
-    is called with the freshly created issue's number/title/html_url — proving the
-    'Create Orcha task' shortcut is not a separate, drifted implementation."""
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=99, title="Chained flow")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+async def test_view_submission_with_task_creates_task_not_issue(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    """The redesign's core behavior: the 'Create Orcha task' shortcut creates the
+    Orcha task DIRECTLY — no GitHub issue is filed by the portal at all. Proven by
+    asserting _gh_post_issue is never called."""
+    issue_post_calls = []
+    monkeypatch.setattr(slack_routes, "_gh_post_issue",
+                        lambda *a, **k: issue_post_calls.append(1) or {"number": 1, "html_url": "", "title": ""})
     monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
-
-    start_calls = []
-    real_start = slack_routes.start_task_from_github
-
-    def spy_start(cur, cid, **kwargs):
-        start_calls.append(kwargs)
-        return real_start(cur, cid, **kwargs)
-
-    monkeypatch.setattr(slack_routes, "start_task_from_github", spy_start)
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
     payload = _submission_payload(
         "create_orcha_task_submit", container["id"], "U-linked",
-        "Chained flow", "body text",
+        "Login button is misaligned", "raw slack body text",
     )
     headers, body = _sign(_payload_form(payload))
     r = await client.post("/api/slack/interactions", content=body, headers=headers)
     assert r.status_code == 200, r.text
     assert r.json() == {"response_action": "clear"}
 
-    assert len(start_calls) == 1
-    assert start_calls[0]["number"] == 99
-    assert start_calls[0]["gh_title"] == "Chained flow"
-    assert start_calls[0]["kind"] == "issue"
-    assert start_calls[0]["source"] == "slack"
+    assert issue_post_calls == []  # never filed a GitHub issue
 
     listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #99:")]
+    t = [x for x in listed if x["title"] == "Login button is misaligned"]
     assert len(t) == 1
-    assert t[0]["title"] == "GH #99: Chained flow"
+    assert t[0]["status"] == "ready"
+
+
+async def test_view_submission_with_task_title_is_raw_modal_title(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    """No 'GH #N:' prefix — that prefix is the idempotency key GitHub-triggered
+    tasks use; a slack-captured task has no GH number and must never look like one."""
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Raw title, please", "body",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"] == "Raw title, please"][0]
+    assert not t["title"].startswith("GH #")
+
+
+async def test_view_submission_with_task_description_carries_body_and_provenance(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    """The task description is the raw message text + Slack provenance — the
+    reporter's exact words must survive, since the agent (not a portal LLM call)
+    does the refinement now."""
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Provenance test", "the exact raw wording from slack",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"] == "Provenance test"][0]
+    assert "the exact raw wording from slack" in t["description"]
+    assert "slack" in t["description"].lower()
+
+
+async def test_view_submission_with_task_uses_slack_captured_dod(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    """The created task's DoD must be the new file-issue-first template, not the
+    generic GH-issue _ISSUE_DOD (which assumes an issue already exists)."""
+    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "DoD check", "body",
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["title"] == "DoD check"][0]
+    assert "file a professional github issue" in t["definition_of_done"].lower()
+    assert "triage comment" in t["definition_of_done"].lower()
 
 
 async def test_view_submission_with_task_passes_selected_assignee(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=100, title="Assign me")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+        client, container, make_agent, db, slack_enabled, monkeypatch):
     monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
     await _link_slack_member(client, container, make_agent, db, "U-linked")
     ai = await make_agent("atlas", kind="ai")
@@ -1507,20 +1426,17 @@ async def test_view_submission_with_task_passes_selected_assignee(
     assert r.status_code == 200, r.text
 
     listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #100:")][0]
-    assert t["status"] == "in_progress"  # assigned tasks start in_progress, not ready
+    t = [x for x in listed if x["title"] == "Assign me"][0]
+    assert t["status"] == "in_progress"
     at = db.execute("SELECT agent_id FROM agent_tasks WHERE task_id=%s", (t["id"],))
     assert str(at[0]["agent_id"]) == ai_id
 
 
 async def test_view_submission_with_task_retired_assignee_degrades_to_unassigned(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+        client, container, make_agent, db, slack_enabled, monkeypatch):
     """A modal can sit open indefinitely — if the picked agent was RETIRED between
     modal-open and submit, the stale selection must degrade to unassigned (Atlas
     routes it) rather than assign work to a dead agent or crash the submission."""
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=110, title="Retired assignee")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
     monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
     await _link_slack_member(client, container, make_agent, db, "U-linked")
     ai = await make_agent("atlas", kind="ai")
@@ -1536,21 +1452,18 @@ async def test_view_submission_with_task_retired_assignee_degrades_to_unassigned
     assert r.status_code == 200, r.text
 
     listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #110:")][0]
+    t = [x for x in listed if x["title"] == "Retired assignee"][0]
     assert t["status"] == "ready"  # degraded to unassigned, not assigned to the retiree
     at = db.execute("SELECT agent_id FROM agent_tasks WHERE task_id=%s", (t["id"],))
     assert at == []
 
 
 async def test_view_submission_with_task_cross_container_assignee_degrades_to_unassigned(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
+        client, container, make_agent, db, slack_enabled, monkeypatch):
     """A modal-selected assignee id from a DIFFERENT container (should be impossible
     via the modal's own options, but a client could still submit an arbitrary value)
     must never be trusted — degrade to unassigned rather than cross a container
     boundary."""
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=111, title="Cross container")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
     monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
@@ -1572,15 +1485,12 @@ async def test_view_submission_with_task_cross_container_assignee_degrades_to_un
     assert r.status_code == 200, r.text
 
     listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #111:")][0]
+    t = [x for x in listed if x["title"] == "Cross container"][0]
     assert t["status"] == "ready"  # degraded to unassigned, never cross-container
 
 
 async def test_view_submission_with_task_unassigned_sentinel_means_no_assignee(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=101, title="No assignee")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+        client, container, make_agent, db, slack_enabled, monkeypatch):
     monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
@@ -1592,15 +1502,12 @@ async def test_view_submission_with_task_unassigned_sentinel_means_no_assignee(
     r = await client.post("/api/slack/interactions", content=body, headers=headers)
     assert r.status_code == 200, r.text
     listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #101:")][0]
-    assert t["status"] == "ready"  # unassigned → Atlas routes it
+    t = [x for x in listed if x["title"] == "No assignee"][0]
+    assert t["status"] == "ready"  # unassigned -> Atlas routes it
 
 
-async def test_view_submission_with_task_confirmation_card_links_both(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=102, title="Both links")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+async def test_view_submission_with_task_confirmation_card_links_task_only(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
     monkeypatch.setenv("ORCHA_PORTAL_BASE_URL", "https://app.example.com")
     dm_calls = []
 
@@ -1613,7 +1520,7 @@ async def test_view_submission_with_task_confirmation_card_links_both(
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
     payload = _submission_payload(
-        "create_orcha_task_submit", container["id"], "U-linked", "Both links", "",
+        "create_orcha_task_submit", container["id"], "U-linked", "Card check", "",
     )
     headers, body = _sign(_payload_form(payload))
     r = await client.post("/api/slack/interactions", content=body, headers=headers)
@@ -1622,25 +1529,27 @@ async def test_view_submission_with_task_confirmation_card_links_both(
     assert len(dm_calls) == 1
     blocks = dm_calls[0]["blocks"]
     assert blocks[0]["text"]["text"] == "🚀 Task created"
-    buttons = blocks[-1]["elements"]
-    urls = [b["url"] for b in buttons]
-    assert any("github.com" in u for u in urls)
+    buttons = [b for b in blocks if b.get("type") == "actions"]
+    assert len(buttons) == 1
+    urls = [el["url"] for el in buttons[0]["elements"]]
+    assert all("github.com" not in u for u in urls)  # no issue link — none exists yet
     assert any(u.startswith("https://app.example.com/tasks?") for u in urls)
+    joined_context = " ".join(
+        b["elements"][0]["text"] for b in blocks if b.get("type") == "context"
+    )
+    assert "agent files the refined github issue" in joined_context.lower()
 
 
-async def test_view_submission_with_task_half_failure_is_honest_not_silent(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """If issue creation succeeds but starting the task fails, the confirmation card
-    must say so honestly (issue link + explicit retry instruction) — never render a
-    task link that doesn't resolve, and never pretend the task exists."""
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=103, title="Half failure")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+async def test_view_submission_with_task_creation_failure_is_honest_and_rolled_back(
+        client, container, make_agent, db, slack_enabled, monkeypatch):
+    """A failure inside the task INSERT itself must roll back cleanly (no partial
+    rows) and surface an honest failure DM — never crash the interaction handler,
+    whose ack (response_action: clear) already went out before the background
+    pipeline ran."""
+    def boom(cur, cid, **kwargs):
+        raise RuntimeError("task creation blew up")
 
-    def boom_start(cur, cid, **kwargs):
-        raise RuntimeError("task start blew up")
-
-    monkeypatch.setattr(slack_routes, "start_task_from_github", boom_start)
+    monkeypatch.setattr(slack_routes, "start_task_from_slack_capture", boom)
     dm_calls = []
 
     def fake_call_slack_api(method, token, payload):
@@ -1652,73 +1561,15 @@ async def test_view_submission_with_task_half_failure_is_honest_not_silent(
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
     payload = _submission_payload(
-        "create_orcha_task_submit", container["id"], "U-linked", "Half failure", "",
-    )
-    headers, body = _sign(_payload_form(payload))
-    r = await client.post("/api/slack/interactions", content=body, headers=headers)
-    assert r.status_code == 200, r.text
-    assert r.json() == {"response_action": "clear"}  # the issue DID get created; ack normally
-
-    # The GitHub issue WAS created (not rolled back).
-    assert len(fake_issue.calls) == 1
-
-    # No Orcha task exists for it.
-    listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    assert not any("GH #103:" in t["title"] for t in listed)
-
-    assert len(dm_calls) == 1
-    blocks = dm_calls[0]["blocks"]
-    assert blocks[0]["text"]["text"] == "🚀 Task created"
-    ctx_text = blocks[2]["elements"][0]["text"]
-    assert "starting the Orcha task failed" in ctx_text
-    assert "/orcha start issue 103" in ctx_text
-    # Only the GitHub issue link is offered — no task-link button.
-    assert not any(b["type"] == "actions" and len(b["elements"]) > 1 for b in blocks)
-
-
-async def test_view_submission_with_task_partial_db_failure_leaves_no_orphaned_task_row(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch):
-    """Tighter than the half-failure test above: this fails PARTWAY through
-    start_task_from_github — after its `tasks` INSERT (and, with an assignee, its
-    `agent_tasks` INSERT) have already run in the still-open transaction — rather
-    than before any write happens at all. The handler must roll back on this path so
-    no orphaned `tasks` row survives the commit; otherwise a member who retries
-    `/orcha start issue <N>` would bounce off the idempotency check and be told the
-    (broken, audit-trail-less) task already exists."""
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=105, title="Partial DB failure")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
-    monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
-    await _link_slack_member(client, container, make_agent, db, "U-linked")
-    ai = await make_agent("atlas", kind="ai")
-    ai_id = ai["agent_id"]
-
-    from portal_backend import task_start_core as core
-
-    def boom_after_insert(cur, agent_id):
-        raise RuntimeError("recompute blew up after the tasks row was already inserted")
-
-    # recompute_agent_status runs AFTER the tasks + agent_tasks INSERTs (see
-    # task_start_core.start_task_from_github) — patching it to raise reproduces a
-    # failure partway through, with real uncommitted writes already staged.
-    monkeypatch.setattr(core, "recompute_agent_status", boom_after_insert)
-
-    payload = _submission_payload(
-        "create_orcha_task_submit", container["id"], "U-linked",
-        "Partial DB failure", "", assignee_value=ai_id,
+        "create_orcha_task_submit", container["id"], "U-linked", "Boom", "",
     )
     headers, body = _sign(_payload_form(payload))
     r = await client.post("/api/slack/interactions", content=body, headers=headers)
     assert r.status_code == 200, r.text
     assert r.json() == {"response_action": "clear"}
-
-    # No orphaned task row: the rollback must have discarded the partial INSERT.
     listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    assert not any("GH #105:" in t["title"] for t in listed)
-    rows = db.execute(
-        "SELECT count(*) AS n FROM tasks WHERE title LIKE %s", ("GH #105:%",)
-    )
-    assert rows[0]["n"] == 0
+    assert not any(t["title"] == "Boom" for t in listed)
+    assert len(dm_calls) == 1  # an honest failure DM, never silence
 
 
 # ====================================================================================
@@ -2030,18 +1881,16 @@ async def test_view_submission_partial_screenshot_failure_counted_honestly(
 
 
 async def test_view_submission_with_task_lands_images_on_task_attachments(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch, att_dir):
+        client, container, make_agent, db, slack_enabled, monkeypatch, att_dir):
     """The founder's actual goal: for the 'Create Orcha task' shortcut, downloaded
-    images ALSO land on the created task's own attachment store (not just the GitHub
-    issue) — the same machinery POST /api/tasks/{tid}/attachments uses, so a
-    sandboxed agent can fetch and review them."""
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=203, title="Task with screenshot")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
+    images land on the created task's own attachment store DIRECTLY — task-first
+    means no GitHub commit happens at creation time at all (the agent commits them
+    to the repo itself, per the new DoD, when it later files the issue)."""
     monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
     monkeypatch.setattr(slack_files, "download_slack_file", lambda url, token: b"\x89PNGrealbytes")
+    put_calls = []
     monkeypatch.setattr(slack_routes, "_gh_put_contents",
-                        lambda repo, token, path, data, message: {"content": {"download_url": "https://raw/x"}})
+                        lambda *a, **k: put_calls.append(1) or {"content": {"download_url": "https://raw/x"}})
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
     payload = _submission_payload(
@@ -2053,8 +1902,10 @@ async def test_view_submission_with_task_lands_images_on_task_attachments(
     r = await client.post("/api/slack/interactions", content=body, headers=headers)
     assert r.status_code == 200, r.text
 
+    assert put_calls == []  # no GitHub commit — task-first never touches GitHub
+
     listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #203:")][0]
+    t = [x for x in listed if x["title"] == "Task with screenshot"][0]
     msgs = (await client.get(f"/api/tasks/{t['id']}/messages")).json()["messages"]
     attach_msgs = [m for m in msgs if m.get("attachments")]
     assert len(attach_msgs) == 1
@@ -2069,19 +1920,14 @@ async def test_view_submission_with_task_lands_images_on_task_attachments(
 
 
 async def test_view_submission_with_task_screenshot_disallowed_extension_skipped(
-        client, container, make_agent, db, slack_enabled, token_env, monkeypatch, att_dir):
+        client, container, make_agent, db, slack_enabled, monkeypatch, att_dir):
     """End-to-end: a Slack file reporting mimetype image/svg+xml (which passes the
     upstream image/* selection filter) but named with a disallowed extension must be
     skipped by the task-attachment landing step — never written into the attachment
     store un-gated. (SVG is deliberately excluded from ATTACHMENT_TYPES — 'never
     served renderable' per attachment_routes.upload_attachment's docstring.)"""
-    await _bind_repo(client, container["id"])
-    fake_issue = _fake_issue_post(number=210, title="Disallowed ext")
-    monkeypatch.setattr(slack_routes, "_gh_post_issue", fake_issue)
     monkeypatch.setattr(slack_routes, "call_slack_api", lambda method, token, payload: {"ok": True})
     monkeypatch.setattr(slack_files, "download_slack_file", lambda url, token: b"<svg onload=alert(1)></svg>")
-    monkeypatch.setattr(slack_routes, "_gh_put_contents",
-                        lambda repo, token, path, data, message: {"content": {"download_url": "https://raw/x"}})
     await _link_slack_member(client, container, make_agent, db, "U-linked")
 
     payload = _submission_payload(
@@ -2094,13 +1940,43 @@ async def test_view_submission_with_task_screenshot_disallowed_extension_skipped
     assert r.status_code == 200, r.text
 
     listed = (await client.get(f"/api/containers/{container['id']}/tasks")).json()["tasks"]
-    t = [x for x in listed if x["title"].startswith("GH #210:")][0]
+    t = [x for x in listed if x["title"] == "Disallowed ext"][0]
     msgs = (await client.get(f"/api/tasks/{t['id']}/messages")).json()["messages"]
     # No attachment message at all — the one candidate file was rejected outright.
     assert not any(m.get("attachments") for m in msgs)
     # Nothing landed on disk under this task's attachment dir either.
     task_dir = att_dir / t["id"]
     assert not task_dir.exists() or not any(task_dir.iterdir())
+
+
+async def test_view_submission_with_task_screenshot_honesty_note_on_card(
+        client, container, make_agent, db, slack_enabled, monkeypatch, att_dir):
+    """Mandatory honesty line survives the redesign — the count of screenshots
+    attached to the TASK (not a GitHub issue, since none exists) still appears."""
+    dm_calls = []
+
+    def fake_call_slack_api(method, token, payload):
+        if method == "chat.postMessage":
+            dm_calls.append(payload)
+        return {"ok": True}
+
+    monkeypatch.setattr(slack_routes, "call_slack_api", fake_call_slack_api)
+    monkeypatch.setattr(slack_files, "download_slack_file", lambda url, token: b"\x89PNGbytes")
+    await _link_slack_member(client, container, make_agent, db, "U-linked")
+
+    payload = _submission_payload(
+        "create_orcha_task_submit", container["id"], "U-linked",
+        "Honesty check", "",
+        files=[_slack_image_file(name="a.png"), _slack_image_file(name="b.png")],
+    )
+    headers, body = _sign(_payload_form(payload))
+    r = await client.post("/api/slack/interactions", content=body, headers=headers)
+    assert r.status_code == 200, r.text
+
+    joined = " ".join(
+        b["elements"][0]["text"] for b in dm_calls[0]["blocks"] if b.get("type") == "context"
+    )
+    assert "2 screenshots attached" in joined
 
 
 async def test_view_submission_issue_only_shortcut_does_not_touch_task_attachments(
@@ -2298,6 +2174,46 @@ def test_blocks_task_created_half_failure_structure():
         el.get("url", "").startswith("https://app.example.com/tasks")
         for b in blocks if b["type"] == "actions" for el in b["elements"]
     )
+
+
+def test_blocks_task_created_from_slack_structure():
+    """The task-first confirmation card: '🚀 Task created' header, a link straight
+    to the Orcha task (there is no GitHub issue yet), a context line explaining the
+    agent will file the refined issue and post the link to the task thread, and the
+    mandatory screenshot-honesty line when given."""
+    blocks = slack_notify.blocks_task_created_from_slack(
+        "Login button is misaligned", "https://app.example.com/tasks?cid=c&task=t1",
+        screenshot_note="2 screenshots attached",
+    )
+    assert blocks[0]["text"]["text"] == "🚀 Task created"
+    assert "Login button is misaligned" in blocks[1]["text"]["text"]
+    joined_context = " ".join(
+        b["elements"][0]["text"] for b in blocks if b.get("type") == "context"
+    )
+    assert "agent files the refined github issue" in joined_context.lower()
+    assert "link arrives in the task thread" in joined_context.lower()
+    assert "2 screenshots attached" in joined_context
+    buttons = [b for b in blocks if b.get("type") == "actions"]
+    assert len(buttons) == 1
+    assert buttons[0]["elements"][0]["url"] == "https://app.example.com/tasks?cid=c&task=t1"
+
+
+def test_blocks_task_created_from_slack_no_link_omits_button():
+    """Without a configured ORCHA_PORTAL_BASE_URL there's no task deep link — the
+    card must still render (title + context), just without a button, same
+    degradation convention as every other composer in this module."""
+    blocks = slack_notify.blocks_task_created_from_slack(
+        "No link case", None, screenshot_note=None,
+    )
+    assert not any(b.get("type") == "actions" for b in blocks)
+
+
+def test_blocks_task_created_from_slack_escapes_title():
+    blocks = slack_notify.blocks_task_created_from_slack(
+        "Fix <script> handling & more", "https://x/y", screenshot_note=None,
+    )
+    assert "&lt;script&gt;" in blocks[1]["text"]["text"]
+    assert "&amp;" in blocks[1]["text"]["text"]
 
 
 def test_build_create_issue_modal_issue_only_shape():

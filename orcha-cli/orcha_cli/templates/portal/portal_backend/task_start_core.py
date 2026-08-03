@@ -65,6 +65,30 @@ _PULL_DOD = (
 # What the two kinds are called in copy. Keep in sync with the DoD templates above.
 _KIND_LABEL = {"issue": "issue", "pull": "pull request"}
 
+# The DoD for a task captured DIRECTLY from a raw Slack report (the "Create Orcha
+# task" shortcut's task-first flow — slack_routes._run_task_first_pipeline). Distinct
+# from _ISSUE_DOD/_PULL_DOD, which both assume a GitHub issue/PR already exists at
+# task-creation time: a slack-captured task has NO GitHub issue yet, so its first
+# instruction is to create one — the agent does the refinement the portal used to do
+# with an LLM call (see docs/slack-integration.md).
+_SLACK_CAPTURED_DOD = (
+    "This task was captured from a raw Slack report — no GitHub issue exists for it "
+    "yet. Before anything else:\n"
+    "1. File a professional GitHub issue for this report in the connected repo: an "
+    "imperative, concise title; a structured body with Summary/Observed/Expected/"
+    "Technical context sections grounded in the actual codebase (not invented); embed "
+    "the screenshots attached to this task (commit them to the repo per its "
+    ".github/orcha-attachments convention); quote the reporter's original message "
+    "verbatim; and a provenance footer noting it was captured from Slack via Orcha. "
+    "Post the new issue's link back as a message on this Orcha task's own thread.\n"
+    "2. Then post a codebase-grounded triage comment on that issue — the specific "
+    "modules/files involved, the most likely cause ranked against the actual code, "
+    "and what logs/repro would confirm it.\n"
+    "3. Then proceed to implement per the standard protocol: fix it, open a PR "
+    "referencing the issue, fresh-session review, then human review. Never merge "
+    "without a human verifying."
+)
+
 
 def build_task_fields(kind: str, number: int, gh_title: str, body_excerpt: str,
                       html_url: str, dod_override: str = None) -> dict:
@@ -254,10 +278,50 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
 
     fields = build_task_fields(kind, number, gh_title, body_excerpt, html_url, dod_override)
 
-    # Mirror create_task: an explicitly-assigned task starts 'in_progress' with
-    # started_at stamped; an unassigned one lands 'ready' (Atlas routes it). No deps
-    # and no protocol on an externally-triggered task, so the branchy create_task logic
-    # collapses to exactly these two cases.
+    result = _finish_task_insert(
+        cur, container_id,
+        title=fields["title"],
+        description=fields["description"],
+        definition_of_done=fields["definition_of_done"],
+        created_by_agent_id=created_by_agent_id,
+        assignee_agent_id=assignee_agent_id,
+        source=source,
+        audit_extra={"gh_kind": kind, "gh_number": number},
+    )
+    tid = result["task_id"]
+    assignee_id = str(assignee_agent_id) if assignee_agent_id else None
+
+    # Fresh start only (never on an existing=True hit, which returns above before this
+    # point) — the round-trip "Orcha started this" comment. Best-effort; see
+    # _post_start_comment's docstring for the non-fatal contract.
+    _post_start_comment(cur, container_id, kind, number, tid, assignee_id)
+    return {"task_id": tid, "existing": False}
+
+
+def _finish_task_insert(cur, container_id, *, title: str, description: str,
+                        definition_of_done: str, created_by_agent_id,
+                        assignee_agent_id, source: str, audit_extra: dict) -> dict:
+    """Shared INSERT/assign/wake/audit tail for both start_task_from_github and
+    start_task_from_slack_capture — the two functions differ only in HOW they build
+    `title`/`description`/`definition_of_done` and whether an idempotency probe runs
+    first; once those fields are decided, task creation itself must be identical
+    (same INSERT columns/defaults, same agent_tasks 'working' row + no-bump +
+    recompute_agent_status + targeted task_assigned, same audit event) so a task
+    born from ANY external trigger is indistinguishable downstream from one born via
+    task_creation_routes.create_task. `audit_extra` carries the caller-specific
+    fields (gh_kind/gh_number for a GitHub-triggered start; nothing extra for a
+    Slack capture) merged into the 'created' event's payload.
+
+    Mirror create_task: an explicitly-assigned task starts 'in_progress' with
+    started_at stamped; an unassigned one lands 'ready' (Atlas routes it). No deps
+    and no protocol on an externally-triggered task, so the branchy create_task
+    logic collapses to exactly these two cases. On assignment: a 'working'
+    agent_tasks row, NO bump_agent (that would shrink idle_seconds and suppress the
+    wake), recompute_agent_status off the row, then a targeted task_assigned so the
+    wake machinery fires.
+
+    The caller owns the commit. Never commits or opens its own connection.
+    """
     assignee_id = str(assignee_agent_id) if assignee_agent_id else None
     initial_status = "in_progress" if assignee_id else "ready"
     started_clause = "now()" if assignee_id else "NULL"
@@ -270,9 +334,9 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
             RETURNING id""",
         (
             container_id,
-            fields["title"],
-            fields["description"],
-            fields["definition_of_done"],
+            title,
+            description,
+            definition_of_done,
             initial_status,
             100,
             created_by_agent_id,
@@ -281,9 +345,6 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
     tid = str(cur.fetchone()["id"])
 
     if assignee_id:
-        # Same as create_task: a 'working' agent_tasks row, NO bump_agent (that would
-        # shrink idle_seconds and suppress the wake), recompute_agent_status off the
-        # row, then a targeted task_assigned so the wake machinery fires.
         cur.execute(
             """INSERT INTO agent_tasks (agent_id, task_id, assignment_status)
                VALUES (%s, %s, 'working')""",
@@ -295,7 +356,7 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
             str(container_id),
             assignee_id,
             "task_assigned",
-            {"task_id": tid, "title": fields["title"], "via": f"{source} start"},
+            {"task_id": tid, "title": title, "via": f"{source} start"},
         )
 
     actor_type = "ai" if created_by_agent_id else "human"
@@ -308,16 +369,53 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
         tid,
         "created",
         {
-            "title": fields["title"],
+            "title": title,
             "status": initial_status,
             "source": source,
-            "gh_kind": kind,
-            "gh_number": number,
             "assignee_agent_id": assignee_id,
+            **audit_extra,
         },
     )
-    # Fresh start only (never on an existing=True hit, which returns above before this
-    # point) — the round-trip "Orcha started this" comment. Best-effort; see
-    # _post_start_comment's docstring for the non-fatal contract.
-    _post_start_comment(cur, container_id, kind, number, tid, assignee_id)
     return {"task_id": tid, "existing": False}
+
+
+def build_slack_captured_dod() -> str:
+    """The definition_of_done for a task captured directly from a raw Slack report
+    (the "Create Orcha task" shortcut's task-first flow — see slack_routes.py's
+    `_run_task_first_pipeline`). Distinct from `_ISSUE_DOD`/`_PULL_DOD`, which
+    both assume a GitHub issue/PR already exists at task-creation time: a
+    slack-captured task has NO GitHub issue yet, so its first instruction is to
+    create one (the agent does the refinement the portal used to do with an LLM
+    call — see docs/slack-integration.md), post the link back to this task's own
+    thread, THEN triage, THEN implement. Pure (no DB); tests assert the literal
+    copy directly."""
+    return _SLACK_CAPTURED_DOD
+
+
+def start_task_from_slack_capture(cur, container_id, *, title: str, description: str,
+                                  created_by_agent_id, assignee_agent_id=None,
+                                  source: str = "slack_capture"):
+    """Create an Orcha task directly from a raw Slack message (the "Create Orcha
+    task" shortcut's task-first flow), with NO chained GitHub issue creation and NO
+    idempotency probe (there is no GH number to key an idempotency check against —
+    every invocation creates a fresh task; a double-click/retry at the Slack layer
+    is out of scope here, unlike start_task_from_github's GH-number-keyed probe).
+
+    `title`/`description` are used VERBATIM (raw is fine — the assigned agent's own
+    DoD, see `build_slack_captured_dod`, instructs it to refine and file the real
+    GitHub issue itself). Returns {"task_id": <str>, "existing": False} — always
+    False, kept in the return shape only so callers can share code with
+    start_task_from_github's {"task_id", "existing"} contract.
+
+    The caller owns the commit. Never commits or opens its own connection.
+    """
+    return _finish_task_insert(
+        cur, container_id,
+        title=title,
+        description=description,
+        definition_of_done=build_slack_captured_dod(),
+        created_by_agent_id=created_by_agent_id,
+        assignee_agent_id=assignee_agent_id,
+        source=source,
+        audit_extra={},
+    )
