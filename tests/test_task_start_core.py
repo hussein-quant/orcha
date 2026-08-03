@@ -384,3 +384,267 @@ def test_start_task_from_slack_capture_uses_slack_captured_dod_not_issue_dod():
     src = inspect.getsource(core.start_task_from_slack_capture)
     assert "build_slack_captured_dod" in src
     assert "_ISSUE_DOD" not in src
+
+
+# ------------------------- automatic triage: wake the orchestrator -------------------------
+#
+# Production gap: a task created UNASSIGNED via the hub Start / Slack capture paths landed
+# 'ready' with nothing to wake anyone to route it — it could sit forever. Both paths funnel
+# through this file's `_finish_task_insert`, so the fix lives in exactly one place: when the
+# unassigned branch runs, look up the container's orchestrator agent (find_orchestrator_agent)
+# and — if one exists — publish a targeted `task_created_unassigned` event at it, the same
+# `publish_event` call shape the assigned branch already uses for `task_assigned`. These tests
+# pin the event's shape, its presence/absence per branch, and its wake-scan visibility.
+
+from portal_backend.database import db_cursor
+
+
+async def test_find_orchestrator_agent_matches_role_ilike_orchestrat(
+        client, container, make_agent):
+    """The only existing 'is this the orchestrator' signal anywhere in the codebase is a
+    role-string heuristic (the frontend's ORCHESTRATOR_ROLE_RE). This pins the backend
+    mirror: a live AI agent whose role contains 'orchestrat', case-insensitively, matching
+    realistic personas like 'orchestrator / system architect'."""
+    cid = container["id"]
+    atlas = await make_agent("Atlas", role="orchestrator / system architect", kind="ai")
+    with db_cursor() as (_, cur):
+        found = core.find_orchestrator_agent(cur, cid)
+    assert found == atlas["agent_id"]
+
+
+async def test_find_orchestrator_agent_none_when_no_match(client, container, make_agent):
+    """A container with only non-orchestrator agents (or none at all) must resolve to
+    None gracefully — never raise, never guess."""
+    cid = container["id"]
+    await make_agent("worker-1", role="worker", kind="ai")
+    with db_cursor() as (_, cur):
+        found = core.find_orchestrator_agent(cur, cid)
+    assert found is None
+
+
+async def test_find_orchestrator_agent_ignores_terminated_and_human(
+        client, container, make_agent, db):
+    """A terminated former-orchestrator, and a HUMAN whose role happens to say
+    'orchestrator', must never be picked — only a live kind='ai' agent counts."""
+    cid = container["id"]
+    dead = await make_agent("old-atlas", role="orchestrator", kind="ai")
+    db.execute("UPDATE agents SET terminated_at=now() WHERE id=%s", (dead["agent_id"],))
+    await make_agent("boss", role="orchestrator of humans", kind="human")
+    with db_cursor() as (_, cur):
+        found = core.find_orchestrator_agent(cur, cid)
+    assert found is None
+
+
+async def test_find_orchestrator_agent_deterministic_tie_break_oldest_first(
+        client, container, make_agent):
+    """Two orchestrator-roled agents: the oldest (by created_at, then id) wins, not
+    whichever happens to be scanned last — the routing target must be stable."""
+    cid = container["id"]
+    first = await make_agent("Atlas-1", role="orchestrator / system architect", kind="ai")
+    await make_agent("Atlas-2", role="orchestrator / system architect", kind="ai")
+    with db_cursor() as (_, cur):
+        found = core.find_orchestrator_agent(cur, cid)
+    assert found == first["agent_id"]
+
+
+async def test_slack_capture_unassigned_emits_exactly_one_orchestrator_event(
+        client, container, make_agent, db):
+    """Deliverable #1's slack-capture half: an UNASSIGNED slack-captured task must emit
+    exactly one task_created_unassigned event, targeted at the orchestrator, with the
+    task id + title in the payload — the doorbell the notifier's wake-scan reads."""
+    cid = container["id"]
+    reporter = await make_agent("reporter", kind="human")
+    atlas = await make_agent("Atlas", role="orchestrator / system architect", kind="ai")
+
+    with db_cursor() as (conn, cur):
+        result = core.start_task_from_slack_capture(
+            cur, cid,
+            title="Unassigned slack capture",
+            description="raw text",
+            created_by_agent_id=reporter["agent_id"],
+            assignee_agent_id=None,
+        )
+        conn.commit()
+
+    rows = db.event_rows(atlas["agent_id"])
+    triage_rows = [r for r in rows if r["event_name"] == "task_created_unassigned"]
+    assert len(triage_rows) == 1
+    payload = triage_rows[0]["payload"]
+    assert payload["task_id"] == result["task_id"]
+    assert payload["title"] == "Unassigned slack capture"
+
+
+async def test_hub_start_unassigned_emits_exactly_one_orchestrator_event(
+        client, container, make_agent, token_env, monkeypatch, db):
+    """Deliverable #1's hub-start half: the real POST /github/start route, unassigned,
+    must emit the same shape of event as the slack-capture path — one dispatch mechanism,
+    one doorbell convention, regardless of which seam created the task."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    _capture_comment(monkeypatch)  # keep the GitHub round-trip comment a no-op leaf
+    atlas = await make_agent("Atlas", role="orchestrator / system architect", kind="ai")
+
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "issue", "number": 501, "title": "unrouted work"})
+    assert r.status_code == 201, r.text
+    tid = r.json()["task_id"]
+
+    rows = db.event_rows(atlas["agent_id"])
+    triage_rows = [row for row in rows if row["event_name"] == "task_created_unassigned"]
+    assert len(triage_rows) == 1
+    assert triage_rows[0]["payload"]["task_id"] == tid
+    assert triage_rows[0]["payload"]["title"] == "GH #501: unrouted work"
+
+
+async def test_assigned_start_emits_no_task_created_unassigned_event(
+        client, container, make_agent, db):
+    """Deliverable #3: an assigned-at-creation task is unchanged — it gets its existing
+    targeted task_assigned wake and NOTHING of the new kind, from either dispatch path."""
+    cid = container["id"]
+    reporter = await make_agent("reporter", kind="human")
+    atlas = await make_agent("Atlas", role="orchestrator / system architect", kind="ai")
+    worker = await make_agent("worker-1", kind="ai")
+
+    with db_cursor() as (conn, cur):
+        core.start_task_from_slack_capture(
+            cur, cid,
+            title="Assigned capture",
+            description="body",
+            created_by_agent_id=reporter["agent_id"],
+            assignee_agent_id=worker["agent_id"],
+        )
+        conn.commit()
+
+    atlas_rows = db.event_rows(atlas["agent_id"])
+    assert not any(r["event_name"] == "task_created_unassigned" for r in atlas_rows)
+    worker_rows = db.event_rows(worker["agent_id"])
+    assert any(r["event_name"] == "task_assigned" for r in worker_rows)
+    assert not any(r["event_name"] == "task_created_unassigned" for r in worker_rows)
+
+
+async def test_no_orchestrator_container_emits_nothing_and_does_not_fail(
+        client, container, make_agent, db):
+    """Deliverable #2: a container with no orchestrator-roled agent at all must not raise
+    and must not emit any task_created_unassigned event anywhere — a silent, log-safe
+    no-op, never an error that could break task creation."""
+    cid = container["id"]
+    reporter = await make_agent("reporter", kind="human")
+    await make_agent("worker-1", role="worker", kind="ai")
+
+    with db_cursor() as (conn, cur):
+        result = core.start_task_from_slack_capture(
+            cur, cid,
+            title="No orchestrator here",
+            description="raw text",
+            created_by_agent_id=reporter["agent_id"],
+            assignee_agent_id=None,
+        )
+        conn.commit()
+    assert result["existing"] is False
+
+    all_rows = db.execute(
+        "SELECT * FROM agent_events WHERE event_name='task_created_unassigned'"
+    )
+    assert all_rows == []
+
+
+async def test_wake_scan_reports_orchestrator_with_pending_event_after_unassigned_start(
+        client, container, make_agent, db):
+    """Integration tooth: after the event insert, the portal's OWN wake-scan for this
+    container must report the orchestrator as a candidate with a pending event and
+    should_wake True — proving the notifier's real wake machinery (not just a raw
+    agent_events row) actually sees this doorbell on its next tick."""
+    cid = container["id"]
+    reporter = await make_agent("reporter", kind="human")
+    atlas = await make_agent("Atlas", role="orchestrator / system architect", kind="ai")
+    aid = atlas["agent_id"]
+
+    with db_cursor() as (conn, cur):
+        core.start_task_from_slack_capture(
+            cur, cid,
+            title="Route me please",
+            description="raw text",
+            created_by_agent_id=reporter["agent_id"],
+            assignee_agent_id=None,
+        )
+        conn.commit()
+
+    r = await client.get(f"/api/containers/{cid}/wake-scan",
+                         params={"cooldown": 0, "min_idle": 0})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    cand = next((c for c in body["candidates"] if c["agent_id"] == aid), None)
+    assert cand is not None
+    assert cand["pending_events"] >= 1
+    assert cand["latest_event"] == "task_created_unassigned"
+    assert cand["should_wake"] is True
+
+
+async def test_wake_scan_prompt_messages_carries_routing_directive_text(
+        client, container, make_agent, db):
+    """Founder refinement: waking the orchestrator is not enough on its own — the wake must
+    carry an explicit ROUTING DIRECTIVE so the orchestrator knows to ASSIGN the best-fit
+    specialist (never implement it itself). This is the actual rendering seam a woken agent
+    reads: wake-scan's `prompt_messages`, built by directed_message_collection.collect_directed_messages
+    (mirroring how a `task_assigned` event's text reaches the same field). Pins the literal
+    instruction text so a future edit that silently drops the directive (e.g. reverting to a bare
+    passive FYI, or omitting the "do not implement it yourself" clause) goes red."""
+    cid = container["id"]
+    reporter = await make_agent("reporter", kind="human")
+    atlas = await make_agent("Atlas", role="orchestrator / system architect", kind="ai")
+    aid = atlas["agent_id"]
+
+    with db_cursor() as (conn, cur):
+        result = core.start_task_from_slack_capture(
+            cur, cid,
+            title="Login button is broken",
+            description="raw text",
+            created_by_agent_id=reporter["agent_id"],
+            assignee_agent_id=None,
+        )
+        conn.commit()
+    tid = result["task_id"]
+
+    r = await client.get(f"/api/containers/{cid}/wake-scan",
+                         params={"cooldown": 0, "min_idle": 0})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    cand = next((c for c in body["candidates"] if c["agent_id"] == aid), None)
+    assert cand is not None
+    msgs = cand["prompt_messages"]
+    directive = next((m for m in msgs if tid[:8] in m), None)
+    assert directive is not None, f"no routing directive surfaced in prompt_messages: {msgs!r}"
+    assert "Login button is broken" in directive
+    assert "ROUTING" in directive
+    assert "ASSIGN" in directive
+    assert "best-fit" in directive
+    assert "do not implement it yourself" in directive.lower()
+    assert "assigning it wakes the assignee automatically" in directive.lower()
+
+
+async def test_wake_scan_no_routing_directive_when_task_already_gone(
+        client, container, make_agent, db):
+    """A task_created_unassigned event whose task was completed/cancelled before the orchestrator
+    ever wakes must NOT surface a stale routing directive (mirrors task_assigned's own terminal-task
+    guard) — nothing left to route."""
+    cid = container["id"]
+    reporter = await make_agent("reporter", kind="human")
+    atlas = await make_agent("Atlas", role="orchestrator / system architect", kind="ai")
+    aid = atlas["agent_id"]
+
+    with db_cursor() as (conn, cur):
+        result = core.start_task_from_slack_capture(
+            cur, cid,
+            title="Stale before wake",
+            description="raw text",
+            created_by_agent_id=reporter["agent_id"],
+            assignee_agent_id=None,
+        )
+        conn.commit()
+    db.execute("UPDATE tasks SET status='cancelled' WHERE id=%s", (result["task_id"],))
+
+    r = await client.get(f"/api/containers/{cid}/wake-scan",
+                         params={"cooldown": 0, "min_idle": 0})
+    assert r.status_code == 200, r.text
+    cand = next(c for c in r.json()["candidates"] if c["agent_id"] == aid)
+    assert not any("ROUTING" in m for m in cand["prompt_messages"])

@@ -28,6 +28,15 @@ task row is built in-memory with a real id, and never on an `existing=True` hit)
 Non-fatal by construction, same contract as slack_notify's outbound ping: any
 failure (repo not bound, no installation token, GitHub 403/404/network error) is
 caught and swallowed — a dead GitHub comment must never break task creation.
+
+Automatic triage (unassigned tasks): an assigned task's targeted `task_assigned`
+event is what wakes its assignee — but an UNASSIGNED task (Atlas-routed) had no
+symmetric doorbell, so it could sit in `ready` indefinitely with nothing to route
+it. `_finish_task_insert`'s unassigned branch now emits a targeted
+`task_created_unassigned` event at the container's orchestrator agent (see
+`find_orchestrator_agent`), reusing `publish_event` exactly as the assigned branch
+does, so the existing notifier wake-scan wakes the orchestrator on its next tick.
+No orchestrator agent in the container -> silent no-op, never an error.
 """
 
 import json
@@ -298,6 +307,36 @@ def start_task_from_github(cur, container_id, *, kind: str, number: int,
     return {"task_id": tid, "existing": False}
 
 
+def find_orchestrator_agent(cur, container_id):
+    """The container's orchestrator agent, or None if it doesn't have one.
+
+    "Orchestrator" has no first-class flag anywhere in the schema (`agents.role` is
+    free text) — the only existing signal is the persona/role string itself, matched
+    the same way the frontend's `ORCHESTRATOR_ROLE_RE` heuristic already does
+    (static/pages/github-state.js) for its own display purposes. This is the backend
+    mirror of that convention: a live (`terminated_at IS NULL`), AI (`kind='ai'`)
+    agent in the container whose `role` contains "orchestrat" (case-insensitive),
+    matching e.g. "orchestrator / system architect", "orchestrator & architect".
+    Deterministic tie-break when more than one matches: oldest first
+    (`created_at ASC`, then `id ASC` for equal timestamps) — the container's
+    original/primary orchestrator, not whichever was created most recently.
+
+    Returns the agent id (str) or None. None is a normal, expected outcome (a
+    container with no orchestrator persona at all) — callers must treat it as a
+    graceful no-op, never an error.
+    """
+    cur.execute(
+        """SELECT id FROM agents
+            WHERE container_id=%s AND kind='ai' AND terminated_at IS NULL
+              AND role ILIKE %s
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1""",
+        (container_id, "%orchestrat%"),
+    )
+    row = cur.fetchone()
+    return str(row["id"]) if row else None
+
+
 def _finish_task_insert(cur, container_id, *, title: str, description: str,
                         definition_of_done: str, created_by_agent_id,
                         assignee_agent_id, source: str, audit_extra: dict) -> dict:
@@ -319,6 +358,17 @@ def _finish_task_insert(cur, container_id, *, title: str, description: str,
     agent_tasks row, NO bump_agent (that would shrink idle_seconds and suppress the
     wake), recompute_agent_status off the row, then a targeted task_assigned so the
     wake machinery fires.
+
+    Automatic triage (unassigned case): a task that lands 'ready' with nobody
+    assigned previously sat inert until something happened to poke it — nothing woke
+    the orchestrator to route it. Mirroring the assigned branch's task_assigned wake
+    exactly (same publish_event call shape, same container/payload conventions),
+    an unassigned task now emits a "task_created_unassigned" event targeted at the
+    container's orchestrator agent (see find_orchestrator_agent), so the existing
+    notifier wake-scan machinery wakes it on its next tick and it routes the task per
+    its persona. If the container has no orchestrator agent, this is a silent,
+    log-safe no-op — no event, no error — since routing without an orchestrator to
+    route is simply not this container's setup.
 
     The caller owns the commit. Never commits or opens its own connection.
     """
@@ -358,6 +408,18 @@ def _finish_task_insert(cur, container_id, *, title: str, description: str,
             "task_assigned",
             {"task_id": tid, "title": title, "via": f"{source} start"},
         )
+    else:
+        orchestrator_id = find_orchestrator_agent(cur, container_id)
+        if orchestrator_id:
+            publish_event(
+                cur,
+                str(container_id),
+                orchestrator_id,
+                "task_created_unassigned",
+                {"task_id": tid, "title": title, "via": f"{source} start"},
+            )
+        # else: no orchestrator agent in this container — log-safe no-op, no event,
+        # no error. The task still lands 'ready'; it simply has nothing to wake.
 
     actor_type = "ai" if created_by_agent_id else "human"
     log_event(

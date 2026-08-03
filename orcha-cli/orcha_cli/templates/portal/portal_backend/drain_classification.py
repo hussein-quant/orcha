@@ -28,7 +28,9 @@ from portal_backend.guards import valid_uuid as _valid_uuid
 #                         the sole wake for "proceed/revise").
 #   NEW_WORK            - claiming/accepting it STARTS the work, so a drain NEVER acks it; it is consumed at
 #                         the /next CLAIM (or accept/reject seam): a task_assigned/task_ready on a `ready`
-#                         task; a request_created of type 'task'.
+#                         task; a request_created of type 'task'; a task_created_unassigned on a live task
+#                         (consumed only when the orchestrator actually ROUTES it via assignment — see
+#                         task_start_core's automatic-triage doorbell).
 #   DIRECTIVE           - a STATUS-SENSITIVE start/rework directive on an in_progress task: surfaced as the
 #                         assignee's wake reason but NOT acked by any drain — only at that worker's
 #                         clean-completion / terminal seam (/done, cancel, unassign): a task_assigned on an
@@ -113,6 +115,16 @@ def _drain_class(cur, event_name: str, payload: Optional[dict], target_id=None) 
             "bucket": _DRAIN_FYI,
             "task_id": None,
         }  # pending/terminal/gone → informational
+    if event_name == "task_created_unassigned":
+        # Same NEW_WORK contract as task_assigned's own 'ready' branch — this is unclaimed work
+        # (routing, not implementing) and must NEVER be ack'd away by an unrelated awake run
+        # generically; it stays pending until actually consumed at the routing action (the
+        # orchestrator assigning it), the same seam task_assigned/task_ready use for claims.
+        tid = payload.get("task_id")
+        st = _drain_task_status(cur, tid)
+        if st in (None, "completed", "cancelled"):
+            return {"bucket": _DRAIN_FYI, "task_id": None}
+        return {"bucket": _DRAIN_NEW_WORK, "task_id": str(tid)}
     if event_name == "task_ready":
         if target_id is None:
             return {
