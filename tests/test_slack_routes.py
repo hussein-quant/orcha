@@ -2300,6 +2300,46 @@ def test_blocks_task_created_half_failure_structure():
     )
 
 
+def test_blocks_task_created_from_slack_structure():
+    """The task-first confirmation card: '🚀 Task created' header, a link straight
+    to the Orcha task (there is no GitHub issue yet), a context line explaining the
+    agent will file the refined issue and post the link to the task thread, and the
+    mandatory screenshot-honesty line when given."""
+    blocks = slack_notify.blocks_task_created_from_slack(
+        "Login button is misaligned", "https://app.example.com/tasks?cid=c&task=t1",
+        screenshot_note="2 screenshots attached",
+    )
+    assert blocks[0]["text"]["text"] == "🚀 Task created"
+    assert "Login button is misaligned" in blocks[1]["text"]["text"]
+    joined_context = " ".join(
+        b["elements"][0]["text"] for b in blocks if b.get("type") == "context"
+    )
+    assert "agent files the refined github issue" in joined_context.lower()
+    assert "link arrives in the task thread" in joined_context.lower()
+    assert "2 screenshots attached" in joined_context
+    buttons = [b for b in blocks if b.get("type") == "actions"]
+    assert len(buttons) == 1
+    assert buttons[0]["elements"][0]["url"] == "https://app.example.com/tasks?cid=c&task=t1"
+
+
+def test_blocks_task_created_from_slack_no_link_omits_button():
+    """Without a configured ORCHA_PORTAL_BASE_URL there's no task deep link — the
+    card must still render (title + context), just without a button, same
+    degradation convention as every other composer in this module."""
+    blocks = slack_notify.blocks_task_created_from_slack(
+        "No link case", None, screenshot_note=None,
+    )
+    assert not any(b.get("type") == "actions" for b in blocks)
+
+
+def test_blocks_task_created_from_slack_escapes_title():
+    blocks = slack_notify.blocks_task_created_from_slack(
+        "Fix <script> handling & more", "https://x/y", screenshot_note=None,
+    )
+    assert "&lt;script&gt;" in blocks[1]["text"]["text"]
+    assert "&amp;" in blocks[1]["text"]["text"]
+
+
 def test_build_create_issue_modal_issue_only_shape():
     view = slack_notify.build_create_issue_modal("A title", "A body", private_metadata="c1|U1")
     assert view["callback_id"] == "create_github_issue_submit"
