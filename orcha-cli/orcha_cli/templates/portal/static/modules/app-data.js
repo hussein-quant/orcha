@@ -57,6 +57,21 @@ function wakesServed(c) {
 function agents() { return D.agents || []; }
 function tasks() { return D.tasks || []; }
 function requests() { return D.requests || []; }
+// GH sidebar/iOS count mismatch: task_open_total/request_open_total (additive snapshot
+// fields — container_snapshot_routes.py) are the ONE authoritative "open" counts, computed
+// server-side over the full table (not the capped tasks[]/requests[] window), so the sidebar
+// badge and the page header can read the SAME number. Fall back to counting the loaded
+// window client-side when polling an older cached snapshot that predates the field (still
+// correct in the common case where the window isn't actually capped).
+const TERMINAL_TASK_STATUSES = ["completed", "cancelled"];
+function taskOpenTotal() {
+  if (D.task_open_total != null) return D.task_open_total;
+  return tasks().filter((t) => TERMINAL_TASK_STATUSES.indexOf(t.status) < 0).length;
+}
+function requestOpenTotal() {
+  if (D.request_open_total != null) return D.request_open_total;
+  return requests().filter((r) => r.status === "open").length;
+}
 function agentByAlias(alias) { return agents().find((a) => a.alias === alias) || null; }
 function agentById(id) { return id == null ? null : agents().find((a) => String(a.id) === String(id)) || null; }
 function aliasFor(id) { const a = agentById(id); return a ? a.alias : null; }

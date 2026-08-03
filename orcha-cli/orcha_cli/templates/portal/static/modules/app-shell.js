@@ -281,10 +281,16 @@ function mountShell(page, opts) {
   const nv = [
     { key: "home", href: withCid("/"), ico: "home", label: "Dashboard" },
     { key: "agents", href: withCid("/agents"), ico: "agents", label: "Agents", count: agents().length },
+    // Badge = OPEN (non-terminal-status) tasks — the same authoritative total the Tasks
+    // page header renders (taskOpenTotal(), app-data.js), so the two can never read
+    // differently (was: needs_verification count only — a much narrower "needs you"
+    // number that read as "0 tasks" next to a header saying "62 tasks"). That
+    // needs-attention signal still lives in the "Needs you" card (attnItems()) — no
+    // information lost, just no longer this badge's job.
     { key: "tasks", href: withCid("/tasks"), ico: "tasks", label: "Tasks",
-      count: tasks().filter((t) => t.status === "needs_verification").length, attn: true },
+      count: taskOpenTotal() },
     { key: "requests", href: withCid("/requests"), ico: "requests", label: "Requests",
-      count: requests().filter((r) => r.status === "open").length },
+      count: requestOpenTotal() },
     // GitHub hub — open issues/PRs on the container's connected repo, with a Start
     // action that spins up an Orcha task from either. No count badge here (the page
     // fetches its own issues/pulls payload outside the container snapshot this array

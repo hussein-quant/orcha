@@ -73,7 +73,11 @@ let booted = false;
 function render() {
   if (!TasD() || !TasD().container) return;
   if (!sel || !(TasD().tasks || []).some((t) => t.id === sel)) sel = firstSel();
-  TasO.mountShell("tasks", { title: "Tasks", ctx: (TasD().tasks || []).length + " tasks · " + TasD().container.name });
+  // GH sidebar/iOS count mismatch: read the SAME authoritative open-total the sidebar
+  // badge reads (taskOpenTotal(), app-data.js) — was (TasD().tasks||[]).length, the size
+  // of the capped/priority-ordered snapshot window (ALL statuses), which could read "62"
+  // next to a sidebar badge reading a completely different number ("0" needs_verification).
+  TasO.mountShell("tasks", { title: "Tasks", ctx: taskOpenTotal() + " open · " + TasD().container.name });
   if (!booted && window.OrchaSkeleton) {
     booted = true;
     OrchaSkeleton.swap(Tas$("tlist"), renderList);

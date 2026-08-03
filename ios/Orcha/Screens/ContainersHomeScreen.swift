@@ -170,7 +170,7 @@ private struct ContainerCard: View {
                     .foregroundStyle(p.muted)
             default:
                 HStack(spacing: 8) {
-                    Text("\(health?.agents ?? 0) agents · \(health?.tasks ?? 0) tasks")
+                    Text("\(health?.agents ?? 0) agents · \(health?.tasks ?? 0) open")
                         .font(p.uiFont(13))
                         .foregroundStyle(p.muted)
                     Spacer()

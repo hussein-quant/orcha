@@ -52,7 +52,11 @@ function reqSorted(list) {
 
 /* ---------- list ---------- */
 function renderList() {
-  const open = reqs().filter((r) => r.status === "open").length;
+  // GH sidebar/iOS count mismatch: requestOpenTotal() (app-data.js) is the SAME
+  // authoritative open-total the sidebar badge reads — was a client-side filter over
+  // the loaded (capped) window, which happened to agree in practice but could drift
+  // once request_limit actually capped a container's set. Now sourced from one place.
+  const open = requestOpenTotal();
   let html = `<div class="rh">${ReqO.icon("requests", "")}Requests · ${open} open<span class="grow" style="flex:1"></span>${ReqO.sortControlHtml(SORT_NAME)}</div>
     <div class="filters">${FILTERS.map((f) => `<button class="${f.k === filter ? "on" : ""}" data-f="${f.k}">${f.label}</button>`).join("")}</div>`;
   const list = reqSorted(reqs().filter(matches));
