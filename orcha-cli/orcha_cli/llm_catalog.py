@@ -72,6 +72,7 @@ USE_CASE_DEFAULTS: dict[str, ModelSpec] = {
     "digest_summary": ModelSpec(model=MODEL_HAIKU, max_tokens=512, timeout_s=20.0),
     "curation": ModelSpec(model=MODEL_SONNET, max_tokens=512, timeout_s=20.0),
     "vision": ModelSpec(model=MODEL_SONNET, max_tokens=1024, timeout_s=45.0),
+    "slack_issue_refine": ModelSpec(model=MODEL_HAIKU, max_tokens=1024, timeout_s=20.0),
 }
 _DEFAULT_SPEC = ModelSpec()
 
@@ -90,6 +91,11 @@ USE_CASE_REGISTRY: list[dict] = [
         "key": "ack",
         "label": "Routine handoff",
         "purpose": "Acknowledges a routine handoff without waking a full agent. Wants a cheap model.",
+    },
+    {
+        "key": "slack_issue_refine",
+        "label": "Slack issue refinement",
+        "purpose": "Rewrites a Slack-filed GitHub issue's title/body as a professional technical report before filing. Wants a cheap model.",
     },
 ]
 

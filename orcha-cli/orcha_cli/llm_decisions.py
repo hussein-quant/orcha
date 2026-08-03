@@ -89,6 +89,88 @@ def triage_wake(
         return {"wake": True, "reason": f"fail-open: {exc}"}
 
 
+REFINE_SLACK_ISSUE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {
+            "type": "string",
+            "description": "Imperative, professional issue title, at most 80 characters.",
+        },
+        "body": {
+            "type": "string",
+            "description": (
+                "Markdown body with sections '## Summary', '## Observed', "
+                "'## Expected', and '## Technical context', built ONLY from facts "
+                "present in the reporter's message — never invented repro steps, "
+                "versions, or root causes. Omit a section entirely (heading and all) "
+                "when the source message has nothing to support it."
+            ),
+        },
+    },
+    "required": ["title", "body"],
+}
+
+_REFINE_SLACK_ISSUE_SYSTEM = (
+    "Rewrite a raw Slack message into a professional technical GitHub issue. "
+    "Title: imperative mood, at most 80 characters, no trailing punctuation. "
+    "Body: markdown with '## Summary', '## Observed', '## Expected', and "
+    "'## Technical context' sections — include ONLY a section the source message "
+    "actually supports; omit sections (heading and all) it does not. NEVER invent "
+    "repro steps, versions, environments, or root causes that are not stated or "
+    "clearly implied in the source text — when in doubt, leave it out rather than "
+    "guess. Do not include a reporter-quote section yourself; the caller appends the "
+    "verbatim original separately."
+)
+
+
+def refine_slack_issue(
+    raw_title: str,
+    raw_body: str,
+    *,
+    classify: Callable,
+    log_failure: Callable,
+    resolve_spec: Callable,
+    system: Optional[str] = None,
+    config: Optional[dict] = None,
+    api_key: Optional[str] = None,
+    provider=None,
+) -> Optional[dict]:
+    """Rewrite a Slack-sourced issue title/body as a professional technical report.
+
+    Fails CLOSED: any error (no key, provider error, timeout, malformed response)
+    returns None so the caller degrades to filing the raw title/body unchanged —
+    this is a wording pass, never a source of invented facts, so a failure must never
+    block issue creation or silently fabricate content.
+    """
+    spec = resolve_spec("slack_issue_refine", config=config)
+    user = f"Title: {raw_title}\n\nMessage:\n{raw_body}"
+    try:
+        result = classify(
+            "slack_issue_refine",
+            system=system or _REFINE_SLACK_ISSUE_SYSTEM,
+            user=user,
+            schema=REFINE_SLACK_ISSUE_SCHEMA,
+            tool_name="refine_issue",
+            config=config,
+            api_key=api_key,
+            provider=provider,
+        )
+        title = str(result.get("title") or "").strip()
+        body = str(result.get("body") or "").strip()
+        if not title or not body:
+            raise ValueError("refine_slack_issue: empty title or body in model output")
+        return {"title": title[:80], "body": body}
+    except Exception as exc:
+        log_failure(
+            use_case="slack_issue_refine",
+            spec=spec,
+            outcome="fail_closed",
+            latency_ms=0,
+            error=str(exc),
+        )
+        return None
+
+
 def handoff_ack(
     handoff_text: str,
     *,

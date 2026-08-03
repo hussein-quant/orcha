@@ -14,11 +14,14 @@ Slash commands (respond within Slack's 3s contract — task creation is fast, do
   * /orcha start issue <N>   → start an Orcha task from GitHub issue #N
   * /orcha start pr <N>      → start an Orcha task from GitHub PR #N
         (both call the SAME start internals the hub uses — task_start_core — so a
-         Slack-started task is byte-identical to a hub-started one. Unlike the hub —
-         whose frontend already has the issue/PR row in hand from the list it just
-         rendered — Slack gives us only a bare number, so this seam does the ONE
-         extra live GitHub fetch the hub path gets for free from its caller, reusing
-         github_hub_routes' token/GET leaves so both seams hit GitHub the same way.)
+         Slack-started task is byte-identical to a hub-started one. Slack gives us
+         only a bare number, so this seam does the SAME live GitHub fetch the hub's
+         own POST /github/start ALSO does server-side now (github_hub_routes.
+         _fetch_gh_item — promoted there after a hub-frontend defect where its
+         POST body never actually carried title/body_excerpt/html_url despite the
+         schema assuming it did; see github_hub_routes.py's docstring), reusing the
+         SAME token/GET leaves so both seams hit GitHub identically and produce the
+         SAME title for the SAME item.)
   * /orcha issue <title> [-- <body>]  → file a NEW GitHub issue in the container's
         connected repo (Issues:write). Everything before an optional ` -- ` separator
         is the title; the rest is the body. The reply's "Start Orcha task" button is a
@@ -46,9 +49,35 @@ three Slack payload shapes, all delivered form-encoded as a single `payload` JSO
   * block_actions               → the "Start Orcha task" button on an issue-filed card;
         routes through the SAME task_start_core.start_task_from_github every other
         dispatch path uses.
-Every interaction handler acks within Slack's 3s window — the modal open (views.open)
-IS the ack path for a shortcut; view_submission's `response_action` return IS its ack;
-block_actions replies inline (task creation is fast, same as the slash commands).
+
+ACK-FIRST, WORK-AFTER (Slack's HTTP response — not just "the modal visibly opens" —
+must land inside its 3s window, or the client shows "We had some trouble connecting.
+Try again?" even though the eventual POST would have succeeded):
+  * shortcut/message_action  → the handler returns an EMPTY 200 immediately; the
+        views.open call that actually opens the modal is fired in a background task
+        (`asyncio.create_task`, started AFTER the ack is built, never awaited by the
+        request). The modal appears a beat later — no banner, no lost work.
+  * view_submission           → the handler returns `{"response_action": "clear"}`
+        immediately; the WHOLE pipeline (image download/commit, issue creation, task
+        start) runs in a background task. The result (or an honest failure) is
+        delivered afterward as an ephemeral `chat.postMessage` DM to the submitting
+        user — same composers, same copy, as before this fix; only the timing moved.
+  * block_actions              → the handler acks immediately (an empty ephemeral
+        `{"response_type": "ephemeral", ...}` with no blocks Slack renders as nothing
+        new); the actual GitHub fetch + task_start_core call runs in a background
+        task, delivering its card via `chat.postMessage` to the same channel/user the
+        click came from.
+Every background task opens its OWN `db_cursor()` (a fresh psycopg connection) — never
+the request-scoped cursor/connection, which is closed the moment the ack is returned.
+This mirrors slack_notify.notify_task_needs_verification's post-commit, own-connection,
+non-fatal-by-construction contract; failures are surfaced to the Slack caller as an
+honest-failure card (reusing the existing cards), never silently swallowed.
+
+Every background pipeline is scheduled through the ONE seam `_schedule_background`
+(production: `asyncio.create_task(asyncio.to_thread(fn))`, fired only AFTER the ack
+value is already built) — tests monkeypatch that single function to run the closure
+inline and deterministically, rather than racing a real asyncio task against
+assertions (see tests/test_slack_routes.py's `_run_background_inline` fixture).
 
 External systems TRIGGER and OBSERVE Orcha; the verification/merge gates stay in Orcha.
 A Slack start/issue-file acts the same way the hub does — it never completes or merges.
@@ -59,6 +88,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import time
@@ -74,6 +104,8 @@ from portal_backend.database import db_cursor
 from portal_backend.github_hub_routes import _excerpt
 from portal_backend.guards import valid_uuid
 from portal_backend.limits import MAX_NAME_LEN
+from portal_backend.model_setting_routes import _resolve_use_case_model
+from portal_backend.provider_keys import provider_api_key as _provider_api_key
 from portal_backend.slack_notify import (
     ASSIGNEE_ACTION_ID,
     ASSIGNEE_BLOCK_ID,
@@ -98,8 +130,16 @@ from portal_backend.slack_files import (
     SlackFilesScopeMissing,
     fetch_selected_images,
     select_image_files,
+    select_image_files_verdicts,
 )
 from portal_backend.task_start_core import start_task_from_github
+
+try:
+    import llm_util
+except ImportError:
+    from orcha_cli import llm_util
+
+SLACK_LOG = logging.getLogger("orcha.slack")
 
 SIGNING_SECRET_ENV = "SLACK_SIGNING_SECRET"
 BOT_TOKEN_ENV = "SLACK_BOT_TOKEN"
@@ -190,40 +230,20 @@ def _ephemeral(blocks: list, fallback_text: str) -> dict:
 
 def _fetch_gh_item(cur, container_id, kind: str, number: int):
     """Live-fetch a GitHub issue/PR's {title, html_url, body_excerpt} for the Slack
-    start path — Slack gives us only a bare number, unlike the hub whose frontend
-    already has the row (title, html_url, body_excerpt) in hand from the list it just
-    rendered and passes straight through (github_hub_routes.GithubStartBody). Reuses
-    the SAME token/GET leaves the hub uses (github_hub_routes._resolve_repo_token /
-    _gh_get) so both seams hit GitHub identically.
+    start path — Slack gives us only a bare number, unlike the hub, which now ALSO
+    does this same live fetch server-side (a production defect: the hub frontend
+    never actually sent title/body_excerpt/html_url despite its schema's docstring
+    assuming it did — see `github_hub_routes._fetch_gh_item`'s docstring for the
+    full story). Delegates to that ONE promoted implementation (through the MODULE,
+    not a direct `from ... import`, so tests monkeypatching `github_hub_routes._gh_get`
+    — the established convention in test_github_hub_routes.py — transparently cover
+    this seam too) so both dispatch paths hit GitHub identically and can never drift.
 
     Returns None on ANY failure (no bound repo, no installation token, GitHub
     unreachable/rate-limited/404) — the caller degrades to the bare '#N' title rather
     than fail the whole command; Slack's 3s contract has no room for a retry loop.
-
-    NOTE: calls `_hub._resolve_repo_token` / `_hub._gh_get` through the MODULE (not a
-    direct `from ... import` of the names) so that tests monkeypatching
-    `github_hub_routes._gh_get` (the established convention in test_github_hub_routes.py)
-    transparently cover this seam too — a direct-name import would have frozen a
-    reference to the pre-patch function at import time.
     """
-    cur.execute("SELECT github_repo FROM containers WHERE id=%s", (container_id,))
-    row = cur.fetchone()
-    repo = row["github_repo"] if row else None
-    if not repo:
-        return None
-    token = _hub._resolve_repo_token(repo)
-    if not token:
-        return None
-    path = f"/repos/{repo}/pulls/{number}" if kind == "pull" else f"/repos/{repo}/issues/{number}"
-    try:
-        raw = _hub._gh_get(path, token)
-    except RuntimeError:
-        return None
-    return {
-        "title": raw.get("title") or "",
-        "html_url": raw.get("html_url") or "",
-        "body_excerpt": _excerpt(raw.get("body")),
-    }
+    return _hub._fetch_gh_item(cur, container_id, kind, number)
 
 
 class GithubPermissionError(Exception):
@@ -371,9 +391,9 @@ def create_github_issue(cur, container_id, title: str, body: str, member,
     token, so the two entry points can never drift on copy or auth.
 
     `repo`/`token`, when BOTH given, skip this function's own repo/token resolution —
-    `_handle_view_submission` already resolves them once (to also drive the image
-    pipeline) and passes them through here so a submission never resolves the same
-    repo/token twice. Omit either (the `/orcha issue` slash command's call site,
+    `_run_view_submission_pipeline` already resolves them once (to also drive the
+    image pipeline) and passes them through here so a submission never resolves the
+    same repo/token twice. Omit either (the `/orcha issue` slash command's call site,
     which has no other reason to pre-resolve them) and this function resolves both
     itself, exactly as before.
 
@@ -410,6 +430,66 @@ def create_github_issue(cur, container_id, title: str, body: str, member,
         "html_url": raw.get("html_url") or "",
         "title": raw.get("title") or title,
     }
+
+
+_REPORTER_QUOTE_HEADING = "## Reporter's original message"
+
+
+def _refine_issue_for_filing(cur, container_id: str, title: str, body: str) -> dict:
+    """AI-refine a Slack-sourced issue title/body into a professional technical report
+    BEFORE it's filed on GitHub (issue #234: a raw pasted Slack message — "Hey Kedar,
+    have you noticed an issue on the android and iOS app we are not able" — filed
+    verbatim as both title and body reads as unprofessional). Only called from the
+    message-shortcut modal paths (`_run_view_submission_pipeline`), never from `/orcha
+    issue` (that command keeps its synchronous 3s-budget contract — see the module
+    docstring's ack-first section; backgrounding a slash command's reply is a
+    differently-shaped change, deliberately out of scope here).
+
+    Runs in the BACKGROUND pipeline (post-ack — see the module docstring), so the
+    ~20s worst-case LLM timeout is free; it was never safe to run inline.
+
+    Resolves the workspace's configured model/key EXACTLY like onboarding_routes.py's
+    propose_onboarding_roster: a stored per-container use-case override (settings
+    UI) falling back to the shipped default, then an explicit stored provider key
+    falling back to ORCHA_LLM_API_KEY / the provider's own env var. Uses the SAME
+    forced-tool-call `classify()` seam (structured output — the schema itself is what
+    keeps this deterministic/low-variance; the client has no separate temperature
+    knob to plumb through) every other decision use case in llm_util goes through.
+
+    Returns {"title": str, "body": str, "refined": bool}. `refined` is False on ANY
+    failure (no key configured, provider error, timeout, malformed output) or when
+    the model returns nothing usable — the caller then files the RAW title/body
+    unchanged and the confirmation card says so ("AI refinement unavailable"). This
+    function NEVER raises; a wording pass must never block issue creation.
+
+    The refined body ALWAYS ends with a verbatim quote of the reporter's original
+    message under `_REPORTER_QUOTE_HEADING` — the model is instructed not to invent
+    facts, but this quote is composed HERE, in Python, not left to the model, so the
+    original text survives byte-for-byte regardless of what the model does.
+    """
+    quote_section = f"{_REPORTER_QUOTE_HEADING}\n\n{body}" if body else ""
+    try:
+        model_override = _resolve_use_case_model(cur, container_id, "slack_issue_refine")
+        config = {"slack_issue_refine": model_override} if model_override else None
+        spec = llm_util.resolve_spec("slack_issue_refine", config=config)
+        stored_key = _provider_api_key(cur, container_id, spec.provider)
+        api_key = llm_util.resolve_api_key(spec.provider, explicit=stored_key)
+    except llm_util.LLMError as exc:
+        SLACK_LOG.info("slack issue refine: no api key (%s) — filing raw", exc)
+        return {"title": title, "body": body, "refined": False}
+
+    result = llm_util.refine_slack_issue(
+        title, body,
+        config=config,
+        api_key=api_key,
+    )
+    if result is None:
+        return {"title": title, "body": body, "refined": False}
+
+    refined_body = result["body"]
+    if quote_section:
+        refined_body = f"{refined_body}\n\n{quote_section}" if refined_body else quote_section
+    return {"title": result["title"], "body": refined_body, "refined": True}
 
 
 def _parse_issue_command(text: str):
@@ -748,11 +828,40 @@ def _dm_or_ephemeral(bot_token: str, slack_user_id: str, blocks: list, fallback_
         pass
 
 
-def _private_metadata_files(files: list) -> list:
+# Slack's own private_metadata hard limit is 3000 chars; leave headroom for the
+# {cid, slack_user_id} fields sharing the same JSON blob (both short/fixed-ish) — this
+# is the ceiling `_private_metadata_files` enforces on its OWN serialized-JSON size, on
+# top of `select_image_files`'s existing 5-file/mimetype/size selection cap. A long
+# filename × several files could otherwise blow the budget even after that cap;
+# Slack silently REJECTS (or truncates) an oversized private_metadata, which would
+# corrupt the OTHER fields (cid, slack_user_id) riding the same blob — so this trims
+# the FILE LIST, not the file entries themselves, dropping trailing files (in message
+# order) until the whole blob fits, rather than ever truncating mid-JSON.
+PRIVATE_METADATA_FILES_BUDGET_CHARS = 2400
+
+
+def _private_metadata_files(files: list) -> dict:
     """The SUBSET of a Slack file's fields we carry through `private_metadata` to
     view_submission time (where the actual download happens) — just enough for
     `slack_files.select_image_files`/`download_slack_file`, never the file bytes
-    themselves (private_metadata is a ~3000-char Slack-imposed string budget)."""
+    themselves (private_metadata is a ~3000-char Slack-imposed string budget).
+
+    Byte-budget guard: after building the (already ≤5-file) candidate list, drop
+    trailing entries — in message order, same order `_commit_images_to_repo` numbers
+    files by — until the JSON-serialized list fits PRIVATE_METADATA_FILES_BUDGET_CHARS.
+    In practice this only bites on unusually long filenames/URLs; the common case
+    (a handful of short Slack-generated filenames) never trims anything.
+
+    Returns {"files": [...selected, budget-capped...], "seen": int} — `seen` is the
+    RAW count of files on the source message (before any filtering), carried through
+    so view_submission can tell "no screenshots on this message" (seen=0) apart from
+    "screenshots were present but every one got filtered out" (seen>0, files=[]) — the
+    production gap (issue #234 follow-up): a message whose screenshots were all over
+    the size/mimetype filter used to produce a silent card with no note at all, because
+    the note was gated on `selected > 0`. Carrying `seen` lets the card be honest even
+    when NOTHING survived selection.
+    """
+    seen = len(files or [])
     out = []
     for f in select_image_files(files):
         out.append({
@@ -761,18 +870,46 @@ def _private_metadata_files(files: list) -> list:
             "size": f.get("size"),
             "url_private_download": f.get("url_private_download"),
         })
-    return out
+    while out and len(json.dumps(out)) > PRIVATE_METADATA_FILES_BUDGET_CHARS:
+        out.pop()
+    return {"files": out, "seen": seen}
 
 
-def _handle_shortcut(cur, member, payload: dict, bot_token: str) -> dict:
-    """A message shortcut invocation ('shortcut'/'message_action' type) — open the
-    create-issue-or-task modal, pre-filled from the source message. `private_metadata`
-    is a small JSON blob (Slack imposes a ~3000-char budget on this field) carrying
-    everything view_submission needs but can't otherwise recover: container_id,
-    the triggering slack_user_id (view_submission has no other channel/user context
-    to DM the confirmation back to), and the message's image files (metadata only —
-    download happens at submission time, not here, since Slack's 3s ack window for a
-    shortcut has no room for N file downloads).
+def _log_shortcut_file_verdicts(message_files: list) -> None:
+    """Shortcut-time instrumentation (issue #234 follow-up): log the PER-FILE
+    selection verdict (kept / dropped:size / dropped:mimetype / dropped:count_cap) plus
+    summary counts, so the NEXT "screenshots didn't show up" report carries evidence
+    instead of another guess. PHI-safe by construction: only mimetype + size + verdict
+    ever reach the log line — never a filename, URL, or file content. No-op (logs
+    nothing) when the message carried no files at all, to avoid a log line on the
+    overwhelming common case of a plain-text message shortcut.
+    """
+    if not message_files:
+        return
+    verdicts = select_image_files_verdicts(message_files)
+    kept = sum(1 for v in verdicts if v["verdict"] == "kept")
+    SLACK_LOG.info(
+        "slack shortcut files: seen=%d kept=%d verdicts=%s",
+        len(verdicts), kept,
+        [(v["mimetype"], v["size"], v["verdict"]) for v in verdicts],
+    )
+
+
+def _build_shortcut_modal_view(cur, member, payload: dict) -> dict:
+    """Compose the create-issue-or-task modal `view` payload for a message-shortcut
+    invocation, pre-filled from the source message. `private_metadata` is a small JSON
+    blob (Slack imposes a ~3000-char budget on this field) carrying everything
+    view_submission needs but can't otherwise recover: container_id, the triggering
+    slack_user_id (view_submission has no other channel/user context to DM the
+    confirmation back to), and the message's image files (metadata only — download
+    happens at submission time, not here: even the BACKGROUNDED views.open call below
+    has no business doing N file downloads before a modal can open).
+
+    Split out from the old `_handle_shortcut` so the one DB read this needs
+    (`_live_ai_agents`, only for the with-task variant) happens BEFORE the ack is
+    returned (it's a fast indexed query, not the "slow work" this fix targets) while
+    the actual `views.open` network call happens AFTER, in a background task — see
+    `_dispatch_interaction`.
     """
     callback_id = payload.get("callback_id", "")
     message = payload.get("message") or {}
@@ -780,36 +917,63 @@ def _handle_shortcut(cur, member, payload: dict, bot_token: str) -> dict:
     title, body = _message_prefill(message_text)
     cid = str(member["container_id"])
     slack_user_id = (payload.get("user") or {}).get("id", "")
-    files = _private_metadata_files(message.get("files") or [])
+    message_files = message.get("files") or []
+    _log_shortcut_file_verdicts(message_files)
+    files_meta = _private_metadata_files(message_files)
     private_metadata = json.dumps({
-        "cid": cid, "slack_user_id": slack_user_id, "files": files,
+        "cid": cid, "slack_user_id": slack_user_id,
+        "files": files_meta["files"], "files_seen": files_meta["seen"],
     })
 
     with_task = callback_id == SHORTCUT_CALLBACK_ID_WITH_TASK
     assignee_options = _live_ai_agents(cur, cid) if with_task else None
-    view = build_create_issue_modal(
+    return build_create_issue_modal(
         title, body, private_metadata=private_metadata,
         with_task=with_task, assignee_options=assignee_options,
     )
-    trigger_id = payload.get("trigger_id", "")
-    _open_modal(bot_token, trigger_id, view)
-    return {}  # Slack expects an empty 200 body to ack a shortcut once the modal opens
+
+
+def _open_modal_background(bot_token: str, trigger_id: str, view: dict) -> None:
+    """Fire-and-forget `views.open` — the modal-open call is no longer the ack itself
+    (the route already returned an empty 200 to Slack before this runs; see
+    `_dispatch_interaction`/`slack_interactions`). Best-effort: a `views.open` failure
+    here has no request left to surface an error to (Slack already got its 200) — logged,
+    never raised, matching every other post-ack background leaf in this module.
+    `trigger_id` is single-use and expires ~3s after Slack issued it, same as before;
+    the background task is scheduled immediately after the ack with nothing awaited in
+    between, so it still fires well inside that window in practice.
+    """
+    try:
+        _open_modal(bot_token, trigger_id, view)
+    except RuntimeError as exc:
+        SLACK_LOG.warning("slack shortcut: background views.open failed: %s", exc)
 
 
 def _parse_private_metadata(raw: str) -> dict:
-    """Decode `_handle_shortcut`'s private_metadata JSON blob, defaulting every field
-    so a malformed/legacy value degrades to 'no files, no context' rather than
-    raising — view_submission's caller already fails closed on a missing cid."""
+    """Decode `_build_shortcut_modal_view`'s private_metadata JSON blob, defaulting
+    every field so a malformed/legacy value degrades to 'no files, no context' rather
+    than raising — view_submission's caller already fails closed on a missing cid.
+
+    `files_seen` (added alongside the issue #234 follow-up) defaults to `len(files)`
+    for a LEGACY blob that predates the field (a modal opened by an older deployed
+    build, then submitted after a mid-flight deploy) — the best available estimate
+    when the raw pre-filter count was never carried, since every SELECTED file was, by
+    construction, also SEEN."""
     try:
         data = json.loads(raw or "{}")
     except ValueError:
         data = {}
     if not isinstance(data, dict):
         data = {}
+    files = data.get("files") if isinstance(data.get("files"), list) else []
+    files_seen = data.get("files_seen")
+    if not isinstance(files_seen, int) or files_seen < 0:
+        files_seen = len(files)
     return {
         "cid": str(data.get("cid") or ""),
         "slack_user_id": str(data.get("slack_user_id") or ""),
-        "files": data.get("files") if isinstance(data.get("files"), list) else [],
+        "files": files,
+        "files_seen": files_seen,
     }
 
 
@@ -865,181 +1029,276 @@ def _fetch_and_land_images(cur, cid: str, repo, token, files: list, issue_slug: 
     }
 
 
-def _screenshot_status_note(selected: int, landed_count: int) -> str:
+def _screenshot_status_note(selected: int, landed_count: int, files_seen: int = 0) -> str:
     """The honesty-count phrase for a confirmation card's context line, or "" when
     there were no images to report on at all (the common case — most messages carry
-    no screenshots, so this must not add noise to every card)."""
+    no screenshots, so this must not add noise to every card).
+
+    `files_seen` (issue #234 follow-up) is the RAW pre-filter file count on the source
+    message — widening this beyond the old `selected == 0` gate closes the exact
+    production gap: a message that carried screenshots which were ALL filtered out
+    before download (over the size cap, wrong mimetype) used to produce a card with NO
+    note at all, indistinguishable from a plain-text message that never had
+    screenshots. Now, whenever `files_seen > 0`, the card states an outcome either
+    way — 'attached' when something landed, or an explicit 'skipped — too large/wrong
+    type' when nothing did.
+    """
     if selected == 0:
-        return ""
+        if files_seen == 0:
+            return ""
+        plural = "screenshot was" if files_seen == 1 else "screenshots were"
+        return f"{files_seen} {plural} skipped — too large or not an image"
     if landed_count == selected:
         plural = "screenshot" if selected == 1 else "screenshots"
         return f"{selected} {plural} attached"
     return f"{landed_count}/{selected} screenshots attached (some skipped)"
 
 
-def _handle_view_submission(cur, payload: dict, bot_token: str) -> dict:
-    """The modal's submit ('File issue' / 'Create task'). Routes on the SUBMITTED
-    VIEW's own callback_id — MODAL_CALLBACK_ID (issue only) vs
-    MODAL_CALLBACK_ID_WITH_TASK (chained issue + task start). Returns a
-    `response_action` dict so Slack closes the modal (or, on a validation error,
-    re-renders it with an inline error) — that return IS this interaction's ack; the
-    actual confirmation card is DMed separately (see _dm_or_ephemeral) since
-    view_submission's own response has no room for a Block Kit card.
+def _prepare_view_submission(cur, payload: dict) -> dict:
+    """The FAST, synchronous half of a modal submission — everything that must be
+    validated before Slack's `response_action` ack (title emptiness, the linked-member
+    gate, private_metadata sanity) because these render as INLINE modal errors, which
+    only the synchronous response_action='errors' path can produce; there is no
+    after-the-fact way to reopen a closed modal with a validation message. Nothing
+    here is slow: private_metadata parsing and the member lookup are local/indexed,
+    never a GitHub or Slack Web API round trip.
 
-    Any message images (private_metadata's `files`) are downloaded here (submission
-    time — Slack's 3s ack for the SHORTCUT already happened at views.open; this is a
-    separate view_submission request with its own 3s budget, and file downloads +
-    GitHub commits are the "slow work" this module intentionally keeps out of the
-    shortcut-ack path), committed into the issue's repo, and embedded as markdown.
+    Returns {"error": <response_action dict>} on a validation failure (the caller
+    returns this AS the ack, unchanged), or {"error": None, ...fields} with everything
+    `_run_view_submission_pipeline` needs to do the actual (backgrounded) work.
     """
     view = payload.get("view") or {}
     callback_id = view.get("callback_id", "")
     meta = _parse_private_metadata(view.get("private_metadata", ""))
-    cid, slack_user_id, files = meta["cid"], meta["slack_user_id"], meta["files"]
+    cid, slack_user_id = meta["cid"], meta["slack_user_id"]
     if not cid:
         # Shouldn't happen (we always set it on open) — fail closed with a validation
         # error on the title field rather than crash into a 500.
-        return {"response_action": "errors",
-               "errors": {"title_block": "Something went wrong — please reopen the shortcut."}}
+        return {"error": {"response_action": "errors",
+                          "errors": {"title_block": "Something went wrong — please reopen the shortcut."}}}
 
     member = _member_for_slack_user(cur, slack_user_id) if slack_user_id else None
     if member is None or str(member["container_id"]) != cid:
-        return {"response_action": "errors",
-               "errors": {"title_block": "Your Slack account isn't linked to this project anymore."}}
+        return {"error": {"response_action": "errors",
+                          "errors": {"title_block": "Your Slack account isn't linked to this project anymore."}}}
 
     fields = _extract_modal_values(view)
     title, body = fields["title"], fields["body"]
     if not title:
-        return {"response_action": "errors", "errors": {"title_block": "Title can't be empty."}}
+        return {"error": {"response_action": "errors", "errors": {"title_block": "Title can't be empty."}}}
     if len(title) > MAX_NAME_LEN:
         title = title[:MAX_NAME_LEN]
 
-    # Resolve the repo/token ONCE up front — reused both for issue creation and for
-    # committing any images (avoids re-resolving the same token twice per submission).
-    cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
-    crow = cur.fetchone()
-    repo = crow["github_repo"] if crow else None
-    token = _hub._resolve_repo_token(repo) if repo else None
+    return {
+        "error": None,
+        "callback_id": callback_id,
+        "cid": cid,
+        "slack_user_id": slack_user_id,
+        "files": meta["files"],
+        "files_seen": meta["files_seen"],
+        "member": member,
+        "title": title,
+        "body": body,
+        "assignee_agent_id_raw": fields["assignee_agent_id"],
+    }
 
-    images = _fetch_and_land_images(
-        cur, cid, repo, token, files, _issue_slug(title, None), bot_token,
-    )
-    body_with_images = _embed_images_markdown(body, images["landed"])
 
-    try:
-        issue = create_github_issue(cur, cid, title, body_with_images, member,
-                                    repo=repo, token=token)
-    except ValueError:
-        return {"response_action": "errors",
-               "errors": {"title_block": "No GitHub repo (or installation token) is connected to this project."}}
-    except GithubPermissionError:
-        return {"response_action": "errors",
-               "errors": {"title_block": "The GitHub App needs the Issues write permission."}}
-    except RuntimeError:
-        return {"response_action": "errors",
-               "errors": {"title_block": "Couldn't reach GitHub — try again in a moment."}}
+def _run_view_submission_pipeline(prepared: dict, bot_token: str) -> None:
+    """The SLOW half of a modal submission — everything Slack's `response_action`
+    already acked before this ever runs (see `_prepare_view_submission` /
+    `_dispatch_interaction`): AI title/body refinement, image download + GitHub
+    commit + markdown embed, the GitHub issue POST itself, and (for the "Create Orcha
+    task" shortcut) the chained task start + task-attachment landing. Runs entirely in
+    a background task on its OWN `db_cursor()` connection — the request's cursor is
+    long closed by the time this executes.
 
-    shot_note = _screenshot_status_note(images["selected"], len(images["landed"]))
-    if images["scope_missing"]:
-        shot_note = (shot_note + " · " if shot_note else "") + \
-            "some screenshots skipped — add the files:read scope and reinstall the App"
+    Every outcome (success, half-failure, hard failure) is delivered as a follow-up
+    `chat.postMessage` DM via `_dm_or_ephemeral` — the SAME composers/copy this used to
+    return inline before the ack-timing fix; only the timing moved, never the content.
+    """
+    callback_id = prepared["callback_id"]
+    cid = prepared["cid"]
+    slack_user_id = prepared["slack_user_id"]
+    files = prepared["files"]
+    files_seen = prepared["files_seen"]
+    title, body = prepared["title"], prepared["body"]
 
-    if callback_id != MODAL_CALLBACK_ID_WITH_TASK:
-        # Issue-only shortcut: ack closes the modal; confirm via DM.
+    with db_cursor() as (conn, cur):
+        member = prepared["member"]
+
+        # AI refinement (issue #234): a wording pass over the user-edited modal
+        # title/body BEFORE filing — never before the ack, since the worst-case LLM
+        # timeout is ~20s and this function only ever runs after Slack already has its
+        # response_action='clear'. Fails closed to the raw title/body on any error —
+        # see _refine_issue_for_filing's docstring.
+        refine_result = _refine_issue_for_filing(cur, cid, title, body)
+        filed_title, filed_body = refine_result["title"], refine_result["body"]
+
+        # Resolve the repo/token ONCE up front — reused both for issue creation and
+        # for committing any images (avoids re-resolving the same token twice).
+        cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
+        crow = cur.fetchone()
+        repo = crow["github_repo"] if crow else None
+        token = _hub._resolve_repo_token(repo) if repo else None
+
+        images = _fetch_and_land_images(
+            cur, cid, repo, token, files, _issue_slug(filed_title, None), bot_token,
+        )
+        body_with_images = _embed_images_markdown(filed_body, images["landed"])
+
+        try:
+            issue = create_github_issue(cur, cid, filed_title, body_with_images, member,
+                                        repo=repo, token=token)
+        except ValueError:
+            conn.rollback()
+            if slack_user_id:
+                _dm_or_ephemeral(
+                    bot_token, slack_user_id, blocks_github_permission_error(),
+                    "No GitHub repo (or installation token) is connected to this project.",
+                )
+            return
+        except GithubPermissionError:
+            conn.rollback()
+            if slack_user_id:
+                _dm_or_ephemeral(
+                    bot_token, slack_user_id, blocks_github_permission_error(),
+                    "The GitHub App needs the Issues write permission.",
+                )
+            return
+        except RuntimeError:
+            conn.rollback()
+            if slack_user_id:
+                _dm_or_ephemeral(
+                    bot_token, slack_user_id, blocks_github_unreachable_error(),
+                    "Couldn't reach GitHub — try again in a moment.",
+                )
+            return
+
+        shot_note = _screenshot_status_note(images["selected"], len(images["landed"]), files_seen)
+        if images["scope_missing"]:
+            shot_note = (shot_note + " · " if shot_note else "") + \
+                "some screenshots skipped — add the files:read scope and reinstall the App"
+        if not refine_result["refined"]:
+            shot_note = (shot_note + " · " if shot_note else "") + "AI refinement unavailable"
+        else:
+            shot_note = "✨ AI-refined · " + shot_note if shot_note else "✨ AI-refined"
+
+        if callback_id != MODAL_CALLBACK_ID_WITH_TASK:
+            # Issue-only shortcut: confirm via DM (the ack already closed the modal).
+            conn.commit()
+            if slack_user_id:
+                _dm_or_ephemeral(
+                    bot_token, slack_user_id,
+                    blocks_issue_filed(issue["number"], issue["html_url"], issue["title"], None,
+                                       screenshot_note=shot_note or None),
+                    f"Filed GitHub issue #{issue['number']}: {issue['title']}",
+                )
+            return
+
+        # Chained "Create Orcha task": start the task from the just-filed issue,
+        # through the SAME shared core as every other dispatch path. The issue is
+        # already created and cannot be rolled back on a task-start failure — the
+        # honesty contract (blocks_task_created's start_failed path) tells the member
+        # exactly that, with a retry command, rather than pretending a task exists.
+        #
+        # `start_task_from_github` is several DB writes deep (tasks INSERT, then
+        # agent_tasks/recompute_agent_status/publish_event/log_event when assigned) —
+        # if it raises PARTWAY through (e.g. after the tasks row lands but before it
+        # returns), catching the exception here and returning normally would let a
+        # commit land that half-built task: an orphaned `tasks` row with no
+        # agent_tasks/audit trail, while the member is told the start "failed" and to
+        # retry — and a retry would then bounce off find_open_gh_task's idempotency
+        # probe and falsely report success on the broken row. Roll back explicitly on
+        # the way out so a failed start leaves NO task row behind, matching what would
+        # happen if this exception had been allowed to propagate unhandled (the
+        # `db_cursor` context manager rolls back on an unhandled exception) — except we
+        # still want to DM a friendly card instead of just vanishing, so we catch,
+        # roll back by hand, then return normally.
+        assignee_id = _validate_assignee(cur, cid, prepared["assignee_agent_id_raw"])
+        try:
+            result = start_task_from_github(
+                cur, cid,
+                kind="issue",
+                number=issue["number"],
+                gh_title=issue["title"],
+                body_excerpt=_excerpt(body_with_images),
+                html_url=issue["html_url"],
+                created_by_agent_id=str(member["id"]),
+                assignee_agent_id=assignee_id,
+                source="slack",
+            )
+        except Exception:
+            conn.rollback()
+            if slack_user_id:
+                _dm_or_ephemeral(
+                    bot_token, slack_user_id,
+                    blocks_task_created(issue["number"], issue["html_url"], issue["title"], None,
+                                        start_failed=True, gh_number_for_retry=issue["number"]),
+                    f"Filed GitHub issue #{issue['number']}, but starting the Orcha task failed.",
+                )
+            return
+
+        # The founder's actual goal: the AI reviews the screenshot. Land the SAME
+        # downloaded images on the task's own attachment store too (independent of
+        # whether they landed on GitHub — a task-attachment failure and a GitHub-commit
+        # failure are isolated from each other, per the per-file honesty contract).
+        if images["downloaded_images"]:
+            _land_images_on_task(
+                cur, result["task_id"], images["downloaded_images"],
+                member.get("github_login") or member.get("alias"),
+            )
+
+        conn.commit()
+        task_link = portal_task_link(cid, result["task_id"])
         if slack_user_id:
             _dm_or_ephemeral(
                 bot_token, slack_user_id,
-                blocks_issue_filed(issue["number"], issue["html_url"], issue["title"], None,
-                                   screenshot_note=shot_note or None),
-                f"Filed GitHub issue #{issue['number']}: {issue['title']}",
+                blocks_task_created(issue["number"], issue["html_url"], issue["title"], task_link,
+                                    screenshot_note=shot_note or None),
+                f"Created an Orcha task from GitHub issue #{issue['number']}: {issue['title']}",
             )
-        return {"response_action": "clear"}
-
-    # Chained "Create Orcha task": start the task from the just-filed issue, through
-    # the SAME shared core as every other dispatch path. The issue is already created
-    # and cannot be rolled back on a task-start failure — the honesty contract
-    # (blocks_task_created's start_failed path) tells the member exactly that, with a
-    # retry command, rather than pretending a task exists.
-    #
-    # `start_task_from_github` is several DB writes deep (tasks INSERT, then
-    # agent_tasks/recompute_agent_status/publish_event/log_event when assigned) — if
-    # it raises PARTWAY through (e.g. after the tasks row lands but before it
-    # returns), catching the exception here and returning normally would let the
-    # caller's `conn.commit()` land that half-built task: an orphaned `tasks` row
-    # with no agent_tasks/audit trail, while the member is told the start "failed"
-    # and to retry — and a retry would then bounce off find_open_gh_task's
-    # idempotency probe and falsely report success on the broken row. Roll back
-    # explicitly on the way out so a failed start leaves NO task row behind, matching
-    # what would happen if this exception had been allowed to propagate to a 500 (the
-    # `db_cursor` context manager rolls back on an unhandled exception) — except we
-    # still want to reply with a friendly card instead of a raw error, so we catch,
-    # roll back by hand, then return normally.
-    assignee_id = _validate_assignee(cur, cid, fields["assignee_agent_id"])
-    try:
-        result = start_task_from_github(
-            cur, cid,
-            kind="issue",
-            number=issue["number"],
-            gh_title=issue["title"],
-            body_excerpt=_excerpt(body_with_images),
-            html_url=issue["html_url"],
-            created_by_agent_id=str(member["id"]),
-            assignee_agent_id=assignee_id,
-            source="slack",
-        )
-    except Exception:
-        cur.connection.rollback()
-        if slack_user_id:
-            _dm_or_ephemeral(
-                bot_token, slack_user_id,
-                blocks_task_created(issue["number"], issue["html_url"], issue["title"], None,
-                                    start_failed=True, gh_number_for_retry=issue["number"]),
-                f"Filed GitHub issue #{issue['number']}, but starting the Orcha task failed.",
-            )
-        return {"response_action": "clear"}
-
-    # The founder's actual goal: the AI reviews the screenshot. Land the SAME
-    # downloaded images on the task's own attachment store too (independent of
-    # whether they landed on GitHub — a task-attachment failure and a GitHub-commit
-    # failure are isolated from each other, per the per-file honesty contract).
-    if images["downloaded_images"]:
-        _land_images_on_task(
-            cur, result["task_id"], images["downloaded_images"],
-            member.get("github_login") or member.get("alias"),
-        )
-
-    task_link = portal_task_link(cid, result["task_id"])
-    if slack_user_id:
-        _dm_or_ephemeral(
-            bot_token, slack_user_id,
-            blocks_task_created(issue["number"], issue["html_url"], issue["title"], task_link,
-                                screenshot_note=shot_note or None),
-            f"Created an Orcha task from GitHub issue #{issue['number']}: {issue['title']}",
-        )
-    return {"response_action": "clear"}
 
 
-def _handle_block_action(cur, member, payload: dict) -> dict:
-    """A `block_actions` click — today, exactly one: the "Start Orcha task" button on
-    an issue-filed card (action_id START_ISSUE_ACTION_ID, value = the GitHub issue
-    number as a string). Routes through the SAME task_start_core start core, then
-    replies ephemerally (task creation is fast — same 3s-contract shape as the slash
-    commands, not a background job)."""
+def _prepare_block_action(payload: dict) -> dict:
+    """The FAST, synchronous half of a block_actions click — just enough to decide
+    WHAT the ack should say (today: only ever the generic usage-help ephemeral, for
+    an empty/unrecognized action; the actual "Start Orcha task" work always moves to
+    the background, see `_run_block_action_pipeline`) without touching the network or
+    doing the GitHub fetch + task_start_core round trip inline. No DB access.
+    """
     actions = payload.get("actions") or []
     if not actions:
-        return _ephemeral(blocks_usage_help(), "Orcha commands")
+        return {"recognized": False}
     action = actions[0]
-    cid = str(member["container_id"])
+    if action.get("action_id") != START_ISSUE_ACTION_ID:
+        return {"recognized": False}
+    try:
+        number = int(action.get("value"))
+    except (TypeError, ValueError):
+        return {"recognized": False}
+    return {"recognized": True, "number": number}
 
-    if action.get("action_id") == START_ISSUE_ACTION_ID:
-        try:
-            number = int(action.get("value"))
-        except (TypeError, ValueError):
-            return _ephemeral(blocks_usage_help(), "Orcha commands")
+
+def _run_block_action_pipeline(cid: str, slack_user_id: str, number: int, bot_token: str) -> None:
+    """The SLOW half of a "Start Orcha task" button click — the live GitHub title
+    fetch + task_start_core.start_task_from_github round trip Slack's ack already
+    happened before this runs (see `_prepare_block_action` / `_dispatch_interaction`).
+    Runs entirely in a background task on its OWN `db_cursor()` connection. Delivers
+    its result card via `chat.postMessage` DM to the clicking user — the SAME cards
+    (`blocks_start_success` / `blocks_already_tracked`) this used to return inline
+    before the ack-timing fix; only the timing moved.
+    """
+    with db_cursor() as (conn, cur):
         gh_item = _fetch_gh_item(cur, cid, "issue", number)
         gh_title = (gh_item or {}).get("title") or f"#{number}"
         html_url = (gh_item or {}).get("html_url") or ""
         body_excerpt = (gh_item or {}).get("body_excerpt") or ""
+        # Re-resolve the acting member from THIS background call's own fresh cursor
+        # (never trusting a dict handed across from the request's already-closed
+        # cursor) — mirrors _member_for_slack_user's own lookup exactly, so a member
+        # unlinked between the click and this pipeline running degrades to an
+        # unattributed (but still successful) start rather than crashing.
+        actor = _member_for_slack_user(cur, slack_user_id)
         result = start_task_from_github(
             cur, cid,
             kind="issue",
@@ -1047,33 +1306,40 @@ def _handle_block_action(cur, member, payload: dict) -> dict:
             gh_title=gh_title,
             body_excerpt=body_excerpt,
             html_url=html_url,
-            created_by_agent_id=str(member["id"]),
+            created_by_agent_id=str(actor["id"]) if actor else None,
             assignee_agent_id=None,
             source="slack",
         )
+        conn.commit()
         task_link = portal_task_link(cid, result["task_id"])
+        if not slack_user_id:
+            return
         if result["existing"]:
-            return _ephemeral(
+            _dm_or_ephemeral(
+                bot_token, slack_user_id,
                 blocks_already_tracked("issue", number, task_link),
                 f"Already tracked: issue #{number} has an open Orcha task.",
             )
-        return _ephemeral(
-            blocks_start_success("issue", number, html_url, gh_title, task_link),
-            f"Started an Orcha task for issue #{number}: {gh_title}",
-        )
+        else:
+            _dm_or_ephemeral(
+                bot_token, slack_user_id,
+                blocks_start_success("issue", number, html_url, gh_title, task_link),
+                f"Started an Orcha task for issue #{number}: {gh_title}",
+            )
 
-    return _ephemeral(blocks_usage_help(), "Orcha commands")
 
+def _prepare_interaction(payload: dict, bot_token: str) -> tuple:
+    """The FAST, synchronous half of slack_interactions: everything needed to decide
+    the ACK — the linked-member gate, modal-view composition, submission validation —
+    on ONE short-lived `db_cursor()` that closes before this returns. Nothing here
+    makes a Slack Web API or GitHub network call; those are exactly the "slow work"
+    this ack-timing fix moves to the background (see module docstring).
 
-def _dispatch_interaction(payload: dict, bot_token: str) -> dict:
-    """The synchronous, potentially-blocking body of slack_interactions: DB cursor
-    open through to shortcut/view_submission/block_actions dispatch. This span makes
-    real blocking network calls — `call_slack_api` (views.open/chat.postMessage),
-    `_gh_post_issue`, and (for messages carrying screenshots) up to 5 sequential
-    `download_slack_file` + `_gh_put_contents` round trips — so the route handler
-    runs this whole span via `asyncio.to_thread` rather than blocking the single
-    asyncio event loop for however long Slack/GitHub take to answer. Split out for
-    the same reason as slack_commands' `_dispatch_command`.
+    Returns (ack_response: dict, background: Optional[Callable[[], None]]) — the
+    route handler returns `ack_response` to Slack immediately, THEN (only after that
+    response is built) schedules `background` as a fire-and-forget task when it's not
+    None. `background` is a zero-arg closure that opens its OWN db_cursor() when it
+    runs — never the cursor this function used, which is already closed.
     """
     payload_type = payload.get("type", "")
 
@@ -1086,35 +1352,52 @@ def _dispatch_interaction(payload: dict, bot_token: str) -> dict:
 
         if payload_type in ("shortcut", "message_action"):
             if member is None:
-                # views.open IS the ack for a shortcut — there's no ephemeral-reply path
-                # for this payload type the way slash commands and block_actions have.
-                # Open a small informational modal instead of a drafting form, so the
-                # "Slack never acts for an unlinked caller" contract holds: the member
-                # can SEE why nothing happened, but the title/body form is never shown.
-                _open_modal(bot_token, payload.get("trigger_id", ""), build_unlinked_user_modal())
-                return {}
-            response = _handle_shortcut(cur, member, payload, bot_token)
-            conn.commit()
-            return response
+                # views.open is no longer this request's ack (see the module
+                # docstring) — but an UNLINKED caller still gets the informational
+                # "Not linked" modal, just via the same backgrounded views.open path
+                # every other shortcut uses, so "never acts for an unlinked caller"
+                # keeps holding without a second ack-timing code path to maintain.
+                trigger_id = payload.get("trigger_id", "")
+                view = build_unlinked_user_modal()
+                return {}, lambda: _open_modal_background(bot_token, trigger_id, view)
+            view = _build_shortcut_modal_view(cur, member, payload)
+            conn.commit()  # nothing written yet in practice, but matches prior symmetry
+            trigger_id = payload.get("trigger_id", "")
+            return {}, lambda: _open_modal_background(bot_token, trigger_id, view)
 
         if payload_type == "view_submission":
-            response = _handle_view_submission(cur, payload, bot_token)
+            prepared = _prepare_view_submission(cur, payload)
             conn.commit()
-            return response
+            if prepared["error"] is not None:
+                return prepared["error"], None
+            return (
+                {"response_action": "clear"},
+                lambda: _run_view_submission_pipeline(prepared, bot_token),
+            )
 
         if payload_type == "block_actions":
             if member is None:
                 return _ephemeral(
                     blocks_unlinked_user(),
                     "Your Slack account isn't linked to an Orcha member yet.",
-                )
-            response = _handle_block_action(cur, member, payload)
-            conn.commit()
-            return response
+                ), None
+            prepared = _prepare_block_action(payload)
+            cid = str(member["container_id"])
+            slack_user_id = (payload.get("user") or {}).get("id", "")
+            if not prepared["recognized"]:
+                return _ephemeral(blocks_usage_help(), "Orcha commands"), None
+            number = prepared["number"]
+            # A minimal, no-blocks ephemeral ack — Slack renders it as nothing visibly
+            # new (no header/section), same convention as an empty {} shortcut ack;
+            # the real card follows as a DM once the background pipeline finishes.
+            return (
+                {"response_type": "ephemeral"},
+                lambda: _run_block_action_pipeline(cid, slack_user_id, number, bot_token),
+            )
 
     # Unknown/unsupported interaction type — ack with an empty 200 (never a 4xx; an
     # unrecognized-but-benign payload shape should not read as a broken integration).
-    return {}
+    return {}, None
 
 
 @app.post("/api/slack/interactions")
@@ -1125,6 +1408,13 @@ async def slack_interactions(request: Request):
     interaction payload the SAME way: form-encoded body with a single `payload` field
     holding a JSON blob (never raw JSON, unlike most Slack Events API traffic) — see
     docs/slack-integration.md.
+
+    ACK-FIRST, WORK-AFTER (see module docstring): `_prepare_interaction` does only the
+    fast, local work needed to build the ack; any Slack Web API call (views.open,
+    chat.postMessage) or GitHub round trip it decided is needed comes back as a
+    `background` closure, scheduled via `asyncio.create_task` ONLY AFTER the ack
+    value is already in hand — so a slow/flaky Slack or GitHub round trip can never
+    delay the HTTP response Slack's 3s contract is timed against.
     """
     if not _slack_enabled():
         raise HTTPException(503, "Slack integration is not configured")
@@ -1145,6 +1435,22 @@ async def slack_interactions(request: Request):
 
     bot_token = (os.environ.get(BOT_TOKEN_ENV) or "").strip()
 
-    # Off the event loop — see _dispatch_interaction's docstring: this span makes real
-    # blocking Slack/GitHub network calls, potentially several in a row (screenshots).
-    return await asyncio.to_thread(_dispatch_interaction, payload, bot_token)
+    # Off the event loop for the FAST half only — see _prepare_interaction's
+    # docstring: this span is now local DB reads/validation, never a network call.
+    ack, background = await asyncio.to_thread(_prepare_interaction, payload, bot_token)
+    if background is not None:
+        _schedule_background(background)
+    return ack
+
+
+def _schedule_background(fn) -> None:
+    """Fire `fn` (a zero-arg closure) off the request's own timeline — the ONE seam
+    every ack-first background pipeline in this module goes through, so tests have a
+    single monkeypatch point to make background work deterministic (call `fn()`
+    inline and block on it) instead of racing a real asyncio task against the test's
+    own assertions. Production behavior: `asyncio.create_task(asyncio.to_thread(fn))`
+    — scheduled AFTER the caller already has its ack value in hand (see
+    `slack_interactions`), never awaited by the request, so a slow/failing background
+    pipeline can never delay or break the HTTP response Slack's 3s contract measures.
+    """
+    asyncio.create_task(asyncio.to_thread(fn))

@@ -27,8 +27,10 @@ try:
         resolve_spec,
         use_case_registry,
     )
-    from .llm_decisions import HANDOFF_ACK_SCHEMA, TRIAGE_SCHEMA
-    from .llm_decisions import handoff_ack as _handoff_ack, triage_wake as _triage_wake
+    from .llm_decisions import HANDOFF_ACK_SCHEMA, REFINE_SLACK_ISSUE_SCHEMA, TRIAGE_SCHEMA
+    from .llm_decisions import handoff_ack as _handoff_ack
+    from .llm_decisions import refine_slack_issue as _refine_slack_issue
+    from .llm_decisions import triage_wake as _triage_wake
     from .llm_formats import normalise_anthropic_response as _normalise_anthropic_response
     from .llm_formats import normalise_anthropic_stream_event as _normalise_anthropic_stream_event
     from .llm_http import http_post_json as _http_post_json, http_post_sse as _http_post_sse
@@ -61,8 +63,10 @@ except ImportError:  # Portal copies these modules into a top-level build direct
         resolve_spec,
         use_case_registry,
     )
-    from llm_decisions import HANDOFF_ACK_SCHEMA, TRIAGE_SCHEMA
-    from llm_decisions import handoff_ack as _handoff_ack, triage_wake as _triage_wake
+    from llm_decisions import HANDOFF_ACK_SCHEMA, REFINE_SLACK_ISSUE_SCHEMA, TRIAGE_SCHEMA
+    from llm_decisions import handoff_ack as _handoff_ack
+    from llm_decisions import refine_slack_issue as _refine_slack_issue
+    from llm_decisions import triage_wake as _triage_wake
     from llm_formats import normalise_anthropic_response as _normalise_anthropic_response
     from llm_formats import normalise_anthropic_stream_event as _normalise_anthropic_stream_event
     from llm_http import http_post_json as _http_post_json, http_post_sse as _http_post_sse
@@ -156,6 +160,17 @@ def handoff_ack(handoff_text: str, **kwargs) -> dict:
     """Fail closed toward a full wake when a handoff is uncertain."""
     return _handoff_ack(
         handoff_text,
+        classify=classify,
+        log_failure=_log_call,
+        resolve_spec=resolve_spec,
+        **kwargs,
+    )
+
+
+def refine_slack_issue(raw_title: str, raw_body: str, **kwargs) -> Optional[dict]:
+    """Fail closed to None (raw title/body unchanged) when refinement is uncertain."""
+    return _refine_slack_issue(
+        raw_title, raw_body,
         classify=classify,
         log_failure=_log_call,
         resolve_spec=resolve_spec,

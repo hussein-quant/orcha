@@ -255,3 +255,50 @@ def test_find_open_gh_task_is_the_single_number_case_of_the_batched_helper(monke
     result = core.find_open_gh_task("fake-cur", "cid-1", 7)
     assert result == "task-from-batched-helper"
     assert calls == [("cid-1", [7])]
+
+
+# ------------------------- DoD: codebase-triage-first clause (issue-kind only) -------------------------
+#
+# Founder ask, layered on top of the Slack AI-refine feature: the LLM refine pass
+# (slack_routes._refine_issue_for_filing) makes an issue's WORDING professional in
+# seconds, codebase-blind by design (it never sees the repo). The dispatched agent
+# is the one with actual codebase access — so its DoD now requires it to open with a
+# codebase-grounded triage comment on the GitHub issue BEFORE writing any code. This
+# is pure division of labor: fast, cheap wording polish up front; real investigation
+# from inside the repo once an agent picks the work up. Only ISSUE-kind tasks get
+# this clause — a PR/Fix task is reacting to CI/review feedback on code that already
+# exists, not triaging a fresh report, so _PULL_DOD (and any dod_override the hub's
+# PR-Fix path supplies) is deliberately untouched.
+
+def test_build_task_fields_issue_kind_includes_triage_clause():
+    fields = core.build_task_fields("issue", 42, "Login button broken", "", "")
+    dod = fields["definition_of_done"]
+    assert "Before implementing: post a triage comment on GH issue #42" in dod
+    assert "codebase-grounded analysis" in dod
+    assert "the specific modules/files involved" in dod
+    assert "what logs/repro would confirm it" in dod
+    # The triage clause comes BEFORE the existing fix/PR/review clauses, not appended
+    # after — "Before implementing" must be true of the DoD's own ordering.
+    assert dod.index("Before implementing") < dod.index("Fix GH #42 per its description")
+    # Pre-existing clauses (pinned by test_github_hub_routes.py/test_slack_routes.py's
+    # substring asserts) survive unchanged.
+    assert "Fix GH #42 per its description" in dod
+    assert "Never merge" in dod
+
+
+def test_build_task_fields_pull_kind_has_no_triage_clause():
+    fields = core.build_task_fields("pull", 9, "Fix retry backoff", "", "")
+    dod = fields["definition_of_done"]
+    assert "triage comment" not in dod
+    assert "Before implementing" not in dod
+    assert "Resolve CI failures / review feedback on PR #9" in dod
+
+
+def test_build_task_fields_dod_override_bypasses_triage_clause():
+    """A PR-Fix dod_override (github_hub_routes' context-aware DoD) REPLACES the
+    generic template outright — the triage clause is part of the generic _ISSUE_DOD
+    template only, never injected into an override."""
+    fields = core.build_task_fields(
+        "issue", 42, "title", "", "", dod_override="Custom DoD with no triage clause.",
+    )
+    assert fields["definition_of_done"] == "Custom DoD with no triage clause."

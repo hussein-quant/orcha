@@ -55,6 +55,18 @@ async def _bind_repo(client, cid, repo="acme/site"):
     assert r.status_code == 200, r.text
 
 
+def _fake_issue_get(number, title, repo="acme/site"):
+    """A fake `_gh_get` serving the single-item issue-detail shape
+    `github_hub_routes._fetch_gh_item` requests — mirrors test_slack_routes.py's
+    helper of the same name/shape (kept local rather than shared to avoid a
+    test-to-test import)."""
+    def fake_get(path, token):
+        assert path == f"/repos/{repo}/issues/{number}"
+        return {"number": number, "title": title,
+                "html_url": f"https://github.com/{repo}/issues/{number}", "body": ""}
+    return fake_get
+
+
 # ------------------------- repo not connected -------------------------
 
 async def test_issues_repo_not_connected(client, container):
@@ -568,6 +580,13 @@ async def test_issues_list_carries_tracked_task_id_for_started_item(
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        # Serves BOTH shapes _gh_get is asked for here: the LIST fetch (the issues
+        # page render) and the SINGLE-item detail fetch POST /start now ALSO makes
+        # (the authoritative-title live fetch, `_fetch_gh_item`) — a real GitHub
+        # token would equally answer either path against the same underlying issue.
+        if path == "/repos/acme/site/issues/232":
+            return {"number": 232, "title": "Clinician dashboard",
+                    "html_url": "https://github.com/acme/site/issues/232", "body": ""}
         return [
             {"number": 232, "title": "Clinician dashboard", "html_url": "https://github.com/acme/site/issues/232"},
             {"number": 50, "title": "untouched", "html_url": "https://github.com/acme/site/issues/50"},
@@ -1524,18 +1543,161 @@ async def test_start_pull_degrades_to_generic_dod_when_live_refetch_fails(
     assert "Resolve CI failures / review feedback on PR #99" in t["definition_of_done"]
 
 
-async def test_start_issue_dispatch_never_triggers_live_refetch(
+async def test_start_issue_dispatch_never_triggers_pr_context_refetch(
         client, container, token_env, monkeypatch):
-    """Mutation-guard: the context-aware re-fetch is PR-only (kind=pull) — an issue
-    dispatch must never call _gh_get at all, even with a repo bound and a token
-    resolvable, since issues keep their original generic DoD unchanged."""
+    """Mutation-guard: the CONTEXT-AWARE re-fetch (_pull_fix_context — checks rollup,
+    review-comment count, draft/mergeable_state, for the PR-specific DoD) is PR-only
+    (kind=pull) — an issue dispatch must never hit the pulls/checks endpoints, since
+    issues keep their original generic DoD template unchanged.
+
+    NOTE: this does NOT mean issue dispatch makes no GitHub call at all — see
+    test_start_issue_dispatch_authoritative_title_overrides_client_supplied_title
+    below for the separate, BOTH-kinds authoritative-title fetch
+    (github_hub_routes._fetch_gh_item) added after the production title-loss defect.
+    This test only pins that the ISSUES endpoint (not pulls/checks) is what gets hit."""
     cid = container["id"]
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
-        raise AssertionError(f"issue dispatch must never call _gh_get: {path}")
+        if "/pulls/" in path or "/check-runs" in path or "/commits/" in path:
+            raise AssertionError(f"issue dispatch must never touch PR/checks endpoints: {path}")
+        return {"number": 100, "title": "Real issue title",
+                "html_url": "https://github.com/acme/site/issues/100", "body": ""}
 
     monkeypatch.setattr(hub, "_gh_get", fake_get)
     r = await client.post(f"/api/containers/{cid}/github/start",
                           json={"kind": "issue", "number": 100, "title": "x"})
     assert r.status_code == 201, r.text
+
+
+# ------------------------- POST /start: authoritative server-side title fetch -------------------------
+#
+# Production defect, fixed here: the hub frontend's OWN postStart() call
+# (static/pages/github-render.js) never actually sends title/body_excerpt/html_url —
+# despite GithubStartBody's docstring assuming it does — so EVERY hub-started task
+# (issue or pull) was landing titled bare "GH #<N>:" with nothing after. The fix:
+# both dispatch kinds now live-fetch the real title/body/url server-side
+# (github_hub_routes._fetch_gh_item, the same function the Slack seam already used)
+# BEFORE composing the task; the client-supplied body.title/body_excerpt/html_url
+# fields are used ONLY as the fallback when that live fetch itself fails.
+
+async def test_start_issue_dispatch_authoritative_title_overrides_client_supplied_title(
+        client, container, token_env, monkeypatch):
+    """The exact regression shape: the request carries NO title (or a blank one, as
+    the real frontend's postStart() sends) — the server's own live fetch supplies the
+    real title regardless."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    monkeypatch.setattr(hub, "_gh_get", _fake_issue_get(150, "Real title from GitHub"))
+
+    # EXACTLY the body the real frontend sends (postStart in github-render.js) — no
+    # title/body_excerpt/html_url at all, only what GithubStartBody makes optional.
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "issue", "number": 150, "assignee_agent_id": None})
+    assert r.status_code == 201, r.text
+    tid = r.json()["task_id"]
+    listed = (await client.get(f"/api/containers/{cid}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["id"] == tid][0]
+    assert t["title"] == "GH #150: Real title from GitHub"
+    assert t["title"] != "GH #150:"  # the exact production bug shape
+
+
+async def test_start_pull_dispatch_authoritative_title_overrides_client_supplied_title(
+        client, container, token_env, monkeypatch):
+    """SAME regression, PR-kind — the founder's actual production report (GH #220
+    rendering as bare 'GH #220:')."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        if path == f"/repos/acme/site/pulls/220":
+            return {"number": 220, "title": "Real PR title from GitHub",
+                    "html_url": "https://github.com/acme/site/pulls/220", "body": "",
+                    "head": {"ref": "fix-branch", "sha": "abc123"},
+                    "draft": False, "mergeable_state": "clean",
+                    "review_comments": 0, "comments": 0}
+        if "/check-runs" in path or "/commits/" in path:
+            return {"total_count": 0, "check_runs": []}
+        raise AssertionError(f"unexpected _gh_get call: {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+
+    # EXACTLY the body the real frontend sends — no title/body_excerpt/html_url.
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "pull", "number": 220, "assignee_agent_id": None})
+    assert r.status_code == 201, r.text
+    tid = r.json()["task_id"]
+    listed = (await client.get(f"/api/containers/{cid}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["id"] == tid][0]
+    assert t["title"] == "GH #220: Real PR title from GitHub"
+    assert t["title"] != "GH #220:"  # the exact production bug shape
+
+
+async def test_start_dispatch_falls_back_to_client_title_when_live_fetch_fails(
+        client, container, token_env, monkeypatch):
+    """The live fetch failing (rate-limited / 404 / network) must never break the
+    Start click — it degrades to whatever title the CLIENT supplied (or the bare
+    '#N' placeholder task_start_core itself falls back to when even that's blank),
+    exactly like the Slack seam's own degraded-fallback contract."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def boom(path, token):
+        raise RuntimeError("github_status:403")
+
+    monkeypatch.setattr(hub, "_gh_get", boom)
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "issue", "number": 909, "title": "Client-supplied fallback title"})
+    assert r.status_code == 201, r.text
+    tid = r.json()["task_id"]
+    listed = (await client.get(f"/api/containers/{cid}/tasks")).json()["tasks"]
+    t = [x for x in listed if x["id"] == tid][0]
+    assert t["title"] == "GH #909: Client-supplied fallback title"
+
+
+async def test_start_issue_vs_slack_start_same_number_same_authoritative_title(
+        client, container, make_agent, db, monkeypatch, token_env):
+    """Cross-path title parity: the hub's OWN authoritative fetch and the Slack seam's
+    (pre-existing) authoritative fetch must land on the IDENTICAL title for the same
+    GitHub issue — both now go through the SAME github_hub_routes._fetch_gh_item,
+    so they structurally cannot drift."""
+    import hashlib
+    import hmac
+    import time
+    import urllib.parse
+
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    real_title = "Parity-checked title"
+    monkeypatch.setattr(hub, "_gh_get", _fake_issue_get(300, real_title))
+
+    hub_r = await client.post(f"/api/containers/{cid}/github/start",
+                              json={"kind": "issue", "number": 300})
+    assert hub_r.status_code == 201, hub_r.text
+
+    c2 = await client.post("/api/containers", json={"name": "slack-parity", "additional": True})
+    assert c2.status_code == 201, c2.text
+    cid2 = c2.json()["container_id"]
+    await client.put(f"/api/containers/{cid2}/github", json={"repo": "acme/site"})
+    agent = await make_agent("ops", kind="human", container_id=cid2)
+    db.execute("UPDATE agents SET slack_user_id=%s WHERE id=%s", ("U-parity", agent["agent_id"]))
+
+    signing_secret = "shhh-parity-secret"
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", signing_secret)
+    monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-parity")
+    ts = str(int(time.time()))
+    slack_body = urllib.parse.urlencode({"user_id": "U-parity", "text": "start issue 300"})
+    base = f"v0:{ts}:{slack_body}".encode()
+    digest = hmac.new(signing_secret.encode(), base, hashlib.sha256).hexdigest()
+    slack_r = await client.post(
+        "/api/slack/commands", content=slack_body,
+        headers={"X-Slack-Request-Timestamp": ts, "X-Slack-Signature": "v0=" + digest,
+                "Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert slack_r.status_code == 200, slack_r.text
+
+    hub_listed = (await client.get(f"/api/containers/{cid}/tasks")).json()["tasks"]
+    slack_listed = (await client.get(f"/api/containers/{cid2}/tasks")).json()["tasks"]
+    hub_t = [x for x in hub_listed if x["title"].startswith("GH #300:")][0]
+    slack_t = [x for x in slack_listed if x["title"].startswith("GH #300:")][0]
+    assert hub_t["title"] == slack_t["title"] == f"GH #300: {real_title}"
