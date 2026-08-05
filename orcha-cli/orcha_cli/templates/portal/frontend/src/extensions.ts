@@ -2,11 +2,13 @@
  * ORCHA CLOUD extension registry — the one open-frontend file Cloud owns.
  * Upstream sync contract: copy frontend/src/** from open Orcha verbatim
  * EXCEPT this file and src/cloud/**. Cloud premium pages register here;
- * a route sharing a path with an open page REPLACES it (access model: the
- * Projects landing owns "/" behavior via HomePage-side redirect for now).
+ * a route sharing a path with an open page REPLACES it (access model:
+ * CloudHome owns "/" — the vanilla home-boot redirect that sends a bare
+ * multi-project "/" to the /projects landing, else renders the open HomePage).
  */
 import type { ComponentType } from "react";
 import { ProjectsPage } from "./cloud/projects/ProjectsPage";
+import { CloudHome } from "./cloud/projects/homeGate";
 import { MetricsPage } from "./cloud/metrics/MetricsPage";
 import { GitHubPage } from "./cloud/github/GitHubPage";
 import { DevicePage } from "./cloud/device/DevicePage";
@@ -33,10 +35,11 @@ export interface Extensions {
 
 export const extensions: Extensions = {
   routes: [
+    { path: "/", element: CloudHome },
     { path: "/projects", element: ProjectsPage },
     { path: "/metrics", element: MetricsPage },
     { path: "/github", element: GitHubPage },
-    { path: "/device", element: DevicePage },
+    { path: "/auth/device", element: DevicePage },   // matches the backend page route
     { path: "/members", element: MembersPage },
   ],
   nav: [
