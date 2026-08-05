@@ -9,6 +9,7 @@
 import type { ComponentType } from "react";
 import { accountMenu, fetchIdentity } from "./cloud/identity";
 import { ProjectsPage } from "./cloud/projects/ProjectsPage";
+import { ProjectSwitcher } from "./cloud/projects/ProjectSwitcher";
 import { CloudHome } from "./cloud/projects/homeGate";
 import { MetricsPage } from "./cloud/metrics/MetricsPage";
 import { GitHubPage } from "./cloud/github/GitHubPage";
@@ -60,7 +61,7 @@ export interface AccountMenuItem {
 // EXACTLY this shape — added here ahead of the vendored copy so the next
 // upstream sync is a no-op diff on the contract. The vendored SettingsPage/
 // Shell in this repo may not consume them yet; they are inert until that sync.
-export interface SettingsSection { key: string; element: ComponentType } // renders its own <div className="card">…
+export interface SettingsSection { key: string; title: string; element: ComponentType } // renders its own <div className="card">…
 
 export interface Extensions {
   routes: ExtensionRoute[];
@@ -80,8 +81,9 @@ export const extensions: Extensions = {
     { path: "/auth/device", element: DevicePage },   // matches the backend page route
     { path: "/members", element: MembersPage },
   ],
+  // No "projects" nav entry: the /projects hub stays routed but is reached via
+  // the topbar ProjectSwitcher's "All projects" row (vanilla-shell parity).
   nav: [
-    { key: "projects", href: "/projects", ico: "home", label: "Projects" },
     { key: "metrics", href: "/metrics", ico: "live", label: "Metrics" },
     { key: "github", href: "/github", ico: "link", label: "GitHub" },
   ],
@@ -92,9 +94,11 @@ export const extensions: Extensions = {
   // Cloud settings cards (vanilla settings.html parity: appearance skin picker,
   // per-provider API keys, phone pairing) + the topbar pairing button.
   settingsSections: [
-    { key: "appearance", element: AppearanceSection },
-    { key: "provider-keys", element: ProviderKeysSection },
-    { key: "pairing", element: PairingSection },
+    { key: "appearance", title: "Appearance", element: AppearanceSection },
+    { key: "provider-keys", title: "Provider keys", element: ProviderKeysSection },
+    { key: "pairing", title: "Phone pairing", element: PairingSection },
   ],
-  topbarActions: [PairingButton],
+  // The project switcher (vanilla shell's dropdown, topbar-relocated) renders
+  // before the pairing button.
+  topbarActions: [ProjectSwitcher, PairingButton],
 };
