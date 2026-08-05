@@ -22,6 +22,7 @@ import {
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getJSON } from "../../api/client";
+import { DiffFile, FilesChanged } from "../../components/FilesChanged";
 import { Icon, useToast } from "../../components/ui";
 import { hue, mdText, relTime } from "../../lib/format";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
@@ -30,7 +31,6 @@ import type { Agent, Task } from "../../types";
 import {
   CHECKS_BATCH_CAP,
   CLEAN_STATES,
-  FILES_EXPANDED_BY_DEFAULT,
   classifyDetailError,
   classifyError,
   dispatchLabel,
@@ -43,7 +43,6 @@ import {
   type ChecksRollup,
   type GhComment,
   type GhError,
-  type GhFileEntry,
   type GhFiles,
   type GhIssueDetail,
   type GhIssueRow,
@@ -331,72 +330,32 @@ function AgentRoster({ item, agents, onPick }: {
   );
 }
 
-/* ---- unified-diff renderer (app-patch-log.js renderDiff parity) ----------- */
-function GhDiff({ diff }: { diff: string }) {
-  if (!diff || !diff.trim()) {
-    return <div className="muted" style={{ padding: 10, fontSize: 13 }}>No net change (empty diff).</div>;
-  }
-  let add = 0;
-  let del = 0;
-  const rows = diff.split("\n").map((l, i) => {
-    let cls = "";
-    if (l.startsWith("+++") || l.startsWith("---") || l.startsWith("diff ") || l.startsWith("index ") || l.startsWith("new file")) cls = "meta";
-    else if (l.startsWith("@@")) cls = "hunk";
-    else if (l.startsWith("+")) { cls = "add"; add++; }
-    else if (l.startsWith("-")) { cls = "del"; del++; }
-    return <div key={i} className={"dl" + (cls ? " " + cls : "")}>{l || " "}</div>;
-  });
-  return (
-    <div className="diff">
-      <div className="dstat">
-        <span className="a">+{add}</span>
-        <span className="d">−{del}</span>
-        <span className="muted">unified diff</span>
-      </div>
-      {rows}
-    </div>
-  );
-}
-
-/* ---- PR Files tab: one collapsible file ----------------------------------- */
-function FileRow({ f, defaultExpanded, htmlUrl }: { f: GhFileEntry; defaultExpanded: boolean; htmlUrl: string | null | undefined }) {
-  // native <details>, expansion in useState so the 3s poll re-render never
-  // clobbers a founder's manual expand/collapse.
-  const [open, setOpen] = useState(defaultExpanded);
-  const statusCls = f.status === "removed" ? "del" : f.status === "added" ? "add" : "mod";
-  return (
-    <details className="gh-file-row" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary className="gh-file-sum">
-        <span className={`tag gh-file-status ${statusCls}`}>{f.status || "modified"}</span>
-        <span className="grow gh-file-name mono">{f.filename || ""}</span>
-        <span className="gh-file-diff"><span className="add">+{f.additions || 0}</span> <span className="del">-{f.deletions || 0}</span></span>
-        <span className="gh-file-chev"><Icon name="chev" cls="gl" /></span>
-      </summary>
-      <div className="gh-file-body">
-        {f.patch_omitted ? (
-          <div className="gh-file-omitted muted">
-            diff not available (binary or too large) —{" "}
-            {htmlUrl
-              ? <a href={htmlUrl} target="_blank" rel="noopener noreferrer">view on GitHub <Icon name="ext" cls="gl" /></a>
-              : "view on GitHub"}
-          </div>
-        ) : (
-          <GhDiff diff={f.patch || ""} />
-        )}
-      </div>
-    </details>
-  );
-}
+// GitHub API status -> the viewer's M/A/D/R badge letters
+const GH_STATUS: Record<string, "M" | "A" | "D" | "R"> = {
+  modified: "M", changed: "M", added: "A", copied: "A", removed: "D", renamed: "R",
+};
 
 function FilesSection({ files, htmlUrl }: { files: GhFiles | undefined; htmlUrl: string | null | undefined }) {
   const f = files || {};
   const items = f.items || [];
   if (!items.length) return <div className="none" style={{ padding: 14 }}>No files changed.</div>;
+  // The shared hierarchy viewer (FilesChanged): tree + filter + badges over the
+  // per-file GitHub patches — same widget the run diffs use.
+  const preparsed: DiffFile[] = items
+    .filter((it) => !!it.filename)
+    .map((it) => ({
+      path: it.filename as string,
+      old: it.filename as string,
+      status: GH_STATUS[it.status || "modified"] || "M",
+      add: it.additions || 0,
+      del: it.deletions || 0,
+      lines: it.patch_omitted
+        ? ["(diff too large to show here — view it on GitHub)"]
+        : (it.patch || "(no textual diff)").split("\n"),
+    }));
   return (
     <div className="gh-files">
-      {items.map((it, i) => (
-        <FileRow key={it.filename || i} f={it} defaultExpanded={i < FILES_EXPANDED_BY_DEFAULT} htmlUrl={htmlUrl} />
-      ))}
+      <FilesChanged preparsed={preparsed} />
       {f.truncated ? <div className="gh-files-more muted">Showing the first {items.length} of {f.count} files.</div> : null}
       {f.patches_truncated ? (
         <div className="gh-files-more muted">

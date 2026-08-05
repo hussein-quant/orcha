@@ -200,19 +200,25 @@ function FilePane({ file }: { file: DiffFile | undefined }) {
 }
 
 /* ---- the widget ----------------------------------------------------------- */
-export function FilesChanged({ diff }: { diff: string | null | undefined }) {
-  const files = useMemo(() => (diff && diff.trim() ? parseDiffFiles(diff) : []), [diff]);
+// Accepts EITHER a raw unified git diff (`diff`) or pre-parsed per-file
+// entries (`preparsed`, e.g. GitHub API file patches) — same tree/filter/
+// badges UI over both.
+export function FilesChanged({ diff, preparsed }: { diff?: string | null | undefined; preparsed?: DiffFile[] }) {
+  const files = useMemo(
+    () => (preparsed && preparsed.length ? preparsed : diff && diff.trim() ? parseDiffFiles(diff) : []),
+    [diff, preparsed],
+  );
   const [selPath, setSelPath] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
 
-  if (!diff || !diff.trim())
+  if (!files.length && (!diff || !diff.trim()))
     return (
       <div className="muted" style={{ padding: 10, fontSize: 13 }}>
         No net change (empty diff).
       </div>
     );
-  if (!files.length || files.some((f) => !f.path)) return <FlatDiff diff={diff} />;
+  if (!files.length || files.some((f) => !f.path)) return <FlatDiff diff={diff || ""} />;
 
   // selection falls back to the first file whenever the stored path vanishes
   // (renderDiff parity: `st.files.find(...) || st.files[0]`).
