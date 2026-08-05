@@ -19,8 +19,21 @@ const pageRoutesPlugin = () => ({
   },
 });
 
+// Inject the shared stylesheet as a render-blocking <link> into the BUILT
+// shell. It must bypass Vite's base-prefixing (which is why main.tsx used
+// runtime injection), so we string-insert post-transform.
+const sharedCssPlugin = () => ({
+  name: "orcha-shared-css",
+  transformIndexHtml: {
+    order: "post" as const,
+    handler(html: string) {
+      return html.replace("</head>", '  <link rel="stylesheet" href="/assets/styles.css" />\n  </head>');
+    },
+  },
+});
+
 export default defineConfig({
-  plugins: [react(), pageRoutesPlugin()],
+  plugins: [react(), pageRoutesPlugin(), sharedCssPlugin()],
   base: "/assets/dist/",
   build: {
     outDir: "../static/dist",

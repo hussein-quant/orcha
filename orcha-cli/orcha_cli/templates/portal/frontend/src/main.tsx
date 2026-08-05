@@ -16,7 +16,8 @@ import { extensions } from "./extensions";
 // the FastAPI backend untouched — no history-fallback route needed server-side.
 // The shared token layer (static/styles.css, served at /assets/styles.css) is
 // linked at runtime: an href in index.html would get base-prefixed by Vite.
-{
+if (!document.querySelector('link[href="/assets/styles.css"]')) {
+  // fallback only — the build injects a blocking <link> (vite sharedCssPlugin)
   const l = document.createElement("link");
   l.rel = "stylesheet";
   l.href = "/assets/styles.css";

@@ -3,9 +3,13 @@
  * vanilla modules/settings-provider-keys.js + the settings.html
  * "xAI / Grok API key" card (multi-provider follow-on to #294 Item 1).
  *
- * One card per AVAILABLE non-Anthropic catalog provider (e.g. xAI/Grok),
- * mirroring the Anthropic card but wired to the provider-scoped routes so a
- * use-case set to xAI has somewhere to put an xAI key. Wire contract
+ * ONE home for every provider key (vanilla settings.html kept the Anthropic
+ * card and the xAI/Grok card together under the Workspace tab): the section
+ * renders the open Anthropic KeyCard as its FIRST card — the open General-tab
+ * copy is hidden via extensions.settingsGeneral.key:false — then one card per
+ * AVAILABLE non-Anthropic catalog provider (e.g. xAI/Grok), mirroring the
+ * Anthropic card but wired to the provider-scoped routes so a use-case set to
+ * xAI has somewhere to put an xAI key. Wire contract
  * (backend UNCHANGED — byte-exact with the vanilla module):
  *   GET    /api/containers/{cid}/settings/provider-keys        -> {keys:[…]}
  *   PUT    …/settings/provider-keys/{provider}   {api_key, actor_agent_id}
@@ -18,6 +22,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { Icon, Modal, useToast } from "../../components/ui";
+import { KeyCard } from "../../pages/settings/SettingsPage";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import { fetchMe, memActor, type Me } from "../identity";
 import "./settings-cards.css";
@@ -301,11 +306,29 @@ export function ProviderKeysSection() {
   );
 
   return (
-    <div className="card set-card">
+    <>
+      {/* Anthropic first — the open KeyCard re-homed here (settings.html kept
+          the Anthropic card alongside the other key cards; card markup + lead
+          verbatim from the open General-tab copy this replaces). */}
+      <div className="card set-card">
+        <div className="card-h"><h2>Anthropic API key</h2></div>
+        <div className="card-b">
+          <div className="lead">
+            Stored encrypted on this workspace and used for the universal client. The{" "}
+            <code>ORCHA_LLM_API_KEY</code> environment variable takes precedence — a key set here is used
+            only when no env key is present.
+          </div>
+          <div id="keyCard">
+            <KeyCard cid={cid} />
+          </div>
+        </div>
+      </div>
+
+      <div className="card set-card">
       <div className="card-h"><h2>xAI / Grok API key</h2></div>
       <div className="card-b">
         <div className="lead">
-          Stored encrypted on this workspace and used when a use-case below is set to xAI (Grok) —
+          Stored encrypted on this workspace and used when a use-case is set to xAI (Grok) —
           wake triage, onboarding proposal, image-to-text, digest curation. As above,{" "}
           <code>ORCHA_LLM_API_KEY</code> takes precedence when present.
         </div>
@@ -321,6 +344,7 @@ export function ProviderKeysSection() {
           onClose={() => setClearing(null)}
         />
       )}
-    </div>
+      </div>
+    </>
   );
 }

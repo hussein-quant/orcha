@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/ui";
 import { SnapshotProvider } from "../../state/SnapshotProvider";
 import { resetIdentity } from "../identity";
-import { MembersPage } from "./MembersPage";
+import { MembersPage, MembersSection } from "./MembersPage";
 
 interface Call { url: string; method: string; body: unknown }
 
@@ -105,6 +105,53 @@ describe("MembersPage roster (wire-contract render)", () => {
     expect(document.querySelector(".mem-restricted")).toHaveTextContent("The full member list is visible to owners");
     expect(screen.queryByPlaceholderText("GitHub username to invite…")).not.toBeInTheDocument();
     expect(document.querySelector(".mem-acts")).toBeNull();
+  });
+});
+
+describe("MembersSection (the settings-tab card)", () => {
+  beforeEach(() => { localStorage.clear(); resetIdentity(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("renders the vanilla settings.html Members card standalone (no Shell/route needed)", async () => {
+    stubFetch();
+    render(
+      <ToastProvider>
+        <SnapshotProvider>
+          <MembersSection />
+        </SnapshotProvider>
+      </ToastProvider>,
+    );
+    // card chrome: title + lead verbatim from the vanilla Collaboration-tab card
+    const title = document.querySelector(".set-card .card-h h2");
+    expect(title).toHaveTextContent("Members");
+    expect(document.querySelector(".set-card .lead")).toHaveTextContent(
+      "owners can invite collaborators, change roles, and assign task reviewers",
+    );
+    expect(document.querySelector("#membersCard")).not.toBeNull();
+    // the same roster body the /members page renders
+    expect(await screen.findByText("kedar-gh")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("GitHub username to invite…")).toBeInTheDocument();
+  });
+
+  it("Invite from the section POSTs the byte-exact body", async () => {
+    const calls = stubFetch();
+    render(
+      <ToastProvider>
+        <SnapshotProvider>
+          <MembersSection />
+        </SnapshotProvider>
+      </ToastProvider>,
+    );
+    await screen.findByText("kedar-gh");
+    fireEvent.change(screen.getByPlaceholderText("GitHub username to invite…"), {
+      target: { value: "hubot" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Invite/ }));
+    await waitFor(() => {
+      const inv = calls.find((c) => c.url === "/api/containers/c1/members" && c.method === "POST");
+      expect(inv).toBeTruthy();
+      expect(inv!.body).toEqual({ github_login: "hubot", role: "member", actor_agent_id: "h1" });
+    });
   });
 });
 

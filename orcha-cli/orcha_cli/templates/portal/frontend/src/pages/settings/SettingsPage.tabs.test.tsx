@@ -81,11 +81,13 @@ beforeEach(() => {
   setHash("");
   installFetch();
   delete extensions.settingsSections;
+  delete extensions.settingsGeneral; // reset the downstream General-card toggles too
 });
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   delete extensions.settingsSections;
+  delete extensions.settingsGeneral;
 });
 
 /* ---- untabbed (open Orcha default) ---------------------------------------- */

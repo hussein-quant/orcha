@@ -8,6 +8,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { HashRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/ui";
+import { extensions } from "../../extensions";
 import { SnapshotProvider } from "../../state/SnapshotProvider";
 import {
   buildOverrides,
@@ -74,6 +75,9 @@ function renderPage() {
 beforeEach(() => {
   localStorage.clear();
   installFetch();
+  // These tests exercise the OPEN General cards — neutralize any downstream
+  // card toggles (the tabs suite resets settingsSections the same way).
+  delete extensions.settingsGeneral;
 });
 afterEach(() => {
   cleanup();
