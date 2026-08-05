@@ -115,8 +115,13 @@ def test_onboarding_deeplinks_use_served_routes():
 def test_onboarding_route_registered_in_main():
     main = (PORTAL / "main.py").read_text()
     assert '@app.get("/onboarding"' in main, "no served /onboarding route"
-    # Phase 7: every page route serves the React SPA shell
-    assert main.count('_serve("dist/index.html")') >= 6, "page routes don't all serve the SPA shell"
+    # Phase 7 (cloud layout): /onboarding serves the shell from main.py; the other
+    # page routes live in portal_backend/{dashboard,device_token}_routes.py.
+    assert '_serve("dist/index.html")' in main, "/onboarding doesn't serve the SPA shell"
+    dash = (PORTAL / "portal_backend" / "dashboard_routes.py").read_text()
+    dev = (PORTAL / "portal_backend" / "device_token_routes.py").read_text()
+    assert dash.count('serve_page("dist/index.html")') >= 8, "dashboard page routes don't all serve the SPA shell"
+    assert 'serve_page("dist/index.html")' in dev, "/auth/device doesn't serve the SPA shell"
 
 
 # ---------- home empty-state CTA → /onboarding ----------

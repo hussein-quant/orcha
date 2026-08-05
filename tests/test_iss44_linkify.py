@@ -47,8 +47,11 @@ def test_linkify_is_applied_to_authored_text_surfaces():
     # React port the row text renders as plain JSX (auto-escaped), never <Linkified>.
     assert 'className="act"' in home, "activity-feed row anchor missing"
     assert "<Linkified text={e.text}" not in home, "activity-feed text must stay plain (it's inside a row anchor)"
-    css = (PORTAL / "static" / "styles.css").read_text()   # styles.css is KEPT (token layer)
-    assert ".lnk" in css, "no link styling"
+    # cloud: styles.css is an @import entrypoint; .lnk lives in the styles/ modules
+    css_dir = PORTAL / "static"
+    blobs = [(css_dir / "styles.css").read_text()]
+    blobs += [f.read_text() for f in (css_dir / "styles").glob("*.css")]
+    assert any(".lnk" in b for b in blobs), "no link styling"
 
 
 def test_linkify_behavior_is_safe_and_correct():
