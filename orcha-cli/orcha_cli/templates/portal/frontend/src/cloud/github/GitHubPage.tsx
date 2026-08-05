@@ -219,6 +219,53 @@ function GhErrorBody({ err, notFoundKind }: { err: GhError; notFoundKind?: GhKin
   return <GenericError status={err.status} detail={err.detail} />;
 }
 
+/* ---- skeleton loading states (modules/app-skeleton.js markup, verbatim) ----
+   The vanilla page filled its first-load gap with OrchaSkeleton's shimmer
+   ("list-rows" for the list, "detail-pane" for ?pr=/?issue=), styled by the
+   shared skeleton.css that already ships in /assets/styles.css — same class
+   contract here so the shimmer reads identically. The 120ms show delay
+   (OrchaSkeleton.SHOW_DELAY_MS) is mirrored by the caller (useSkeletonReady)
+   so a fast local response never flashes a skeleton at all. */
+function GhSkeleton({ kind }: { kind: "list-rows" | "detail-pane" }) {
+  if (kind === "detail-pane") {
+    return (
+      <div className="ork-sk-wrap" aria-hidden="true">
+        <div className="ork-sk-line w50 lg"></div>
+        <div className="ork-sk-line w80"></div>
+        <div className="ork-sk-line w70"></div>
+        <div className="ork-sk-block"></div>
+        <div className="ork-sk-line w60"></div>
+        <div className="ork-sk-line w40"></div>
+      </div>
+    );
+  }
+  return (
+    <div className="ork-sk-wrap" aria-hidden="true">
+      {Array.from({ length: 6 }, (_, i) => (
+        <div key={i} className="ork-sk-row">
+          <div className="ork-sk ork-sk-pill"></div>
+          <div className="ork-sk-col">
+            <div className="ork-sk-line w80"></div>
+            <div className="ork-sk-line w30 sm"></div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+// true once `resetKey`'s view has been unsettled for 120ms (OrchaSkeleton's
+// SHOW_DELAY_MS) — the loading branch renders nothing until then, exactly like
+// the vanilla show() timer, so warm loads never flash a skeleton.
+function useSkeletonReady(resetKey: string): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    setReady(false);
+    const t = setTimeout(() => setReady(true), 120);
+    return () => clearTimeout(t);
+  }, [resetKey]);
+  return ready;
+}
+
 /* ---- column header (wide viewports; CSS-hidden below the wrap breakpoint) - */
 function ColumnHeader({ tab }: { tab: GhKind }) {
   return (
@@ -290,7 +337,9 @@ function StartCell({ kind, item, taskState, busy, ddOpen, onStart, onToggleDd }:
 }
 
 /* ---- assignee dropdown roster (agentRosterHtml port) ---------------------- */
-function AgentRoster({ item, agents, onPick }: {
+function AgentRoster({ kind, number, item, agents, onPick }: {
+  kind: GhKind;
+  number: number;
   item: GhItem | null;
   agents: Agent[];
   onPick: (agentId: string) => void;
@@ -303,6 +352,8 @@ function AgentRoster({ item, agents, onPick }: {
       className={"pm-row" + (reason !== undefined ? " gh-suggested-row" : "")}
       type="button"
       data-gh-assign={a.id}
+      data-gh-kind={kind}
+      data-gh-number={number}
       onClick={() => onPick(a.id)}
     >
       <span className="b">
@@ -542,6 +593,10 @@ export function GitHubPage() {
   const theme = ghResolvedTheme();
   const agents = snap?.agents ?? [];
   const tasks = snap?.tasks ?? [];
+
+  // vanilla ghSkeletonShow(): a fresh route/tab gets its own 120ms-delayed
+  // skeleton window; a warm response settles before it and never flashes one.
+  const skeletonReady = useSkeletonReady(routeKey + ":" + tab);
 
   /* ---- navigation (github-boot.js navigate()/data-gh-back) ---------------- */
   const goto = useCallback((next: GhRoute, replace = false) => {
@@ -885,9 +940,9 @@ export function GitHubPage() {
     const key = tab;
     const pl = payload[key];
     const err = loadError[key];
-    // unsettled (no payload AND no error yet): the vanilla page holds its
-    // skeleton here — same gate, plain Loading text (no OrchaSkeleton port)
-    if (pl == null && err == null) return <div className="none" style={{ padding: 20 }}>Loading…</div>;
+    // unsettled (no payload AND no error yet): the vanilla page's OrchaSkeleton
+    // "list-rows" shimmer, behind the same 120ms show delay (nothing before it)
+    if (pl == null && err == null) return skeletonReady ? <GhSkeleton kind="list-rows" /> : null;
     if (err) return <GhErrorBody err={err} />;
     if (!pl || !pl.repo) return <EmptyRepo />;
     const kind: GhKind = key === "pulls" ? "pull" : "issue";
@@ -1026,8 +1081,9 @@ export function GitHubPage() {
     const err = de && de.__number === number ? de : null;
     if (!p && err) return <GhErrorBody err={err} notFoundKind={kind} />;
     const item = p ? (kind === "pull" ? p.pull : p.issue) : null;
-    // no item yet (and no error) -> Loading…, regardless of fetch timing
-    if (!item) return <div className="none" style={{ padding: 20 }}>Loading…</div>;
+    // no item yet (and no error) -> the vanilla "detail-pane" skeleton,
+    // regardless of fetch timing (same 120ms show delay as the list)
+    if (!item) return skeletonReady ? <GhSkeleton kind="detail-pane" /> : null;
     return kind === "pull" ? prDetail(item as GhPullDetail, p!.repo) : issueDetail(item as GhIssueDetail, p!.repo);
   };
 
@@ -1116,6 +1172,8 @@ export function GitHubPage() {
             >
               <div className="pm-head plain">Assign to</div>
               <AgentRoster
+                kind={dd.kind}
+                number={dd.number}
                 item={findItem(dd.kind, dd.number)}
                 agents={agents}
                 onPick={(agentId) => { const d = dd; setDd(null); postStart(d.kind, d.number, agentId); }}
