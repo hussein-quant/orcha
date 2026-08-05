@@ -34,6 +34,11 @@ const SETTINGS_CSS = `
   .set-card .card-b { padding: 18px 20px; }
   .set-card .lead { color: var(--muted); font-size: 12.5px; line-height: 1.55; margin: -2px 0 16px; }
 
+  /* Tab strip (vanilla settings-tabs port) — reuses the topbar's .aut/.seg pill
+     idiom from styles.css so dark/light and skins hold with no new tokens. */
+  .set-tabs { margin: 0 0 18px; }
+  .set-tabs .seg.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+
   /* status banner (ok / warn / err / muted) — built from the same soft tokens
      used by .attn-card / callouts so it stays theme-correct. */
   .sc-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px;
@@ -211,6 +216,25 @@ export function buildOverrides(
 function statusOf(e: unknown): number | undefined {
   return e && typeof e === "object" ? (e as { status?: number }).status : undefined;
 }
+
+/* ====================================================================== *
+ *  Settings tabs (port of static/modules/settings-tabs.js)               *
+ * ====================================================================== */
+
+// The URL-hash persistence contract, verbatim from the vanilla module:
+//  - deep link #tab=<name> selects the tab on load and on hashchange;
+//  - an unknown (or absent) #tab falls back to the FIRST tab;
+//  - loading never writes the hash — only a user click does (replaceState).
+const TAB_HASH_RE = /(?:^#|[#&])tab=([\w-]+)/;
+
+export function tabFromHash(hash: string | null | undefined, names: string[]): string {
+  const m = TAB_HASH_RE.exec(hash || "");
+  const want = m && names.indexOf(m[1]) !== -1 ? m[1] : null;
+  return want || names[0];
+}
+
+/** The General tab's key on the tab strip (the open key + models cards). */
+export const GENERAL_TAB = "general";
 
 /* ====================================================================== *
  *  Anthropic API-key card (#294)                                          *
@@ -771,10 +795,44 @@ function ModelsCard({ cid }: { cid: string | null }) {
  * ====================================================================== */
 export function SettingsPage() {
   const { snap, cid } = useSnapshot();
+
+  // Tabs appear ONLY when a downstream registered settings sections; open
+  // Orcha (no sections) keeps today's untabbed layout with zero visual change.
+  const sections = extensions.settingsSections ?? [];
+  const tabbed = sections.length > 0;
+  const names = [GENERAL_TAB, ...sections.map((s) => s.key)];
+  const namesKey = names.join(" ");
+
+  const [tab, setTab] = useState(() => tabFromHash(window.location.hash, names));
+
+  // Vanilla contract: #tab=<name> re-selects on hashchange (back/forward,
+  // manual edit) without writing the hash back.
+  useEffect(() => {
+    if (!tabbed) return;
+    const list = namesKey.split(" ");
+    const onHash = () => setTab(tabFromHash(window.location.hash, list));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, [tabbed, namesKey]);
+
+  // Clicking a pill selects it and rewrites the hash via replaceState (no
+  // history spam) — the vanilla module's exact idiom, fallback included.
+  const select = (name: string) => {
+    setTab(name);
+    try {
+      history.replaceState(null, "", "#tab=" + name);
+    } catch {
+      window.location.hash = "tab=" + name;
+    }
+  };
+
+  const active = tabbed && names.indexOf(tab) !== -1 ? tab : GENERAL_TAB;
+  const activeSection = sections.find((s) => s.key === active);
+
   return (
     <Shell page="settings" title="Settings" ctx={snap?.container?.name}>
       <style>{SETTINGS_CSS}</style>
-      <div className="set-wrap">
+      <div className="set-wrap" {...(tabbed ? { "data-tab": active } : {})}>
         <div className="set-intro">
           <h1>Settings</h1>
           <p>
@@ -784,7 +842,39 @@ export function SettingsPage() {
           </p>
         </div>
 
-        <div className="card set-card">
+        {tabbed && (
+          /* Vanilla tab strip verbatim (settings.html #setTabs): the topbar
+             .aut/.seg pill idiom, so cloud's settings.css + the open styles.css
+             style it with no new tokens. First tab is always General. */
+          <nav className="aut set-tabs" id="setTabs" role="tablist" aria-label="Settings sections">
+            {[{ key: GENERAL_TAB, title: "General" }, ...sections].map((t) => {
+              const on = t.key === active;
+              return (
+                <span
+                  key={t.key}
+                  className={"seg" + (on ? " on" : "")}
+                  role="tab"
+                  tabIndex={0}
+                  aria-selected={on}
+                  data-tab={t.key}
+                  onClick={() => select(t.key)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      select(t.key);
+                    }
+                  }}
+                >
+                  {t.title}
+                </span>
+              );
+            })}
+          </nav>
+        )}
+
+        {active === GENERAL_TAB && (
+          <>
+        <div className="card set-card" data-settab={GENERAL_TAB}>
           <div className="card-h">
             <h2>Anthropic API key</h2>
           </div>
@@ -800,7 +890,7 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <div className="card set-card">
+        <div className="card set-card" data-settab={GENERAL_TAB}>
           <div className="card-h">
             <h2>Universal model selection</h2>
           </div>
@@ -815,9 +905,10 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
-        {(extensions.settingsSections ?? []).map((sec) => (
-          <sec.element key={sec.key} />
-        ))}
+          </>
+        )}
+
+        {activeSection && <activeSection.element />}
       </div>
     </Shell>
   );
