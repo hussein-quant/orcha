@@ -97,11 +97,27 @@ export function Pill({ status, size }: { status: string | null | undefined; size
 }
 
 /* ---- avatar -------------------------------------------------------------- */
-export function Avatar({ alias, kind, size }: { alias: string | null | undefined; kind?: string | null; size?: string }) {
+// ghLogin (cloud backends enrich agents with github_login) upgrades the tile to
+// the GitHub avatar image; open backends omit it and keep the letter tile.
+export function Avatar({ alias, kind, size, ghLogin }: { alias: string | null | undefined; kind?: string | null; size?: string; ghLogin?: string | null }) {
+  const [imgFailed, setImgFailed] = useState(false);
   const h = hue(alias || "");
   const grad = `linear-gradient(140deg, hsl(${h} 70% 62%), hsl(${(h + 38) % 360} 72% 54%))`;
   const cls = "av" + (size ? " " + size : "") + (kind === "human" ? " human" : "");
   const init = (alias || "?").trim().charAt(0).toUpperCase();
+  const login = (ghLogin || "").trim();
+  if (login && !imgFailed && /^[A-Za-z0-9-]+$/.test(login)) {
+    return (
+      <span className={cls} style={{ background: grad, overflow: "hidden" }}>
+        <img
+          src={`https://github.com/${login}.png?size=64`}
+          alt={alias || login}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", borderRadius: "inherit" }}
+          onError={() => setImgFailed(true)}
+        />
+      </span>
+    );
+  }
   return (
     <span className={cls} style={{ background: grad }}>
       {init}
@@ -127,8 +143,9 @@ export function KindBadge({ kind }: { kind: string | null | undefined }) {
 
 /* ---- the Orcha mark ------------------------------------------------------ */
 export function OrcaMark() {
+  // intrinsic size: downstream stylesheets may not carry .brand .mark rules
   return (
-    <svg viewBox="0 0 100 100" fill="none" aria-label="Orcha">
+    <svg viewBox="0 0 100 100" width={34} height={34} style={{ maxWidth: "100%", maxHeight: "100%" }} fill="none" aria-label="Orcha">
       <path d="M27,83 C28,55 33,32 45.5,22.5 C51.5,18 57.5,19.5 60,27 C64.5,46 70.5,67 73,83 Z" fill="#f3fbfb" />
       <g stroke="#06171c" strokeWidth={2.4} strokeLinecap="round">
         <line x1="49" y1="38" x2="40" y2="62" />

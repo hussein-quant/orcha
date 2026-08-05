@@ -4,9 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Orcha</title>
+    <script>
+      // pre-paint theme: honor the persisted choice before first paint so
+      // full-page navigations never flash the dark default (GH #239 family).
+      try {
+        var t = localStorage.getItem("orcha:theme");
+        if (t) document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    </script>
     <!-- the shared styles.css token layer is injected at runtime by main.tsx:
          a <link> here would get base-prefixed by Vite to /assets/dist/... -->
-    <script type="module" crossorigin src="/assets/dist/assets/index-DNOin_YW.js"></script>
+    <script type="module" crossorigin src="/assets/dist/assets/index-BFZSH0o3.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/dist/assets/index-DUjwjJgP.css">
   </head>
   <body>

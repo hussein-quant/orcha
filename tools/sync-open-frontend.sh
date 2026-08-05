@@ -23,6 +23,9 @@ rsync -a --delete \
 echo "== syncing static/vendor/"
 rsync -a --delete "$SRC/static/vendor/" "$DST/static/vendor/"
 
+echo "== syncing open styles.css -> styles/open-base.css (the base layer under the cloud skin)"
+cp "$SRC/static/styles.css" "$DST/static/styles/open-base.css"
+
 cd "$DST/frontend"
 echo "== install (lockfile may have changed)"
 npm install --no-audit --no-fund >/dev/null
