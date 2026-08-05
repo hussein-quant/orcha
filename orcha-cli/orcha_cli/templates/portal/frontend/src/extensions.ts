@@ -1,0 +1,47 @@
+/**
+ * ORCHA CLOUD extension registry — the one open-frontend file Cloud owns.
+ * Upstream sync contract: copy frontend/src/** from open Orcha verbatim
+ * EXCEPT this file and src/cloud/**. Cloud premium pages register here;
+ * a route sharing a path with an open page REPLACES it (access model: the
+ * Projects landing owns "/" behavior via HomePage-side redirect for now).
+ */
+import type { ComponentType } from "react";
+import { ProjectsPage } from "./cloud/projects/ProjectsPage";
+import { MetricsPage } from "./cloud/metrics/MetricsPage";
+import { GitHubPage } from "./cloud/github/GitHubPage";
+import { DevicePage } from "./cloud/device/DevicePage";
+import { MembersPage } from "./cloud/members/MembersPage";
+
+export interface ExtensionRoute {
+  path: string;
+  element: ComponentType;
+}
+
+export interface ExtensionNavItem {
+  key: string;
+  href: string;
+  ico: string;
+  label: string;
+  count?: (snap: import("./types").Snapshot | null) => number | null;
+  attn?: boolean;
+}
+
+export interface Extensions {
+  routes: ExtensionRoute[];
+  nav: ExtensionNavItem[];
+}
+
+export const extensions: Extensions = {
+  routes: [
+    { path: "/projects", element: ProjectsPage },
+    { path: "/metrics", element: MetricsPage },
+    { path: "/github", element: GitHubPage },
+    { path: "/device", element: DevicePage },
+    { path: "/members", element: MembersPage },
+  ],
+  nav: [
+    { key: "projects", href: "/projects", ico: "home", label: "Projects" },
+    { key: "metrics", href: "/metrics", ico: "live", label: "Metrics" },
+    { key: "github", href: "/github", ico: "link", label: "GitHub" },
+  ],
+};
