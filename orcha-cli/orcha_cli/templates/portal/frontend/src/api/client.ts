@@ -82,6 +82,8 @@ export function mapSnapshot(rawIn: any): Snapshot {
     alias: a.alias,
     kind: a.kind,
     github_login: a.github_login != null ? a.github_login : null,
+    member_role: a.member_role != null ? a.member_role : null,
+    reasoning_effort: a.reasoning_effort != null ? a.reasoning_effort : null,
     role: a.role || "—",
     model: a.model != null ? a.model : null,
     status: a.status,
@@ -100,6 +102,8 @@ export function mapSnapshot(rawIn: any): Snapshot {
     title: t.title,
     status: t.status,
     priority: t.priority,
+    reviewer_agent_id: t.reviewer_agent_id != null ? t.reviewer_agent_id : null,
+    reviewer: t.reviewer != null ? t.reviewer : null,
     assignees: t.assignees || [],
     assignee: (t.assignees || [])[0] || null,
     description: t.description || "",
@@ -146,7 +150,11 @@ export function mapSnapshot(rawIn: any): Snapshot {
     a.current_task = cur ? { task_id: cur.id, title: cur.title } : null;
   });
 
-  return { container: raw.container || null, agents, byAlias, tasks, requests };
+  return {
+    task_open_total: raw.task_open_total != null ? raw.task_open_total : null,
+    request_open_total: raw.request_open_total != null ? raw.request_open_total : null,
+    container: raw.container || null, agents, byAlias, tasks, requests,
+  };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 

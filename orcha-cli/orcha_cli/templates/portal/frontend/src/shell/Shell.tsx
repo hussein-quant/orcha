@@ -5,14 +5,18 @@
  * links (/tasks?task=…) so the SPA serves from one static HTML file with the
  * FastAPI backend untouched.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { sendJSON, getJSON } from "../api/client";
 import { relTime, trunc, esc } from "../lib/format";
+import { ensureCidInLocation } from "../lib/scope";
 import {
   actingHuman,
+  actingIdentityHuman,
+  attnCardCounts,
   attnItems,
   autLevel,
+  navCounts,
   planMessageOf,
   useSnapshot,
 } from "../state/SnapshotProvider";
@@ -309,9 +313,101 @@ function NotificationCenter({ open, onClose }: { open: boolean; onClose: () => v
   );
 }
 
+/* ---- acting-as chip (+ downstream account menu) --------------------------
+ * Open default: extensions.accountMenu is unset (or returns []) and the chip
+ * renders exactly as before — a passive label. When a downstream registers
+ * accountMenu, the chip becomes a dropdown trigger with the notification-
+ * center interaction pattern (outside-click + Escape close). Markup stays
+ * classless-safe: inline styles over existing CSS custom properties only
+ * (styles.css has no menu/pmenu class to reuse).
+ */
+const ACCT_MENU_STYLE: CSSProperties = {
+  position: "absolute", right: 0, top: "calc(100% + 6px)", minWidth: 190, zIndex: 80,
+  background: "var(--raised)", border: "1px solid var(--border)", borderRadius: 10,
+  boxShadow: "var(--shadow)", padding: 6, display: "flex", flexDirection: "column",
+};
+const acctItemStyle = (danger?: boolean): CSSProperties => ({
+  display: "block", width: "100%", textAlign: "left", padding: "7px 10px",
+  borderRadius: 7, background: "none", border: "none", font: "inherit",
+  fontSize: "12.5px", fontWeight: 500, cursor: "pointer", textDecoration: "none",
+  color: danger ? "var(--danger)" : "var(--text)",
+});
+
+function ActingChip() {
+  const { snap, identity } = useSnapshot();
+  const who = actingIdentityHuman(snap, identity);
+  const items = extensions.accountMenu ? extensions.accountMenu(identity) : [];
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("click", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("click", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  // non-member viewers (who === null) still see their own signed-in identity
+  // on the chip so the account menu stays reachable.
+  const label = who ? who.alias : identity ? identity.alias || identity.github_login || "account" : null;
+  const ghLogin = who ? who.github_login : identity?.github_login;
+  const whoSpan = (
+    <span className="who" id="actingWho">
+      {label
+        ? (<><Avatar alias={label} kind="human" size="sm" ghLogin={ghLogin} />{label}</>)
+        : <span className="muted">no human registered</span>}
+    </span>
+  );
+
+  if (!items.length) {
+    return (
+      <div className="acting" title="You are the human authority on this container">
+        <span className="lbl">acting as</span>
+        {whoSpan}
+      </div>
+    );
+  }
+  return (
+    <div ref={boxRef} style={{ position: "relative" }}>
+      <div
+        className="acting" role="button" tabIndex={0} title="Account"
+        aria-haspopup="menu" aria-expanded={open} style={{ cursor: "pointer" }}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((v) => !v); } }}
+      >
+        <span className="lbl">acting as</span>
+        {whoSpan}
+        <Icon name="chev" cls="" />
+      </div>
+      {open && (
+        <div role="menu" aria-label="Account" style={ACCT_MENU_STYLE}>
+          {items.map((it, i) =>
+            it.href ? (
+              <a key={i} role="menuitem" href={it.href} style={acctItemStyle(it.danger)} onClick={() => setOpen(false)}>
+                {it.label}
+              </a>
+            ) : (
+              <button
+                key={i} role="menuitem" type="button" style={acctItemStyle(it.danger)}
+                onClick={() => { setOpen(false); it.onClick?.(); }}
+              >
+                {it.label}
+              </button>
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---- the shell ----------------------------------------------------------- */
 export function Shell({ page, title, ctx, children }: { page: string; title: string; ctx?: ReactNode; children: ReactNode }) {
-  const { snap } = useSnapshot();
+  const { snap, cid, multi } = useSnapshot();
   const toast = useToast();
   const location = useLocation();
   const [ncOpen, setNcOpen] = useState(false);
@@ -319,6 +415,11 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => { setNcOpen(false); }, [location.pathname]);
+
+  // FEATURE 3: SPA <Link> navigations bypass the DOM-href interceptor (react-
+  // router navigates from the `to` prop), so re-pin ?cid= after every route
+  // change on multi-container stacks. No-op on single-container open stacks.
+  useEffect(() => { ensureCidInLocation({ cid, multi }); }, [location, cid, multi]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -333,16 +434,15 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
 
   const a = attnItems(snap);
   const agents = snap?.agents ?? [];
-  const tasks = snap?.tasks ?? [];
-  const requests = snap?.requests ?? [];
-  const who = actingHuman(snap);
+  const counts = navCounts(snap); // authoritative totals when present (GH count-mismatch fix)
+  const attnN = attnCardCounts(snap, a);
   const paused = !!(snap?.container && (snap.container as { wakes_enabled?: boolean }).wakes_enabled === false);
 
   const nv = [
     { key: "home", href: "/", ico: "home", label: "Dashboard", count: null as number | null, attn: false },
     { key: "agents", href: "/agents", ico: "agents", label: "Agents", count: agents.length, attn: false },
-    { key: "tasks", href: "/tasks", ico: "tasks", label: "Tasks", count: tasks.filter((t) => t.status === "needs_verification").length, attn: true },
-    { key: "requests", href: "/requests", ico: "requests", label: "Requests", count: requests.filter((r) => r.status === "open").length, attn: false },
+    { key: "tasks", href: "/tasks", ico: "tasks", label: "Tasks", count: counts.tasks, attn: true },
+    { key: "requests", href: "/requests", ico: "requests", label: "Requests", count: counts.requests, attn: false },
     // downstream pages (src/extensions.ts) slot between Requests and Settings
     ...extensions.nav.map((n) => ({ key: n.key, href: n.href, ico: n.ico, label: n.label, count: n.count ? n.count(snap) : null, attn: !!n.attn })),
     { key: "settings", href: "/settings", ico: "sliders", label: "Settings", count: null, attn: false },
@@ -380,8 +480,8 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
         <div className="sb-spacer" />
         <div className="attn-card">
           <div className="h"><Icon name="bell" cls="" /><span>Needs you</span></div>
-          <div className="big tnum">{a.count}</div>
-          <div className="sub">{a.verifs.length} to verify · {a.escs.length} escalation{a.escs.length === 1 ? "" : "s"}</div>
+          <div className="big tnum">{attnN.total}</div>
+          <div className="sub">{attnN.verify} to verify · {attnN.esc} escalation{attnN.esc === 1 ? "" : "s"}</div>
           <Link className="go" to="/">Open action queue <Icon name="arrow" cls="" /></Link>
         </div>
         <div className="maker">
@@ -416,12 +516,7 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
             <Icon name="bell" cls="bell" /><span>Needs you</span><span className="n tnum">{a.count}</span>
           </a>
           <AutonomySwitch />
-          <div className="acting" title="You are the human authority on this container">
-            <span className="lbl">acting as</span>
-            <span className="who" id="actingWho">
-              {who ? (<><Avatar alias={who.alias} kind="human" size="sm" ghLogin={who.github_login} />{who.alias}</>) : <span className="muted">no human registered</span>}
-            </span>
-          </div>
+          <ActingChip />
           <button className="iconbtn" id="themeBtn" title={`Theme: ${currentTheme()} — click to cycle`} onClick={cycle}>
             <Icon name="sun" cls="sun" /><Icon name="moon" cls="moon" />
           </button>

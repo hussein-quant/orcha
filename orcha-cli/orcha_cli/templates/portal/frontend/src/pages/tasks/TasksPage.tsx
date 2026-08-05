@@ -21,6 +21,8 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Shell } from "../../shell/Shell";
 import { threadOf } from "../../api/client";
 import { clockTime, relTime, shortId, trunc } from "../../lib/format";
+import { resultText } from "../../lib/resultText";
+import { isActingOwner, reviewerLabel, reviewerRef, reviewerSupported } from "../../lib/reviewer";
 import { leaseOf, statusClass } from "../../lib/status";
 import { Avatar, Icon, KindBadge, Linkified, Modal, useToast } from "../../components/ui";
 import {
@@ -245,6 +247,111 @@ function MsgRow({ snap, m, onLightbox }: { snap: Snapshot | null; m: ThreadMsg; 
 }
 
 /* ============================================================================
+   Collab v1 — the task's assigned reviewer (tasks-detail.js reviewerChip +
+   tasks-actions.js doReviewer). Advisory (the verify gate stays open to any
+   human): the chip shows WHO the owner asked to verify — GitHub avatar + login
+   for a mapped member, letter avatar + alias otherwise, "anyone" when unset.
+   Owners get a change affordance: the picker lists the container's human
+   MEMBERS (snapshot roster) + an "Anyone" reset, then
+   PUT /api/tasks/{tid}/reviewer {reviewer_agent_id|null, actor_agent_id};
+   the backend re-validates (owner gate, human-member target).
+   Open backends (reviewerSupported false): the caller renders nothing and
+   this endpoint is never called.
+   ========================================================================== */
+function ReviewerChip({ t }: { t: Task }) {
+  const { snap, refresh } = useSnapshot();
+  const toast = useToast();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [selRev, setSelRev] = useState("");
+  // 200 echoes {reviewer: {...}|null} — stamp it locally so the chip
+  // re-renders immediately (doReviewer's in-place update, no 3s-poll wait);
+  // the next snapshot poll confirms it.
+  const [override, setOverride] = useState<{ reviewer: Task["reviewer"]; reviewer_agent_id: string | null } | null>(null);
+  const curId = override ? override.reviewer_agent_id : t.reviewer_agent_id;
+  const r = reviewerRef({ reviewer: override ? override.reviewer : t.reviewer });
+  const canEdit = isActingOwner(actingHuman(snap));
+  const hs = (snap?.agents ?? []).filter((x) => x.kind === "human");
+
+  const openPicker = () => {
+    if (!actingHuman(snap)) {
+      toast("Pick an acting human (top-right) first.", "danger");
+      return;
+    }
+    setSelRev(curId != null ? String(curId) : "");
+    setPickerOpen(true);
+  };
+
+  const setReviewer = async () => {
+    const h = actingHuman(snap);
+    if (!h) return;
+    const rid = selRev || null;
+    try {
+      const resp = await fetch("/api/tasks/" + encodeURIComponent(t.id) + "/reviewer", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reviewer_agent_id: rid, actor_agent_id: h.id }),
+      });
+      let d: { detail?: string; reviewer?: { agent_id?: string; alias?: string; github_login?: string | null } | null } = {};
+      try {
+        d = await resp.json();
+      } catch {
+        /* empty/non-JSON body */
+      }
+      setPickerOpen(false);
+      if (!resp.ok) {
+        toast("Setting reviewer failed (" + resp.status + ")" + (d.detail ? ": " + d.detail : ""), "danger");
+        return;
+      }
+      setOverride({ reviewer: d.reviewer || null, reviewer_agent_id: d.reviewer ? d.reviewer.agent_id || null : null });
+      toast(d.reviewer ? "Reviewer set — " + (d.reviewer.github_login || d.reviewer.alias) : "Reviewer cleared — anyone may verify", "ok");
+      void refresh();
+    } catch {
+      setPickerOpen(false);
+      toast("Setting reviewer failed — network error.", "danger");
+    }
+  };
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      {!r ? (
+        <span className="muted" style={{ fontSize: 12.5 }}>
+          anyone
+        </span>
+      ) : (
+        <>
+          <Avatar alias={r.alias || r.github_login} kind="human" size="sm" ghLogin={r.github_login} />
+          <span style={{ fontSize: 12.5, fontWeight: 600 }}>{reviewerLabel(r)}</span>
+        </>
+      )}
+      {canEdit ? (
+        <button className="iconbtn" data-act="reviewer" type="button" title="Change reviewer" style={{ width: 22, height: 22 }} onClick={openPicker}>
+          <Icon name="pencil" cls="gl" />
+        </button>
+      ) : null}
+      {pickerOpen && (
+        <Modal
+          title="Who should review this task?"
+          desc="The reviewer is asked to verify when the task completes. Anyone may still verify — this routes attention, it doesn't lock the gate."
+          primary="Set reviewer"
+          approve
+          onPrimary={() => void setReviewer()}
+          onClose={() => setPickerOpen(false)}
+        >
+          <select id="revSel" className="reply-in" style={{ width: "100%" }} value={selRev} onChange={(e) => setSelRev(e.target.value)}>
+            <option value="">— Anyone —</option>
+            {hs.map((x) => (
+              <option key={x.id} value={x.id}>
+                {(x.github_login || x.alias) + (String(x.id) === String(curId) ? " (current)" : "")}
+              </option>
+            ))}
+          </select>
+        </Modal>
+      )}
+    </span>
+  );
+}
+
+/* ============================================================================
    Gate surface — plan-approval (B10) OR verify (Epic B), gated on
    plan_decision (ISS-41). Reject REQUIRES a typed reason (same .gate .reason
    markup); plan-approve may carry an OPTIONAL answer (ISS-59).
@@ -350,7 +457,8 @@ function GateSurface({ t, acted, onActed }: { t: Task; acted: boolean; onActed: 
             {isPlan ? "Proposed plan — full text" : "Result claimed by " + whoName}
           </div>
           <div className="tx" style={{ whiteSpace: "pre-wrap", maxHeight: 300, overflowY: "auto" }}>
-            <Linkified text={isPlan ? pm?.body || "" : t.result || "—"} tasks={snap?.tasks} />
+            {/* open-orcha#209: task.result is JSONB — normalize before render */}
+            <Linkified text={isPlan ? pm?.body || "" : resultText(t.result) || "—"} tasks={snap?.tasks} />
           </div>
         </div>
         <div className="field" style={{ marginTop: 14 }}>
@@ -1693,6 +1801,20 @@ export function TasksPage() {
                           assignee
                         </span>{" "}
                         <AgentLink snap={snap} alias={t.assignee} />
+                        {/* collab v1: assigned reviewer — rendered ONLY when the
+                            snapshot speaks collab (cloud); open backends show
+                            nothing and never touch the reviewer endpoint. */}
+                        {reviewerSupported(snap) ? (
+                          <>
+                            <span className="muted" style={{ fontSize: 12.5 }}>
+                              ·
+                            </span>
+                            <span className="muted" style={{ fontSize: 12.5 }}>
+                              reviewer
+                            </span>{" "}
+                            <ReviewerChip key={"rev-" + t.id} t={t} />
+                          </>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -1710,7 +1832,8 @@ export function TasksPage() {
                     <div className="field" style={{ marginTop: 14 }}>
                       <div className="lbl">Result</div>
                       <div className="tx">
-                        <Linkified text={t.result} tasks={snap?.tasks} />
+                        {/* open-orcha#209: task.result is JSONB — normalize before render */}
+                        <Linkified text={resultText(t.result)} tasks={snap?.tasks} />
                       </div>
                     </div>
                   ) : null}

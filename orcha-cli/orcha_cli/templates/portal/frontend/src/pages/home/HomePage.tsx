@@ -11,6 +11,7 @@
 import { useEffect, useState } from "react";
 import { sendJSON } from "../../api/client";
 import { esc, relTime, trunc } from "../../lib/format";
+import { reviewFor } from "../../lib/reviewer";
 import {
   actingHuman,
   agentByAlias,
@@ -70,6 +71,10 @@ const PAGE_CSS = `
     border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; max-height: 220px; overflow: auto; white-space: pre-wrap; }
   .aq .ctx .lbl { color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; font-weight: 650; display: block; margin-bottom: 3px; }
   .aq .acts { display: flex; gap: 8px; margin-top: auto; padding-top: 3px; flex-wrap: wrap; }
+  /* collab v1 (cloud pages/home.css): someone-else's-review de-emphasis */
+  .aq.verify.other-review { opacity: .55; }
+  .aq.verify.other-review:hover { opacity: .85; }
+  .aq .type .tag.review-for { margin-left: 7px; text-transform: none; letter-spacing: 0; }
 
   /* kanban */
   .kanban { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 13px; }
@@ -373,9 +378,18 @@ export function HomePage() {
   const verifyCard = (t: Task) => {
     const who = (t.assignees || [])[0];
     const a = agentByAlias(snap, who);
+    // Collab v1 (home-state.js): a task with an owner-assigned reviewer is
+    // SOMEONE's review. The assigned reviewer (or any owner — permissive when
+    // member_role is absent, i.e. open backends) sees the card normally;
+    // everyone else gets it de-emphasized + labeled. Frontend-only: the
+    // backend verify gate stays permissive (any human CAN verify).
+    const revLabel = reviewFor(t, actingHuman(snap));
     return (
-      <div className="aq verify" key={"v-" + t.id}>
-        <span className="type"><Icon name="check" cls="" />Verify task</span>
+      <div className={"aq verify" + (revLabel ? " other-review" : "")} key={"v-" + t.id}>
+        <span className="type">
+          <Icon name="check" cls="" />Verify task
+          {revLabel ? <span className="tag review-for">review: {revLabel}</span> : null}
+        </span>
         <div className="ttl">{t.title}</div>
         <div className="who">
           {who ? <AgentLink snap={snap} alias={who} /> : "—"}<span>·</span>
