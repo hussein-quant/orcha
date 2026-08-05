@@ -19,6 +19,7 @@ import { relTime, shortId, trunc } from "../../lib/format";
 import { leaseOf, statusClass } from "../../lib/status";
 import { Shell } from "../../shell/Shell";
 import { actingHuman, agentByAlias, planMessageOf, useSnapshot } from "../../state/SnapshotProvider";
+import type { Identity } from "../../extensions";
 import type { Agent, OrchaRequest, Snapshot, Task } from "../../types";
 import { Conversation } from "./Conversation";
 import { RunsFeed } from "./runlog";
@@ -77,6 +78,61 @@ function fmtInterval(secs: number | null): string {
 function awakePresets(current: number | null): { secs: number | null; label: string }[] {
   if (current == null || AWAKE_PRESETS.some((p) => p.secs === current)) return AWAKE_PRESETS;
   return AWAKE_PRESETS.concat([{ secs: current, label: fmtInterval(current) }]);
+}
+
+/* ---------- per-agent autonomy override (mig 043: PATCH /api/agents/{id}) ----
+   Inherit (null) = the container level governs; a level chip grants THIS agent
+   a different engine level WITHOUT moving the container slider. HUMAN-AUTHORITY
+   gated (same PATCH lane as role + persona edits). While the container ENFORCES
+   its level (autonomy_enforced), every override is ignored server-side — the
+   chips render disabled with an honest "enforced" note so the live state is
+   never misread. The desc always names the EFFECTIVE level (the snapshot's
+   server-computed effective_autonomy — the one shared rule the completion gate
+   uses), so what the human reads here is exactly what the engine will do.
+   Graceful absence: an open backend that omits the mig-043 exposure fields
+   (autonomy_override / effective_autonomy) renders NO override control. */
+const AUT_OVERRIDES: { id: string | null; name: string }[] = [
+  { id: null, name: "Inherit" },
+  { id: "plan", name: "Plan-only" },
+  { id: "pr", name: "Build to PR" },
+  { id: "full", name: "Full" },
+];
+function autLevelName(level: string | null | undefined): string {
+  return (AUT_OVERRIDES.find((o) => o.id === level) || { name: undefined }).name || level || "Plan-only";
+}
+function containerEnforced(snap: Snapshot | null): boolean {
+  return !!snap?.container?.autonomy_enforced;
+}
+// Cloud access model (mig 039): the selector is enabled only for owners /
+// manage_autonomy holders — the SAME grant the container slider requires (the
+// server enforces regardless; this only gates the AFFORDANCE). Viewers
+// (role-viewer members AND trusted non-members) stay read-only: they still SEE
+// the current override + effective level, chips disabled. An enforced container
+// parks the control for everyone (the override is ignored server-side).
+// Trust off (no identity registered — the open default) falls back to the
+// permissive owner convention: the acting human whose member_role is 'owner'
+// or absent may act; the server stays the enforcer either way.
+function canEditAutOvr(snap: Snapshot | null, identity: Identity | null): boolean {
+  const h = actingHuman(snap); // null for a trusted non-member (viewerOnly)
+  if (!h || containerEnforced(snap)) return false;
+  if (identity) {
+    if (identity.member_role === "viewer") return false; // mig 039: read-only role
+    if (identity.member_role === "owner") return true; // owners implicitly hold every grant
+    return (identity.grants || []).indexOf("manage_autonomy") >= 0;
+  }
+  return h.member_role === "owner" || h.member_role == null;
+}
+function effectiveAutonomyOf(snap: Snapshot | null, a: Pick<Agent, "autonomy_override" | "effective_autonomy">): string {
+  // Prefer the server-computed field (single shared rule); degrade to the same
+  // rule computed client-side when the snapshot omits it.
+  if (a.effective_autonomy) return a.effective_autonomy;
+  const containerLevel = snap?.container?.autonomy_level || "plan";
+  return containerEnforced(snap) ? containerLevel : a.autonomy_override || containerLevel;
+}
+function autOvrDesc(snap: Snapshot | null, a: Pick<Agent, "autonomy_override" | "effective_autonomy">): string {
+  const eff = "Effective: " + autLevelName(effectiveAutonomyOf(snap, a));
+  if (containerEnforced(snap)) return eff + " — 🔒 container enforces its level for all agents (override ignored)";
+  return eff + (a.autonomy_override ? " — per-agent override" : " — inherits the container level");
 }
 
 /* ---------- ISS-69(a): embodiment lease badge ------------------------------ */
@@ -282,7 +338,7 @@ type DigestEntry = { loading: true } | { loading?: false; digest: DigestData | n
 
 /* ========================================================================== */
 export function AgentsPage() {
-  const { snap } = useSnapshot();
+  const { snap, identity } = useSnapshot();
   const toast = useToast();
   const location = useLocation();
   const navigate = useNavigate();
@@ -342,6 +398,7 @@ export function AgentsPage() {
   // optimistic overrides (reconciled by the next snapshot / reverted on failure)
   const [awakeOverride, setAwakeOverride] = useState<{ aid: string; val: number | null } | null>(null);
   const [modelOverride, setModelOverride] = useState<{ aid: string; model: string } | null>(null);
+  const [ovrOverride, setOvrOverride] = useState<{ aid: string; val: string | null } | null>(null);
 
   const modelRuntimeOf = (modelId: string | null): "claude" | "codex" => {
     const m = models.find((x) => x.id === modelId);
@@ -386,6 +443,7 @@ export function AgentsPage() {
     resetCaps(); // ISS-68 PR-3: reset section caps
     setAwakeOverride(null);
     setModelOverride(null);
+    setOvrOverride(null);
     const sp = new URLSearchParams(location.search);
     sp.set("agent", alias);
     navigate({ pathname: "/agents", search: "?" + sp.toString() }, { replace: true });
@@ -473,6 +531,29 @@ export function AgentsPage() {
       });
   };
 
+  // mig 043: PATCH the per-agent override. Mirrors onAwakeClick — human-gated,
+  // optimistic + revert, reconciled by the next snapshot. "Inherit" PATCHes an
+  // EXPLICIT null (clear-to-inherit) — the backend distinguishes null-supplied
+  // (clear) from omitted (unchanged) via model_fields_set.
+  const onAutOvrClick = (ag: Agent, ovr: string | null) => {
+    const h = actingHuman(snap);
+    if (!h) {
+      toast("Pick an acting human first.", "danger");
+      return;
+    }
+    const prev = ag.autonomy_override != null ? ag.autonomy_override : null;
+    const cur = ovrOverride && ovrOverride.aid === ag.id ? ovrOverride.val : prev;
+    if (ovr === cur) return; // no-op (re-click of the active chip)
+    setOvrOverride({ aid: ag.id, val: ovr }); // optimistic; reconciled by the next snapshot
+    sendJSON("PATCH", "/api/agents/" + encodeURIComponent(ag.id), { actor_agent_id: h.id, autonomy_override: ovr })
+      .then(() => toast(ovr == null ? "Autonomy · inherits the container level" : "Autonomy override → " + autLevelName(ovr), "ok"))
+      .catch((e) => {
+        setOvrOverride(null); // revert on failure
+        const st = (e as { status?: number }).status;
+        toast(st ? "Autonomy override change failed (" + st + ")" : "Autonomy override change failed: " + (e as Error).message, "danger");
+      });
+  };
+
   /* ---------- digest block ---------- */
   const digestBlock = (ag: Agent) => {
     if (ag.kind === "human") return <div className="none">Humans don&#39;t rehydrate — no digest.</div>;
@@ -545,6 +626,15 @@ export function AgentsPage() {
       const visibleModels = modelsForRuntime(selectedRuntime);
       const modelVal = modelOverride && modelOverride.aid === a.id ? modelOverride.model : a.model;
       const awakeVal = awakeOverride && awakeOverride.aid === a.id ? awakeOverride.val : a.auto_wake_interval_secs != null ? a.auto_wake_interval_secs : null;
+      // #64 override segment — graceful absence: an open backend that omits the
+      // mig-043 exposure fields renders NO control (nothing to read or write).
+      const showAutOvr = a.effective_autonomy != null || a.autonomy_override != null;
+      const ovrOptimistic = ovrOverride && ovrOverride.aid === a.id;
+      const ovrVal = ovrOptimistic ? ovrOverride.val : a.autonomy_override != null ? a.autonomy_override : null;
+      // while optimistic, ignore the (stale) server-computed effective level and
+      // apply the same shared rule client-side (vanilla onAutOvrClick parity).
+      const ovrDesc = autOvrDesc(snap, ovrOptimistic ? { autonomy_override: ovrVal, effective_autonomy: null } : a);
+      const canEditOvr = canEditAutOvr(snap, identity);
       const full = personaFull[a.id];
       const pOpen = !!personaOpen[a.id];
 
@@ -696,6 +786,29 @@ export function AgentsPage() {
                         ))}
                       </div>
                     </div>
+                    {showAutOvr && (
+                      <div className="ctrl">
+                        <div className="grow">
+                          <div className="lbl">Autonomy</div>
+                          <div className="desc">{ovrDesc}</div>
+                        </div>
+                        <div className="seg" id="autOvrSeg" data-agent={a.id} aria-label="Per-agent autonomy override">
+                          {AUT_OVERRIDES.map((o) => (
+                            <button
+                              key={String(o.id)}
+                              type="button"
+                              className={(ovrVal || null) === o.id ? "on" : ""}
+                              data-ovr={o.id == null ? "null" : o.id}
+                              aria-pressed={(ovrVal || null) === o.id}
+                              disabled={!canEditOvr}
+                              onClick={() => onAutOvrClick(a, o.id)}
+                            >
+                              {o.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

@@ -45,6 +45,7 @@ export interface Identity {
   github_login?: string | null;
   member_role?: string | null;
   avatar_url?: string | null;
+  grants?: string[] | null; // mig 039 per-member grants (owner implies all)
 }
 
 export interface AccountMenuItem {

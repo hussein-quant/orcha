@@ -84,6 +84,8 @@ export function mapSnapshot(rawIn: any): Snapshot {
     github_login: a.github_login != null ? a.github_login : null,
     member_role: a.member_role != null ? a.member_role : null,
     reasoning_effort: a.reasoning_effort != null ? a.reasoning_effort : null,
+    autonomy_override: a.autonomy_override != null ? a.autonomy_override : null,
+    effective_autonomy: a.effective_autonomy != null ? a.effective_autonomy : null,
     role: a.role || "—",
     model: a.model != null ? a.model : null,
     status: a.status,

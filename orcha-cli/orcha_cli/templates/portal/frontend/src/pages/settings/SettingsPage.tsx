@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getJSON, sendJSON } from "../../api/client";
 import { Icon, Modal, useToast } from "../../components/ui";
 import { Shell } from "../../shell/Shell";
+import { extensions } from "../../extensions";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 
 /* ---- settings-specific CSS, carried over verbatim from settings.html ------ */
@@ -814,6 +815,9 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
+        {(extensions.settingsSections ?? []).map((sec) => (
+          <sec.element key={sec.key} />
+        ))}
       </div>
     </Shell>
   );
