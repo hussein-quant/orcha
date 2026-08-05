@@ -34,6 +34,7 @@ import {
 } from "../../state/SnapshotProvider";
 import { FilesChanged } from "../../components/FilesChanged";
 import { useRunStream } from "../../hooks/useRunStream";
+import { nearBottom, pinToBottom } from "../../lib/logScroll";
 import type { Agent, Attachment, Run, Snapshot, Task, ThreadMsg } from "../../types";
 import { tasksPageCss } from "./pageCss";
 import { SortCtl, sortComparator } from "../../lib/sort";
@@ -1379,9 +1380,12 @@ function RunCard({ run }: { run: Run }) {
   const atBottomRef = useRef(true);
 
   // appendLine parity: stick to the bottom while the reader is at the bottom.
+  // pinToBottom is INSTANT — a smooth-animated pin would let the onScroll
+  // handler observe a mid-animation position, flip atBottomRef false, and
+  // permanently stop the feed from following its own stream.
   useEffect(() => {
     const el = logRef.current;
-    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
+    if (el && atBottomRef.current) pinToBottom(el);
   }, [lines]);
 
   const rid = run.run_id || run.id || "";
@@ -1489,8 +1493,7 @@ function RunCard({ run }: { run: Run }) {
           id={"run-" + rid}
           ref={logRef}
           onScroll={(e) => {
-            const el = e.currentTarget;
-            atBottomRef.current = el.scrollHeight - el.clientHeight - el.scrollTop < 36;
+            atBottomRef.current = nearBottom(e.currentTarget);
           }}
         >
           {lines.map((e, i) => (

@@ -15,6 +15,7 @@ import { esc, shortId, relTime, clockTime } from "../../lib/format";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent, Run } from "../../types";
 import { classifyLine, type LogEvent } from "../../lib/classify";
+import { nearBottom, pinToBottom } from "../../lib/logScroll";
 import { FilesChanged } from "../../components/FilesChanged";
 
 // LogEvent comes from lib/classify; `sec` (section collapse) is a legacy
@@ -27,8 +28,11 @@ function logRow(e: LogRow, isNew: boolean): string {
   return `<div class="ln t-${t}${isNew ? " new" : ""}"><span class="gut">›</span><span class="ty">${esc(e.label || t)}</span><span class="tx">${esc(e.text)}${det}</span></div>`;
 }
 const CHEV = '<svg class="" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12l5-4.5"/></svg>';
-function appendLine(logEl: HTMLElement, e: LogRow): void {
-  const atBottom = logEl.scrollHeight - logEl.clientHeight - logEl.scrollTop < 36;
+export function appendLine(logEl: HTMLElement, e: LogRow): void {
+  // read BEFORE insert; pinToBottom pins instantly, so a followed log reads
+  // back exactly at the bottom here no matter how tall the last row was
+  // (a smooth-animated pin would read mid-animation and kill the follow).
+  const atBottom = nearBottom(logEl);
   if (e.sec != null) {
     logEl.insertAdjacentHTML("beforeend", `<div class="sec"><span class="chev">${CHEV}</span><span>${esc(e.sec)}</span></div>`);
   } else {
@@ -38,7 +42,7 @@ function appendLine(logEl: HTMLElement, e: LogRow): void {
   }
   // cap length so a long live stream can't grow unbounded
   while (logEl.children.length > 400 && logEl.firstElementChild) logEl.removeChild(logEl.firstElementChild);
-  if (atBottom) logEl.scrollTop = logEl.scrollHeight;
+  if (atBottom) pinToBottom(logEl);
 }
 // group toggle: clicking a .sec hides/shows lines until the next .sec (wireSections)
 function onLogSectionClick(ev: React.MouseEvent<HTMLDivElement>) {
