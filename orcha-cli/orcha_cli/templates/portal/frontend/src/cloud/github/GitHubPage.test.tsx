@@ -120,6 +120,43 @@ describe("GitHubPage list (wire-contract render)", () => {
     expect(screen.queryByText("No GitHub repo connected")).not.toBeInTheDocument();
   });
 
+  it("renders the vanilla column-header row above the list", async () => {
+    stubFetch(AGENTS_WITH_HUMAN);
+    mount();
+    await screen.findByText("Fix login bug");
+    const head = document.querySelector(".ghhead-row");
+    expect(head).not.toBeNull();
+    // ID | TITLE | REVIEWERS | CHECKS | MERGE | UPDATED, same cell classes as .ghrow
+    expect(head!.querySelector(".ghh-num")!.textContent).toBe("ID");
+    expect(head!.querySelector(".ghh-main")!.textContent).toBe("TITLE");
+    expect(head!.querySelector(".ghh-reviewers")!.textContent).toBe("REVIEWERS");
+    expect(head!.querySelector(".ghh-checks")!.textContent).toBe("CHECKS");
+    expect(head!.querySelector(".ghh-merge")!.textContent).toBe("MERGE");
+    expect(head!.querySelector(".ghh-updated")!.textContent).toBe("UPDATED");
+    // pulls tab keeps the header and adds the / CONTEXT suffix to TITLE
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow");
+    expect(document.querySelector(".ghhead-row .ghh-main")!.textContent).toBe("TITLE / CONTEXT");
+  });
+
+  it("an issue row carries the empty reviewers/checks/merge columns and the updated cell (vanilla degrade)", async () => {
+    stubFetch(AGENTS_WITH_HUMAN);
+    mount();
+    await screen.findByText("Fix login bug");
+    const row = document.querySelector('[data-gh-row="issue:7"]');
+    expect(row).not.toBeNull();
+    // vanilla issueRowHtml leaves the three PR-only columns present but empty
+    // so the shared header lines up over both tabs
+    expect(row!.querySelector(".gh-reviewers-col")).not.toBeNull();
+    expect(row!.querySelector(".gh-reviewers-col")!.innerHTML).toBe("");
+    expect(row!.querySelector(".gh-checks-col")!.innerHTML).toBe("");
+    expect(row!.querySelector(".gh-merge-col")!.innerHTML).toBe("");
+    // updated relative time renders (never the raw ISO string)
+    const updated = row!.querySelector(".gh-updated");
+    expect(updated!.textContent).toBeTruthy();
+    expect(updated!.textContent).not.toContain("2026-08-01");
+  });
+
   it("pulls tab renders PR rows and progressively fills checks via the batch endpoint", async () => {
     const calls = stubFetch(AGENTS_WITH_HUMAN);
     mount();
@@ -133,6 +170,52 @@ describe("GitHubPage list (wire-contract render)", () => {
     // PR dispatch button reads "Fix", clean mergeable_state shows "Checks passed"
     expect(screen.getByRole("button", { name: "Dispatch an agent to fix checks/review feedback on this PR" })).toBeInTheDocument();
     expect(screen.getByText("Checks passed")).toBeInTheDocument();
+  });
+
+  it("a PR row fills the reviewers/checks/merge/updated columns (vanilla pullRowHtml)", async () => {
+    stubFetch(AGENTS_WITH_HUMAN);
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("3 passed"); // progressive fill settled
+    const row = document.querySelector('[data-gh-row="pull:12"]');
+    expect(row).not.toBeNull();
+    // REVIEWERS: requested_reviewers as overlapping avatars in the reviewers column
+    const reviewers = row!.querySelector(".gh-reviewers-col .gh-reviewers");
+    expect(reviewers).not.toBeNull();
+    expect(reviewers!.querySelectorAll(".av").length).toBe(1); // ["kedar"]
+    // CHECKS: the rollup chip (patched in by the batch endpoint) in its column
+    const checks = row!.querySelector(".gh-checks-col .tag.gh-checks");
+    expect(checks).not.toBeNull();
+    expect(checks!.classList.contains("pass")).toBe(true);
+    expect(checks!.textContent).toContain("3 passed");
+    // MERGE: mergeable_state clean -> the green "Checks passed" merge chip
+    const merge = row!.querySelector(".gh-merge-col .tag.gh-merge");
+    expect(merge).not.toBeNull();
+    expect(merge!.classList.contains("ok")).toBe(true);
+    // UPDATED: relative time, never the raw ISO string
+    const updated = row!.querySelector(".gh-updated");
+    expect(updated!.textContent).toBeTruthy();
+    expect(updated!.textContent).not.toContain("2026-08-01");
+  });
+
+  it("shows the OrchaSkeleton list shimmer while the list fetch is unsettled", async () => {
+    // issues fetch never resolves -> after the 120ms show delay the vanilla
+    // "list-rows" skeleton markup (shared skeleton.css classes) fills #ghlist
+    const json = (data: unknown, status = 200) =>
+      ({ ok: status < 400, status, json: async () => data }) as unknown as Response;
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/github/")) return new Promise<Response>(() => { /* never settles */ });
+      if (url.startsWith("/api/me")) return json({ identity: { agent_id: "h1", github_login: "kedar" }, trusted: true });
+      if (url.startsWith("/api/containers/c1")) return json(rawSnap(AGENTS_WITH_HUMAN));
+      if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
+      return json({});
+    }) as unknown as typeof fetch;
+    mount();
+    await waitFor(() => {
+      expect(document.querySelector("#ghlist .ork-sk-wrap .ork-sk-row")).not.toBeNull();
+    });
   });
 });
 
