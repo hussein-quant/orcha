@@ -1,5 +1,30 @@
 # React portal adoption — premium-delta audit
 
+> ## Remediation status & priority order (2026-08-05, post-deploy)
+>
+> **Fixed & deployed (PR #113 + upstream):** the unstyled-open-class bug family
+> (open `styles.css` now layers under the cloud skin as `styles/open-base.css`
+> — giant sidebar logo etc.), the dark-flash on full-page navigations
+> (pre-paint theme script), intrinsic brand-SVG sizes, and GitHub avatar
+> thumbnails wherever the snapshot carries `github_login` (adapter passes it
+> through upstream now).
+>
+> **P0 — correctness/identity (do next, mostly §A/§B):**
+> 1. `/api/me` acting-identity layer (§A) — trusted non-members currently fall
+>    through to the project's first human on mutations. Upstream-able seam:
+>    an identity provider the open `actingHuman` consults when present.
+> 2. Multi-project `?cid=` propagation on shell nav + page links (§B) — links
+>    drop project scope on full loads. Land `withCid()` in the open shell.
+> 3. Sign-out account menu (§C) — sessions can't be cleared from the UI.
+> 4. Reviewer routing (§F) + `[object Object]` resultText normalization —
+>    adapter field additions are the smallest highest-leverage upstream PR.
+> **P1 — premium UX:** provider-keys card, pairing entry points (topbar +
+> settings), appearance/skin settings section (needs the settings-section
+> extension seam upstream), conversation honesty (`wakesServed`), sidebar
+> authoritative counts, #64 autonomy-override UI (tripwire test in place).
+> **P2 — polish:** skeletons/primed-shell nav cache, viewer read-only states,
+> notification-center gh-avatar rows, misc §J long tail.
+
 **Purpose.** The open-Orcha React base now vendored at
 `orcha-cli/orcha_cli/templates/portal/frontend/src/**` replaces the cloud vanilla portal
 (`orcha-cli/orcha_cli/templates/portal/static/**`). The open base was written for open Orcha
