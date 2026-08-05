@@ -467,6 +467,7 @@ async def test_full_override_audit_records_resolved_level(
 # from: autonomy_override / effective_autonomy / autonomy_enforced on every surface).
 
 import pathlib
+import re
 
 _FRONTEND = (pathlib.Path(__file__).resolve().parent.parent / "orcha-cli" / "orcha_cli"
              / "templates" / "portal" / "frontend" / "src")
@@ -488,14 +489,22 @@ def test_shell_autonomy_switch_posts_levels_to_the_same_endpoint():
         "the slider lost its human-gate affordance"
 
 
-def test_react_port_has_not_silently_grown_an_ungated_override_control():
-    """Tripwire for the fast-follow: the day autonomy_override lands in the React frontend,
-    this test goes RED so the mig-039 affordance gates (manage_autonomy grant + read-only
-    viewers), the explicit-null Inherit chip, the effective_autonomy badge, and the enforced
-    lock glyph are ported WITH it — the control must never ship gate-less. Until then it
-    also documents, honestly, that the #64 override surface is API-only."""
-    hits = [p for p in _FRONTEND.rglob("*.ts*")
-            if ".test." not in p.name and "autonomy_override" in p.read_text()]
-    assert not hits, (
-        "autonomy_override reached the React frontend (%s) — port the #64 UI teeth with it"
-        % ", ".join(str(p) for p in hits))
+def test_react_override_control_ships_with_all_mig039_teeth():
+    """The #64 override UI landed in the React frontend (AgentsPage) — the former
+    tripwire now pins its four mandatory teeth so a refactor can't shed them:
+    (1) mig-039 affordance gates, (2) explicit-null Inherit chip, (3) the
+    effective_autonomy badge, (4) the enforced lock glyph. Behavior coverage:
+    frontend AgentsPage.autonomy.test.tsx (8 tests)."""
+    src = (_FRONTEND / "pages" / "agents" / "AgentsPage.tsx").read_text()
+    # (1) gates: grant + viewer read-only + owner path
+    assert "canEditAutOvr" in src and "manage_autonomy" in src, "affordance gates missing"
+    assert '"viewer"' in src, "viewer read-only gate missing"
+    # (2) Inherit sends an explicit null (clear-vs-omit contract)
+    assert "autonomy_override" in src and "Inherit" in src, "Inherit chip missing"
+    assert re.search(r"autonomy_override[\"']?\s*:\s*", src), "override not sent in the PATCH body"
+    # (3) effective badge from the server-computed field
+    assert "effective_autonomy" in src and "Effective:" in src, "effective badge missing"
+    # (4) enforced lock glyph parks the chips
+    assert "autonomy_enforced" in src, "enforce gate missing"
+    # graceful absence on open backends
+    assert "showAutOvr" in src, "absence gate missing"

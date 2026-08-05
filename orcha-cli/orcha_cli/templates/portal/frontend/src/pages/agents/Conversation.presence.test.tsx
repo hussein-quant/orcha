@@ -26,7 +26,10 @@ import { Conversation } from "./Conversation";
 // uses its OWN cache-cold agent id so no case sees the prior case's state.
 const AI = (id: string, status: string) => ({ id, alias: "Frame-" + id, kind: "ai", role: "Builder", status });
 const RAW_SNAPSHOT = {
-  container: { id: "c1", name: "Orcha", status: "active", autonomy_level: "plan" },
+  // last_wake_scan_at: a live daemon serves this project's wakes — these
+  // scenarios exercise the SERVED indicator matrix (the wakes-not-served
+  // honesty rule has its own suite: Conversation.honesty.test.tsx).
+  container: { id: "c1", name: "Orcha", status: "active", autonomy_level: "plan", last_wake_scan_at: new Date().toISOString() },
   agents: [
     { id: "h1", alias: "kedar", kind: "human", role: "Founder", status: "idle" },
     AI("q1", "idle"), AI("q2", "idle"), AI("q3", "working"), AI("q4", "idle"),

@@ -14,6 +14,11 @@ import { MetricsPage } from "./cloud/metrics/MetricsPage";
 import { GitHubPage } from "./cloud/github/GitHubPage";
 import { DevicePage } from "./cloud/device/DevicePage";
 import { MembersPage } from "./cloud/members/MembersPage";
+// Importing the appearance module also runs its module-level boot hook
+// (restore the persisted data-skin + kick the /api/prefs sync) at app boot.
+import { AppearanceSection } from "./cloud/settings/AppearanceSection";
+import { ProviderKeysSection } from "./cloud/settings/ProviderKeysSection";
+import { PairingButton, PairingSection } from "./cloud/settings/pairing";
 
 export interface ExtensionRoute {
   path: string;
@@ -40,6 +45,7 @@ export interface Identity {
   github_login?: string | null;
   member_role?: string | null;
   avatar_url?: string | null;
+  grants?: string[] | null; // mig 039 per-member grants (owner implies all)
 }
 
 export interface AccountMenuItem {
@@ -49,11 +55,20 @@ export interface AccountMenuItem {
   danger?: boolean;
 }
 
+// Settings-section + topbar-action seam. NOTE: like the identity seam above,
+// these declarations match what open Orcha's extensions.ts carries upstream in
+// EXACTLY this shape — added here ahead of the vendored copy so the next
+// upstream sync is a no-op diff on the contract. The vendored SettingsPage/
+// Shell in this repo may not consume them yet; they are inert until that sync.
+export interface SettingsSection { key: string; element: ComponentType } // renders its own <div className="card">…
+
 export interface Extensions {
   routes: ExtensionRoute[];
   nav: ExtensionNavItem[];
   identity?: (cid: string | null) => Promise<Identity | null>;
   accountMenu?: (identity: Identity | null) => AccountMenuItem[];
+  settingsSections?: SettingsSection[];
+  topbarActions?: ComponentType[];   // rendered in the topbar between the notification pill and the autonomy switch
 }
 
 export const extensions: Extensions = {
@@ -74,4 +89,12 @@ export const extensions: Extensions = {
   // vanilla data.js fetchMe / app-shell.js actingMenuHtml, ported).
   identity: fetchIdentity,
   accountMenu,
+  // Cloud settings cards (vanilla settings.html parity: appearance skin picker,
+  // per-provider API keys, phone pairing) + the topbar pairing button.
+  settingsSections: [
+    { key: "appearance", element: AppearanceSection },
+    { key: "provider-keys", element: ProviderKeysSection },
+    { key: "pairing", element: PairingSection },
+  ],
+  topbarActions: [PairingButton],
 };

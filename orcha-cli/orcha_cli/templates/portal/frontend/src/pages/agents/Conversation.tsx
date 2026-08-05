@@ -37,6 +37,7 @@ interface ConvAtt {
   kind?: string;
 }
 interface ConvTurn {
+  id?: string;
   seq: number;
   role: string;
   author_agent_id?: string | null;
@@ -53,6 +54,17 @@ interface Staged {
   kind: string;
   status: "uploading" | "done" | "failed";
   ref?: any;
+}
+// the optimistic just-sent turn: the composer's text + staged refs live here
+// until the server owns the turn (vanilla conversation-composer.js pendingLocal).
+interface PendingLocal {
+  content: string;
+  atts: { id: string; name: string }[];
+  keepStaged: Staged[];
+  authorId: string;
+  at: number;
+  status: "sending" | "failed";
+  err: string | null;
 }
 
 // the /-palette mirrors the CLI work skills (presentational; sends as turn content)
@@ -77,6 +89,26 @@ function fmtSize(n: unknown): string {
 }
 
 const PRES_LABEL: Record<string, string> = { idle: "idle", waking: "waking", working: "working", busy: "busy", replied: "replied", stopped: "offline" };
+
+/* ---- multi-project: is a HOST-SIDE notifier serving this container? ----
+ * The daemon's per-tick wake-scan poll stamps containers.last_wake_scan_at
+ * (mig 037, throttled to one write/15s), so a stamp within the last ~2 minutes
+ * means "an `orcha init`-bound workspace's daemon serves THIS project's
+ * wakes". NULL/stale ⇒ portal-only: full CRUD works, but nothing wakes agents
+ * until host-side glue binds a workspace. (Port of app-data.js wakesServed.) */
+const WAKES_SERVED_WINDOW_MS = 2 * 60 * 1000;
+function wakesServed(c: Snapshot["container"]): boolean {
+  const t = Date.parse((c && c.last_wake_scan_at) || "");
+  return !!t && Date.now() - t <= WAKES_SERVED_WINDOW_MS;
+}
+// Is a host-side notifier serving THIS project's wakes? Absent data — snapshot
+// not loaded yet — reads as SERVED so the chat never false-alarms while booting.
+// (Port of conversation-state.js convWakesServed.)
+function convWakesServed(snap: Snapshot | null): boolean {
+  const c = snap && snap.container;
+  if (!c) return true;
+  return wakesServed(c);
+}
 
 // ISS-68: per-agent conversation cache so switching agent tabs and back does
 // NOT reload the thread from scratch. Module-level, mirrors the vanilla cache.
@@ -218,6 +250,9 @@ export function Conversation({ agent }: { agent: Agent }) {
   const [presenceReason, setPresenceReason] = useState<string | null>(freshCache ? freshCache.presenceReason : null);
   const [draft, setDraftRaw] = useState(() => loadDraft(agent.id)); // ISS-64 rehydrate
   const [staged, setStaged] = useState<Staged[]>([]);
+  // dup-send guard + optimistic pending bubble (vanilla conversation-composer.js)
+  const [sending, setSending] = useState(false);
+  const [pendingLocal, setPendingLocalRaw] = useState<PendingLocal | null>(null);
   const [slashIdx, setSlashIdx] = useState(0);
   const [slashClosed, setSlashClosed] = useState(false);
   const [dragover, setDragover] = useState(false);
@@ -236,10 +271,18 @@ export function Conversation({ agent }: { agent: Agent }) {
   const atBottomRef = useRef(true);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  // `sending` mirrored in a ref so a second Enter/click in the SAME tick (before
+  // React re-renders) is still a no-op — the vanilla in-flight guard, race-proof.
+  const sendingRef = useRef(false);
+  const pendingLocalRef = useRef<PendingLocal | null>(null);
 
   const setDraft = (v: string) => {
     setDraftRaw(v);
     saveDraft(agent.id, v); // ISS-64: persist on every keystroke
+  };
+  const setPendingLocal = (p: PendingLocal | null) => {
+    pendingLocalRef.current = p;
+    setPendingLocalRaw(p);
   };
 
   /* ---------- load + poll ---------- */
@@ -286,8 +329,13 @@ export function Conversation({ agent }: { agent: Agent }) {
       if (!fresh.length) return;
       if (fresh.some((t) => t.role === "agent")) setAwaiting(false); // reply landed -> stop "thinking"
       setTurns((prev) => {
-        const next = prev.concat(fresh);
-        lastSeqRef.current = next[next.length - 1].seq;
+        // dedupe the append by id/seq so an overlapped response (or the turn the
+        // send POST already reconciled via settleSend) can never paint twice.
+        const seen = new Set(prev.map((x) => (x.id != null ? "i:" + x.id : "q:" + x.seq)));
+        const add = fresh.filter((t) => !seen.has(t.id != null ? "i:" + t.id : "q:" + t.seq));
+        const next = add.length ? prev.concat(add) : prev;
+        const tail = fresh[fresh.length - 1];
+        if (typeof tail.seq === "number" && tail.seq > lastSeqRef.current) lastSeqRef.current = tail.seq;
         return next;
       });
     } catch { /* transient */ }
@@ -319,7 +367,7 @@ export function Conversation({ agent }: { agent: Agent }) {
   useEffect(() => {
     const list = listRef.current;
     if (list && atBottomRef.current) list.scrollTop = list.scrollHeight;
-  }, [turns, awaiting, presence, shown]);
+  }, [turns, awaiting, presence, shown, pendingLocal]);
 
   // autosize the textarea (vanilla autosize())
   useEffect(() => {
@@ -389,15 +437,24 @@ export function Conversation({ agent }: { agent: Agent }) {
     });
   };
 
-  /* ---------- composer ---------- */
-  const send = async () => {
+  /* ---------- composer ----------
+     Dup-send root cause #1 (vanilla conversation-composer.js): send() had NO
+     in-flight guard and only cleared the input after the POST resolved — a
+     second Enter (or held-key repeat, or a "did it go through?" click while
+     the portal is slow/restarting) re-read the same text and POSTed the same
+     turn again. Everything now funnels through ONE guarded path: `sending`
+     makes the second activation a no-op, the button is down with a spinner,
+     and the composer is cleared optimistically (restored on failure — nothing
+     is ever silently lost). */
+  const send = () => {
+    if (sendingRef.current) return; // in flight: Enter/click/key-repeat are no-ops until it settles
     const v = draft.trim();
     const done = staged.filter((s) => s.status === "done");
     if (staged.some((s) => s.status === "uploading")) {
       toast("Wait for uploads to finish", "danger");
       return;
     }
-    if (!v && !done.length) return; // #337: allow attachment-only turns
+    if (!v && !done.length) return; // #337: allow attachment-only turns (no text required)
     const h = actingHuman(snap);
     if (!h) {
       toast("Pick an acting human (top-right) first.", "danger");
@@ -405,25 +462,93 @@ export function Conversation({ agent }: { agent: Agent }) {
     }
     setSlashClosed(true);
     const atts = done.map((s) => ({ id: s.ref.id, name: s.ref.name }));
-    const res = await ensureConv();
-    if (!res.ok) {
-      toast("Couldn't open conversation (" + (res.status || "") + ")", "danger");
-      return;
+    // optimistic: clear the composer NOW (ISS-64 draft included) and paint a
+    // pending bubble; the text + staged refs live on pendingLocal until the
+    // server owns the turn.
+    setDraft("");
+    const keepStaged = staged;
+    setStaged([]);
+    void submitTurn(v, atts, keepStaged, h);
+  };
+  // the ONE place a turn is POSTed (fresh sends and Retry both land here).
+  const submitTurn = async (v: string, atts: { id: string; name: string }[], keepStaged: Staged[], h: Agent) => {
+    sendingRef.current = true;
+    setSending(true);
+    setPendingLocal({ content: v, atts, keepStaged, authorId: h.id, at: Date.now(), status: "sending", err: null });
+    try {
+      const res = await ensureConv();
+      if (!res.ok) {
+        failSend(res.noHuman ? "Pick an acting human (top-right) first." : "Couldn't open conversation (" + (res.status || "") + ")");
+        return;
+      }
+      const r = await fetch("/api/conversations/" + encodeURIComponent(convIdRef.current as string) + "/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "human", author_agent_id: h.id, content: v, attachments: atts.length ? atts : undefined }),
+      });
+      if (!r.ok) {
+        failSend("Send failed (" + r.status + ")");
+        return;
+      }
+      const d: any = await r.json().catch(() => ({}));
+      settleSend(d && d.turn);
+    } catch {
+      failSend("Couldn't reach the portal — it may be restarting.");
     }
-    const r = await fetch("/api/conversations/" + encodeURIComponent(convIdRef.current as string) + "/turns", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role: "human", author_agent_id: h.id, content: v, attachments: atts.length ? atts : undefined }),
-    });
-    if (!r.ok) {
-      toast("Send failed (" + r.status + ")", "danger");
-      return;
+  };
+  // success: the server owns the turn. Reconcile the optimistic bubble with the
+  // durable row the POST returned (append by turn id; the poll's id/seq dedupe
+  // drops the copy IT fetches), then raise the honest awaiting-reply indicator.
+  const settleSend = (t: ConvTurn | undefined) => {
+    sendingRef.current = false;
+    setSending(false);
+    if (t) {
+      setTurns((prev) => {
+        if (prev.some((x) => String(x.id) === String(t.id))) return prev;
+        if (typeof t.seq === "number" && t.seq > lastSeqRef.current) lastSeqRef.current = t.seq;
+        return prev.concat([t]);
+      });
     }
-    setDraft(""); // ISS-64: drop the persisted draft once sent
-    setStaged([]); // #337: clear the staging tray once sent
-    toast("Sent — " + agent.alias + " will reply.", "ok");
+    setPendingLocal(null);
     setAwaiting(true); // show the "thinking…" indicator until the reply lands
     void poll();
+  };
+  // failure: nothing is lost and nothing auto-repeats — the composer gets the
+  // text back (only if the user hasn't typed something new), the staged refs
+  // return to the tray, and the pending bubble flips to an inline danger note
+  // with an explicit Retry.
+  const failSend = (msg: string) => {
+    sendingRef.current = false;
+    setSending(false);
+    const p = pendingLocalRef.current;
+    if (!p) return; // a poll already reconciled this turn (it DID land server-side)
+    setPendingLocal({ ...p, status: "failed", err: msg });
+    setDraftRaw((cur) => {
+      if ((cur || "").trim()) return cur;
+      saveDraft(agent.id, p.content);
+      return p.content;
+    });
+    setStaged((cur) => (!cur.length && p.keepStaged && p.keepStaged.length ? p.keepStaged : cur));
+  };
+  // Retry on the failed bubble: re-submit EXACTLY the failed content through the
+  // same guarded path. The failure-restored composer text is taken back out
+  // first (when still untouched) so a follow-up Enter can't double it.
+  const retrySend = () => {
+    if (sendingRef.current) return;
+    const p = pendingLocalRef.current;
+    if (!p || p.status !== "failed") return;
+    const h = actingHuman(snap);
+    if (!h) {
+      toast("Pick an acting human (top-right) first.", "danger");
+      return;
+    }
+    setDraftRaw((cur) => {
+      if ((cur || "").trim() !== p.content) return cur;
+      saveDraft(agent.id, "");
+      return "";
+    });
+    setStaged((cur) => (cur === p.keepStaged ? [] : cur));
+    void submitTurn(p.content, p.atts, p.keepStaged, h);
   };
 
   /* ---------- S4 slash palette (derived) ---------- */
@@ -459,7 +584,14 @@ export function Conversation({ agent }: { agent: Agent }) {
   const startIdx = Math.max(0, turns.length - shown);
   const visible = turns.slice(startIdx);
 
+  const served = convWakesServed(snap);
   const indicator = () => {
+    // portal-only project (no host workspace bound): NOTHING serves this
+    // project's wakes, so thinking dots would be a lie — the only honest state
+    // is "queued until a runtime exists" (same signal as the banner).
+    if (!served) {
+      return queued("Message queued — this project has no agent runtime yet. It is delivered once a workspace binds on the host.");
+    }
     // resident actively working the human's turn → thinking dots; busy on another
     // (task) lease → an honest "queued" notice (never fake "thinking…").
     if (p.k === "busy") return queued();
@@ -467,24 +599,31 @@ export function Conversation({ agent }: { agent: Agent }) {
     if (awaiting && p.k === "idle") return thinking();
     return queued();
   };
-  const thinking = () => (
-    <div className="turn agent">
-      <Avatar alias={agent.alias} kind="ai" size="sm" />
-      <div className="tb">
-        <div className="tmeta">
-          {agent.alias}
-          <span className="tt">thinking…</span>
-        </div>
-        <div className="conv-thinking">
-          <span />
-          <span />
-          <span />
+  // Cold-start honesty: when the thread has NO agent turn yet, this reply rides
+  // a full agent session boot — say so instead of letting "thinking…" read as
+  // seconds-away.
+  const thinking = () => {
+    const cold = !turns.some((t) => t.role === "agent");
+    return (
+      <div className="turn agent">
+        <Avatar alias={agent.alias} kind="ai" size="sm" />
+        <div className="tb">
+          <div className="tmeta">
+            {agent.alias}
+            <span className="tt">{cold ? "starting…" : "thinking…"}</span>
+          </div>
+          <div className="conv-thinking">
+            <span />
+            <span />
+            <span />
+          </div>
+          {cold && <div className="conv-coldnote">starting the agent’s session — the first reply can take a minute</div>}
         </div>
       </div>
-    </div>
-  );
-  const queued = () => {
-    const msg = p.reason ? p.reason : agent.alias + " is busy with another task — your message is queued and will be answered when it's free.";
+    );
+  };
+  const queued = (reason?: string) => {
+    const msg = reason ? reason : p.reason ? p.reason : agent.alias + " is busy with another task — your message is queued and will be answered when it's free.";
     return (
       <div className="turn agent">
         <Avatar alias={agent.alias} kind="ai" size="sm" />
@@ -497,6 +636,45 @@ export function Conversation({ agent }: { agent: Agent }) {
             <Icon name="clock" cls="" />
             <span>{msg}</span>
           </div>
+        </div>
+      </div>
+    );
+  };
+  // the optimistic human bubble: the just-sent text at reduced opacity until the
+  // server's copy lands; on failure it carries an inline danger note + Retry
+  // (and the composer got the text back) — a failed send is never silently
+  // dropped and never auto-reposted. PLAIN text (no md): the bubble is transient
+  // and must mirror the composer verbatim; the markdown render appears when the
+  // durable turn lands.
+  const pendingBubbleEl = (pl: PendingLocal) => {
+    const failed = pl.status === "failed";
+    return (
+      <div className={"turn human pending" + (failed ? " failed" : "")}>
+        <div className="tb">
+          <div className="tmeta">
+            you
+            <span className="tt">{failed ? "not sent" : "sending…"}</span>
+          </div>
+          <div className="tx">{pl.content || ""}</div>
+          {pl.atts.length > 0 && (
+            <div className="msg-atts">
+              {pl.atts.map((att) => (
+                <span key={att.id} className="att-file">
+                  <span style={{ display: "contents" }} dangerouslySetInnerHTML={{ __html: FILE_ICON }} />
+                  <span>{att.name || att.id}</span>
+                </span>
+              ))}
+            </div>
+          )}
+          {failed && (
+            <div className="conv-sendfail">
+              <Icon name="alert" cls="" />
+              <span>{pl.err || "Couldn't send."}</span>
+              <button type="button" className="btn sm danger" data-retrysend onClick={retrySend}>
+                Retry
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -549,6 +727,22 @@ export function Conversation({ agent }: { agent: Agent }) {
             <Icon name={maxed ? "minimize" : "maximize"} cls="" />
           </button>
         </div>
+        {/* Persistent warn banner over the thread while NO host-side notifier
+            serves this project (portal-only New-project flow). Not dismissible —
+            as long as sends only queue, the chat must say so. Re-checked on
+            every snapshot poll, so it self-clears the moment a workspace binds
+            and the daemon polls. (Port of renderWakesBanner.) */}
+        <div id="convWakes">
+          {!served && (
+            <div className="conv-wakes">
+              <Icon name="alert" cls="" />
+              <div className="body">
+                <div className="t1">No agent runtime yet</div>
+                <div className="t2">This project has no agent runtime yet — messages will queue until a workspace binds on the host.</div>
+              </div>
+            </div>
+          )}
+        </div>
         <div
           className="conv-list"
           id="convList"
@@ -562,7 +756,7 @@ export function Conversation({ agent }: { agent: Agent }) {
             <div className="none" style={{ padding: 18 }}>Conversation unavailable.</div>
           ) : !loaded ? (
             <div className="none" style={{ padding: 18 }}>Loading conversation…</div>
-          ) : !turns.length ? (
+          ) : !turns.length && !pendingLocal ? (
             <div className="none" style={{ padding: 18 }}>No messages yet — say hello to start the conversation.</div>
           ) : (
             <>
@@ -574,7 +768,10 @@ export function Conversation({ agent }: { agent: Agent }) {
               {visible.map((t, i) => (
                 <Bubble key={t.seq ?? startIdx + i} t={t} snap={snap} agentId={agent.id} onZoom={setLightbox} />
               ))}
-              {awaitingReply && indicator()}
+              {/* the optimistic pending bubble suppresses the reply indicator —
+                  one honest state at a time (sending… / failed+Retry first; the
+                  thinking/queued indicator returns once the turn lands). */}
+              {pendingLocal ? pendingBubbleEl(pendingLocal) : awaitingReply && indicator()}
             </>
           )}
         </div>
@@ -641,9 +838,21 @@ export function Conversation({ agent }: { agent: Agent }) {
               if (items && items.length) uploadConvFiles(items); // pasted image/file → stage (don't block text paste)
             }}
           />
-          <button className="btn approve" id="convSend" disabled={locked} onClick={() => void send()}>
-            <Icon name="arrow" cls="" />
-            Send
+          {/* in-flight affordance: down + spinner while the POST runs; `sending`
+              in the disabled expr keeps the button down across presence repaints
+              (the vanilla applyLock dup vector). */}
+          <button className={"btn approve" + (sending ? " busy" : "")} id="convSend" disabled={locked || sending} onClick={() => void send()}>
+            {sending ? (
+              <>
+                <span className="spin" />
+                Sending
+              </>
+            ) : (
+              <>
+                <Icon name="arrow" cls="" />
+                Send
+              </>
+            )}
           </button>
         </div>
         <div className="conv-tray" id="convTray">

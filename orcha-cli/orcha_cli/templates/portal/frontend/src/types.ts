@@ -20,6 +20,8 @@ export interface Agent {
   github_login?: string | null; // cloud backends enrich humans; open may omit
   member_role?: string | null; // cloud collab: owner|member|viewer
   reasoning_effort?: string | null; // cloud: per-agent effort setting
+  autonomy_override?: string | null; // #64 mig-043: per-agent level (null = inherit); open backends omit
+  effective_autonomy?: string | null; // #64: server-computed effective level; open backends omit
   role: string;
   model: string | null;
   status: string;
@@ -120,7 +122,9 @@ export interface Container {
   description?: string | null;
   status?: string;
   autonomy_level?: string; // plan | pr | full
+  autonomy_enforced?: boolean; // #64 mig-043: container level governs everyone (overrides ignored)
   autonomy_paused?: boolean;
+  last_wake_scan_at?: string | null; // mig 037: daemon wake-scan stamp — drives wakesServed
   root_task_id?: string | null;
   created_at?: string;
 }

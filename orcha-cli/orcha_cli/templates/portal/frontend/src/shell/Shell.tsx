@@ -515,6 +515,9 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
           >
             <Icon name="bell" cls="bell" /><span>Needs you</span><span className="n tnum">{a.count}</span>
           </a>
+          {(extensions.topbarActions ?? []).map((C, i) => (
+            <C key={i} />
+          ))}
           <AutonomySwitch />
           <ActingChip />
           <button className="iconbtn" id="themeBtn" title={`Theme: ${currentTheme()} — click to cycle`} onClick={cycle}>
