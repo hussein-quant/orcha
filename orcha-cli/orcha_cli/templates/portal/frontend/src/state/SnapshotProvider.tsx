@@ -14,12 +14,16 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { fetchSnapshot, resolveCid } from "../api/client";
+import { fetchSnapshot } from "../api/client";
+import { ensureCidInLocation, installCidLinkInterceptor, resolveCidScope } from "../lib/scope";
+import { extensions, type Identity } from "../extensions";
 import type { Agent, OrchaRequest, Snapshot, Task } from "../types";
 
 export interface SnapshotCtx {
   snap: Snapshot | null;
   cid: string | null;
+  multi: boolean; // multi-container stack (lib/scope) — drives ?cid= propagation
+  identity: Identity | null; // extensions.identity result (open default: null)
   error: string | null;
   refresh: () => Promise<void>;
   bump: number; // increments every applied refresh (for effects keyed to polls)
@@ -28,6 +32,8 @@ export interface SnapshotCtx {
 const Ctx = createContext<SnapshotCtx>({
   snap: null,
   cid: null,
+  multi: false,
+  identity: null,
   error: null,
   refresh: async () => {},
   bump: 0,
@@ -36,15 +42,25 @@ const Ctx = createContext<SnapshotCtx>({
 export function SnapshotProvider({ children, pollMs = 3000 }: { children: ReactNode; pollMs?: number }) {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [cid, setCid] = useState<string | null>(null);
+  const [multi, setMulti] = useState(false);
+  const [identity, setIdentity] = useState<Identity | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bump, setBump] = useState(0);
+  const [cidResolved, setCidResolved] = useState(false); // first resolve attempt done
   const cidRef = useRef<string | null>(null);
+  const multiRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
       if (!cidRef.current) {
-        cidRef.current = await resolveCid();
-        setCid(cidRef.current);
+        const scope = await resolveCidScope();
+        cidRef.current = scope.cid;
+        multiRef.current = scope.multi;
+        setCid(scope.cid);
+        setMulti(scope.multi);
+        setCidResolved(true);
+        // multi-container: pin the resolved scope into the URL immediately
+        ensureCidInLocation(scope);
       }
       if (!cidRef.current) throw new Error("no container found");
       const s = await fetchSnapshot(cidRef.current);
@@ -52,9 +68,38 @@ export function SnapshotProvider({ children, pollMs = 3000 }: { children: ReactN
       setError(null);
       setBump((b) => b + 1);
     } catch (e) {
+      setCidResolved(true);
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
+
+  // FEATURE 3: one document-level capture-phase click interceptor upgrades
+  // same-origin anchors with ?cid= on multi-container stacks (no-op otherwise).
+  useEffect(
+    () => installCidLinkInterceptor(() => ({ cid: cidRef.current, multi: multiRef.current })),
+    [],
+  );
+
+  // FEATURE 1: identity seam — when a downstream registers extensions.identity
+  // (its /api/me), fetch it once per resolved cid (re-fetch on cid change).
+  // Failures resolve to null and NEVER block the snapshot. The result is
+  // published both on the context and into the module-level acting slot so
+  // legacy actingHuman(snap) callers transparently inherit it.
+  const identityReq = useRef(0);
+  useEffect(() => {
+    const provider = extensions.identity;
+    if (!provider || !cidResolved) return;
+    const req = ++identityReq.current;
+    const apply = (id: Identity | null) => {
+      if (identityReq.current !== req) return; // stale (cid changed underneath)
+      setIdentity(id);
+      _setActingIdentity(id);
+    };
+    provider(cid).then(
+      (id) => apply(id ?? null),
+      () => apply(null),
+    );
+  }, [cid, cidResolved]);
 
   useEffect(() => {
     let alive = true;
@@ -100,7 +145,7 @@ export function SnapshotProvider({ children, pollMs = 3000 }: { children: ReactN
     };
   }, [refresh, pollMs]);
 
-  return <Ctx.Provider value={{ snap, cid, error, refresh, bump }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ snap, cid, multi, identity, error, refresh, bump }}>{children}</Ctx.Provider>;
 }
 
 export function useSnapshot(): SnapshotCtx {
@@ -138,11 +183,43 @@ export function isToHuman(snap: Snapshot | null, r: OrchaRequest): boolean {
   return !!(a && a.kind === "human");
 }
 
-/* ---- acting-as (persisted; NOT hardcoded) -------------------------------- */
+/* ---- acting-as (persisted; NOT hardcoded) --------------------------------
+ * Identity seam mechanics: when a downstream registers `extensions.identity`,
+ * SnapshotProvider publishes each fetched Identity into a module-level slot
+ * via `_setActingIdentity`. The long-standing `actingHuman(snap)` consults
+ * that slot (through `actingIdentityHuman`), so every existing caller —
+ * pages, autonomy switch, notification center — transparently inherits the
+ * identity-aware actor without signature changes. Open builds never register
+ * a provider, the slot stays null, and behavior is exactly the legacy
+ * localStorage-pick / first-human resolution.
+ */
+let moduleIdentity: Identity | null = null;
+/** Provider/test hook: publish (or clear) the viewer identity consulted by actingHuman. */
+export function _setActingIdentity(id: Identity | null): void {
+  moduleIdentity = id;
+}
+
 function actingKey(snap: Snapshot | null): string {
   return "orcha:actingHuman:" + (snap?.container?.id || "_");
 }
-export function actingHuman(snap: Snapshot | null): Agent | null {
+
+/**
+ * Identity-aware acting-human resolution (port of cloud app-data.js:100-164):
+ *  - identity present + agent_id resolves to a kind='human' agent in the
+ *    snapshot → THAT is the acting human (the localStorage pick is ignored);
+ *  - identity present but agent_id null/unresolvable (trusted non-member,
+ *    e.g. a viewer) → NULL. Never falls through to another human.
+ *  - no identity (open default) → legacy: persisted per-container pick, else
+ *    the first kind='human' agent.
+ */
+export function actingIdentityHuman(snap: Snapshot | null, identity: Identity | null): Agent | null {
+  if (identity) {
+    if (identity.agent_id != null) {
+      const own = agentById(snap, identity.agent_id);
+      if (own && own.kind === "human") return own;
+    }
+    return null; // a trusted non-member must NEVER act as another human
+  }
   const hs = humans(snap);
   if (!hs.length) return null;
   let saved: string | null = null;
@@ -152,6 +229,10 @@ export function actingHuman(snap: Snapshot | null): Agent | null {
     if (m) return m;
   }
   return hs[0];
+}
+
+export function actingHuman(snap: Snapshot | null): Agent | null {
+  return actingIdentityHuman(snap, moduleIdentity);
 }
 export function setActingHuman(snap: Snapshot | null, id: string): void {
   try { localStorage.setItem(actingKey(snap), String(id)); } catch { /* private mode */ }
@@ -187,4 +268,22 @@ export function attnItems(snap: Snapshot | null): AttnItems {
   const verifs = lvl === "full" ? [] : tasks.filter((t) => t.status === "needs_verification");
   const escs = reqs.filter((r) => r.status === "open" && isToHuman(snap, r));
   return { plans, verifs, escs, count: plans.length + verifs.length + escs.length };
+}
+
+/* ---- authoritative sidebar counts (GH count-mismatch fix) -----------------
+ * Cloud backends put authoritative open totals on the snapshot
+ * (task_open_total / request_open_total) because their snapshot lists may be
+ * scoped/truncated. When non-null those win; open backends omit them (mapped
+ * to null) and the counts fall back to today's list-computed values.
+ */
+export function navCounts(snap: Snapshot | null): { tasks: number; requests: number } {
+  return {
+    tasks: snap?.task_open_total ?? (snap?.tasks ?? []).filter((t) => t.status === "needs_verification").length,
+    requests: snap?.request_open_total ?? (snap?.requests ?? []).filter((r) => r.status === "open").length,
+  };
+}
+export function attnCardCounts(snap: Snapshot | null, a: AttnItems): { verify: number; esc: number; total: number } {
+  const verify = snap?.task_open_total ?? a.verifs.length;
+  const esc = snap?.request_open_total ?? a.escs.length;
+  return { verify, esc, total: a.plans.length + verify + esc };
 }

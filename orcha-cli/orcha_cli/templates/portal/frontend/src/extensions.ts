@@ -7,6 +7,7 @@
  * multi-project "/" to the /projects landing, else renders the open HomePage).
  */
 import type { ComponentType } from "react";
+import { accountMenu, fetchIdentity } from "./cloud/identity";
 import { ProjectsPage } from "./cloud/projects/ProjectsPage";
 import { CloudHome } from "./cloud/projects/homeGate";
 import { MetricsPage } from "./cloud/metrics/MetricsPage";
@@ -28,9 +29,31 @@ export interface ExtensionNavItem {
   attn?: boolean;
 }
 
+// Identity + account-menu seam. NOTE: these three declarations are being added
+// to open Orcha's extensions.ts upstream in exactly this shape — added here
+// ahead of the vendored copy so the next upstream sync is a no-op diff on the
+// contract. Open's Shell does not consume them in this repo's copy yet, so
+// they are inert until that sync.
+export interface Identity {
+  agent_id?: string | null;
+  alias?: string | null;
+  github_login?: string | null;
+  member_role?: string | null;
+  avatar_url?: string | null;
+}
+
+export interface AccountMenuItem {
+  label: string;
+  href?: string;
+  onClick?: () => void;
+  danger?: boolean;
+}
+
 export interface Extensions {
   routes: ExtensionRoute[];
   nav: ExtensionNavItem[];
+  identity?: (cid: string | null) => Promise<Identity | null>;
+  accountMenu?: (identity: Identity | null) => AccountMenuItem[];
 }
 
 export const extensions: Extensions = {
@@ -47,4 +70,8 @@ export const extensions: Extensions = {
     { key: "metrics", href: "/metrics", ico: "live", label: "Metrics" },
     { key: "github", href: "/github", ico: "link", label: "GitHub" },
   ],
+  // The /api/me layer + the sign-out account menu (src/cloud/identity.ts —
+  // vanilla data.js fetchMe / app-shell.js actingMenuHtml, ported).
+  identity: fetchIdentity,
+  accountMenu,
 };

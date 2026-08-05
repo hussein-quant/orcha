@@ -30,7 +30,10 @@ import { useCallback, useEffect, useState } from "react";
 import { Avatar, Icon, Modal, useToast } from "../../components/ui";
 import { hue } from "../../lib/format";
 import { Shell } from "../../shell/Shell";
-import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
+import { useSnapshot } from "../../state/SnapshotProvider";
+import {
+  actingGrant, actingOwner, fetchMe, memActor, viewerRole, type ActingHumanRec, type Me,
+} from "../identity";
 
 /* ---- wire shapes -------------------------------------------------------- */
 export interface Member {
@@ -41,15 +44,6 @@ export interface Member {
   grants: string[] | null;
   pending: boolean;
 }
-interface Identity {
-  agent_id: string | null;
-  alias: string | null;
-  github_login: string | null;
-  member_role: string | null;
-  grants?: string[] | null;
-  avatar_url?: string | null;
-}
-interface Me { identity: Identity | null; trusted: boolean }
 
 // The grantable permissions (mirror identity_routes.GRANTS) + human labels.
 const MEM_GRANTS: [string, string][] = [
@@ -105,51 +99,10 @@ function MemberFace({ m }: { m: Member }) {
   return m.github_login ? <GhAvatar login={m.github_login} /> : <Avatar alias={m.alias} kind="human" />;
 }
 
-/* ---- acting identity (app-data.js accessors, scoped to this cloud page) -- */
-type Snap = ReturnType<typeof useSnapshot>["snap"];
-type HumanRec = { id: string; alias: string; member_role?: string | null };
-
-function identityHuman(me: Me | null, snap: Snap): HumanRec | null {
-  const id = me?.identity;
-  if (!id || !id.agent_id) return null;
-  const h = (snap?.agents ?? []).find(
-    (a) => a.kind === "human" && String(a.id) === String(id.agent_id),
-  );
-  return h ? (h as unknown as HumanRec) : null;
-}
-// The real human authority: with the TRUSTED proxy lane live, the resolved member
-// (or nothing) is the ONLY possible actor — a signed-in non-member must never fall
-// through to the local/default human. Trust off keeps the pre-collab pick.
-function memActor(me: Me | null, snap: Snap): HumanRec | null {
-  if (me?.trusted) return identityHuman(me, snap);
-  const bound = identityHuman(me, snap);
-  if (bound) return bound;
-  const h = actingHuman(snap);
-  return h ? (h as unknown as HumanRec) : null;
-}
-// Owner check: with an identity its member_role decides; without one (trust off)
-// the acting human's snapshot member_role decides — permissive when absent,
-// mirroring the backend's trust-off fallback.
-function actingOwner(me: Me | null, snap: Snap): boolean {
-  const id = me?.identity;
-  if (id) return id.member_role === "owner";
-  const h = memActor(me, snap);
-  return !!(h && (h.member_role === "owner" || h.member_role == null));
-}
-// Access model: does the acting identity hold a grant? Owners implicitly hold
-// everything; members need it listed. The server stays the enforcer — this only
-// gates AFFORDANCES.
-function actingGrant(me: Me | null, snap: Snap, grant: string): boolean {
-  const id = me?.identity;
-  if (id) {
-    if (id.member_role === "owner") return true;
-    return (id.grants || []).indexOf(grant) >= 0;
-  }
-  return actingOwner(me, snap);
-}
-function viewerRole(me: Me | null): boolean {
-  return !!(me?.identity && me.identity.member_role === "viewer");
-}
+/* ---- acting identity: the shared cloud /api/me layer (src/cloud/identity.ts
+ * — fetchMe + memActor/actingOwner/actingGrant/viewerRole) gates every
+ * affordance below, exactly as the local copies here did before the module
+ * was extracted for the extensions.ts identity/accountMenu seams. ---------- */
 
 /* ---- page-scoped CSS: the settings-card + members rules the vanilla page
  * pulled from pages/settings.css, carried over verbatim so the standalone
@@ -216,18 +169,14 @@ function MembersCard() {
   const [removing, setRemoving] = useState<Member | null>(null);
   const [me, setMe] = useState<Me | null>(null);
 
-  // Collab v1: resolve the acting identity once per page load (GET /api/me?cid=…),
-  // exactly as data.js fetchMe did. Errors fall back to {identity:null, trusted:false}
-  // — the self-host state, where the local acting human gates affordances.
+  // Collab v1: resolve the acting identity once per page load — the shared
+  // single-flighted fetchMe (src/cloud/identity.ts, vanilla data.js parity).
+  // Failures resolve to {identity:null, trusted:false} — the self-host state,
+  // where the local acting human gates affordances.
   useEffect(() => {
     if (!cid) return;
     let alive = true;
-    fetch("/api/me?cid=" + encodeURIComponent(cid))
-      .then((r) => r.json())
-      .then((d: { identity?: Identity | null; trusted?: boolean } | null) => {
-        if (alive) setMe({ identity: (d && d.identity) || null, trusted: !!(d && d.trusted) });
-      })
-      .catch(() => { if (alive) setMe({ identity: null, trusted: false }); });
+    void fetchMe(cid).then((m) => { if (alive) setMe(m); });
     return () => { alive = false; };
   }, [cid]);
 
@@ -249,7 +198,7 @@ function MembersCard() {
   useEffect(() => { void load(); }, [load]);
 
   const actor = () => memActor(me, snap);
-  const requireActor = (): HumanRec | null => {
+  const requireActor = (): ActingHumanRec | null => {
     const h = actor();
     if (!h) toast("Pick an acting human first.", "warn");
     return h;

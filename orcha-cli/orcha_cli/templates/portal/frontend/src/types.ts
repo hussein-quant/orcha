@@ -18,6 +18,8 @@ export interface Agent {
   alias: string;
   kind: string; // "ai" | "human"
   github_login?: string | null; // cloud backends enrich humans; open may omit
+  member_role?: string | null; // cloud collab: owner|member|viewer
+  reasoning_effort?: string | null; // cloud: per-agent effort setting
   role: string;
   model: string | null;
   status: string;
@@ -52,6 +54,8 @@ export interface Task {
   id: string;
   title: string;
   status: string;
+  reviewer_agent_id?: string | null; // cloud collab v1: owner-assigned reviewer
+  reviewer?: { alias?: string; github_login?: string | null } | string | null;
   priority: string | number | null;
   assignees: string[];
   assignee: string | null;
@@ -122,6 +126,9 @@ export interface Container {
 }
 
 export interface Snapshot {
+  // cloud: authoritative open totals (additive; open backends omit — compute instead)
+  task_open_total?: number | null;
+  request_open_total?: number | null;
   container: Container | null;
   agents: Agent[];
   byAlias: Record<string, Agent>;

@@ -9,6 +9,7 @@ import { HashRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/ui";
 import { SnapshotProvider } from "../../state/SnapshotProvider";
+import { resetIdentity } from "../identity";
 import { MembersPage } from "./MembersPage";
 
 interface Call { url: string; method: string; body: unknown }
@@ -67,7 +68,7 @@ function mount() {
 }
 
 describe("MembersPage roster (wire-contract render)", () => {
-  beforeEach(() => { localStorage.clear(); });
+  beforeEach(() => { localStorage.clear(); resetIdentity(); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it("renders the roster rows from GET /members: logins, role chips, pending + grants tags", async () => {
@@ -108,7 +109,7 @@ describe("MembersPage roster (wire-contract render)", () => {
 });
 
 describe("MembersPage mutations (exact wire bodies, human-gated)", () => {
-  beforeEach(() => { localStorage.clear(); });
+  beforeEach(() => { localStorage.clear(); resetIdentity(); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it("Invite POSTs {github_login, role, actor_agent_id} to /api/containers/{cid}/members", async () => {
