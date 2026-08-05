@@ -553,7 +553,7 @@ export function AgentsPage() {
           {/* header */}
           <div className="card pad" style={{ marginBottom: 18 }}>
             <div className="ahead">
-              <Avatar alias={a.alias} kind={a.kind} size="lg" />
+              <Avatar alias={a.alias} kind={a.kind} size="lg" ghLogin={a.github_login} />
               <div className="who grow">
                 <h1>
                   {a.alias} <KindBadge kind={a.kind} />
@@ -821,7 +821,7 @@ export function AgentsPage() {
             </div>
             {agents.map((ag) => (
               <button key={ag.id} className={"rrow" + (ag.alias === selAlias ? " sel" : "")} data-alias={ag.alias} onClick={() => select(ag.alias)}>
-                <Avatar alias={ag.alias} kind={ag.kind} />
+                <Avatar alias={ag.alias} kind={ag.kind} ghLogin={ag.github_login} />
                 <span className="grow">
                   <span className="nm">{ag.alias}</span>
                   <span className="rl">{ag.role}</span>

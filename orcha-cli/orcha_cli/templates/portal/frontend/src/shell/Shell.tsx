@@ -387,7 +387,7 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
         <div className="maker">
           <div className="dev">Developed by</div>
           <div className="ql-logo">
-            <svg className="ql-mark" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <svg className="ql-mark" viewBox="0 0 40 40" width={23} height={23} fill="none" aria-hidden="true">
               <circle cx="19" cy="20" r="14.6" stroke="currentColor" strokeWidth={4} />
               <circle cx="27.2" cy="31.2" r="5" fill="#ffbf00" />
             </svg>
@@ -419,7 +419,7 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
           <div className="acting" title="You are the human authority on this container">
             <span className="lbl">acting as</span>
             <span className="who" id="actingWho">
-              {who ? (<><Avatar alias={who.alias} kind="human" size="sm" />{who.alias}</>) : <span className="muted">no human registered</span>}
+              {who ? (<><Avatar alias={who.alias} kind="human" size="sm" ghLogin={who.github_login} />{who.alias}</>) : <span className="muted">no human registered</span>}
             </span>
           </div>
           <button className="iconbtn" id="themeBtn" title={`Theme: ${currentTheme()} — click to cycle`} onClick={cycle}>

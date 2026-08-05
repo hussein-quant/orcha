@@ -81,6 +81,7 @@ export function mapSnapshot(rawIn: any): Snapshot {
     id: a.id,
     alias: a.alias,
     kind: a.kind,
+    github_login: a.github_login != null ? a.github_login : null,
     role: a.role || "—",
     model: a.model != null ? a.model : null,
     status: a.status,

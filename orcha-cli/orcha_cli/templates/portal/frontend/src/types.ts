@@ -17,6 +17,7 @@ export interface Agent {
   id: string;
   alias: string;
   kind: string; // "ai" | "human"
+  github_login?: string | null; // cloud backends enrich humans; open may omit
   role: string;
   model: string | null;
   status: string;

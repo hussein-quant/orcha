@@ -14,7 +14,10 @@ const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();
 
 describe("ISS-83 recency band helper (retained for reuse)", () => {
   it("recencyTs picks the NEWEST of any supplied ISO timestamps (0 if none parse)", () => {
-    expect(recencyTs(iso(10 * H), iso(2 * H), iso(30 * H))).toBe(Date.parse(iso(2 * H)));
+    // compute the newest input ONCE — two separate iso(2*H) calls can differ by
+    // a millisecond and made this assertion flaky.
+    const newest = iso(2 * H);
+    expect(recencyTs(iso(10 * H), newest, iso(30 * H))).toBe(Date.parse(newest));
     expect(recencyTs(null, "", undefined)).toBe(0);
   });
   it("recencyBand: 0 inside the ~12h window, 1 outside — recent sorts above stale", () => {

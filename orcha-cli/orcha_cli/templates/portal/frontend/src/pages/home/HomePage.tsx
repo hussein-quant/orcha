@@ -513,7 +513,7 @@ export function HomePage() {
                         >
                           <td>
                             <div className="row">
-                              <Avatar alias={a.alias} kind={a.kind} />
+                              <Avatar alias={a.alias} kind={a.kind} ghLogin={a.github_login} />
                               <div><div className="t1">{a.alias}</div><div className="t2">{a.role || "—"}</div></div>
                             </div>
                           </td>
