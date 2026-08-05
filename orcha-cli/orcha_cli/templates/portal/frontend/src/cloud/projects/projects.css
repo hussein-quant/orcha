@@ -89,3 +89,8 @@
   .proj-main { padding: 22px 16px 44px; }
   .proj-grid { grid-template-columns: 1fr; }
 }
+
+/* Favorites split on the hub grid: full-width section labels. */
+.proj-grid .proj-sect { grid-column: 1 / -1; font-size: 11.5px; letter-spacing: .09em;
+  text-transform: uppercase; font-weight: 700; color: var(--faint); margin: 6px 2px -4px; }
+.proj-grid .proj-sect:first-child { margin-top: 0; }

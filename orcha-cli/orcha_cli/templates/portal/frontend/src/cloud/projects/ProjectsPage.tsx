@@ -234,12 +234,30 @@ export function ProjectsPage() {
           ) : (
             <>
               {list.length ? (
-                list.map((c) => (
-                  <ProjectCard
-                    key={c.id} c={c} stars={stars} defCid={defCid} onStar={onStar}
-                    onPair={(p) => setPairing({ cid: p.id, name: p.name })}
-                  />
-                ))
+                (() => {
+                  // Favorites first: the starred project(s) pin to their own
+                  // section at the top; everything else under "All projects".
+                  const favs = stars ? list.filter((c) => c.id === defCid) : [];
+                  const rest = favs.length ? list.filter((c) => c.id !== defCid) : list;
+                  const card = (c: ProjContainer) => (
+                    <ProjectCard
+                      key={c.id} c={c} stars={stars} defCid={defCid} onStar={onStar}
+                      onPair={(p) => setPairing({ cid: p.id, name: p.name })}
+                    />
+                  );
+                  return (
+                    <>
+                      {favs.length > 0 && (
+                        <>
+                          <div className="proj-sect">★ Favorites</div>
+                          {favs.map(card)}
+                          <div className="proj-sect">All projects</div>
+                        </>
+                      )}
+                      {rest.map(card)}
+                    </>
+                  );
+                })()
               ) : (
                 <div className="proj-empty">
                   <div className="t1">No projects yet</div>

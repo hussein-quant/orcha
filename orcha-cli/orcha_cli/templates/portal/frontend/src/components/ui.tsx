@@ -5,6 +5,7 @@
  * (trusted-HTML renderers over lib/format), Modal, and the toast system.
  */
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { esc, hue, linkify, mdText } from "../lib/format";
 import { statusMeta } from "../lib/status";
 import type { Task } from "../types";
@@ -214,7 +215,10 @@ export function Modal({ title, desc, danger, approve, primary, cancel, onPrimary
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // Portal to <body>: an ancestor with backdrop-filter/transform (e.g. the
+  // topbar) becomes the containing block for position:fixed, clipping the
+  // overlay — any modal launched from topbar controls needs this.
+  return createPortal(
     <div
       className="overlay show"
       onClick={(e) => {
@@ -240,6 +244,7 @@ export function Modal({ title, desc, danger, approve, primary, cancel, onPrimary
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

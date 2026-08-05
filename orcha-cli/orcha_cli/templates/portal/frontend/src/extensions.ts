@@ -90,8 +90,8 @@ export const extensions: Extensions = {
   // No "projects" nav entry: the /projects hub stays routed but is reached via
   // the topbar ProjectSwitcher's "All projects" row (vanilla-shell parity).
   nav: [
-    { key: "metrics", href: "/metrics", ico: "live", label: "Metrics" },
     { key: "github", href: "/github", ico: "link", label: "GitHub" },
+    { key: "metrics", href: "/metrics", ico: "live", label: "Metrics" },
   ],
   // The /api/me layer + the sign-out account menu (src/cloud/identity.ts —
   // vanilla data.js fetchMe / app-shell.js actingMenuHtml, ported).
