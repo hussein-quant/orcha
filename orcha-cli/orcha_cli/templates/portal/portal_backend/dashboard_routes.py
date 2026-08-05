@@ -97,6 +97,13 @@ def github_hub_page():
     return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
+@app.get("/members", response_class=HTMLResponse)
+def members_page():
+    """Members management (React /members — formerly the settings-members card).
+    Serves the SPA shell like every page route."""
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
+
+
 @app.get("/tasks", response_class=HTMLResponse)
 def tasks_page():
     """Per-task detail view (owned by agent "D").
