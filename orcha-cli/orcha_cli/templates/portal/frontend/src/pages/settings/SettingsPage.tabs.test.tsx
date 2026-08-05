@@ -81,7 +81,7 @@ beforeEach(() => {
   setHash("");
   installFetch();
   delete extensions.settingsSections;
-  delete extensions.settingsGeneral; // reset the downstream General-card toggles too
+  delete extensions.settingsGeneral;
 });
 afterEach(() => {
   cleanup();
