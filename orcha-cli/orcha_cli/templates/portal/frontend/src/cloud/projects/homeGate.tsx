@@ -12,15 +12,21 @@
 import { useEffect, useState } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { HomePage } from "../../pages/home/HomePage";
+import { useSnapshot } from "../../state/SnapshotProvider";
 
 export function CloudHome() {
   const location = useLocation();
-  const hasCid = /[?&]cid=/.test(location.search || "");
+  const { cid } = useSnapshot();
+  // A cid in the URL OR an already-resolved project in the session both mean
+  // "stay on this project's dashboard" — the hub bounce is ONLY for a truly
+  // unscoped landing. (Sidebar Dashboard is an SPA Link to a bare "/", which
+  // must respect the current project rather than dumping the user on the hub.)
+  const hasCid = /[?&]cid=/.test(location.search || "") || cid != null;
   // "home" renders the open HomePage; "projects" bounces; null = still deciding.
   const [dest, setDest] = useState<"home" | "projects" | null>(hasCid ? "home" : null);
 
   useEffect(() => {
-    if (hasCid) return; // cid-carrying URL: never bounce (deep links stay put)
+    if (hasCid) { setDest("home"); return; } // scoped session/URL: never bounce
     let alive = true;
     fetch("/api/containers")
       .then((r) => (r.ok ? r.json() : null))
