@@ -284,14 +284,20 @@ async def test_device_page_serves_redirect_js_and_fallback(client):
     r = await client.get("/auth/device")
     assert r.status_code == 200, r.text
     assert r.headers["content-type"].startswith("text/html")
-    page = r.text
+    # React port: the route serves the SPA shell; the pairing behaviors live in
+    # src/cloud/device/DevicePage.tsx (Vitest: DevicePage.test.tsx covers the
+    # one-POST mint, clipboard copy, and 403 remedy behaviorally).
+    assert '<div id="root">' in r.text and "/assets/dist/" in r.text
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parent.parent / "orcha-cli" / "orcha_cli"
+           / "templates" / "portal" / "frontend" / "src" / "cloud" / "device" / "DevicePage.tsx").read_text()
     # mints through the same-origin API (the proxy session carries the identity)
-    assert "/api/device-tokens" in page
+    assert "/api/device-tokens" in src
     # hands the token to the app via the registered URL scheme, host included
-    assert "orcha://auth/callback?host=" in page
-    assert "location.host" in page
+    assert "orcha://auth/callback?host=" in src
+    assert "location.host" in src
     # manual fallback: visible token + copy button + "app should have opened" copy
-    assert "should have opened automatically" in page
-    assert "Copy token" in page
+    assert "should have opened automatically" in src
+    assert "Copy token" in src
     # mint failure (non-member) renders an actionable message
-    assert "must be a member" in page
+    assert "must be a member" in src

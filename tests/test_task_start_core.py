@@ -402,7 +402,8 @@ from portal_backend.database import db_cursor
 async def test_find_orchestrator_agent_matches_role_ilike_orchestrat(
         client, container, make_agent):
     """The only existing 'is this the orchestrator' signal anywhere in the codebase is a
-    role-string heuristic (the frontend's ORCHESTRATOR_ROLE_RE). This pins the backend
+    role-string heuristic (the frontend's ORCHESTRATOR_ROLE_RE — now in
+    frontend/src/cloud/github/ghlib.ts). This pins the backend
     mirror: a live AI agent whose role contains 'orchestrat', case-insensitively, matching
     realistic personas like 'orchestrator / system architect'."""
     cid = container["id"]

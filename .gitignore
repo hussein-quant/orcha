@@ -262,3 +262,7 @@ deploy/auth/github-app.json
 deploy/auth/github-app.webhook-secret
 ios/project.local.yml
 ios/dd/
+
+# portal React app: template-shipped source + built bundle (see frontend/README)
+!orcha-cli/orcha_cli/templates/portal/frontend/src/**
+!orcha-cli/orcha_cli/templates/portal/static/dist/

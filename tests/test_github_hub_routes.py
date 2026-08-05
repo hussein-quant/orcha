@@ -1572,8 +1572,9 @@ async def test_start_issue_dispatch_never_triggers_pr_context_refetch(
 
 # ------------------------- POST /start: authoritative server-side title fetch -------------------------
 #
-# Production defect, fixed here: the hub frontend's OWN postStart() call
-# (static/pages/github-render.js) never actually sends title/body_excerpt/html_url —
+# Production defect, fixed here: the hub frontend's OWN postStart() call (now
+# frontend/src/cloud/github/GitHubPage.tsx; the vanilla static/pages/github-render.js
+# at the time) never actually sends title/body_excerpt/html_url —
 # despite GithubStartBody's docstring assuming it does — so EVERY hub-started task
 # (issue or pull) was landing titled bare "GH #<N>:" with nothing after. The fix:
 # both dispatch kinds now live-fetch the real title/body/url server-side
@@ -1590,8 +1591,9 @@ async def test_start_issue_dispatch_authoritative_title_overrides_client_supplie
     await _bind_repo(client, cid)
     monkeypatch.setattr(hub, "_gh_get", _fake_issue_get(150, "Real title from GitHub"))
 
-    # EXACTLY the body the real frontend sends (postStart in github-render.js) — no
-    # title/body_excerpt/html_url at all, only what GithubStartBody makes optional.
+    # EXACTLY the body the real frontend sends (postStart in the React hub,
+    # frontend/src/cloud/github/GitHubPage.tsx) — no title/body_excerpt/html_url at
+    # all, only what GithubStartBody makes optional.
     r = await client.post(f"/api/containers/{cid}/github/start",
                           json={"kind": "issue", "number": 150, "assignee_agent_id": None})
     assert r.status_code == 201, r.text

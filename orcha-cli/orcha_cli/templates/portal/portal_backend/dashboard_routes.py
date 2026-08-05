@@ -15,7 +15,7 @@ def snapshot(cid: str, request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 def home():
-    return serve_page("home.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
 @app.get("/projects", response_class=HTMLResponse)
@@ -27,7 +27,7 @@ def projects_page():
     (already membership-filtered under the trusted lane) and renders. The home
     page's boot redirects a bare "/" here whenever the stack isn't the
     single-project case; in-project links carry ?cid= and never bounce."""
-    return serve_page("projects.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
 @app.get("/settings", response_class=HTMLResponse)
@@ -40,7 +40,7 @@ def settings_page():
     /api/containers/{cid}/settings/llm-key routes (GET/PUT/DELETE + .../test) —
     no new API/DB route added here (those belong to the #294 backend PR).
     """
-    return serve_page("settings.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
 @app.get("/agents", response_class=HTMLResponse)
@@ -52,7 +52,7 @@ def agents_page():
     roster + a detail panel (current task in detail, every task the agent is on,
     and the agent's incoming + outgoing requests). No new API surface.
     """
-    return serve_page("agents.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
 @app.get("/requests", response_class=HTMLResponse)
@@ -67,7 +67,7 @@ def requests_page():
     request with a live link, plus any children asked in service of it). No new
     API surface — everything derives from requests[] joined to agents[] by id.
     """
-    return serve_page("requests.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
 @app.get("/metrics", response_class=HTMLResponse)
@@ -79,7 +79,7 @@ def metrics_page():
     (OrchaData) and reads GET /api/containers/{cid}/metrics?days=7|30 — the one
     aggregate endpoint added for this page (container_metrics_routes).
     """
-    return serve_page("metrics.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
 @app.get("/github", response_class=HTMLResponse)
@@ -94,7 +94,7 @@ def github_hub_page():
     .../pulls (github_hub_routes.py) — new endpoints added alongside this page,
     not part of the shared container snapshot. No business logic here.
     """
-    return serve_page("github.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
 @app.get("/tasks", response_class=HTMLResponse)
@@ -109,4 +109,4 @@ def tasks_page():
     result, who created it, and the request that spawned it (if any). No new API
     surface — everything derives from tasks[] joined to agents[] by alias/id.
     """
-    return serve_page("tasks.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
