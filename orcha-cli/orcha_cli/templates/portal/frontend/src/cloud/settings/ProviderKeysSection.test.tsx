@@ -1,10 +1,13 @@
 /**
- * ProviderKeysSection — masked render from the provider-keys GET (Anthropic
- * filtered out) and the exact human-gated mutation bodies against the
- * provider-scoped routes. fetch is stubbed; snapshot flows through the real
- * SnapshotProvider + mapSnapshot, matching MembersPage.test.tsx style.
+ * ProviderKeysSection — ONE home for every provider key: the open Anthropic
+ * KeyCard renders as the FIRST card (settings.html kept the Anthropic card
+ * alongside the xAI card under the Workspace tab), then the masked render
+ * from the provider-keys GET (Anthropic filtered out of the pk list) and the
+ * exact human-gated mutation bodies against the provider-scoped routes.
+ * fetch is stubbed; snapshot flows through the real SnapshotProvider +
+ * mapSnapshot, matching MembersPage.test.tsx style.
  */
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/ui";
 import { SnapshotProvider } from "../../state/SnapshotProvider";
@@ -30,7 +33,7 @@ const keys = {
   ],
 };
 
-function stubFetch(overrides: { keys?: unknown } = {}): Call[] {
+function stubFetch(overrides: { keys?: unknown; llmKey?: unknown } = {}): Call[] {
   const calls: Call[] = [];
   const json = (data: unknown, status = 200) =>
     ({ ok: status < 400, status, json: async () => data }) as unknown as Response;
@@ -43,6 +46,9 @@ function stubFetch(overrides: { keys?: unknown } = {}): Call[] {
     });
     if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
     if (url.startsWith("/api/me")) return json({ identity: null, trusted: false });
+    // the re-homed open KeyCard's own status GET (#294 llm-key routes)
+    if (url === "/api/containers/c1/settings/llm-key")
+      return json(overrides.llmKey ?? { configured: true, masked: "sk-...anth", source: "db" });
     if (url === "/api/containers/c1/settings/provider-keys") return json(overrides.keys ?? keys);
     if (url.startsWith("/api/containers/c1/settings/provider-keys/")) return json({ ok: true });
     if (url.startsWith("/api/containers/c1")) return json(rawSnap);
@@ -61,43 +67,65 @@ function mount() {
   );
 }
 
-describe("ProviderKeysSection (wire-contract render)", () => {
+/** Scope queries to the xAI provider card (the Anthropic KeyCard shares
+ *  placeholder/button copy, so unscoped queries would double-match). */
+function xaiCard() {
+  const el = document.querySelector(".pk-card");
+  expect(el).not.toBeNull();
+  return within(el as HTMLElement);
+}
+
+describe("ProviderKeysSection (one home for every key)", () => {
   beforeEach(() => { localStorage.clear(); resetIdentity(); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-  it("renders the masked DB key from GET …/settings/provider-keys and filters Anthropic out", async () => {
+  it("renders the Anthropic KeyCard FIRST, then the xAI card (vanilla Workspace-tab card order)", async () => {
+    const calls = stubFetch();
+    mount();
+    // the open KeyCard, re-homed here, loads its own llm-key status
+    expect(await screen.findByText("Anthropic API key configured")).toBeInTheDocument();
+    expect(screen.getByText("sk-...anth")).toBeInTheDocument();
+    expect(calls.some((c) => c.url === "/api/containers/c1/settings/llm-key")).toBe(true);
+    // card order + titles byte-exact with settings.html's Workspace tab
+    const titles = Array.from(document.querySelectorAll(".set-card .card-h h2")).map((h) => h.textContent);
+    expect(titles).toEqual(["Anthropic API key", "xAI / Grok API key"]);
+    // the Anthropic card hosts the open #keyCard mount
+    expect(document.querySelector(".set-card #keyCard")).not.toBeNull();
+  });
+
+  it("renders the masked DB key from GET …/settings/provider-keys and filters Anthropic out of the pk list", async () => {
     stubFetch();
     mount();
     // db-mode banner: masked form straight from the GET
     expect(await screen.findByText("sk-...abcd")).toBeInTheDocument();
     expect(screen.getByText("xAI (Grok) API key configured")).toBeInTheDocument();
-    // Anthropic keeps its own dedicated card — never rendered here
+    // Anthropic renders through the open KeyCard above — never as a pk-card
     expect(screen.queryByText("sk-...zzzz")).not.toBeInTheDocument();
     expect(document.querySelectorAll(".pk-card").length).toBe(1);
     expect(document.querySelector(".pk-card")!.getAttribute("data-provider")).toBe("xai");
     // db mode affordances: replace + test + remove, input in replace mode
-    expect(screen.getByPlaceholderText("Paste a new key to replace…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Replace key/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Remove/ })).toBeInTheDocument();
+    expect(xaiCard().getByPlaceholderText("Paste a new key to replace…")).toBeInTheDocument();
+    expect(xaiCard().getByRole("button", { name: /Replace key/ })).toBeInTheDocument();
+    expect(xaiCard().getByRole("button", { name: /Remove/ })).toBeInTheDocument();
   });
 
   it("unset provider renders the warn banner and Save affordance", async () => {
     stubFetch({ keys: { keys: [{ provider: "xai", name: "xAI (Grok)", configured: false, masked: null, source: null }] } });
     mount();
     expect(await screen.findByText("No xAI (Grok) API key configured.")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Paste xAI (Grok) API key…")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Save key/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
+    expect(xaiCard().getByPlaceholderText("Paste xAI (Grok) API key…")).toBeInTheDocument();
+    expect(xaiCard().getByRole("button", { name: /Save key/ })).toBeInTheDocument();
+    expect(xaiCard().queryByRole("button", { name: /Remove/ })).not.toBeInTheDocument();
   });
 
   it("Save PUTs {api_key, actor_agent_id} to …/settings/provider-keys/xai (byte-exact body)", async () => {
     const calls = stubFetch();
     mount();
     await screen.findByText("sk-...abcd");
-    fireEvent.change(screen.getByPlaceholderText("Paste a new key to replace…"), {
+    fireEvent.change(xaiCard().getByPlaceholderText("Paste a new key to replace…"), {
       target: { value: "sk-xai-new-123" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Replace key/ }));
+    fireEvent.click(xaiCard().getByRole("button", { name: /Replace key/ }));
     await waitFor(() => {
       const put = calls.find(
         (c) => c.url === "/api/containers/c1/settings/provider-keys/xai" && c.method === "PUT",
@@ -120,7 +148,7 @@ describe("ProviderKeysSection (wire-contract render)", () => {
     mount();
     await screen.findByText("sk-...abcd");
     // no typed value + configured key: Test fires with actor only (server tests the stored key)
-    fireEvent.click(screen.getByRole("button", { name: /^Test$/ }));
+    fireEvent.click(xaiCard().getByRole("button", { name: /^Test$/ }));
     await waitFor(() => {
       const post = calls.find(
         (c) => c.url === "/api/containers/c1/settings/provider-keys/xai/test" && c.method === "POST",

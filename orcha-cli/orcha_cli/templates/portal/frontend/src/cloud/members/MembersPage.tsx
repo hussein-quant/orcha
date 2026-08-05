@@ -458,30 +458,43 @@ function MembersCard() {
   );
 }
 
-/* ---- the page ------------------------------------------------------------ */
+/* ---- the settings section (vanilla settings.html Members card, verbatim
+ * title + lead) — registered on Extensions.settingsSections so Members lives
+ * as a Settings tab exactly where the vanilla page kept it (Collaboration).
+ * Carries its own <style> so the card renders identically here and on the
+ * standalone /members page (identical rules are idempotent when doubled). -- */
+export function MembersSection() {
+  return (
+    <>
+      <style>{MEMBERS_CSS}</style>
+      <div className="card set-card">
+        <div className="card-h"><h2>Members</h2></div>
+        <div className="card-b">
+          <div className="lead">
+            Who&#39;s on this project. Members map verified GitHub identities to this workspace;
+            owners can invite collaborators, change roles, and assign task reviewers. Cloud
+            access itself (the perimeter allowlist) is synced separately.
+          </div>
+          <div id="membersCard">
+            <MembersCard />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ---- the page (kept routed at /members; renders the same section) -------- */
 export function MembersPage() {
   const { snap } = useSnapshot();
   return (
     <Shell page="members" title="Members" ctx={snap?.container?.name}>
-      <style>{MEMBERS_CSS}</style>
       <div className="set-wrap">
         <div className="set-intro">
           <h1>Members</h1>
           <p>Who&#39;s on this project — the collab roster mapping verified GitHub identities to this workspace.</p>
         </div>
-        <div className="card set-card">
-          <div className="card-h"><h2>Members</h2></div>
-          <div className="card-b">
-            <div className="lead">
-              Who&#39;s on this project. Members map verified GitHub identities to this workspace;
-              owners can invite collaborators, change roles, and assign task reviewers. Cloud
-              access itself (the perimeter allowlist) is synced separately.
-            </div>
-            <div id="membersCard">
-              <MembersCard />
-            </div>
-          </div>
-        </div>
+        <MembersSection />
       </div>
     </Shell>
   );

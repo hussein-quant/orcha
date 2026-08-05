@@ -1,7 +1,9 @@
 /**
- * Pairing entry points — the topbar PairingButton (topbarActions seam) and the
- * settings PairingSection both render their vanilla markup and open the shared
- * PairingModal against the loaded container. fetch is stubbed; snapshot flows
+ * Pairing entry points — the topbar PairingButton opens the PairingModal as a
+ * document.body PORTAL (the topbar's backdrop-filter would otherwise trap the
+ * fixed overlay mid-page: no centering, no backdrop), and the settings
+ * PairingSection renders the PairingPanel INLINE so the QR auto-loads the
+ * moment the tab opens — no button press. fetch is stubbed; snapshot flows
  * through the real SnapshotProvider, matching MembersPage.test.tsx style.
  */
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -54,7 +56,7 @@ function mount(el: ReactElement) {
   );
 }
 
-describe("pairing entry points (shared PairingModal reuse)", () => {
+describe("pairing entry points (shared PairingPanel/PairingModal reuse)", () => {
   beforeEach(() => { localStorage.clear(); resetIdentity(); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -79,18 +81,51 @@ describe("pairing entry points (shared PairingModal reuse)", () => {
     expect(screen.queryByText(/Project:/)).not.toBeInTheDocument();
   });
 
-  it("settings card renders the vanilla banner + hint and its button opens the same modal", async () => {
+  it("the modal is PORTAL'd to document.body (never trapped inside the topbar's containing block)", async () => {
     stubFetch();
-    mount(<PairingSection />);
-    expect(await screen.findByText("Phone pairing")).toBeInTheDocument();
-    expect(screen.getByText("Open the same pairing code that is available from the top bar.")).toBeInTheDocument();
-    expect(screen.getByText("Your phone talks directly to this computer on your network. Nothing goes through the cloud.")).toBeInTheDocument();
-    const btn = screen.getByRole("button", { name: /Pair phone/ });
-    expect(btn.id).toBe("settingsPairPhone");
+    const { container } = mount(<PairingButton />);
+    const btn = await screen.findByRole("button", { name: /Pair phone/ });
     await vi.waitFor(() => {
       fireEvent.click(btn);
       expect(screen.getByText("Pair your phone")).toBeInTheDocument();
     });
+    // proper overlay chrome, mounted directly under <body> — NOT under the
+    // launcher's subtree (the topbar), so .overlay's position:fixed dims and
+    // centers against the viewport.
+    const overlay = document.body.querySelector(":scope > .overlay.show");
+    expect(overlay).not.toBeNull();
+    expect(container.querySelector(".overlay")).toBeNull();
+    const modal = overlay!.querySelector(".modal.pair-modal");
+    expect(modal).not.toBeNull();
+    expect(modal!.getAttribute("role")).toBe("dialog");
+    expect(modal!.getAttribute("aria-modal")).toBe("true");
+    // outside-click (on the backdrop) closes
+    fireEvent.click(overlay!);
+    expect(screen.queryByText("Pair your phone")).not.toBeInTheDocument();
+    // reopen, then Escape closes
+    fireEvent.click(btn);
+    expect(screen.getByText("Pair your phone")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByText("Pair your phone")).not.toBeInTheDocument();
+  });
+
+  it("settings card auto-loads the pairing panel INLINE: QR + countdown on tab open, no button", async () => {
+    const calls = stubFetch();
+    mount(<PairingSection />);
+    expect(await screen.findByText("Phone pairing")).toBeInTheDocument();
+    // the panel loads by itself once the cid resolves — code + QR inline
     expect(await screen.findByText("ABCD-1234")).toBeInTheDocument();
+    expect(calls.some((c) => c.url === "/api/containers/c1/pairing")).toBe(true);
+    expect(document.querySelector("#pairingCard .pair-qr")).not.toBeNull();
+    expect(document.querySelector("#pairingCard .pair-grid")).not.toBeNull();
+    // countdown chip ticking against the payload expiry
+    expect(document.querySelector("#pairCountdown")).not.toBeNull();
+    expect(screen.getByText(/expires in/)).toBeInTheDocument();
+    // honest network copy (non-cloud test origin)
+    expect(screen.getByText("Your phone talks directly to this computer on your network. Nothing goes through the cloud.")).toBeInTheDocument();
+    // in-page card body — no launcher button, no modal chrome
+    expect(screen.queryByRole("button", { name: /Pair phone/ })).not.toBeInTheDocument();
+    expect(document.querySelector(".overlay")).toBeNull();
+    expect(screen.queryByText("Pair your phone")).not.toBeInTheDocument();
   });
 });

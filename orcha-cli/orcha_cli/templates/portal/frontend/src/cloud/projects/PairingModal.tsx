@@ -11,6 +11,7 @@
  * rendered as its own picker. Same class names as overlays.css styles.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Icon, OrcaMark } from "../../components/ui";
 import { CloudIcon } from "./icons";
 import { GhAvatar } from "./avatars";
@@ -64,11 +65,16 @@ type View =
   | { kind: "chooser"; humans: ChooseHuman[] }
   | { kind: "payload"; data: PairingPayload; humanId: string | null };
 
-export function PairingModal({ cid, name, identity, onClose }: {
+/**
+ * PairingPanel — the pairing BODY, host-agnostic: auto-loads the cid-scoped
+ * pairing GET on mount, ticks the expiry countdown, regenerates on expiry,
+ * and renders the warning / choose-human / payload states. The modal wraps
+ * it in overlay chrome; the settings section renders it directly in the card
+ * so the QR is visible the moment the tab opens (no button press).
+ */
+export function PairingPanel({ cid, identity }: {
   cid: string;
-  name?: string;
   identity: PairingIdentity | null; // trusted-lane resolved identity (or null)
-  onClose: () => void;
 }) {
   const [view, setView] = useState<View>({ kind: "loading" });
   const [countLeft, setCountLeft] = useState<string>("expires soon");
@@ -140,12 +146,6 @@ export function PairingModal({ cid, name, identity, onClose }: {
     return clearTimer;
   }, [view, load]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   const body = () => {
     switch (view.kind) {
       case "loading":
@@ -211,7 +211,31 @@ export function PairingModal({ cid, name, identity, onClose }: {
     }
   };
 
-  return (
+  return <div id="pairBody">{body()}</div>;
+}
+
+/**
+ * PairingModal — the overlay/dialog chrome around PairingPanel. Rendered via a
+ * React PORTAL to document.body: launchers live inside the topbar, whose
+ * backdrop-filter (shell.css) makes it the containing block for
+ * position:fixed descendants — an inline .overlay would center over the
+ * TOPBAR, not the viewport, with no page-dimming backdrop. Portaling restores
+ * the vanilla document-level overlay: centered, dimmed, outside-click and
+ * Escape both close.
+ */
+export function PairingModal({ cid, name, identity, onClose }: {
+  cid: string;
+  name?: string;
+  identity: PairingIdentity | null; // trusted-lane resolved identity (or null)
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return createPortal(
     <div className="overlay show" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal pair-modal" role="dialog" aria-modal="true" aria-labelledby="pairTitle">
         <div className="pair-head">
@@ -223,9 +247,10 @@ export function PairingModal({ cid, name, identity, onClose }: {
           <button className="iconbtn" id="pairClose" type="button" title="Close" onClick={onClose}><Icon name="x" cls="" /></button>
         </div>
         <div className="pair-content">
-          <div id="pairBody">{body()}</div>
+          <PairingPanel cid={cid} identity={identity} />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

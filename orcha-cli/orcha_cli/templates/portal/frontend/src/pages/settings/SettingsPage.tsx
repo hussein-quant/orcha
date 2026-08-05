@@ -244,7 +244,7 @@ interface TestResult {
   detail?: string | null;
 }
 
-function KeyCard({ cid }: { cid: string | null }) {
+export function KeyCard({ cid }: { cid: string | null }) {
   const { snap } = useSnapshot();
   const toast = useToast();
   const [vm, setVm] = useState<KeyVM | null>(null);
@@ -604,7 +604,7 @@ function UcRow({
   );
 }
 
-function ModelsCard({ cid }: { cid: string | null }) {
+export function ModelsCard({ cid }: { cid: string | null }) {
   const { snap } = useSnapshot();
   const toast = useToast();
   const [models, setModels] = useState<UseCase[] | null>(null);
@@ -874,6 +874,7 @@ export function SettingsPage() {
 
         {active === GENERAL_TAB && (
           <>
+        {(extensions.settingsGeneral?.key ?? true) && (
         <div className="card set-card" data-settab={GENERAL_TAB}>
           <div className="card-h">
             <h2>Anthropic API key</h2>
@@ -889,7 +890,9 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
+        )}
 
+        {(extensions.settingsGeneral?.models ?? true) && (
         <div className="card set-card" data-settab={GENERAL_TAB}>
           <div className="card-h">
             <h2>Universal model selection</h2>
@@ -905,6 +908,7 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
+        )}
           </>
         )}
 

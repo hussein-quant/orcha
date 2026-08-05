@@ -5,6 +5,7 @@
  * as it does in production.
  */
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { extensions } from "../../extensions";
 import { HashRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/ui";
@@ -72,6 +73,10 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  // downstream-proof: a distribution's extensions.ts populates the registry
+  // at import time — reset so these tests always exercise the OPEN layout.
+  delete extensions.settingsSections;
+  delete extensions.settingsGeneral;
   localStorage.clear();
   installFetch();
 });

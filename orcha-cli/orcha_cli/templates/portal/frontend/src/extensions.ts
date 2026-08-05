@@ -14,7 +14,7 @@ import { CloudHome } from "./cloud/projects/homeGate";
 import { MetricsPage } from "./cloud/metrics/MetricsPage";
 import { GitHubPage } from "./cloud/github/GitHubPage";
 import { DevicePage } from "./cloud/device/DevicePage";
-import { MembersPage } from "./cloud/members/MembersPage";
+import { MembersPage, MembersSection } from "./cloud/members/MembersPage";
 // Importing the appearance module also runs its module-level boot hook
 // (restore the persisted data-skin + kick the /api/prefs sync) at app boot.
 import { AppearanceSection } from "./cloud/settings/AppearanceSection";
@@ -69,6 +69,12 @@ export interface Extensions {
   identity?: (cid: string | null) => Promise<Identity | null>;
   accountMenu?: (identity: Identity | null) => AccountMenuItem[];
   settingsSections?: SettingsSection[];
+  // General-tab card toggles (consumed by the open SettingsPage): key:false
+  // hides the open Anthropic-key card, models:false the model-selection card.
+  // Cloud hides the key card and re-homes the Anthropic KeyCard inside the
+  // Provider keys section so every provider key has ONE home (vanilla
+  // settings.html kept all key cards together under the Workspace tab).
+  settingsGeneral?: { key?: boolean; models?: boolean };
   topbarActions?: ComponentType[];   // rendered in the topbar between the notification pill and the autonomy switch
 }
 
@@ -91,13 +97,18 @@ export const extensions: Extensions = {
   // vanilla data.js fetchMe / app-shell.js actingMenuHtml, ported).
   identity: fetchIdentity,
   accountMenu,
-  // Cloud settings cards (vanilla settings.html parity: appearance skin picker,
-  // per-provider API keys, phone pairing) + the topbar pairing button.
+  // Cloud settings tabs, mirroring vanilla settings.html's grouping order —
+  // Workspace (keys + models) → Collaboration (Members, Phone pairing) →
+  // Appearance. General (models) + Provider keys cover the old Workspace tab;
+  // the open Anthropic-key card is hidden (settingsGeneral.key) because the
+  // Provider keys section renders it as its FIRST card, keys all in one home.
   settingsSections: [
-    { key: "appearance", title: "Appearance", element: AppearanceSection },
     { key: "provider-keys", title: "Provider keys", element: ProviderKeysSection },
+    { key: "members", title: "Members", element: MembersSection },
     { key: "pairing", title: "Phone pairing", element: PairingSection },
+    { key: "appearance", title: "Appearance", element: AppearanceSection },
   ],
+  settingsGeneral: { key: false },
   // The project switcher (vanilla shell's dropdown, topbar-relocated) renders
   // before the pairing button.
   topbarActions: [ProjectSwitcher, PairingButton],
