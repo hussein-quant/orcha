@@ -136,6 +136,25 @@ def _thread_row_to_dict(row) -> dict:
     }
 
 
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _resolve_commit_sha(repo: str, token: str, cid: str, ref) -> str:
+    """Anchor pinning: turn any ref into the COMMIT SHA it points at right now.
+
+    _resolve_ref handles default-branch and pr/<n> (already a head sha), but
+    passes branch/tag names through — an anchor stored as "main" is not pinned
+    at all. GET /repos/{repo}/commits/{ref} resolves the rest."""
+    resolved = _resolve_ref(repo, token, cid, ref)
+    if _FULL_SHA_RE.match(resolved or ""):
+        return resolved
+    raw = _gh_get(f"/repos/{repo}/commits/{resolved}", token)
+    sha = (raw or {}).get("sha")
+    if not sha or not _FULL_SHA_RE.match(sha):
+        raise RuntimeError("github_status:404")
+    return sha
+
+
 def _render_wake_payload(thread_id: str, anchor: dict, kind: str, body: str) -> str:
     """The directed request's `payload` text — the ONLY thing the tagged agent's wake
     prompt actually renders (request_nudge_routes / the wake manifest surface a
@@ -177,7 +196,7 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
         if not token:
             return _not_connected()
         try:
-            resolved_sha = _resolve_ref(repo, token, cid, body.ref)
+            resolved_sha = _resolve_commit_sha(repo, token, cid, body.ref)
         except RuntimeError as exc:
             return {**_detail_error_payload(exc), "repo": repo}
 
@@ -478,6 +497,26 @@ def post_code_thread_message(tid: str, body: CodeThreadMessageCreate):
 MAX_SOURCE_FILE_BYTES = 200_000
 
 SYMBOL_SEARCH_MAX_RESULTS = 200
+SYMBOL_INDEX_BUDGET = 40   # files fetched per request while the index warms
+SYMBOL_STATE_TTL_SECONDS = 600  # warm index kept 10 min — indexing is expensive
+
+_symbol_state: dict = {}
+
+
+def _symbol_state_get(cid: str, ref: str):
+    entry = _symbol_state.get((cid, ref))
+    if entry is None:
+        return None
+    state, ts = entry
+    if time.monotonic() - ts > SYMBOL_STATE_TTL_SECONDS:
+        _symbol_state.pop((cid, ref), None)
+        return None
+    return state
+
+
+def _symbol_state_put(cid: str, ref: str, state) -> None:
+    _symbol_state[(cid, ref)] = (state, time.monotonic())
+
 
 # Extension -> language id, used to pick the right regex table. Only these extensions are
 # ever considered "source" for indexing purposes (design doc language list: Kotlin, Swift,
@@ -643,13 +682,18 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
     except RuntimeError as exc:
         return {**_detail_error_payload(exc), "repo": repo}
 
-    cached = _symbol_cache_get(cid, resolved_ref)
-    if cached is None:
+    # Budgeted incremental indexing: a cold index would otherwise fetch EVERY
+    # source file serially (minutes + rate-limit burn on real repos). Each
+    # request advances the index by at most SYMBOL_INDEX_BUDGET files and
+    # returns what it has; `indexing`/`indexed`/`total` report progress and
+    # follow-up requests (or the next poll) converge. State keyed (cid, ref).
+    state = _symbol_state_get(cid, resolved_ref)
+    if state is None:
         try:
             entries, _truncated = _fetch_full_tree(repo, resolved_ref, token, cid)
         except RuntimeError as exc:
             return {**_error_payload(exc), "repo": repo}
-        symbols = []
+        pending = []
         for entry in entries:
             if entry.get("type") != "blob":
                 continue
@@ -660,16 +704,25 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
             size = entry.get("size")
             if size is not None and size > MAX_SOURCE_FILE_BYTES:
                 continue
-            try:
-                text = _fetch_source_file(repo, resolved_ref, token, path)
-            except RuntimeError:
-                continue
-            if text is None:
-                continue
-            for definition in _extract_definitions(text, language):
-                symbols.append({**definition, "path": path})
-        _symbol_cache_put(cid, resolved_ref, symbols)
-        cached = symbols
+            pending.append(path)
+        state = {"symbols": [], "pending": pending, "total": len(pending)}
+        _symbol_state_put(cid, resolved_ref, state)
+    budget = SYMBOL_INDEX_BUDGET
+    while state["pending"] and budget > 0:
+        path = state["pending"].pop(0)
+        budget -= 1
+        language = _language_for_path(path)
+        if language is None:
+            continue
+        try:
+            text = _fetch_source_file(repo, resolved_ref, token, path)
+        except RuntimeError:
+            continue
+        if text is None:
+            continue
+        for definition in _extract_definitions(text, language):
+            state["symbols"].append({**definition, "path": path})
+    cached = state["symbols"]
 
     if q:
         needle = q.lower()
@@ -677,7 +730,11 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
     else:
         filtered = list(cached)
     truncated = len(filtered) > SYMBOL_SEARCH_MAX_RESULTS
+    indexing = bool(state["pending"])
     return {
+        "indexing": indexing,
+        "indexed": state["total"] - len(state["pending"]),
+        "total": state["total"],
         "available": True, "repo": repo, "ref": resolved_ref,
         "results": filtered[:SYMBOL_SEARCH_MAX_RESULTS],
         "truncated": truncated,
