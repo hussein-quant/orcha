@@ -38,6 +38,9 @@ function installFetch() {
         { provider: "anthropic", name: "Anthropic", configured: true, masked: "sk-...anth", source: "db" },
         { provider: "xai", name: "xAI (Grok)", configured: false, masked: null, source: null },
       ] });
+    if (url === "/api/containers/c1/settings/github-pat")
+      return json({ configured: false, source: null, masked: null, set_at: null });
+    if (url === "/api/github/repos") return json({ available: false, repos: [] });
     if (url.endsWith("/settings/models")) return json({ use_cases: [] });
     if (url.endsWith("/settings/providers")) return json({ providers: [] });
     if (url === "/api/containers/c1/members")
@@ -86,6 +89,7 @@ describe("cloud settings tabs (vanilla settings.html arrangement, real registry)
   it("registers the mirrored tab order and hides the open key card from General", () => {
     expect((extensions.settingsSections || []).map((s) => [s.key, s.title])).toEqual([
       ["provider-keys", "Provider keys"],
+      ["github-access", "GitHub access"],
       ["members", "Members"],
       ["pairing", "Phone pairing"],
       ["appearance", "Appearance"],
@@ -98,7 +102,7 @@ describe("cloud settings tabs (vanilla settings.html arrangement, real registry)
     renderPage();
     await waitFor(() => expect(screen.getByText("Universal model selection")).toBeInTheDocument());
     const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
-    expect(tabs).toEqual(["General", "Provider keys", "Members", "Phone pairing", "Appearance"]);
+    expect(tabs).toEqual(["General", "Provider keys", "GitHub access", "Members", "Phone pairing", "Appearance"]);
     // the key card lives ONLY under Provider keys now
     expect(screen.queryByText("Anthropic API key")).not.toBeInTheDocument();
     expect(document.querySelector("#keyCard")).toBeNull();
