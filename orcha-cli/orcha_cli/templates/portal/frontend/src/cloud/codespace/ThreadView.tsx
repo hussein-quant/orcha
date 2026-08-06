@@ -59,13 +59,30 @@ export function ThreadView({ threadId, onBack, onJumpToPinnedSha, seed }: Thread
     const myToken = ++token.current;
     fetchThread(threadId).then((res) => {
       if (myToken !== token.current) return;
-      if (res.ok) setDetail((prev) => reconcile(prev, res.data));
+      // A network/classify-error response also shouldn't leave the FIRST
+      // load stuck on "Loading thread…" forever — reconcile(null, null)
+      // degrades to the same "couldn't load" sentinel a thread-less 200 does.
+      setDetail((prev) => reconcile(prev, res.ok ? res.data : (null as unknown as CodeThreadDetailPayload)));
     });
     // house 3s bump — polls the thread's messages without a manual refresh
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, bump]);
 
   if (!detail) return <div className="none" style={{ padding: 14 }}>Loading thread…</div>;
+  // Root-cause guard (Learn-tab black-screen bug): a malformed/short-circuited
+  // detail payload — a 200 with an empty or shape-mismatched body, which the
+  // fetch layer treats as "ok" since it never validates the JSON shape — used
+  // to reach here with detail.thread undefined, and destructuring it below
+  // threw with no boundary to catch it, blanking the whole page. Treat it as
+  // a load failure instead of trusting the shape.
+  if (!detail.thread) {
+    return (
+      <div className="cs-thread-view">
+        <button type="button" className="cs-thread-back" onClick={onBack}>&larr; Back to threads</button>
+        <div className="none" style={{ padding: 14 }}>Couldn&#39;t load this thread.</div>
+      </div>
+    );
+  }
   const { thread, messages } = detail;
   const outdated = thread.blob_match === false;
 
@@ -137,7 +154,7 @@ export function ThreadView({ threadId, onBack, onJumpToPinnedSha, seed }: Thread
         ) : null}
       </div>
       <div className="cs-messages">
-        {messages.map((m) => (
+        {(messages ?? []).map((m) => (
           <div key={m.id} className={"cs-message" + (m.is_human ? " human" : "") + (m.id.startsWith("optimistic-") ? " pending" : "")}>
             <div className="cs-message-meta">
               <span>{m.is_human ? "human" : m.author_alias || "agent"}</span>
@@ -178,10 +195,21 @@ export function ThreadView({ threadId, onBack, onJumpToPinnedSha, seed }: Thread
 // appears in the fetched list — the ordinary case is the fetch simply
 // supersedes it entirely once the POST has landed server-side).
 function reconcile(prev: CodeThreadDetailPayload | null, fetched: CodeThreadDetailPayload): CodeThreadDetailPayload {
+  // Defensive: a fetch that resolved "ok" but with a shape-mismatched, null,
+  // or thread-less body (see the black-screen bug fixed above) shouldn't
+  // clobber whatever's already validly on screen — keep the previous detail.
+  // On the FIRST load (no prev yet) there's nothing valid to fall back to, so
+  // surface the same thread-less sentinel ThreadView already renders as
+  // "Couldn't load this thread." instead of looping "Loading thread…"
+  // forever (detail would otherwise stay null and never re-render).
+  if (!fetched || !fetched.thread) {
+    return prev ?? { thread: undefined as unknown as CodeThreadDetailPayload["thread"], messages: [] };
+  }
   if (!prev) return fetched;
-  const stillPending = prev.messages.filter((m) => {
+  const fetchedMessages = fetched.messages ?? [];
+  const stillPending = (prev.messages ?? []).filter((m) => {
     if (!m.id.startsWith("optimistic-")) return false;
-    return !fetched.messages.some((fm) => fm.body === m.body && fm.author_agent_id === m.author_agent_id);
+    return !fetchedMessages.some((fm) => fm.body === m.body && fm.author_agent_id === m.author_agent_id);
   });
-  return { thread: fetched.thread, messages: [...fetched.messages, ...stillPending] };
+  return { thread: fetched.thread, messages: [...fetchedMessages, ...stillPending] };
 }
