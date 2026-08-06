@@ -10,9 +10,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/ui";
 import { SnapshotProvider } from "../../state/SnapshotProvider";
 import { resetIdentity } from "../identity";
+import { resetPlan } from "../shared/plan";
 import { MembersPage, MembersSection } from "./MembersPage";
 
 interface Call { url: string; method: string; body: unknown }
+
+const TEAM_PLAN = { plan: "team", features: { members: true }, upgrade_url: "https://orcha.nursoftai.com/#pricing" };
+const SOLO_PLAN = { plan: "solo", features: { members: false }, upgrade_url: "https://orcha.nursoftai.com/#pricing" };
 
 const rawSnap = {
   container: { id: "c1", name: "Orcha", status: "active", autonomy_level: "plan" },
@@ -32,7 +36,9 @@ const roster = {
   restricted: false,
 };
 
-function stubFetch(overrides: { members?: unknown; me?: unknown } = {}): Call[] {
+function stubFetch(
+  overrides: { members?: unknown; me?: unknown; plan?: unknown; memberStatus?: number } = {},
+): Call[] {
   const calls: Call[] = [];
   const json = (data: unknown, status = 200) =>
     ({ ok: status < 400, status, json: async () => data }) as unknown as Response;
@@ -45,8 +51,17 @@ function stubFetch(overrides: { members?: unknown; me?: unknown } = {}): Call[] 
     });
     if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
     if (url.startsWith("/api/me")) return json(overrides.me ?? { identity: null, trusted: false });
+    // Every existing test in this file predates plan gating and exercises the
+    // roster/invite UI directly, so the default here is "team" (unlocked) —
+    // solo-gating behavior gets its own describe block below with an explicit override.
+    if (url === "/api/plan") return json(overrides.plan ?? TEAM_PLAN);
     if (url === "/api/containers/c1/members") {
-      if ((init?.method || "GET") === "POST") return json({ agent_id: "h3" }, 201);
+      if ((init?.method || "GET") === "POST") {
+        if (overrides.memberStatus === 402) {
+          return json({ detail: { premium: "members", message: "Members needs Team.", upgrade_url: "https://orcha.nursoftai.com/#pricing" } }, 402);
+        }
+        return json({ agent_id: "h3" }, 201);
+      }
       return json(overrides.members ?? roster);
     }
     if (url.startsWith("/api/containers/c1")) return json(rawSnap);
@@ -68,7 +83,7 @@ function mount() {
 }
 
 describe("MembersPage roster (wire-contract render)", () => {
-  beforeEach(() => { localStorage.clear(); resetIdentity(); });
+  beforeEach(() => { localStorage.clear(); resetIdentity(); resetPlan(); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it("renders the roster rows from GET /members: logins, role chips, pending + grants tags", async () => {
@@ -109,7 +124,7 @@ describe("MembersPage roster (wire-contract render)", () => {
 });
 
 describe("MembersSection (the settings-tab card)", () => {
-  beforeEach(() => { localStorage.clear(); resetIdentity(); });
+  beforeEach(() => { localStorage.clear(); resetIdentity(); resetPlan(); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it("renders the vanilla settings.html Members card standalone (no Shell/route needed)", async () => {
@@ -156,7 +171,7 @@ describe("MembersSection (the settings-tab card)", () => {
 });
 
 describe("MembersPage mutations (exact wire bodies, human-gated)", () => {
-  beforeEach(() => { localStorage.clear(); resetIdentity(); });
+  beforeEach(() => { localStorage.clear(); resetIdentity(); resetPlan(); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
   it("Invite POSTs {github_login, role, actor_agent_id} to /api/containers/{cid}/members", async () => {
@@ -178,5 +193,51 @@ describe("MembersPage mutations (exact wire bodies, human-gated)", () => {
       const gets = calls.filter((c) => c.url === "/api/containers/c1/members" && c.method === "GET");
       expect(gets.length).toBeGreaterThan(1);
     });
+  });
+});
+
+describe("MembersPage plan gating (docs/orcha-cloud-local-run.md addendum)", () => {
+  beforeEach(() => { localStorage.clear(); resetIdentity(); resetPlan(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("solo plan renders PremiumGate instead of the roster+invite UI", async () => {
+    stubFetch({ plan: SOLO_PLAN });
+    mount();
+    expect(await screen.findByText("Members is an Orcha Cloud Team feature.", { exact: false })).toBeInTheDocument();
+    // the pitch (contract item 7: invite, roles, grants, GitHub-verified identity)
+    expect(screen.getByText(/Invite teammates/)).toBeInTheDocument();
+    expect(screen.getByText(/owner, member, viewer/)).toBeInTheDocument();
+    expect(screen.getByText(/Granular per-member permission grants/)).toBeInTheDocument();
+    expect(screen.getByText(/GitHub-verified identity/)).toBeInTheDocument();
+    // no roster, no invite affordances
+    expect(screen.queryByText("kedar-gh")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("GitHub username to invite…")).not.toBeInTheDocument();
+  });
+
+  it("solo plan's upgrade button opens the server-provided upgrade_url", async () => {
+    stubFetch({ plan: { ...SOLO_PLAN, upgrade_url: "https://example.com/team" } });
+    mount();
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    fireEvent.click(await screen.findByRole("button", { name: /Upgrade to Orcha Cloud Team/ }));
+    expect(openSpy).toHaveBeenCalledWith("https://example.com/team", "_blank", "noopener");
+  });
+
+  it("team plan renders the roster+invite UI unchanged", async () => {
+    stubFetch({ plan: TEAM_PLAN });
+    mount();
+    expect(await screen.findByText("kedar-gh")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("GitHub username to invite…")).toBeInTheDocument();
+    expect(screen.queryByText(/Team feature/)).not.toBeInTheDocument();
+  });
+
+  it("belt-and-braces: a 402 with the premium detail shape from a mutation swaps to the gate", async () => {
+    stubFetch({ plan: TEAM_PLAN, memberStatus: 402 });
+    mount();
+    await screen.findByText("kedar-gh");
+    fireEvent.change(screen.getByPlaceholderText("GitHub username to invite…"), {
+      target: { value: "hubot" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Invite/ }));
+    expect(await screen.findByText("Members is an Orcha Cloud Team feature.", { exact: false })).toBeInTheDocument();
   });
 });

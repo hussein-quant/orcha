@@ -25,6 +25,15 @@
  * The LAST owner's row never offers demote/remove (the backend 400s both).
  * actor_agent_id rides every mutation as the trust-off fallback actor; with a
  * trusted proxy identity the server resolves the actor from the header instead.
+ *
+ * PLAN GATING (Orcha Cloud local run addendum — docs/orcha-cloud-local-run.md):
+ * local run is the free solo tier. Under solo, this page renders PremiumGate
+ * INSTEAD of the roster+invite UI (GET /api/plan, src/cloud/shared/plan.ts);
+ * the nav entry to /members stays visible (entry point = visible), and every
+ * mutation route 402s server-side regardless of what the client believes
+ * (member_routes.py's require_feature("members") first check) — a 402
+ * arriving from any mutation swaps straight to the gate as a belt-and-braces
+ * fallback. GET (roster) stays open on both plans.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Avatar, Icon, Modal, useToast } from "../../components/ui";
@@ -34,6 +43,8 @@ import { useSnapshot } from "../../state/SnapshotProvider";
 import {
   actingGrant, actingOwner, fetchMe, memActor, viewerRole, type ActingHumanRec, type Me,
 } from "../identity";
+import { PremiumGate } from "../shared/PremiumGate";
+import { usePlan } from "../shared/plan";
 
 /* ---- wire shapes -------------------------------------------------------- */
 export interface Member {
@@ -56,8 +67,12 @@ const MEM_GRANTS: [string, string][] = [
 ];
 
 /* ---- raw fetch with status passthrough (vanilla memApi parity: the 409
- * invite path and detail surfacing depend on reading status + body). ------ */
-interface MemRes { ok: boolean; status: number; body: { detail?: string } & Record<string, unknown> | null }
+ * invite path and detail surfacing depend on reading status + body). Also
+ * carries the plan-gating 402 detail shape ({premium, message, upgrade_url})
+ * — portal_backend/plan_routes.require_feature's HTTPException(402, …) body,
+ * which member_routes.py raises as the FIRST check on every mutation. ----- */
+interface Premium402 { premium?: string; message?: string; upgrade_url?: string }
+interface MemRes { ok: boolean; status: number; body: ({ detail?: string | Premium402 } & Record<string, unknown>) | null }
 async function memApi(method: string, path: string, body?: unknown): Promise<MemRes> {
   const init: RequestInit = { method, headers: { "Content-Type": "application/json" } };
   if (body !== undefined) init.body = JSON.stringify(body);
@@ -69,9 +84,26 @@ async function memApi(method: string, path: string, body?: unknown): Promise<Mem
   } catch { return { ok: false, status: 0, body: null }; }
 }
 
+// Belt-and-braces: true when a mutation response is the plan-gating 402
+// shape (server truth wins even if the client believed it was on team —
+// e.g. a stale plan fetch, or ORCHA_PLAN flipped mid-session).
+function isPremium402(res: MemRes): boolean {
+  const d = res.body?.detail;
+  return res.status === 402 && !!d && typeof d === "object" && "premium" in d;
+}
+
 function memUrl(cid: string, suffix = ""): string {
   return "/api/containers/" + encodeURIComponent(cid) + "/members" + suffix;
 }
+
+// The feature pitch shown on the paywall (contract item 7: invite teammates,
+// roles, granular grants, GitHub-verified identity).
+const MEMBERS_PITCH = [
+  "Invite teammates by GitHub username",
+  "Roles: owner, member, viewer",
+  "Granular per-member permission grants",
+  "GitHub-verified identity for every collaborator",
+];
 
 /* ---- faces (app-ui.js ghAvatar/face parity) ------------------------------ */
 // GitHub member avatar: the github.com/<login>.png image over the deterministic
@@ -158,6 +190,7 @@ interface RowCtx { canManage: boolean; isOwner: boolean; meId: string | null; ow
 function MembersCard() {
   const { snap, cid } = useSnapshot();
   const toast = useToast();
+  const plan = usePlan();
   const [members, setMembers] = useState<Member[] | null>(null);
   const [restricted, setRestricted] = useState(false);
   const [err, setErr] = useState(false);
@@ -168,6 +201,11 @@ function MembersCard() {
   const [inviteRole, setInviteRole] = useState("member");
   const [removing, setRemoving] = useState<Member | null>(null);
   const [me, setMe] = useState<Me | null>(null);
+  // Belt-and-braces (contract item 7): a 402 with the plan-gating detail shape
+  // arriving from ANY mutation swaps straight to the gate, even if `plan`
+  // believed we were on team (stale fetch, or ORCHA_PLAN flipped mid-session
+  // on the server) — the server's answer always wins over the client's guess.
+  const [forcedGate, setForcedGate] = useState<{ upgradeUrl: string } | null>(null);
 
   // Collab v1: resolve the acting identity once per page load — the shared
   // single-flighted fetchMe (src/cloud/identity.ts, vanilla data.js parity).
@@ -204,6 +242,17 @@ function MembersCard() {
     return h;
   };
 
+  // Belt-and-braces (contract item 7): a 402 from ANY mutation means the
+  // server disagrees with what we rendered — swap to the gate immediately
+  // rather than surfacing a confusing generic error toast. Returns true when
+  // it handled the response (caller should stop).
+  const catchPremium402 = (res: MemRes): boolean => {
+    if (!isPremium402(res)) return false;
+    const d = res.body?.detail as Premium402;
+    setForcedGate({ upgradeUrl: d.upgrade_url || "https://orcha.nursoftai.com/#pricing" });
+    return true;
+  };
+
   /* ---- mutations (server re-validates every gate) ----------------------- */
   const doInvite = async () => {
     const login = inviteLogin.trim();
@@ -217,6 +266,7 @@ function MembersCard() {
       actor_agent_id: h.id,
     });
     setBusy(false);
+    if (catchPremium402(res)) return;
     if (res.ok) {
       toast("Invited " + login + " — pending until they first sign in.", "ok");
       setInviteLogin("");
@@ -237,6 +287,7 @@ function MembersCard() {
       role: to, actor_agent_id: h.id,
     });
     setBusy(false);
+    if (catchPremium402(res)) return;
     if (res.ok) { toast("Role updated — " + to + ".", "ok"); void load(); }
     else {
       toast("Role change failed (" + res.status + ")" + (res.body && res.body.detail ? ": " + res.body.detail : ""), "danger");
@@ -254,6 +305,7 @@ function MembersCard() {
       grants: grants, actor_agent_id: h.id,
     });
     setBusy(false);
+    if (catchPremium402(res)) return;
     if (res.ok) { toast("Permissions saved.", "ok"); void load(); }
     else toast("Permissions change failed (" + res.status + ")" + (res.body && res.body.detail ? ": " + res.body.detail : ""), "danger");
   };
@@ -268,6 +320,7 @@ function MembersCard() {
       actor_agent_id: h.id,
     });
     setBusy(false);
+    if (catchPremium402(res)) return;
     if (res.ok) { toast("Removed " + name + ".", "ok"); void load(); }
     else toast("Remove failed (" + res.status + ")" + (res.body && res.body.detail ? ": " + res.body.detail : ""), "danger");
   };
@@ -290,6 +343,19 @@ function MembersCard() {
   };
 
   /* ---- render ----------------------------------------------------------- */
+  // Belt-and-braces: a 402 from a mutation trumps everything else — the
+  // server just told us, authoritatively, that this plan can't do this.
+  if (forcedGate) {
+    return <PremiumGate feature="members" title="Members" pitch={MEMBERS_PITCH} upgradeUrl={forcedGate.upgradeUrl} />;
+  }
+  // Plan gating (contract item 7): solo renders the paywall INSTEAD of the
+  // roster+invite UI — invite/role/grant affordances never render. `plan ===
+  // null` is the brief in-flight window before usePlan() resolves; we hold
+  // rendering (a beat of blank card body) rather than flash the real roster
+  // and then yank it away, or flash the gate for a paying team customer.
+  if (plan && plan.plan === "solo") {
+    return <PremiumGate feature="members" title="Members" pitch={MEMBERS_PITCH} upgradeUrl={plan.upgrade_url} />;
+  }
   if (err) {
     return (
       <div className="sc-banner warn">
@@ -298,7 +364,7 @@ function MembersCard() {
       </div>
     );
   }
-  if (!members) return <div className="none">Loading members…</div>;
+  if (!members || !plan) return <div className="none">Loading members…</div>;
 
   // Roster privacy: the server sent only your own membership — render it as a
   // card plus the explanation (no invite bar, no roster, no controls).

@@ -22,6 +22,16 @@ def no_trust_proxy(monkeypatch):
     monkeypatch.delenv("ORCHA_TRUST_PROXY_USER", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _team_plan(monkeypatch):
+    """This module exercises member mutations (invite/role/grants/remove) —
+    a Team-plan feature under the plan-gating addendum
+    (docs/orcha-cloud-local-run.md). Solo-tier 402 behavior is covered by
+    tests/test_plan_gating.py; this suite stays on the team plan so its
+    access-model assertions are unaffected by the gate."""
+    monkeypatch.setenv("ORCHA_PLAN", "team")
+
+
 async def _members(client, cid):
     r = await client.get(f"/api/containers/{cid}/members")
     assert r.status_code == 200, r.text
