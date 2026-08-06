@@ -74,7 +74,9 @@ hint + link to the PAT creation page). Uses the provider-key card idiom.
 
 ## Non-goals (v1)
 
-- No license/entitlement enforcement (packaging decision, separate track).
+- No license keys / billing integration — plan gating is the env-driven
+  `ORCHA_PLAN` switch (see addendum); paid activation mechanics are a
+  separate track.
 - No webhooks/push-relay locally (box timers stay box-only; portal features
   that poll work unchanged).
 - No changes to open-orcha — this is all cloud-side (`portal_backend` cloud
