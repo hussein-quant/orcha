@@ -15,6 +15,14 @@
  *  - toggling a dir lazy-loads its children exactly once (cached after).
  *  - file content re-fetches on (cid, gitRef, path) change, token-guarded
  *    against stale async responses.
+ *
+ * Folder-expand failures are NEVER cached (fix for: a transient failure —
+ * e.g. a GitHub rate-limit blip — used to get cached by the lazy tree same as
+ * a success, so collapsing/re-expanding the folder never retried and it
+ * showed "Couldn't load this folder." permanently). A dir whose cached state
+ * carries an `error` is treated as not-yet-loaded: `toggleDir` re-fetches it
+ * on the next expand, and `retryDir` re-fetches it in place (without
+ * collapsing/re-expanding) for the error row's own click-to-retry affordance.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchFile, fetchTree } from "../github/browse/browseApi";
@@ -27,6 +35,11 @@ export interface UseBrowseTreeResult {
   expanded: Set<string>;
   rows: TreeRow[];
   toggleDir: (dirPath: string) => void;
+  // Re-fetch a dir that's currently showing an error, IN PLACE — unlike
+  // toggleDir (a collapse/expand toggle), this never changes `expanded`; it's
+  // what the error row's own "tap to retry" affordance calls while the dir
+  // stays expanded and visibly shows the loading state.
+  retryDir: (dirPath: string) => void;
   filePayload: BrowseFilePayload | null;
   fileError: GhError | null;
   fileLoading: boolean;
@@ -95,12 +108,25 @@ export function useBrowseTree(cid: string, gitRef: string, path: string): UseBro
       } else {
         next.add(dirPath);
         setDirCache((cache) => {
-          if (!cache[dirPath]) loadDir(dirPath);
+          // A dir cached with an error is treated as never-loaded — a failed
+          // load must never block a retry on the next expand (the bug this
+          // fixes: re-expanding after a transient failure re-showed the same
+          // stale error forever instead of trying again).
+          if (!cache[dirPath] || cache[dirPath].error) loadDir(dirPath);
           return cache;
         });
       }
       return next;
     });
+  }, [loadDir]);
+
+  // Click-to-retry affordance on the error row itself: re-fetch a failed dir
+  // WITHOUT collapsing it first (toggleDir would just close it since it's
+  // already in `expanded`) — loadDir alone re-runs the fetch and updates
+  // dirCache in place, so the retry's loading/success/error states render
+  // right where the error was.
+  const retryDir = useCallback((dirPath: string) => {
+    loadDir(dirPath);
   }, [loadDir]);
 
   const rows = useMemo(
@@ -121,5 +147,5 @@ export function useBrowseTree(cid: string, gitRef: string, path: string): UseBro
     });
   }, [cid, gitRef, path]);
 
-  return { dirCache, expanded, rows, toggleDir, filePayload, fileError, fileLoading };
+  return { dirCache, expanded, rows, toggleDir, retryDir, filePayload, fileError, fileLoading };
 }

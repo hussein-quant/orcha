@@ -135,11 +135,31 @@
 .cs-line-text { flex: 1; min-width: 0; white-space: pre; padding-right: 12px; }
 
 /* ---- Item 1: markdown Raw|Rendered toggle + rendered pane ------------------- */
-.cs-view-toggle { margin-left: auto; flex: none; display: flex; gap: 4px; }
+/* .cs-discuss-doc-btn (item 2) precedes .cs-view-toggle in the DOM when
+   present — the auto margin lives on whichever of the two is FIRST so the
+   pair pushes right as a unit either way (Rendered mode: both; Raw mode:
+   just the toggle, this rule still applies to it directly). */
+.cs-discuss-doc-btn, .cs-view-toggle { margin-left: auto; }
+.cs-discuss-doc-btn + .cs-view-toggle { margin-left: 0; }
+.cs-view-toggle { flex: none; display: flex; gap: 4px; }
 .cs-view-toggle-btn { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
   font: inherit; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; cursor: pointer; }
 .cs-view-toggle-btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
-.cs-md-rendered { padding: 16px 20px; font-size: 13.5px; line-height: 1.6; cursor: help; }
+.cs-discuss-doc-btn { flex: none; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent);
+  font: inherit; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 999px; cursor: pointer; }
+
+.cs-md-rendered { padding: 16px 20px; font-size: 13.5px; line-height: 1.6; }
+/* Item 2 — each rendered heading (mdText's flat <span class="md-h">) is a
+   click-to-discuss affordance: a hover highlight plus a small chip glyph
+   revealed to its left (mirrors .cs-gutter-add's hover-reveal idiom), never
+   shifting layout since the chip is absolutely positioned outside the
+   heading's own box. */
+.cs-md-rendered .md-h { position: relative; display: inline-block; cursor: pointer; border-radius: 4px;
+  padding: 0 2px; margin: 0 -2px; }
+.cs-md-rendered .md-h:hover { background: var(--hover); }
+.cs-md-rendered .md-h::before { content: "💬"; position: absolute; left: -20px; top: 0; opacity: 0;
+  transition: opacity .1s; font-size: 12px; }
+.cs-md-rendered .md-h:hover::before { opacity: 0.7; }
 
 /* ---- right: thread rail ----------------------------------------------------- */
 .cs-rail { min-width: 240px; flex: none;

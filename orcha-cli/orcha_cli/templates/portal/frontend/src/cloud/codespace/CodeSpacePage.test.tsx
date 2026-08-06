@@ -199,7 +199,7 @@ describe("CodeSpacePage — markdown Raw|Rendered toggle (item 1)", () => {
     expect(await screen.findByText(/line 1/i)).toBeInTheDocument();
   });
 
-  it("toggling back to Rendered disables the gutter with an explanatory tooltip", async () => {
+  it("toggling back to Rendered has no gutter, but keeps the Discuss-this-document affordance available", async () => {
     stubFetch();
     mount("/code?path=readme.md");
     await screen.findByText("readme.md", { selector: ".rb-file-path" });
@@ -207,7 +207,8 @@ describe("CodeSpacePage — markdown Raw|Rendered toggle (item 1)", () => {
     fireEvent.click(screen.getByText("Rendered"));
     const rendered = document.querySelector(".cs-md-rendered");
     expect(rendered).not.toBeNull();
-    expect(rendered!.getAttribute("title")).toMatch(/switch to raw to anchor a thread/i);
+    expect(document.querySelector(".cs-gutter")).toBeNull();
+    expect(screen.getByText("Discuss this document")).toBeInTheDocument();
   });
 
   it("a non-.md file has no Raw|Rendered toggle at all", async () => {
@@ -228,6 +229,125 @@ describe("CodeSpacePage — markdown Raw|Rendered toggle (item 1)", () => {
     await screen.findByText("a.ts", { selector: ".rb-file-path" });
     expect(document.querySelector(".cs-md-rendered")).toBeNull();
     expect(document.querySelector('[data-cs-line="1"] .cs-gutter')).not.toBeNull();
+  });
+});
+
+/* ---- Item 2: thread conversations on rendered markdown ------------------- */
+describe("CodeSpacePage — thread conversations on rendered markdown (item 2)", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  // Two distinct "Section" headings (same normalized text) exercise the
+  // matcher's positional-not-textual-uniqueness resolution; "Weird `Code`"
+  // exercises inline-markup normalization.
+  const MD_CONTENT = [
+    "# Title",
+    "",
+    "Some **bold** text.",
+    "",
+    "## Section",
+    "",
+    "First section body.",
+    "",
+    "## Weird `Code` Heading",
+    "",
+    "More text.",
+    "",
+    "## Section",
+    "",
+    "Second section body.",
+  ].join("\n");
+  const FILE_MD_HEADINGS = { ref: "HEAD", path: "readme.md", content: MD_CONTENT, size: MD_CONTENT.length };
+  const THREAD_ON_MD = {
+    id: "tmd1", ref: "HEAD", sha: "abc1234def", path: "readme.md", start_line: 5, end_line: 5,
+    kind: "question", status: "open", created_at: "now", updated_at: "now", blob_match: true,
+  };
+
+  function stubMdFetch(threads: unknown[] = []) {
+    const json = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as unknown as Response;
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/github/browse/tree")) return json(TREE_ROOT);
+      if (url.startsWith("/api/containers/c1/github/browse/file")) return json(FILE_MD_HEADINGS);
+      if (url.startsWith("/api/containers/c1/code/threads")) return json({ threads });
+      if (url.startsWith("/api/containers/c1/code/outline")) {
+        return json({ available: true, ref: "HEAD", path: "readme.md", language: "markdown", symbols: [] });
+      }
+      if (url.startsWith("/api/containers/c1/code/symbols")) return json(SYMBOL_SEARCH_RESULT);
+      if (url.startsWith("/api/containers/c1")) {
+        return json({ container: { id: "c1", name: "Acme", status: "active", autonomy_level: "plan" }, agents: AGENTS, tasks: [], requests: [] });
+      }
+      if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
+      return json({});
+    }) as unknown as typeof fetch;
+  }
+
+  it("'Discuss this document' opens the composer with a file-level (whole document) anchor", async () => {
+    stubMdFetch();
+    mount("/code?path=readme.md");
+    await screen.findByText("readme.md", { selector: ".rb-file-path" });
+    fireEvent.click(screen.getByText("Discuss this document"));
+    expect(await screen.findByText(/whole document/i)).toBeInTheDocument();
+    // never mislabeled as an ordinary line-1 anchor
+    expect(screen.queryByText(/line 1\b/i)).not.toBeInTheDocument();
+  });
+
+  it("clicking a heading anchors the composer to that heading's SOURCE line", async () => {
+    stubMdFetch();
+    mount("/code?path=readme.md");
+    await screen.findByText("readme.md", { selector: ".rb-file-path" });
+    const heading = document.querySelectorAll(".cs-md-rendered .md-h")[1]; // first "## Section" — source line 5
+    fireEvent.click(heading as Element);
+    expect(await screen.findByText(/line 5\b/i)).toBeInTheDocument();
+  });
+
+  it("a duplicate heading resolves POSITIONALLY to its own occurrence's line, not the first match", async () => {
+    stubMdFetch();
+    mount("/code?path=readme.md");
+    await screen.findByText("readme.md", { selector: ".rb-file-path" });
+    const headings = document.querySelectorAll(".cs-md-rendered .md-h");
+    fireEvent.click(headings[3] as Element); // second "## Section" — source line 13
+    expect(await screen.findByText(/line 13\b/i)).toBeInTheDocument();
+  });
+
+  it("an unresolvable heading click falls back to the whole-document anchor with a note, never guessing a line", async () => {
+    stubMdFetch();
+    mount("/code?path=readme.md");
+    await screen.findByText("readme.md", { selector: ".rb-file-path" });
+    const heading = document.querySelector(".cs-md-rendered .md-h") as HTMLElement;
+    // simulate a resolver mismatch by editing the DOM text after render (the
+    // click handler reads live textContent, so this reproduces "rendered
+    // text doesn't match source" without needing a second real fixture).
+    heading.textContent = "Something Else Entirely";
+    fireEvent.click(heading);
+    expect(await screen.findByText(/couldn.t match that heading/i)).toBeInTheDocument();
+    expect(document.querySelector(".cs-composer-anchor")!.textContent).toMatch(/whole document/i);
+  });
+
+  it("clicking a thread in the rail while Rendered is active switches to Raw at the anchor, with a note", async () => {
+    stubMdFetch([THREAD_ON_MD]);
+    mount("/code?path=readme.md");
+    await screen.findByText("readme.md", { selector: ".rb-file-path" });
+    expect(document.querySelector(".cs-md-rendered")).not.toBeNull();
+
+    const threadChip = await screen.findByText("Question", { selector: ".kind-tag" });
+    fireEvent.click(threadChip.closest(".cs-thread-chip") as Element);
+
+    expect(document.querySelector(".cs-md-rendered")).toBeNull(); // switched to Raw
+    expect(screen.getByText("Raw").className).toContain("on");
+    expect(await screen.findByText(/switched to raw/i)).toBeInTheDocument();
+    expect(document.querySelector('[data-cs-line="5"] .cs-gutter')).not.toBeNull();
+  });
+
+  it("Raw-mode behavior is untouched: the gutter still opens a normal line-anchored composer", async () => {
+    stubMdFetch();
+    mount("/code?path=readme.md");
+    await screen.findByText("readme.md", { selector: ".rb-file-path" });
+    fireEvent.click(screen.getByText("Raw"));
+    const gutter1 = document.querySelector('[data-cs-line="1"] .cs-gutter') as HTMLElement;
+    fireEvent.click(gutter1);
+    expect(await screen.findByText(/line 1\b/i)).toBeInTheDocument();
+    expect(screen.queryByText(/whole document/i)).not.toBeInTheDocument();
   });
 });
 

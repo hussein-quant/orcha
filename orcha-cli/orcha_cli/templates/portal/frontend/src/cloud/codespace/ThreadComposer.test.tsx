@@ -152,6 +152,31 @@ describe("ThreadComposer", () => {
     await screen.findByText("Post");
     expect(() => fireEvent.keyDown(document, { key: "Escape" })).not.toThrow();
   });
+
+  // Item 2 — Rendered-markdown "Discuss this document": a file-level anchor
+  // (start_line=1, end_line=1) is disambiguated from an ordinary line-1
+  // selection by the wholeDocument prop, labeled explicitly rather than as
+  // "line 1" — the POST body itself is unaffected (still start/end=1).
+  it("wholeDocument labels the anchor \"whole document\" instead of \"line 1\", but still posts start/end_line=1", async () => {
+    const calls = stubFetch();
+    mount({ startLine: 1, endLine: 1, wholeDocument: true });
+    await screen.findByText("Post");
+    expect(screen.getByText(/whole document/i)).toBeInTheDocument();
+    expect(screen.queryByText(/line 1\b/i)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/thread message/i), { target: { value: "what's this doc about?" } });
+    fireEvent.click(screen.getByText("Post"));
+    const postCall = await waitForPost(calls);
+    expect(postCall.body).toMatchObject({ start_line: 1, end_line: 1 });
+  });
+
+  it("without wholeDocument, an actual line-1 selection still labels normally as \"line 1\"", async () => {
+    stubFetch();
+    mount({ startLine: 1, endLine: 1 });
+    await screen.findByText("Post");
+    expect(screen.getByText(/line 1\b/i)).toBeInTheDocument();
+    expect(screen.queryByText(/whole document/i)).not.toBeInTheDocument();
+  });
 });
 
 async function waitForPost(calls: Call[]): Promise<Call> {

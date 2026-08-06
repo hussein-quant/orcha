@@ -32,6 +32,8 @@
    stylesheet verbatim (no redeclaration) — .rb-dfv-tree only tweaks overflow. */
 .rb-dfv-tree { overflow: visible; }
 .rb-dir-loading { font-size: 11.5px; padding: 3px 8px; }
+.rb-dir-retry { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.rb-dir-retry:hover, .rb-dir-retry:focus-visible { color: var(--text-2); }
 
 /* ---- search results -------------------------------------------------------- */
 .rb-search-note { font-size: 11.5px; padding: 8px 10px; border-bottom: 1px solid var(--border); }

@@ -140,11 +140,17 @@ export interface BrowseTreeProps {
   selectedPath: string;
   onToggleDir: (path: string) => void;
   onSelectFile: (path: string) => void;
+  // Folder-expand failure retry: a dir row that errored renders as a
+  // click-to-retry affordance instead of a dead-end message. Optional so a
+  // caller that doesn't wire it still renders (falls back to the plain,
+  // unclickable error text) — both current callers (RepoBrowser, Code Space)
+  // pass it through useBrowseTree's retryDir.
+  onRetryDir?: (path: string) => void;
   // optional per-path decoration appended after the file name (e.g. Code
   // Space's thread-count badge) — RepoBrowser passes nothing (unchanged UI).
   fileBadge?: (path: string) => React.ReactNode;
 }
-export function BrowseTree({ rows, dirCache, expanded, selectedPath, onToggleDir, onSelectFile, fileBadge }: BrowseTreeProps) {
+export function BrowseTree({ rows, dirCache, expanded, selectedPath, onToggleDir, onSelectFile, onRetryDir, fileBadge }: BrowseTreeProps) {
   const root = dirCache[""];
   if (root && root.loading && !root.entries) return <BrowseSkeletonRows />;
   if (root && root.error) return <BrowseErrorBody err={root.error} what="Repository" />;
@@ -172,7 +178,20 @@ export function BrowseTree({ rows, dirCache, expanded, selectedPath, onToggleDir
                 <div style={{ paddingLeft: 24 + r.depth * 14 }} className="rb-dir-loading muted">Loading…</div>
               ) : null}
               {open && state && state.error ? (
-                <div style={{ paddingLeft: 24 + r.depth * 14 }} className="rb-dir-loading muted">Couldn&#39;t load this folder.</div>
+                onRetryDir ? (
+                  <div
+                    style={{ paddingLeft: 24 + r.depth * 14 }}
+                    className="rb-dir-loading rb-dir-retry muted"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onRetryDir(r.entry.path)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onRetryDir(r.entry.path); }}
+                  >
+                    Couldn&#39;t load this folder — tap to retry
+                  </div>
+                ) : (
+                  <div style={{ paddingLeft: 24 + r.depth * 14 }} className="rb-dir-loading muted">Couldn&#39;t load this folder.</div>
+                )
               ) : null}
             </div>
           );
