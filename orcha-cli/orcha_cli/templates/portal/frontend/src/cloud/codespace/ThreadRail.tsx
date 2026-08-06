@@ -47,6 +47,11 @@ export interface ThreadRailProps {
   onTabChange: (tab: RailTab) => void;
   // composer open state is driven by the code viewer's gutter click
   composerSelection: { start: number; end: number } | null;
+  // Item 2 — composerSelection is {start:1,end:1} for BOTH an actual line-1
+  // gutter click AND the Rendered view's "Discuss this document" affordance;
+  // this flag disambiguates them so the composer never mislabels a real
+  // line-1 selection as the whole document (or vice versa).
+  composerWholeDocument?: boolean;
   onComposerClose: () => void;
   onJumpToLine: (line: number) => void;
   onJumpToPinnedSha?: (sha: string) => void;
@@ -80,6 +85,7 @@ export function ThreadRail({
   tab,
   onTabChange,
   composerSelection,
+  composerWholeDocument,
   onComposerClose,
   onJumpToLine,
   onJumpToPinnedSha,
@@ -192,6 +198,7 @@ export function ThreadRail({
               startLine={composerSelection.start}
               endLine={composerSelection.end}
               agents={agents}
+              wholeDocument={composerWholeDocument}
               onCreated={(created) => { onComposerClose(); openCreatedThread(created); }}
               onCancel={onComposerClose}
             />

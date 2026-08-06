@@ -121,6 +121,55 @@ describe("RepoBrowser tree", () => {
     mount();
     expect(await screen.findByText("GitHub rate limit hit")).toBeInTheDocument();
   });
+
+  // Folder-expand failure caching regression — a transient dir-load failure
+  // (e.g. a GitHub rate-limit blip on ONE nested folder, root already fine)
+  // must not get cached forever: the error row is itself a click-to-retry
+  // affordance, and re-expanding after collapsing also retries.
+  it("a failed dir expand shows a click-to-retry row, and retrying re-fetches successfully", async () => {
+    let call = 0;
+    const calls = stubFetch({
+      "/browse/tree": (url: string) => {
+        if (url.includes("path=src")) {
+          call++;
+          if (call === 1) return { __status: 403, body: { detail: "slow down" } };
+          return { ref: "HEAD", path: "src", entries: [{ name: "index.ts", path: "src/index.ts", type: "file" }] };
+        }
+        return { ref: "HEAD", path: "", entries: [{ name: "src", path: "src", type: "dir" }] };
+      },
+    });
+    mount();
+    const dirRow = await screen.findByText("src");
+    fireEvent.click(dirRow);
+    const retryRow = await screen.findByText(/couldn.t load this folder — tap to retry/i);
+
+    fireEvent.click(retryRow);
+    expect(await screen.findByText("index.ts")).toBeInTheDocument();
+    expect(calls.filter((c) => c.url.includes("/browse/tree") && c.url.includes("path=src")).length).toBe(2);
+  });
+
+  it("collapsing and re-expanding a failed dir retries instead of re-showing the same cached error", async () => {
+    let call = 0;
+    stubFetch({
+      "/browse/tree": (url: string) => {
+        if (url.includes("path=src")) {
+          call++;
+          if (call === 1) return { __status: 403, body: { detail: "slow down" } };
+          return { ref: "HEAD", path: "src", entries: [{ name: "index.ts", path: "src/index.ts", type: "file" }] };
+        }
+        return { ref: "HEAD", path: "", entries: [{ name: "src", path: "src", type: "dir" }] };
+      },
+    });
+    mount();
+    const dirRow = await screen.findByText("src");
+    fireEvent.click(dirRow); // expand: fails
+    await screen.findByText(/couldn.t load this folder/i);
+
+    fireEvent.click(screen.getByText("src")); // collapse
+    fireEvent.click(screen.getByText("src")); // re-expand: must retry, not reuse the cached error
+    expect(await screen.findByText("index.ts")).toBeInTheDocument();
+    expect(call).toBe(2);
+  });
 });
 
 describe("RepoBrowser content pane", () => {

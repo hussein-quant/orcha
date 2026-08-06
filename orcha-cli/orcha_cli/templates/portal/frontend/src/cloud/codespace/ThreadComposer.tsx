@@ -25,6 +25,12 @@ export interface ThreadComposerProps {
   startLine: number;
   endLine: number;
   agents: Agent[];
+  // Item 2 (rendered-markdown "Discuss this document") — a FILE-LEVEL anchor
+  // (start_line=1, end_line=1) posted from Rendered mode's document-level
+  // affordance, not an actual line-1 selection. The anchor line swaps its
+  // "line 1" label for an explicit "whole document" one so the composer is
+  // never ambiguous about which kind of anchor it's posting.
+  wholeDocument?: boolean;
   // Phase 2 raise-hand: pre-tag a specific agent and lock the picker, with
   // the honest queued-caption instead of the free picker.
   preTaggedAgentId?: string | null;
@@ -42,6 +48,7 @@ export function ThreadComposer({
   startLine,
   endLine,
   agents,
+  wholeDocument,
   preTaggedAgentId,
   onCreated,
   onCancel,
@@ -101,7 +108,7 @@ export function ThreadComposer({
   return (
     <div className="cs-composer">
       <div className="cs-composer-anchor">
-        {path} · line {anchorLabel(startLine, endLine)}
+        {path} · {wholeDocument ? "whole document" : "line " + anchorLabel(startLine, endLine)}
       </div>
       {!raiseHand ? (
         <div className="cs-templates" role="group" aria-label="Question templates">

@@ -15,7 +15,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Md } from "../../components/ui";
+import { useToast } from "../../components/ui";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import { Shell } from "../../shell/Shell";
 import { extOf } from "../github/browse/browseTypes";
@@ -32,6 +32,7 @@ import { CodeSpaceLanding } from "./CodeSpaceLanding";
 import type { CodeThreadSummary } from "./codespaceTypes";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { isLineSelected, rangeFrom, singleLine, type LineSelection } from "./gutter";
+import { MdRenderedPane } from "./MdRenderedPane";
 import { recordFileView } from "./recentFiles";
 import { RecentFilesDropdown } from "./RecentFilesDropdown";
 import { IdentifierTokens } from "./symbols/IdentifierTokens";
@@ -42,9 +43,15 @@ import "./codespace.css";
 
 // Item 1 — Markdown files render through the house Md component (esc-first,
 // safe inline markdown) by default; a small Raw|Rendered toggle in the
-// content-pane header lets a human drop back to line-anchored Raw mode
-// (gutter selection is disabled in Rendered mode — there ARE no gutter lines
-// to anchor against prose, so the tooltip is honest about why).
+// content-pane header lets a human drop back to line-anchored Raw mode.
+//
+// Item 2 (thread conversations on rendered markdown) — Rendered mode has no
+// gutter lines (there's no 1:1 line mapping over rendered prose blocks), but
+// it's NOT anchor-dead: a "Discuss this document" header affordance opens
+// the composer with a FILE-LEVEL anchor (start_line=1, end_line=1), and each
+// rendered heading gets its own hover affordance that resolves to that
+// heading's SOURCE line (MdRenderedPane.tsx / mdHeadingAnchor.ts) — falling
+// back to the file-level anchor, with an explanatory note, on any ambiguity.
 type ViewMode = "raw" | "rendered";
 function isMarkdownPath(path: string): boolean {
   return extOf(path) === "md";
@@ -79,6 +86,7 @@ function pulseTreeRow(dirPath: string): void {
 
 export function CodeSpacePage() {
   const { snap, cid } = useSnapshot();
+  const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const gitRef = searchParams.get("ref") || "HEAD";
@@ -86,10 +94,15 @@ export function CodeSpacePage() {
   const lineParam = searchParams.get("line");
   const threadParam = searchParams.get("thread");
 
-  const { dirCache, expanded, rows, toggleDir, filePayload, fileError, fileLoading } = useBrowseTree(cid || "", gitRef, path);
+  const { dirCache, expanded, rows, toggleDir, retryDir, filePayload, fileError, fileLoading } = useBrowseTree(cid || "", gitRef, path);
 
   const [selection, setSelection] = useState<LineSelection | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
+  // Item 2 — true when the open composer's {start:1,end:1} selection is the
+  // Rendered view's FILE-LEVEL anchor ("Discuss this document" affordance, or
+  // an ambiguous-heading fallback), not an actual Raw-mode line-1 click —
+  // disambiguates the two so ThreadComposer never mislabels one as the other.
+  const [composerWholeDocument, setComposerWholeDocument] = useState(false);
   const anchorLineRef = useRef<number | null>(null);
   const [railTab, setRailTab] = useState<RailTab>("threads");
   const [openThreadId, setOpenThreadId] = useState<string | null>(threadParam);
@@ -163,10 +176,27 @@ export function CodeSpacePage() {
     navigate({ ref: sha }, true);
   }, [navigate]);
 
+  // Item 2(c) — rendered blocks don't map 1:1 to source lines, so a thread
+  // opened from the rail while Rendered is active switches to Raw AT THE
+  // THREAD'S ANCHOR (the only mode that can actually show/highlight it), with
+  // a small note explaining the jump. Only fires for an id belonging to a
+  // thread ON THIS FILE (fileThreads, already loaded for the tree badge) —
+  // closing (id=null), a raise-hand thread, or a just-created optimistic open
+  // (openCreatedThread, always Raw already since the composer that made it
+  // only ever anchors a real line) don't match any fileThreads row and no-op
+  // harmlessly here.
   const openThread = useCallback((id: string | null) => {
     setOpenThreadId(id);
     navigate({ thread: id }, true);
-  }, [navigate]);
+    if (id && viewMode === "rendered") {
+      const t = fileThreads.find((ft) => ft.id === id);
+      if (t) {
+        setViewMode("raw");
+        toast("Switched to Raw to show this thread's anchor", "");
+        scrollLineIntoView(t.start_line);
+      }
+    }
+  }, [navigate, viewMode, fileThreads, toast]);
 
   const onGutterClick = useCallback((line: number, shiftKey: boolean) => {
     if (shiftKey && anchorLineRef.current != null) {
@@ -175,11 +205,48 @@ export function CodeSpacePage() {
       anchorLineRef.current = line;
       setSelection(singleLine(line));
     }
+    setComposerWholeDocument(false);
     setComposerOpen(true);
     setRailTab("threads");
     setOpenThreadId(null);
     setRaiseHand(null);
   }, []);
+
+  // Item 2 — Rendered mode's "Discuss this document" header affordance: opens
+  // the SAME composer the gutter uses, anchored file-level (start=end=1),
+  // clearly labeled by composerWholeDocument so it never reads as "line 1".
+  const onDiscussDocument = useCallback(() => {
+    setSelection(singleLine(1));
+    setComposerWholeDocument(true);
+    setComposerOpen(true);
+    setRailTab("threads");
+    setOpenThreadId(null);
+    setRaiseHand(null);
+  }, []);
+
+  // Item 2 — a rendered heading resolved to its source line (mdHeadingAnchor
+  // .ts): anchor the composer there, same as a Raw-mode gutter click on that
+  // line, but never Raw's own state (Rendered stays Rendered — Raw is ONLY
+  // entered explicitly by the toggle or a thread-rail jump).
+  const onDiscussHeading = useCallback((line: number) => {
+    setSelection(singleLine(line));
+    setComposerWholeDocument(false);
+    setComposerOpen(true);
+    setRailTab("threads");
+    setOpenThreadId(null);
+    setRaiseHand(null);
+  }, []);
+
+  // Item 2 — a heading click that couldn't be confidently resolved to a
+  // source line (count/text mismatch — see mdHeadingAnchor.ts) falls back to
+  // the file-level anchor rather than risk anchoring to the wrong line; the
+  // toast is the "tooltip saying so" the spec calls for, surfaced at the
+  // moment of the click since a hover-only tooltip can't explain a decision
+  // made at click time.
+  const onAmbiguousHeading = useCallback(() => {
+    toast("Couldn't match that heading to a source line — discussing the whole document instead", "warn");
+    onDiscussDocument();
+  }, [onDiscussDocument, toast]);
 
   // Usability sweep papercut: closing the composer (Escape, or its own
   // Cancel button) left the just-picked line's ".cs-line.selected" highlight
@@ -188,6 +255,7 @@ export function CodeSpacePage() {
   // picked yet.
   const closeComposer = useCallback(() => {
     setComposerOpen(false);
+    setComposerWholeDocument(false);
     setSelection(null);
   }, []);
 
@@ -350,6 +418,7 @@ export function CodeSpacePage() {
                   expanded={expanded}
                   selectedPath={path}
                   onToggleDir={toggleDir}
+                  onRetryDir={retryDir}
                   onSelectFile={selectFile}
                   fileBadge={(p) => {
                     const n = fileThreads.filter((t) => t.path === p).length;
@@ -406,33 +475,44 @@ export function CodeSpacePage() {
                     <>
                       <Breadcrumbs path={path} onOpenDir={openDirInTree} />
                       {isMd ? (
-                        <div className="cs-view-toggle" role="group" aria-label="View mode">
-                          <button
-                            type="button"
-                            className={"cs-view-toggle-btn" + (viewMode === "raw" ? " on" : "")}
-                            onClick={() => setViewMode("raw")}
-                          >
-                            Raw
-                          </button>
-                          <button
-                            type="button"
-                            className={"cs-view-toggle-btn" + (viewMode === "rendered" ? " on" : "")}
-                            onClick={() => setViewMode("rendered")}
-                          >
-                            Rendered
-                          </button>
-                        </div>
+                        <>
+                          {viewMode === "rendered" ? (
+                            <button
+                              type="button"
+                              className="cs-discuss-doc-btn"
+                              onClick={onDiscussDocument}
+                              title="Start a thread anchored to this whole document"
+                            >
+                              Discuss this document
+                            </button>
+                          ) : null}
+                          <div className="cs-view-toggle" role="group" aria-label="View mode">
+                            <button
+                              type="button"
+                              className={"cs-view-toggle-btn" + (viewMode === "raw" ? " on" : "")}
+                              onClick={() => setViewMode("raw")}
+                            >
+                              Raw
+                            </button>
+                            <button
+                              type="button"
+                              className={"cs-view-toggle-btn" + (viewMode === "rendered" ? " on" : "")}
+                              onClick={() => setViewMode("rendered")}
+                            >
+                              Rendered
+                            </button>
+                          </div>
+                        </>
                       ) : null}
                     </>
                   }
                 >
                   {isMd && viewMode === "rendered" ? (
-                    <div
-                      className="cs-md-rendered"
-                      title="switch to Raw to anchor a thread"
-                    >
-                      <Md text={filePayload.content ?? ""} />
-                    </div>
+                    <MdRenderedPane
+                      content={filePayload.content ?? ""}
+                      onDiscussHeading={onDiscussHeading}
+                      onAmbiguousHeading={onAmbiguousHeading}
+                    />
                   ) : (
                     <div className="rb-code mono">
                       {(filePayload.content ?? "").split("\n").map((line, i) => {
@@ -490,6 +570,7 @@ export function CodeSpacePage() {
               tab={railTab}
               onTabChange={setRailTab}
               composerSelection={composerOpen ? selection : null}
+              composerWholeDocument={composerOpen ? composerWholeDocument : undefined}
               onComposerClose={closeComposer}
               onJumpToLine={jumpToLine}
               onJumpToPinnedSha={jumpToPinnedSha}

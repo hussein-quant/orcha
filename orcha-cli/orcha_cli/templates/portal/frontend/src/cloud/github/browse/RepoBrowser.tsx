@@ -59,7 +59,7 @@ export interface RepoBrowserProps {
 }
 
 export function RepoBrowser({ cid, gitRef, path, htmlUrlBase, onNavigate }: RepoBrowserProps) {
-  const { dirCache, expanded, rows, toggleDir, filePayload, fileError, fileLoading } = useBrowseTree(cid, gitRef, path);
+  const { dirCache, expanded, rows, toggleDir, retryDir, filePayload, fileError, fileLoading } = useBrowseTree(cid, gitRef, path);
   const [searchMode, setSearchMode] = useState<BrowseSearchMode>("names");
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 300);
@@ -151,7 +151,7 @@ export function RepoBrowser({ cid, gitRef, path, htmlUrlBase, onNavigate }: Repo
               onPick={selectFile}
             />
           ) : (
-            <BrowseTree rows={rows} dirCache={dirCache} expanded={expanded} selectedPath={path} onToggleDir={toggleDir} onSelectFile={(p) => selectFile(p)} />
+            <BrowseTree rows={rows} dirCache={dirCache} expanded={expanded} selectedPath={path} onToggleDir={toggleDir} onRetryDir={retryDir} onSelectFile={(p) => selectFile(p)} />
           )}
         </div>
       </div>
