@@ -69,6 +69,8 @@ async def test_create_thread_resolves_sha_and_persists_anchor(client, container,
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         raise AssertionError(f"unexpected path {path}")
@@ -88,7 +90,7 @@ async def test_create_thread_resolves_sha_and_persists_anchor(client, container,
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["repo"] == "acme/site"
-    assert body["sha"] == "main"  # default-branch resolution is a passthrough name here
+    assert body["sha"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"  # anchor pins to the COMMIT sha, never a branch name
     assert body["path"] == "src/a.py"
     assert body["start_line"] == 3 and body["end_line"] == 5
     assert body["kind"] == "question"
@@ -105,19 +107,21 @@ async def test_create_thread_explicit_ref_and_sha(client, container, make_agent,
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         raise AssertionError(f"unexpected path {path}")  # explicit sha never calls GitHub
 
     _stub_gh(monkeypatch, fake_get)
     r = await client.post(
         f"/api/containers/{cid}/code/threads",
         json={
-            "actor_agent_id": author["agent_id"], "ref": "deadbeef123",
+            "actor_agent_id": author["agent_id"], "ref": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
             "path": "a.py", "start_line": 1, "end_line": 1, "body": "note",
         },
     )
     assert r.status_code == 201, r.text
-    assert r.json()["sha"] == "deadbeef123"
-    assert r.json()["ref"] == "deadbeef123"
+    assert r.json()["sha"] == "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+    assert r.json()["ref"] == "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
 
 async def test_create_thread_invalid_lines_400(client, container, make_agent, token_env):
@@ -149,6 +153,8 @@ async def test_create_thread_bad_actor_404(client, container, token_env, monkeyp
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -165,6 +171,8 @@ async def test_create_thread_actor_wrong_container_400(client, container, make_a
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -189,6 +197,8 @@ async def test_tagged_create_makes_directed_request_with_anchor_and_wakes(
     tagged = await make_agent("Tagged")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         raise AssertionError(f"unexpected path {path}")
@@ -236,6 +246,8 @@ async def test_untagged_create_makes_no_request(client, db, container, make_agen
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -258,6 +270,8 @@ async def test_tagged_agents_first_reply_flips_answered(client, container, make_
     tagged = await make_agent("Tagged")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -284,6 +298,8 @@ async def test_non_tagged_agent_reply_does_not_flip_status(client, container, ma
     bystander = await make_agent("Bystander")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -311,6 +327,8 @@ async def test_human_resolve_flips_resolved(client, container, make_agent, token
     human = await make_agent("Homer", kind="human")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -335,6 +353,8 @@ async def test_agent_cannot_resolve_403(client, container, make_agent, token_env
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -359,6 +379,8 @@ async def test_resolved_thread_rejects_further_messages(client, container, make_
     human = await make_agent("Homer", kind="human")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -387,6 +409,8 @@ async def test_get_thread_returns_messages(client, container, make_agent, token_
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -421,6 +445,8 @@ async def test_list_by_path_returns_threads(client, container, make_agent, token
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -448,6 +474,8 @@ async def test_list_without_path_returns_per_file_counts(client, container, make
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -475,6 +503,8 @@ async def test_list_status_filter(client, container, make_agent, token_env, monk
     human = await make_agent("Homer", kind="human")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -504,9 +534,12 @@ async def test_list_blob_match_true_when_unchanged(client, container, make_agent
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
-        if path == "/repos/acme/site/git/trees/main?recursive=1":
+        if path in ("/repos/acme/site/git/trees/main?recursive=1",
+                    "/repos/acme/site/git/trees/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?recursive=1"):
             return {"tree": [{"path": "a.py", "type": "blob", "sha": "blobsha1"}], "truncated": False}
         raise AssertionError(path)
 
@@ -516,7 +549,7 @@ async def test_list_blob_match_true_when_unchanged(client, container, make_agent
         json={"actor_agent_id": author["agent_id"], "path": "a.py",
               "start_line": 1, "end_line": 1, "body": "note"},
     )).json()
-    assert created["sha"] == "main"
+    assert created["sha"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
     r = await client.get(f"/api/containers/{cid}/code/threads", params={"path": "a.py"})
     assert r.status_code == 200, r.text
@@ -532,9 +565,11 @@ async def test_list_blob_match_false_when_file_changed(client, container, make_a
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
-        if path == "/repos/acme/site/git/trees/oldsha?recursive=1":
+        if path in ("/repos/acme/site/git/trees/oldsha?recursive=1", "/repos/acme/site/git/trees/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?recursive=1"):
             return {"tree": [{"path": "a.py", "type": "blob", "sha": "blobsha1"}], "truncated": False}
         if path == "/repos/acme/site/git/trees/main?recursive=1":
             return {"tree": [{"path": "a.py", "type": "blob", "sha": "blobsha2-CHANGED"}], "truncated": False}
@@ -546,7 +581,7 @@ async def test_list_blob_match_false_when_file_changed(client, container, make_a
         json={"actor_agent_id": author["agent_id"], "ref": "oldsha", "path": "a.py",
               "start_line": 1, "end_line": 1, "body": "note"},
     )).json()
-    assert created["sha"] == "oldsha"
+    assert created["sha"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
     r = await client.get(f"/api/containers/{cid}/code/threads", params={"path": "a.py", "ref": "main"})
     assert r.status_code == 200, r.text
@@ -610,6 +645,8 @@ async def test_get_thread_trusted_non_member_403(client, container, make_agent, 
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -640,6 +677,8 @@ async def test_post_message_wrong_container_actor_400(client, container, make_ag
     author = await make_agent("Author")
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -756,6 +795,8 @@ async def test_outline_python_definitions_truth_table(client, container, token_e
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         assert path.startswith("/repos/acme/site/contents/pkg/widget.py?ref=main")
@@ -779,6 +820,8 @@ async def test_outline_typescript_definitions_truth_table(client, container, tok
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         return _content_response(TS_SAMPLE)
@@ -801,6 +844,8 @@ async def test_outline_kotlin_definitions_truth_table(client, container, token_e
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         return _content_response(KOTLIN_SAMPLE)
@@ -823,6 +868,8 @@ async def test_outline_swift_definitions_truth_table(client, container, token_en
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         return _content_response(SWIFT_SAMPLE)
@@ -845,6 +892,8 @@ async def test_outline_go_definitions_truth_table(client, container, token_env, 
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         return _content_response(GO_SAMPLE)
@@ -867,6 +916,8 @@ async def test_outline_unsupported_extension_empty(client, container, token_env,
     await _bind_repo(client, cid)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         return {"default_branch": "main"}
 
     _stub_gh(monkeypatch, fake_get)
@@ -884,6 +935,8 @@ async def test_outline_skips_oversized_file(client, container, token_env, monkey
     huge = "x = 1\n" * (cs.MAX_SOURCE_FILE_BYTES // 6 + 100)
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         return _content_response(huge)
@@ -901,6 +954,8 @@ async def test_outline_uncapped(client, container, token_env, monkeypatch):
     many_defs = "".join(f"def fn_{i}():\n    pass\n\n" for i in range(300))
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         return _content_response(many_defs)
@@ -920,6 +975,8 @@ async def test_symbols_search_across_files_and_query_filter(client, container, t
     files = {"a.py": PY_SAMPLE, "b.py": "def other_helper():\n    pass\n"}
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         if path == "/repos/acme/site/git/trees/main?recursive=1":
@@ -947,6 +1004,8 @@ async def test_symbols_search_empty_query_returns_everything_capped(client, cont
     files = {"many.py": many_defs}
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         if path == "/repos/acme/site/git/trees/main?recursive=1":
@@ -968,6 +1027,8 @@ async def test_symbols_skips_non_source_and_oversized(client, container, token_e
     calls = []
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         calls.append(path)
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
@@ -999,6 +1060,8 @@ async def test_symbols_cached_60s_per_cid_ref(client, container, token_env, monk
     tree_calls = {"n": 0}
 
     def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
         if path == "/repos/acme/site":
             return {"default_branch": "main"}
         if path == "/repos/acme/site/git/trees/main?recursive=1":
@@ -1012,7 +1075,9 @@ async def test_symbols_cached_60s_per_cid_ref(client, container, token_env, monk
     assert tree_calls["n"] == 1  # second query reused the cached index, no re-fetch
 
     base = cs.time.monotonic()
-    monkeypatch.setattr(cs.time, "monotonic", lambda: base + cs.SYMBOL_CACHE_TTL_SECONDS + 1)
+    # the warm INDEX state outlives the 60s tree cache by design (10 min —
+    # re-indexing is the expensive part); expiry re-fetches the tree.
+    monkeypatch.setattr(cs.time, "monotonic", lambda: base + cs.SYMBOL_STATE_TTL_SECONDS + 1)
     await client.get(f"/api/containers/{cid}/code/symbols", params={"q": "foo"})
     assert tree_calls["n"] == 2
 
