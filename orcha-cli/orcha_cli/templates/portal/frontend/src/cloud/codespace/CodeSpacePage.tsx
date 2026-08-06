@@ -15,8 +15,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Md } from "../../components/ui";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import { Shell } from "../../shell/Shell";
+import { extOf } from "../github/browse/browseTypes";
 import { highlightLine, type Token } from "../github/browse/highlight";
 import {
   BrowseErrorBody,
@@ -31,6 +33,16 @@ import { IdentifierTokens } from "./symbols/IdentifierTokens";
 import { SymbolSearch } from "./symbols/SymbolSearch";
 import { ThreadRail, type RailTab } from "./ThreadRail";
 import "./codespace.css";
+
+// Item 1 — Markdown files render through the house Md component (esc-first,
+// safe inline markdown) by default; a small Raw|Rendered toggle in the
+// content-pane header lets a human drop back to line-anchored Raw mode
+// (gutter selection is disabled in Rendered mode — there ARE no gutter lines
+// to anchor against prose, so the tooltip is honest about why).
+type ViewMode = "raw" | "rendered";
+function isMarkdownPath(path: string): boolean {
+  return extOf(path) === "md";
+}
 
 // jsdom has no scrollIntoView (RequestsPage.tsx / AgentsPage.tsx's same
 // feature-detect precedent) — production browsers always have it.
@@ -65,6 +77,17 @@ export function CodeSpacePage() {
   // the same word.
   const [symbolPrefill, setSymbolPrefill] = useState<string | undefined>(undefined);
   const [symbolPrefillToken, setSymbolPrefillToken] = useState(0);
+
+  // Item 1 — Raw|Rendered toggle: Rendered is the default ONLY for .md files;
+  // every other extension only ever sees Raw (the toggle itself is hidden for
+  // them). Re-derives per file so navigating from a .md file to a non-.md
+  // file (or vice versa) always lands on the right default instead of
+  // carrying over the previous file's choice.
+  const isMd = isMarkdownPath(path);
+  const [viewMode, setViewMode] = useState<ViewMode>(isMd ? "rendered" : "raw");
+  useEffect(() => {
+    setViewMode(isMarkdownPath(path) ? "rendered" : "raw");
+  }, [path]);
 
   // deep-linked ?line= scrolls to that line once the file paints.
   useEffect(() => {
@@ -140,6 +163,18 @@ export function CodeSpacePage() {
     setSymbolPrefillToken((n) => n + 1);
   }, []);
 
+  // Item 3 — Recent tab row click: open that thread's file at its anchor line
+  // WITH the thread itself selected (unlike navigateToSymbol, which clears
+  // ?thread= — here the whole point is landing straight in the thread view).
+  const navigateToThread = useCallback((t: CodeThreadSummary) => {
+    setSelection(null);
+    setComposerOpen(false);
+    setRailTab("threads");
+    setOpenThreadId(t.id);
+    navigate({ path: t.path, line: t.start_line, thread: t.id }, false);
+    scrollLineIntoView(t.start_line);
+  }, [navigate]);
+
   const agents = snap?.agents ?? [];
   const htmlUrl = null; // Code Space has no repo html_url context handy here; the file pane omits the GitHub link.
 
@@ -196,35 +231,68 @@ export function CodeSpacePage() {
               ) : fileError ? (
                 <BrowseErrorBody err={fileError} what="File" />
               ) : filePayload ? (
-                <ContentPaneChrome gitRef={gitRef} payload={filePayload} htmlUrl={htmlUrl}>
-                  <div className="rb-code mono">
-                    {(filePayload.content ?? "").split("\n").map((line, i) => {
-                      const lineNo = i + 1;
-                      const threadsHere = gutterDotsForLine.get(lineNo) || [];
-                      const selected = isLineSelected(selection, lineNo);
-                      const tokens: Token[] = highlightLine(line, filePayload.path);
-                      return (
-                        <div
-                          key={lineNo}
-                          className={"cs-line" + (selected ? " selected" : "")}
-                          data-cs-line={lineNo}
+                <ContentPaneChrome
+                  gitRef={gitRef}
+                  payload={filePayload}
+                  htmlUrl={htmlUrl}
+                  headerExtra={
+                    isMd ? (
+                      <div className="cs-view-toggle" role="group" aria-label="View mode">
+                        <button
+                          type="button"
+                          className={"cs-view-toggle-btn" + (viewMode === "raw" ? " on" : "")}
+                          onClick={() => setViewMode("raw")}
                         >
-                          <span
-                            className="cs-gutter"
-                            onClick={(e) => onGutterClick(lineNo, e.shiftKey)}
-                            title="Click to start a thread, shift-click to extend the range"
+                          Raw
+                        </button>
+                        <button
+                          type="button"
+                          className={"cs-view-toggle-btn" + (viewMode === "rendered" ? " on" : "")}
+                          onClick={() => setViewMode("rendered")}
+                        >
+                          Rendered
+                        </button>
+                      </div>
+                    ) : null
+                  }
+                >
+                  {isMd && viewMode === "rendered" ? (
+                    <div
+                      className="cs-md-rendered"
+                      title="switch to Raw to anchor a thread"
+                    >
+                      <Md text={filePayload.content ?? ""} />
+                    </div>
+                  ) : (
+                    <div className="rb-code mono">
+                      {(filePayload.content ?? "").split("\n").map((line, i) => {
+                        const lineNo = i + 1;
+                        const threadsHere = gutterDotsForLine.get(lineNo) || [];
+                        const selected = isLineSelected(selection, lineNo);
+                        const tokens: Token[] = highlightLine(line, filePayload.path);
+                        return (
+                          <div
+                            key={lineNo}
+                            className={"cs-line" + (selected ? " selected" : "")}
+                            data-cs-line={lineNo}
                           >
-                            <span className="cs-gutter-add" aria-hidden="true">+</span>
-                            {threadsHere.length ? <span className="cs-gutter-dot" /> : null}
-                            {lineNo}
-                          </span>
-                          <span className="cs-line-text">
-                            <IdentifierTokens tokens={tokens} onIdentifierClick={onIdentifierClick} />
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
+                            <span
+                              className="cs-gutter"
+                              onClick={(e) => onGutterClick(lineNo, e.shiftKey)}
+                              title="Click to start a thread, shift-click to extend the range"
+                            >
+                              <span className="cs-gutter-add" aria-hidden="true">+</span>
+                              {threadsHere.length ? <span className="cs-gutter-dot" /> : null}
+                              {lineNo}
+                            </span>
+                            <span className="cs-line-text">
+                              <IdentifierTokens tokens={tokens} onIdentifierClick={onIdentifierClick} />
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </ContentPaneChrome>
               ) : (
                 <BrowseSkeletonPane />
@@ -249,6 +317,7 @@ export function CodeSpacePage() {
             raiseHand={raiseHand}
             onRaiseHandDone={() => setRaiseHand(null)}
             onRaiseHandRequested={onRaiseHand}
+            onNavigateToThread={navigateToThread}
           />
         </div>
       </div>

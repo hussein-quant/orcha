@@ -48,6 +48,18 @@ export function fetchThreads(
   return doFetch<CodeThreadListPayload>(threadsPrefix(cid) + (qs ? "?" + qs : ""));
 }
 
+// Item 3 — Recent quick-jump: the n newest threads across every path in the
+// container (server caps n at 50; see code_space_routes.py's RECENT_THREADS_MAX).
+export function fetchRecentThreads(
+  cid: string,
+  opts: { n?: number; status?: string } = {},
+): Promise<CsResult<CodeThreadListPayload>> {
+  const q = new URLSearchParams();
+  q.set("recent", String(opts.n ?? 20));
+  if (opts.status) q.set("status", opts.status);
+  return doFetch<CodeThreadListPayload>(threadsPrefix(cid) + "?" + q.toString());
+}
+
 export function createThread(cid: string, body: CreateThreadBody): Promise<CsResult<CreateThreadResponse>> {
   return doFetch<CreateThreadResponse>(threadsPrefix(cid), {
     method: "POST",

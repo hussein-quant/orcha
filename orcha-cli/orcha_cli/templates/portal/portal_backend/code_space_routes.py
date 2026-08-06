@@ -162,12 +162,20 @@ def _render_wake_payload(thread_id: str, anchor: dict, kind: str, body: str) -> 
     the thread kind, the human/agent's question body, and the literal reply
     instruction — naming the REAL thread id, since it already exists by the time this
     is called — so the woken agent knows exactly how to answer without guessing an
-    endpoint shape."""
+    endpoint shape. Also appends a portal deep-link line so a human reading the
+    conversation/request surface can jump straight to the thread in Code Space; the
+    conversation UI's linkify (lib/format.ts) only turns http(s) URLs into anchors,
+    not portal-relative paths, so this renders as copyable plain text there — the
+    reverse direction (thread -> request) is a clickable chip in ThreadView instead
+    (see ThreadView.tsx's "via request <id>" chip), giving bidirectional linking
+    without inventing a second portal-relative-link renderer."""
     location = f"{anchor['path']}:{anchor['start_line']}-{anchor['end_line']}"
+    deep_link = f"/code?path={urllib.parse.quote(anchor['path'])}&thread={thread_id}"
     return (
         f"[code thread — {kind}] {anchor['repo']}@{anchor['sha'][:7]} {location}\n"
         f"{body}\n\n"
-        f"reply via POST /api/code/threads/{thread_id}/messages with your agent id as actor_agent_id"
+        f"reply via POST /api/code/threads/{thread_id}/messages with your agent id as actor_agent_id\n"
+        f"view/reply in the portal: {deep_link}"
     )
 
 
@@ -271,6 +279,9 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
     return JSONResponse(status_code=201, content=thread)
 
 
+RECENT_THREADS_MAX = 50
+
+
 @app.get("/api/containers/{cid}/code/threads")
 def list_code_threads(
     cid: str,
@@ -278,20 +289,27 @@ def list_code_threads(
     ref: str = Query(default=""),
     path: str = Query(default=""),
     status: str = Query(default=""),
+    recent: int = Query(default=0),
 ):
     """List a container's code threads, optionally filtered by `path` and/or
     `status`. `ref` is NEVER a row filter — a thread pinned to an older sha still
     belongs to its file and must still surface when browsing that file at a newer
     ref (that's exactly the "outdated — pinned to <sha7>" honesty case the design
     calls for); `ref` only steers which CURRENT blob shas `blob_match` is computed
-    against. When `path` is omitted, returns per-file thread COUNTS instead of full
-    thread rows (the directory-tree/file-list overview surface) — each entry is
-    `{path, count, open_count}`. When `path` is given, returns the full thread rows
-    for that file, each stamped with `blob_match` (bool): whether the file's blob at
-    the CURRENT `ref` (or the thread's own creation ref if `ref` is omitted) still
-    matches the blob the thread was anchored against — computed via the repo
-    browser's cached recursive-tree blob shas, never a fresh raw-blob fetch per
-    thread. `blob_match` is omitted (None) when the repo/ref can't be resolved
+    against. When `path` is omitted and `recent` is unset, returns per-file thread
+    COUNTS instead of full thread rows (the directory-tree/file-list overview
+    surface) — each entry is `{path, count, open_count}`. When `path` is omitted
+    and `recent=<n>` is given (n capped at RECENT_THREADS_MAX), returns
+    `{threads: [...]}` — the n newest threads across every path in the container,
+    newest-first (Code Space's "Recent" quick-jump; no blob_match is computed for
+    this shape, same as the by_path counts branch it replaces — the caller isn't
+    viewing a specific file/ref pair to compare blobs against). When `path` is
+    given, returns the full thread rows for that file, each stamped with
+    `blob_match` (bool): whether the file's blob at the CURRENT `ref` (or the
+    thread's own creation ref if `ref` is omitted) still matches the blob the
+    thread was anchored against — computed via the repo browser's cached
+    recursive-tree blob shas, never a fresh raw-blob fetch per thread.
+    `blob_match` is omitted (None) when the repo/ref can't be resolved
     (rate-limited, not connected, etc.) — an honest "don't know", never a guessed
     true/false.
     """
@@ -305,6 +323,38 @@ def list_code_threads(
 
         if status and status not in VALID_STATUSES:
             raise HTTPException(400, f"status must be one of {VALID_STATUSES}")
+
+        if not path and recent:
+            n = min(recent, RECENT_THREADS_MAX)
+            query = "SELECT * FROM code_threads WHERE container_id=%s"
+            params = [cid]
+            if status:
+                query += " AND status=%s"
+                params.append(status)
+            query += " ORDER BY created_at DESC LIMIT %s"
+            params.append(n)
+            cur.execute(query, params)
+            recent_rows = cur.fetchall()
+            recent_threads = [_thread_row_to_dict(r) for r in recent_rows]
+
+            # First-message snippet per thread (Code Space's Recent quick-jump row) —
+            # one query for the whole page rather than N+1: DISTINCT ON picks each
+            # thread's earliest message by created_at, matching "the opening note"
+            # every thread is created with (see create_code_thread's own first
+            # INSERT into code_thread_messages).
+            if recent_threads:
+                ids = [t["id"] for t in recent_threads]
+                cur.execute(
+                    """SELECT DISTINCT ON (thread_id) thread_id, body
+                         FROM code_thread_messages
+                        WHERE thread_id = ANY(%s)
+                        ORDER BY thread_id, created_at ASC""",
+                    (ids,),
+                )
+                first_body_by_thread = {str(r["thread_id"]): r["body"] for r in cur.fetchall()}
+                for t in recent_threads:
+                    t["first_message"] = first_body_by_thread.get(t["id"])
+            return {"threads": recent_threads}
 
         if not path:
             query = "SELECT path, status FROM code_threads WHERE container_id=%s"

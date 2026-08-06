@@ -14,7 +14,7 @@ import { useToast } from "../../components/ui";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent } from "../../types";
 import { createThread } from "./codespaceApi";
-import { anchorLabel, THREAD_TEMPLATES, type ThreadKind } from "./codespaceTypes";
+import { anchorLabel, THREAD_TEMPLATES, type CreateThreadResponse, type ThreadKind } from "./codespaceTypes";
 
 export interface ThreadComposerProps {
   cid: string;
@@ -28,7 +28,10 @@ export interface ThreadComposerProps {
   // Phase 2 raise-hand: pre-tag a specific agent and lock the picker, with
   // the honest queued-caption instead of the free picker.
   preTaggedAgentId?: string | null;
-  onCreated?: (threadId: string) => void;
+  // Item 5 — the full create response (thread + opening message), not just
+  // the id: lets the caller (ThreadRail) seed ThreadView optimistically
+  // instead of waiting on a fresh GET /code/threads/{id}.
+  onCreated?: (created: CreateThreadResponse) => void;
   onCancel?: () => void;
 }
 
@@ -79,7 +82,7 @@ export function ThreadComposer({
         return;
       }
       toast("Thread posted", "ok");
-      onCreated?.(res.data.thread.id);
+      onCreated?.(res.data);
     });
   };
 
