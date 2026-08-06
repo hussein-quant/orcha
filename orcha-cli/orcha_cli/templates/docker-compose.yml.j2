@@ -65,6 +65,16 @@ services:
       # proxy). Unset/empty for self-hosters → the header is ignored entirely. Passed
       # through from the host env like ORCHA_LLM_API_KEY above.
       ORCHA_TRUST_PROXY_USER: ${ORCHA_TRUST_PROXY_USER:-}
+      # Local run (deploy/local): a GitHub personal access token used only when
+      # neither App token source above resolves — lets a laptop stack reach the
+      # GitHub features with zero App registration. Also settable per-container
+      # from Settings → GitHub access (this env shadows the stored one).
+      ORCHA_GITHUB_PAT: ${ORCHA_GITHUB_PAT:-}
+      # Plan gating: "solo" (default — local/free tier; team surfaces render the
+      # upgrade card and member mutations 402) or "team" (hosted/paid). The
+      # upgrade URL is where solo's paywall entry points send people.
+      ORCHA_PLAN: ${ORCHA_PLAN:-}
+      ORCHA_UPGRADE_URL: ${ORCHA_UPGRADE_URL:-}
     ports: ["{{ api_port }}:8000"]
     volumes:
       - ./migrations:/app/migrations:ro   # R1: portal reads migrations to apply pending ones (no wipe)
