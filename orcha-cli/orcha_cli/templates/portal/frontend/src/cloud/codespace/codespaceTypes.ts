@@ -48,6 +48,10 @@ export interface CodeThreadSummary {
   // means the file's blob at `ref` no longer matches the thread's pinned sha,
   // so the anchor is honestly "outdated" until cross-sha remap lands (v-later).
   blob_match?: boolean;
+  // Item 3 (Recent quick-jump) only: the thread's opening message body, set
+  // by the ?recent= list mode for the row snippet — undefined on every other
+  // list shape (by-path counts, per-file rows), which never fetch it.
+  first_message?: string | null;
 }
 
 // Per-file counts returned when the list is fetched WITHOUT a ?path= filter
@@ -114,6 +118,17 @@ export function kindLabel(kind: ThreadKind): string {
     case "why": return "Why";
     case "teach": return "Teach";
     default: return "Note";
+  }
+}
+
+// Item 3 — Recent tab's compact per-row glyph (kind at a glance without the
+// full kind-tag pill's width).
+export function kindGlyph(kind: ThreadKind): string {
+  switch (kind) {
+    case "question": return "?";
+    case "why": return "!";
+    case "teach": return "🎓";
+    default: return "·";
   }
 }
 

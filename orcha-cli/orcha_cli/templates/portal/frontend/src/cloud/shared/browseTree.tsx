@@ -262,15 +262,20 @@ export interface ContentPaneChromeProps {
   // passes the shared <Icon name="ext"/> glyph for exact pre-refactor parity;
   // Code Space omits it — no behavioral difference, both are aria-hidden).
   extIcon?: React.ReactNode;
+  // optional slot appended to the file-head row, after the size chip (Code
+  // Space's Raw/Rendered markdown toggle; RepoBrowser passes nothing —
+  // byte-identical header when omitted).
+  headerExtra?: React.ReactNode;
   children?: React.ReactNode; // the actual code body (CodeLines or a custom gutter render)
 }
-export function ContentPaneChrome({ gitRef, payload, htmlUrl, extIcon, children }: ContentPaneChromeProps) {
+export function ContentPaneChrome({ gitRef, payload, htmlUrl, extIcon, headerExtra, children }: ContentPaneChromeProps) {
   return (
     <>
       <div className="rb-file-head">
         <span className="tag rb-ref-chip mono">{gitRef}</span>
         <span className="rb-file-path mono" title={payload.path}>{payload.path}</span>
         <span className="rb-file-size muted">{formatSize(payload.size)}</span>
+        {headerExtra}
       </div>
       {payload.binary ? (
         <div className="rb-binary muted">
