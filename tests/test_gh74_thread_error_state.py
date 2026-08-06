@@ -4,50 +4,47 @@ A failed (network/non-200) thread fetch, OR a fetch that returns no messages whi
 says count>0, must surface a visible "couldn't load — retry" affordance instead of a perpetual
 spinner. A failing fetch must NOT be auto-retried on every 3s repaint (it latches until the user
 retries). An explicit retry refetches without a full page reload.
+
+Phase 7: the vanilla static/tasks.html is retired; the React port lives in
+frontend/src/pages/tasks/TasksPage.tsx. Behavioral coverage (latch semantics, retry
+refetch, cached-messages-preserved-on-failed-refresh) runs in Vitest against the real
+component: frontend/src/pages/tasks/TasksPage.thread-retry.test.tsx. This file pins the
+source contract so the affordance can't be silently dropped.
 """
 import pathlib
-import re
-from portal_source import page_source
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-TASKS = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static" / "tasks.html"
+TASKS_TSX = (
+    REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal"
+    / "frontend" / "src" / "pages" / "tasks" / "TasksPage.tsx"
+)
 
 
 def test_thread_fetch_error_latches_and_surfaces_retry():
-    src = page_source("tasks.html")
-    block = re.search(r"function maybeLoadThread\(.*?\n  \}", src, re.S)
-    assert block, "maybeLoadThread not found"
-    body = block.group(0)
-    # the catch must record an error (not just clear the loading flag and leave the panel blank)
-    assert ".catch(" in body and "threadError[t.id] = true" in body, \
-        "a failed thread fetch doesn't latch an error state"
-    # empty fetch while the snapshot expects messages is treated as a failure, not a perpetual spinner
-    assert "want > 0" in body, "an empty fetch with summary count>0 isn't treated as an inconsistency"
-    # a latched error suppresses the auto-retry (no hammering the endpoint every repaint)
-    assert "threadError[t.id]) return" in body, "a latched thread error is still auto-retried each tick"
+    src = TASKS_TSX.read_text()
+    # a per-task latch exists and the loader consults it (no refetch-hammering each poll tick)
+    assert "threadErrorRef" in src, "no latched thread-error state"
+    assert "threadErrorRef.current[tid]" in src, "loader doesn't consult the latch"
+    # an empty fetch while the snapshot expects messages is treated as a failure
+    assert "want > 0" in src or "want >" in src, \
+        "an empty fetch with summary count>0 isn't treated as an inconsistency"
 
 
 def test_render_shows_retry_affordance_and_is_wired():
-    src = page_source("tasks.html")
+    src = TASKS_TSX.read_text()
     # render path offers a retry button (not blank, not perpetual "Loading thread…")
     assert "data-thread-retry" in src, "no retry affordance rendered for a failed thread fetch"
-    # an explicit retry refetches via maybeLoadThread(t, true) — clears the latch + refetches in place
-    assert "maybeLoadThread(t, true)" in src, "retry button doesn't trigger a manual refetch"
+    assert "onRetry" in src, "retry button isn't wired to a refetch"
     # no regression: a task with zero real messages still shows the empty state
     assert "No messages yet." in src, "empty-thread state lost"
 
 
 def test_failed_refresh_over_cached_messages_still_offers_retry():
     """Review blocker: a refresh that fails while cached messages are shown must still surface a
-    retry control — otherwise the latch silently freezes the thread stale until a full page refresh."""
-    src = page_source("tasks.html")
-    # there must be a distinct "cached messages present + error latched" branch
-    assert "staleError" in src, "no stale-refresh branch for cached-messages-present failures"
-    assert re.search(r"staleError\s*=\s*!!threadError\[t\.id\]\s*&&\s*!!msgs\.length", src), \
-        "staleError must fire when an error is latched AND cached messages exist"
-    # the retry affordance (shared retryBtn carrying data-thread-retry) must render in the
-    # cached-messages branch, not only the empty-thread branch
-    assert re.search(r"data-thread-retry[^\n]*</button>", src.replace("\n", " ")) and "retryBtn" in src, \
-        "no shared retry button defined"
-    cached_branch = re.search(r"msgs\.length \?[^\n]*staleError[^\n]*\$\{retryBtn\}", src)
-    assert cached_branch, "retry button isn't rendered alongside cached messages on a failed refresh"
+    retry control — otherwise the latch silently freezes the thread stale until a full page
+    refresh. The React ThreadCard renders a distinct cached-but-stale branch."""
+    src = TASKS_TSX.read_text()
+    assert "Couldn&#39;t refresh" in src, "no stale-refresh notice for cached-messages-present failures"
+    # both the empty-error and the cached-stale branches carry the retry control
+    assert src.count("data-thread-retry") >= 2, \
+        "retry button isn't rendered alongside cached messages on a failed refresh"

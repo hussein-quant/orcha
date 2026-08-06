@@ -10,6 +10,15 @@ missing.
 
 ## [Unreleased]
 
+### Changed
+- Portal frontend rewritten in React 18 + TypeScript + Vite (all six pages,
+  live terminal included) at full parity with the vanilla portal — same clean
+  URLs, same `/api` contract, same Docker image shape. The vanilla HTML/JS
+  files are removed; the built bundle ships in `static/dist/`. Includes a
+  GitHub-style files-changed diff viewer on task runs and a
+  downstream-extension seam (`frontend/src/extensions.ts`) for
+  distribution-specific pages, nav entries, and settings sections.
+
 ## [0.5.0] - 2026-07-20
 
 ### Added

@@ -169,7 +169,7 @@ def onboarding_page():
     optional initial_task), and reads GET /api/models — all existing API surface.
     No new API/DB route.
     """
-    return _serve("onboarding.html")
+    return _serve("dist/index.html")
 
 
 # Import the remaining route registry and retain modules with compatibility setup.

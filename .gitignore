@@ -256,3 +256,7 @@ docs/_local/*
 # #289 control-project token baselines + #284 continuity-eval results (machine/run-specific)
 tools/efficiency/baselines/*.json
 tools/efficiency/baselines/**/*.json
+
+# portal React bundle: shipped as a template (built by frontend/, baked into the image)
+!orcha-cli/orcha_cli/templates/portal/static/dist/
+!orcha-cli/orcha_cli/templates/portal/frontend/src/**

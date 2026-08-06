@@ -60,3 +60,28 @@ jobs:
         if: always()
         run: |
           pytest --cov=main --cov-report=term | tail -5 >> "$GITHUB_STEP_SUMMARY" || true
+
+  frontend:
+    # React portal: typecheck + component tests + a production build, so a PR
+    # can't land a frontend that doesn't compile or ship a broken bundle.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orcha-cli/orcha_cli/templates/portal/frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: orcha-cli/orcha_cli/templates/portal/frontend/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Vitest
+        run: npx vitest run
+
+      - name: Build (tsc + vite)
+        run: npm run build

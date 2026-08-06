@@ -31,6 +31,8 @@ def copy_tree(src, dst: pathlib.Path) -> None:
     """Recursively copy an importlib Traversable into a filesystem directory."""
     dst.mkdir(parents=True, exist_ok=True)
     for item in src.iterdir():
+        if item.name == "node_modules":   # frontend dev deps — never part of a stack
+            continue
         target = dst / item.name
         if item.is_dir():
             copy_tree(item, target)
