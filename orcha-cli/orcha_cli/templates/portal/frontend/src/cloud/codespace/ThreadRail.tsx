@@ -65,6 +65,11 @@ export interface ThreadRailProps {
   // don't wire it still render (Recent rows simply no-op without it, matching
   // every other optional callback's convention in this file).
   onNavigateToThread?: (thread: CodeThreadSummary) => void;
+  // Panel improvements item 1 — resizable panes: CodeSpacePage owns the
+  // persisted width (usePaneWidths.ts) and passes it straight through so
+  // `.cs-rail` itself (not a wrapper) carries the inline width, matching
+  // .cs-tree-pane's own convention.
+  width?: number;
 }
 
 export function ThreadRail({
@@ -85,6 +90,7 @@ export function ThreadRail({
   onRaiseHandDone,
   onRaiseHandRequested,
   onNavigateToThread,
+  width,
 }: ThreadRailProps) {
   const { bump } = useSnapshot();
   const [threads, setThreads] = useState<CodeThreadSummary[]>([]);
@@ -132,7 +138,7 @@ export function ThreadRail({
   };
 
   return (
-    <aside className="cs-rail">
+    <aside className="cs-rail" style={width != null ? { width } : undefined}>
       <div className="cs-rail-tabs" role="tablist" aria-label="Code Space rail">
         <button type="button" role="tab" aria-selected={tab === "threads"} className={"cs-rail-tab" + (tab === "threads" ? " on" : "")} onClick={() => onTabChange("threads")}>
           Threads

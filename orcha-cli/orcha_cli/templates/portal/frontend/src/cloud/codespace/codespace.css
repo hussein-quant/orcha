@@ -78,7 +78,7 @@
   border-radius: 10px; overflow: hidden; background: var(--surface); }
 
 /* ---- left: tree + search (reuses .rb-side/.rb-tree-scroll/.dfv-* verbatim) - */
-.cs-tree-pane { width: 280px; min-width: 200px; max-width: 360px; flex: none;
+.cs-tree-pane { min-width: 160px; flex: none;
   display: flex; flex-direction: column; border-right: 1px solid var(--border);
   background: var(--surface-2); overflow: hidden; }
 
@@ -101,8 +101,24 @@
   padding: 0 6px; min-width: 16px; text-align: center; }
 
 /* ---- middle: code viewer, full-height independently scrollable ------------ */
-.cs-code-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+.cs-code-pane { flex: 1; min-width: 320px; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
 .cs-code-scroll { flex: 1; overflow: auto; }
+
+/* ---- Panel improvements item 1: resizable pane dividers -------------------
+   6px hit area (comfortable pointer target without visually widening the
+   1px border look), col-resize cursor, a subtle highlight on hover/drag
+   done via a ::after inset bar so the divider's own box stays hairline-thin
+   at rest. touch-action:none stops the browser's own scroll/pan gesture
+   from fighting the drag on trackpad/touch input. Text selection: the
+   divider itself is user-select:none (it's a drag handle, not text), but
+   deliberately does NOT touch the code pane's own selection behavior — no
+   global preventDefault is installed anywhere, so selecting code text while
+   NOT dragging a divider keeps working exactly as before. */
+.cs-divider { flex: none; width: 6px; margin: 0 -3px; position: relative; z-index: 5;
+  cursor: col-resize; touch-action: none; -webkit-user-select: none; user-select: none; }
+.cs-divider::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; right: 2px;
+  border-radius: 2px; background: transparent; transition: background .12s; }
+.cs-divider:hover::after, .cs-divider.dragging::after { background: var(--accent-line); }
 
 /* gutter affordance: hovering a line reveals a "+" thread button; a line with
    an existing thread shows a persistent dot instead. */
@@ -126,7 +142,7 @@
 .cs-md-rendered { padding: 16px 20px; font-size: 13.5px; line-height: 1.6; cursor: help; }
 
 /* ---- right: thread rail ----------------------------------------------------- */
-.cs-rail { width: 340px; min-width: 260px; max-width: 420px; flex: none;
+.cs-rail { min-width: 240px; flex: none;
   display: flex; flex-direction: column; border-left: 1px solid var(--border);
   background: var(--surface-2); overflow: hidden; }
 .cs-rail-tabs { flex: none; display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
