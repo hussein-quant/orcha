@@ -102,6 +102,50 @@ class LlmKeyTest(BaseModel):
     )
 
 
+class GithubPatUpdate(BaseModel):
+    """Orcha Cloud local run gap #1: store a per-container GitHub personal access token
+    (PUT .../settings/github-pat). HUMAN-AUTHORITY gated + audit-logged — writing a
+    credential is a human action, mirroring /settings/llm-key. The token is sealed by
+    secret_box before it touches the DB; the plaintext is never persisted and never
+    returned."""
+
+    actor_agent_id: str = Field(
+        ...,
+        description="UUID of the human agent performing the action (kind='human')",
+    )
+    token: str = Field(
+        ...,
+        min_length=1,
+        max_length=512,
+        description="the GitHub personal access token (plaintext, sealed server-side)",
+    )
+
+
+class GithubPatActor(BaseModel):
+    """Actor-only body for DELETE .../settings/github-pat (human-authority gated)."""
+
+    actor_agent_id: str = Field(
+        ...,
+        description="UUID of the human agent performing the action (kind='human')",
+    )
+
+
+class GithubPatTest(BaseModel):
+    """Server-side credential ping (POST .../settings/github-pat/test). HUMAN-AUTHORITY
+    gated. `token` is OPTIONAL — supply a candidate to test BEFORE saving (the setup
+    flow), or omit to test the currently-resolved token (env override > stored)."""
+
+    actor_agent_id: str = Field(
+        ...,
+        description="UUID of the human agent performing the action (kind='human')",
+    )
+    token: Optional[str] = Field(
+        default=None,
+        max_length=512,
+        description="candidate token to test; omit to test the stored/resolved token",
+    )
+
+
 class ModelSettingOverride(BaseModel):
     """One per-use-case model override in a PUT .../settings/models body (SPEC-SETTINGS §3).
     `provider`+`model` both present = override that use-case; a use-case OMITTED from the body

@@ -11,10 +11,12 @@ Endpoints (all GETs share the SAME grant model; the two writes are only /start):
 The detail GETs are READ-ONLY: no approve/close/rerun write endpoints — deliberate; the
 portal's only GitHub action stays Start.
 
-Auth/token plumbing is SHARED with github_routes.py — the same GitHub App INSTALLATION
-token the host-side refresh timer maintains (never a personal token). For a container's
-bound `owner/name` repo we resolve the installation token for `owner` from the multi-org
-token map, falling back to the legacy single-token file, exactly as github_routes does.
+Auth/token plumbing is SHARED with github_routes.py — the same resolution chain: the
+GitHub App INSTALLATION token the host-side refresh timer maintains (multi-org token map,
+then the legacy single-token file), and — Orcha Cloud local run gap #1 — a personal
+access token as the lowest-precedence fallback when no App token is wired (env
+ORCHA_GITHUB_PAT, else the DB-stored per-container PAT). App files, where present, always
+keep winning. See `_resolve_repo_token`.
 
 Network calls go through small monkeypatchable leaf functions (`_gh_get`) — tests stub
 that leaf and NEVER hit live GitHub (mirroring github_routes._fetch_installation_repos).
@@ -51,7 +53,7 @@ from fastapi import HTTPException, Query, Request
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
-from portal_backend.github_routes import _read_token, _read_token_map
+from portal_backend.github_routes import _read_pat, _read_token, _read_token_map
 from portal_backend.identity_routes import require_member_read, trusted_actor
 from portal_backend.schemas.github_hub import GithubStartBody
 from portal_backend.task_start_core import (
@@ -119,15 +121,23 @@ def _cache_invalidate(cid: str) -> None:
         _CACHE.pop(key, None)
 
 
-def _resolve_repo_token(repo: str):
-    """The installation token that can read `owner/name`, or None when the App isn't
-    wired for this owner. Multi-org: prefer the per-owner token from the map; else the
-    legacy single-token file (self-host default). Mirrors github_routes' resolution."""
+def _resolve_repo_token(repo: str, cid: str = None):
+    """The token that can read `owner/name`, or None when nothing is wired for it.
+    Multi-org: prefer the per-owner token from the map; else the legacy single-token
+    file; else — Orcha Cloud local run gap #1 — the PAT fallback (env ORCHA_GITHUB_PAT,
+    else the DB-stored PAT for `cid`). Mirrors github_routes' resolution precedence
+    exactly; App files, where present, keep winning unchanged. `cid` is optional so
+    existing callers that only have a `repo` string keep working (env-only PAT still
+    applies), but every route below passes its container id so the DB-stored PAT can
+    participate too."""
     owner = (repo or "").split("/", 1)[0].lower()
     token_map = _read_token_map()
     if token_map and owner in token_map:
         return token_map[owner]
-    return _read_token()
+    token = _read_token()
+    if token:
+        return token
+    return _read_pat(cid)
 
 
 def _gh_get(path: str, token: str):
@@ -275,7 +285,7 @@ def _fetch_gh_item(cur, container_id, kind: str, number: int):
     repo = row["github_repo"] if row else None
     if not repo:
         return None
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, container_id)
     if not token:
         return None
     path = f"/repos/{repo}/pulls/{number}" if kind == "pull" else f"/repos/{repo}/issues/{number}"
@@ -669,7 +679,7 @@ def list_github_issues(cid: str, request: Request):
     cached = _cache_get(cid, "issues")
     if cached is not None:
         return {**cached, "issues": _with_tracked_list(cid, cached["issues"])}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     # GitHub's issues list includes PRs; filter them out (PRs carry pull_request).
@@ -733,7 +743,7 @@ def list_github_pulls(cid: str, request: Request):
     cached = _cache_get(cid, "pulls")
     if cached is not None:
         return {**cached, "pulls": _with_tracked_list(cid, cached["pulls"])}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -773,7 +783,7 @@ def list_github_checks(cid: str, request: Request, numbers: str = Query(...)):
         raise HTTPException(400, "numbers must be a comma-separated list of integers")
     if not wanted:
         return {"available": True, "checks": {}}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -835,7 +845,7 @@ def get_github_pull(cid: str, number: int, request: Request):
     cached = _cache_get(cid, "pull", number)
     if cached is not None:
         return {**cached, "pull": _with_tracked_one(cid, number, cached["pull"])}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -867,7 +877,7 @@ def get_github_issue(cid: str, number: int, request: Request):
     cached = _cache_get(cid, "issue", number)
     if cached is not None:
         return {**cached, "issue": _with_tracked_one(cid, number, cached["issue"])}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -960,7 +970,7 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
             if body.kind == "pull":
                 cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
                 repo = cur.fetchone()["github_repo"]
-                token = _resolve_repo_token(repo) if repo else None
+                token = _resolve_repo_token(repo, cid) if repo else None
                 if token:
                     try:
                         ctx = _pull_fix_context(repo, body.number, token)
