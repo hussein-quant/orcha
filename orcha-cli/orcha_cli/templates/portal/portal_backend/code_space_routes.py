@@ -51,9 +51,25 @@ Phase 3 — built-in symbol provider
   GET /api/containers/{cid}/code/symbols?ref=&q=   — workspace symbol search
   GET /api/containers/{cid}/code/outline?ref=&path= — one file's outline
 
-Built entirely on the repo browser's existing cached recursive tree
+Indexing warm-up, snapshot-first (docs/code-space-indexing-research.md §3 Phase A):
+`search_code_symbols` first tries `github_repo_browse_routes._fetch_repo_snapshot` — a
+SINGLE tarball fetch (`GET /repos/{repo}/tarball/{ref}`) extracted in-memory, replacing
+the entire per-file Contents-API loop. When a snapshot is available the WHOLE repo is
+indexed synchronously within this one request (`indexing:false` immediately in the
+response — no polling needed, no budget bookkeeping) and cached 10 min per (cid, ref),
+same TTL idea as the pre-existing symbol-state cache below. SYMBOL_INDEX_BUDGET and the
+`pending`-list machinery become the FALLBACK path only, used when no snapshot is
+available (the tarball exceeded REPO_SNAPSHOT_MAX_BYTES, or the download/extraction
+failed) — same behavior as before this change: each request advances the index by at
+most SYMBOL_INDEX_BUDGET per-file Contents-API fetches and `indexing`/`indexed`/`total`
+report real progress across polls.
+
+Built on the repo browser's existing cached recursive tree
 (`github_repo_browse_routes._fetch_full_tree`, 60s TTL per (cid,ref) — reused
-directly, never refetched here) plus on-demand single-file fetches
+directly, never refetched here) — still needed even on the snapshot path, both to
+compute `total` and because the snapshot only carries file BYTES, not the tree's
+size/type metadata used to decide what counts as indexable in the first place — plus,
+on the fallback path only, on-demand single-file fetches
 (`github_repo_browse_routes.browse_file`'s underlying `_gh_get` contents call,
 reused via `_fetch_source_file` below). A small regex definition extractor per
 language (Kotlin, Swift, TS/JS, Python, Go) pulls functions / classes-structs-
@@ -78,6 +94,7 @@ from portal_backend.database import db_cursor
 from portal_backend.github_hub_routes import _detail_error_payload, _error_payload
 from portal_backend.github_repo_browse_routes import (
     _fetch_full_tree,
+    _fetch_repo_snapshot,
     _gh_get,
     _is_binary_content,
     _load_binding,
@@ -732,18 +749,18 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
     except RuntimeError as exc:
         return {**_detail_error_payload(exc), "repo": repo}
 
-    # Budgeted incremental indexing: a cold index would otherwise fetch EVERY
-    # source file serially (minutes + rate-limit burn on real repos). Each
-    # request advances the index by at most SYMBOL_INDEX_BUDGET files and
-    # returns what it has; `indexing`/`indexed`/`total` report progress and
-    # follow-up requests (or the next poll) converge. State keyed (cid, ref).
+    # Cold-start indexing. Snapshot-first (docs/code-space-indexing-research.md §3 Phase
+    # A): a single tarball fetch + in-memory extraction can index the WHOLE repo within
+    # this one request, so the SYMBOL_INDEX_BUDGET/pending-list machinery below only
+    # runs as the FALLBACK — when no snapshot is available (oversize tarball, or the
+    # tarball download/extraction failed). State keyed (cid, ref) either way.
     state = _symbol_state_get(cid, resolved_ref)
     if state is None:
         try:
             entries, _truncated = _fetch_full_tree(repo, resolved_ref, token, cid)
         except RuntimeError as exc:
             return {**_error_payload(exc), "repo": repo}
-        pending = []
+        indexable = []
         for entry in entries:
             if entry.get("type") != "blob":
                 continue
@@ -754,9 +771,49 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
             size = entry.get("size")
             if size is not None and size > MAX_SOURCE_FILE_BYTES:
                 continue
-            pending.append(path)
-        state = {"symbols": [], "pending": pending, "total": len(pending)}
+            indexable.append(path)
+
+        snapshot = None
+        try:
+            snapshot = _fetch_repo_snapshot(
+                repo, resolved_ref, token, cid,
+                tuple(LANGUAGE_BY_EXTENSION), MAX_SOURCE_FILE_BYTES,
+            )
+        except RuntimeError:
+            # Tarball download failed (rate limit, network) — not fatal to indexing
+            # itself, since the per-file fallback below may still succeed (or itself
+            # hit the same error and report it the same way it always has). Snapshot
+            # is just an optimization; losing it never turns a working request into a
+            # failing one.
+            snapshot = None
+
+        if snapshot is not None:
+            # Whole-repo indexing in ONE pass: every indexable path's bytes are already
+            # in `snapshot` (or the tree listed a path the tarball didn't have — a rare
+            # skew, e.g. a submodule/symlink entry — skipped honestly rather than
+            # guessed). `pending` stays empty: indexing:false immediately below, no
+            # polling required for a snapshot-backed repo.
+            symbols = []
+            for path in indexable:
+                raw_bytes = snapshot.get(path)
+                if raw_bytes is None:
+                    continue
+                if _is_binary_content(raw_bytes):
+                    continue
+                text = raw_bytes.decode("utf-8", errors="ignore")
+                language = _language_for_path(path)
+                for definition in _extract_definitions(text, language):
+                    symbols.append({**definition, "path": path})
+            state = {"symbols": symbols, "pending": [], "total": len(indexable)}
+        else:
+            # Fallback: budgeted incremental indexing exactly as before snapshot
+            # support existed. A cold index would otherwise fetch EVERY source file
+            # serially (minutes + rate-limit burn on real repos); each request
+            # advances the index by at most SYMBOL_INDEX_BUDGET files and returns what
+            # it has, `indexing`/`indexed`/`total` reporting real progress across polls.
+            state = {"symbols": [], "pending": list(indexable), "total": len(indexable)}
         _symbol_state_put(cid, resolved_ref, state)
+
     budget = SYMBOL_INDEX_BUDGET
     while state["pending"] and budget > 0:
         path = state["pending"].pop(0)

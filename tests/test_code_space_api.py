@@ -9,8 +9,18 @@ for its own `_fetch_source_file` leaf) plus the installation-token file read,
 mirroring test_repo_browser_api.py's fixtures exactly. The routes, sha
 resolution, membership gating, thread state machine, and the directed-request
 wake path all run for real against the real test Postgres.
+
+Snapshot (tarball) leaf: `github_repo_browse_routes._download_tarball_bytes` is a
+SEPARATE network leaf from `_gh_get` (raw bytes, not JSON) — `_clear_caches` below
+also autouse-stubs it to return None ("snapshot unavailable") for every test that
+doesn't explicitly opt in, so every pre-existing symbol-indexing test keeps
+exercising the SAME per-file fallback path it always has, deterministically, with
+zero live network — never an incidental fast-401 race against real GitHub. Tests
+that want the snapshot happy path call `_stub_tarball` themselves.
 """
 import base64
+import io
+import tarfile
 import uuid
 
 import pytest
@@ -20,16 +30,23 @@ from portal_backend import github_repo_browse_routes as browse
 
 
 @pytest.fixture(autouse=True)
-def _clear_caches():
+def _clear_caches(monkeypatch):
     """Every module-dict TTL cache this feature touches — reset around every test so
-    one test's cached tree/symbols never leaks into the next (mirrors
-    test_repo_browser_api.py's _clear_caches)."""
+    one test's cached tree/symbols/snapshot never leaks into the next (mirrors
+    test_repo_browser_api.py's _clear_caches). Also defaults the tarball leaf to
+    "unavailable" (see module docstring) so no test accidentally depends on live
+    network reachability."""
     browse._TREE_CACHE.clear()
     browse._DEFAULT_BRANCH_CACHE.clear()
+    browse._REPO_SNAPSHOT_CACHE.clear()
+    browse._REPO_SNAPSHOT_ORDER.clear()
     cs._SYMBOL_TREE_CACHE.clear()
+    monkeypatch.setattr(browse, "_download_tarball_bytes", lambda *a, **k: None)
     yield
     browse._TREE_CACHE.clear()
     browse._DEFAULT_BRANCH_CACHE.clear()
+    browse._REPO_SNAPSHOT_CACHE.clear()
+    browse._REPO_SNAPSHOT_ORDER.clear()
     cs._SYMBOL_TREE_CACHE.clear()
 
 
@@ -57,6 +74,30 @@ def _stub_gh(monkeypatch, fake):
     """Patch the network leaf on BOTH modules that hold their own bound reference."""
     monkeypatch.setattr(browse, "_gh_get", fake)
     monkeypatch.setattr(cs, "_gh_get", fake)
+
+
+def _make_tarball(files: dict, top_prefix: str = "acme-site-abc1234") -> bytes:
+    """Build a real in-memory gzip tarball (tarfile.open on BytesIO) with each
+    `files` entry nested under `top_prefix/` — the same synthetic top-level directory
+    shape GitHub's own tarball archives use. Returns the raw tarball bytes, exactly
+    what `_download_tarball_bytes` would hand back on a real download."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for path, content in files.items():
+            data = content if isinstance(content, bytes) else content.encode("utf-8")
+            info = tarfile.TarInfo(name=f"{top_prefix}/{path}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def _stub_tarball(monkeypatch, files: dict, top_prefix: str = "acme-site-abc1234"):
+    """Stub the tarball leaf to hand back a real extracted-from-bytes tarball for
+    `files` — the snapshot happy path. Returns the raw bytes built, in case a test
+    wants to assert on size."""
+    tarball_bytes = _make_tarball(files, top_prefix=top_prefix)
+    monkeypatch.setattr(browse, "_download_tarball_bytes", lambda *a, **k: tarball_bytes)
+    return tarball_bytes
 
 
 # ============================== Phase 1: threads ==============================
@@ -1236,6 +1277,223 @@ async def test_symbols_cached_60s_per_cid_ref(client, container, token_env, monk
     monkeypatch.setattr(cs.time, "monotonic", lambda: base + cs.SYMBOL_STATE_TTL_SECONDS + 1)
     await client.get(f"/api/containers/{cid}/code/symbols", params={"q": "foo"})
     assert tree_calls["n"] == 2
+
+
+# ------------------------- symbols: snapshot (tarball) fetch path -------------------
+
+async def test_symbols_snapshot_indexes_whole_repo_in_one_request(client, container, token_env, monkeypatch):
+    """The headline win: when a tarball snapshot is available, indexing completes
+    SYNCHRONOUSLY within one request — indexing:false immediately, indexed==total, no
+    polling — never touching `_fetch_source_file`'s per-file Contents-API leaf."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    files = {"a.py": PY_SAMPLE, "b.py": "def other_helper():\n    pass\n"}
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        if path == "/repos/acme/site":
+            return {"default_branch": "main"}
+        if path == "/repos/acme/site/git/trees/main?recursive=1":
+            return _tree_with_files(files)
+        raise AssertionError(f"per-file fallback should not be used: {path}")
+
+    _stub_gh(monkeypatch, fake_get)
+    _stub_tarball(monkeypatch, files)
+
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["indexing"] is False
+    assert body["indexed"] == body["total"] == 2
+    names = {s["name"] for s in body["results"]}
+    assert {"Widget", "build_widget", "other_helper"} <= names
+
+
+async def test_symbols_snapshot_strips_top_level_tarball_prefix(client, container, token_env, monkeypatch):
+    """GitHub tarballs nest every file under a synthetic {owner}-{repo}-{sha}/ dir;
+    the snapshot must strip it so extracted paths match the tree's repo-relative
+    paths — otherwise every file in the snapshot dict would silently miss its lookup
+    and indexing would find nothing despite a "successful" snapshot fetch."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    files = {"a.py": "def only_one():\n    pass\n"}
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        if path == "/repos/acme/site":
+            return {"default_branch": "main"}
+        if path == "/repos/acme/site/git/trees/main?recursive=1":
+            return _tree_with_files(files)
+        raise AssertionError(f"unexpected _gh_get call: {path}")
+
+    _stub_gh(monkeypatch, fake_get)
+    # A distinctive, GitHub-shaped top-level dir — proves the strip isn't hardcoded to
+    # the fixture's own default prefix.
+    _stub_tarball(monkeypatch, files, top_prefix="acme-site-0123abcd")
+
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["indexing"] is False
+    assert {s["name"] for s in body["results"]} == {"only_one"}
+
+
+async def test_symbols_snapshot_filters_traversal_members(client, container, token_env, monkeypatch):
+    """A crafted/corrupt tarball member with a `../` escape or an absolute path must
+    never be trusted into the snapshot dict — extraction silently DROPS it rather than
+    raising, so a hostile member degrades to "this one file is missing" not a crash or
+    a path collision. Built via a raw tarfile so the malicious member names bypass the
+    test helper's normal prefix-joining."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    good_path = "a.py"
+    good_content = b"def safe():\n    pass\n"
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        # legitimate member
+        info = tarfile.TarInfo(name=f"acme-site-abc1234/{good_path}")
+        info.size = len(good_content)
+        tar.addfile(info, io.BytesIO(good_content))
+        # traversal escape
+        evil = b"pwned"
+        info2 = tarfile.TarInfo(name="acme-site-abc1234/../../etc/evil.py")
+        info2.size = len(evil)
+        tar.addfile(info2, io.BytesIO(evil))
+        # absolute path
+        info3 = tarfile.TarInfo(name="/etc/evil2.py")
+        info3.size = len(evil)
+        tar.addfile(info3, io.BytesIO(evil))
+    tarball_bytes = buf.getvalue()
+    monkeypatch.setattr(browse, "_download_tarball_bytes", lambda *a, **k: tarball_bytes)
+
+    files = {good_path: good_content.decode("utf-8")}
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        if path == "/repos/acme/site":
+            return {"default_branch": "main"}
+        if path == "/repos/acme/site/git/trees/main?recursive=1":
+            return _tree_with_files(files)
+        raise AssertionError(f"unexpected _gh_get call: {path}")
+
+    _stub_gh(monkeypatch, fake_get)
+
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert {s["name"] for s in body["results"]} == {"safe"}
+
+    # Direct unit check on the extraction helper: neither evil member ever appears as
+    # an extracted key, under ANY name (not "etc/evil.py", not "evil2.py", nothing) —
+    # proving they were dropped during extraction, not merely unreachable via the API.
+    snapshot = browse._extract_source_files(tarball_bytes, (".py",), cs.MAX_SOURCE_FILE_BYTES)
+    assert snapshot == {good_path: good_content}
+
+
+async def test_symbols_snapshot_oversize_tarball_falls_back_to_per_file(client, container, token_env, monkeypatch):
+    """A tarball download that exceeds REPO_SNAPSHOT_MAX_BYTES must fall back to the
+    existing budgeted per-file path — never partially cache, never error the request."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    files = {"a.py": "def via_fallback():\n    pass\n"}
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        if path == "/repos/acme/site":
+            return {"default_branch": "main"}
+        if path == "/repos/acme/site/git/trees/main?recursive=1":
+            return _tree_with_files(files)
+        if path.startswith("/repos/acme/site/contents/a.py"):
+            return _content_response(files["a.py"])
+        raise AssertionError(f"unexpected _gh_get call: {path}")
+
+    _stub_gh(monkeypatch, fake_get)
+    # _download_tarball_bytes itself returns None once the streamed download exceeds
+    # the cap (see its own docstring) — simulate that directly rather than actually
+    # streaming 80MB in a test.
+    monkeypatch.setattr(browse, "_download_tarball_bytes", lambda *a, **k: None)
+
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["indexing"] is False
+    assert {s["name"] for s in body["results"]} == {"via_fallback"}
+    # No snapshot was ever cached for this (cid, ref) — the size-cap path never
+    # partially caches.
+    assert browse._repo_snapshot_cache_get(cid, "main") is None
+
+
+async def test_symbols_snapshot_download_error_falls_back_to_per_file(client, container, token_env, monkeypatch):
+    """A genuine GitHub/network failure fetching the tarball (rate limit, timeout) must
+    not fail the whole request — it degrades to the per-file fallback exactly like a
+    missing/oversize snapshot does."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    files = {"a.py": "def via_fallback():\n    pass\n"}
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        if path == "/repos/acme/site":
+            return {"default_branch": "main"}
+        if path == "/repos/acme/site/git/trees/main?recursive=1":
+            return _tree_with_files(files)
+        if path.startswith("/repos/acme/site/contents/a.py"):
+            return _content_response(files["a.py"])
+        raise AssertionError(f"unexpected _gh_get call: {path}")
+
+    _stub_gh(monkeypatch, fake_get)
+
+    def raise_status(*a, **k):
+        raise RuntimeError("github_status:403")
+
+    monkeypatch.setattr(browse, "_download_tarball_bytes", raise_status)
+
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert {s["name"] for s in body["results"]} == {"via_fallback"}
+
+
+async def test_repo_snapshot_cache_evicts_oldest_beyond_bound(client, container, token_env, monkeypatch):
+    """At most REPO_SNAPSHOT_MAX_CACHED (2) snapshots are held at once — a third
+    distinct ref must evict the FIRST (oldest-inserted), not the second."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def make_fake_get(ref_sha):
+        def fake_get(path, token):
+            if "/commits/" in path:
+                return {"sha": ref_sha}
+            if path == "/repos/acme/site":
+                return {"default_branch": "main"}
+            if path.endswith("/recursive=1") or "git/trees" in path:
+                return _tree_with_files({"a.py": "def fn():\n    pass\n"})
+            raise AssertionError(f"unexpected _gh_get call: {path}")
+        return fake_get
+
+    refs = [
+        "1111111111111111111111111111111111111a",
+        "2222222222222222222222222222222222222b",
+        "3333333333333333333333333333333333333c",
+    ]
+    for ref_sha in refs:
+        monkeypatch.setattr(browse, "_gh_get", make_fake_get(ref_sha))
+        monkeypatch.setattr(cs, "_gh_get", make_fake_get(ref_sha))
+        _stub_tarball(monkeypatch, {"a.py": "def fn():\n    pass\n"})
+        r = await client.get(f"/api/containers/{cid}/code/symbols", params={"ref": ref_sha})
+        assert r.status_code == 200, r.text
+
+    assert browse._repo_snapshot_cache_get(cid, refs[0]) is None  # evicted
+    assert browse._repo_snapshot_cache_get(cid, refs[1]) is not None
+    assert browse._repo_snapshot_cache_get(cid, refs[2]) is not None
+    assert len(browse._REPO_SNAPSHOT_ORDER) == browse.REPO_SNAPSHOT_MAX_CACHED
 
 
 async def test_symbols_repo_not_connected(client, container):
