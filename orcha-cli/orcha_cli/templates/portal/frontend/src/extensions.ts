@@ -13,6 +13,7 @@ import { ProjectSwitcher } from "./cloud/projects/ProjectSwitcher";
 import { CloudHome } from "./cloud/projects/homeGate";
 import { MetricsPage } from "./cloud/metrics/MetricsPage";
 import { GitHubPage } from "./cloud/github/GitHubPage";
+import { CodeSpacePage } from "./cloud/codespace/CodeSpacePage";
 import { DevicePage } from "./cloud/device/DevicePage";
 import { MembersPage, MembersSection } from "./cloud/members/MembersPage";
 // Importing the appearance module also runs its module-level boot hook
@@ -84,6 +85,7 @@ export const extensions: Extensions = {
     { path: "/projects", element: ProjectsPage },
     { path: "/metrics", element: MetricsPage },
     { path: "/github", element: GitHubPage },
+    { path: "/code", element: CodeSpacePage },
     { path: "/auth/device", element: DevicePage },   // matches the backend page route
     { path: "/members", element: MembersPage },
   ],
@@ -91,6 +93,7 @@ export const extensions: Extensions = {
   // the topbar ProjectSwitcher's "All projects" row (vanilla-shell parity).
   nav: [
     { key: "github", href: "/github", ico: "link", label: "GitHub" },
+    { key: "code", href: "/code", ico: "code", label: "Code Space" },
     { key: "metrics", href: "/metrics", ico: "live", label: "Metrics" },
   ],
   // The /api/me layer + the sign-out account menu (src/cloud/identity.ts —

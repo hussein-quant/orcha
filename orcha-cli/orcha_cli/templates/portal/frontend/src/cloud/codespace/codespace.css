@@ -1,0 +1,206 @@
+/* Code Space (/code) — full-page three-pane surface: directory tree + search
+   | code viewer | thread rail. Token-driven only (var(--surface-2/-3/--border/
+   ...)) so classic/swiss/minimal all read correctly. Reuses browse.css's
+   .rb-* tree/content idioms via the shared BrowseTree/CodeViewer pieces
+   refactored out of RepoBrowser.tsx — this file only adds Code-Space-specific
+   chrome: the full-bleed page shell, the gutter affordances, the thread rail,
+   the composer, Live panel patch cards, and the Learn tab. */
+
+/* ---- full-bleed page shell -------------------------------------------------
+   The Shell's <main class="content"> carries a max-width + vertical padding
+   for every other page; Code Space is the one full-viewport exception (GH
+   complaint: "the embedded browser is cramped"). :has() targets the shell's
+   own wrapper so no other page is affected. Height comes from the ancestor
+   flex chain (min-height:0 all the way down) rather than a hardcoded topbar
+   offset, since this repo doesn't own the vendored shell.css that sizes
+   .app/.content — 100dvh with min-height:0 propagation is the safe fallback
+   that still fills the viewport under any ancestor flex/grid the vendored
+   shell uses. */
+.content:has(.cs-shell) {
+  max-width: none;
+  width: 100%;
+  padding-left: 0;
+  padding-right: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cs-shell { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100dvh;
+  max-height: 100dvh; padding: 0 16px 16px; gap: 10px; box-sizing: border-box; }
+.cs-head { flex: none; display: flex; align-items: center; gap: 10px; padding-top: 12px; position: relative; z-index: 20; }
+.cs-head h1 { font-size: 15px; margin: 0; }
+.cs-head .muted { font-size: 12px; }
+
+/* ---- Phase 3: workspace symbol search (header affordance) ------------------ */
+.cs-symsearch { position: relative; width: 340px; max-width: 100%; }
+.cs-symsearch-box { display: flex; align-items: center; }
+.cs-symsearch-in { width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; }
+.cs-symsearch-in:focus { border-color: var(--accent-line); box-shadow: var(--ring); outline: none; }
+.cs-symsearch-panel { position: absolute; top: calc(100% + 6px); left: 0; right: 0; max-height: 360px;
+  overflow: auto; background: var(--raised); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 6px; z-index: 30; }
+.cs-symsearch-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+.cs-symsearch-group-path { font-size: 11px; color: var(--faint); padding: 4px 6px 2px; }
+.cs-symsearch-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+.cs-symsearch-row:hover { background: var(--hover); }
+.cs-symsearch-name { font-size: 12.5px; color: var(--text); }
+.cs-symsearch-line { font-size: 11px; }
+.cs-symsearch-note { font-size: 11px; padding: 6px 8px; }
+
+/* ---- Phase 3: outline rail (per-kind grouping, house kind-tag pill style) -- */
+.cs-outline { display: flex; flex-direction: column; gap: 10px; }
+.cs-outline-group { display: flex; flex-direction: column; gap: 3px; }
+.cs-outline-group-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--faint); padding: 2px 0; }
+.cs-outline-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+.cs-outline-row:hover { background: var(--hover); }
+.cs-outline-name { font-size: 12.5px; color: var(--text); }
+.cs-outline-line { font-size: 11px; }
+
+/* per-kind kind-tag colors (extends the thread .kind-tag idiom to symbol kinds) */
+.kind-tag.cs-symkind-function { background: var(--accent-soft); color: var(--accent); }
+.kind-tag.cs-symkind-class { background: var(--violet-soft, var(--accent-soft)); color: var(--violet); }
+.kind-tag.cs-symkind-interface { background: var(--diff-add-soft, var(--accent-soft)); color: var(--diff-add); }
+.kind-tag.cs-symkind-type { background: var(--surface-3); color: var(--muted); }
+.kind-tag.cs-symkind-const { background: var(--accent-soft); color: var(--accent); }
+.kind-tag.cs-symkind-var { background: var(--surface-3); color: var(--muted); }
+
+/* identifier-click affordance (Phase 3 best-effort v1: workspace symbol
+   search prefill, never "go to definition") */
+.cs-ident-tok { cursor: pointer; border-radius: 3px; }
+.cs-ident-tok:hover { background: var(--accent-soft); text-decoration: underline dotted; }
+
+.cs-body { flex: 1; min-height: 0; display: flex; gap: 0; border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden; background: var(--surface); }
+
+/* ---- left: tree + search (reuses .rb-side/.rb-tree-scroll/.dfv-* verbatim) - */
+.cs-tree-pane { width: 280px; min-width: 200px; max-width: 360px; flex: none;
+  display: flex; flex-direction: column; border-right: 1px solid var(--border);
+  background: var(--surface-2); overflow: hidden; }
+
+/* per-file thread count badge, optional, appended after a tree row's name */
+.cs-tree-badge { margin-left: auto; flex: none; font-size: 10.5px; font-weight: 700;
+  color: var(--accent); background: var(--accent-soft); border-radius: 999px;
+  padding: 0 6px; min-width: 16px; text-align: center; }
+
+/* ---- middle: code viewer, full-height independently scrollable ------------ */
+.cs-code-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--surface); }
+.cs-code-scroll { flex: 1; overflow: auto; }
+
+/* gutter affordance: hovering a line reveals a "+" thread button; a line with
+   an existing thread shows a persistent dot instead. */
+.cs-line { display: flex; position: relative; }
+.cs-line:hover { background: var(--hover); }
+.cs-line.selected { background: var(--accent-soft); }
+.cs-gutter { flex: none; width: 4.5ch; text-align: right; padding-right: 8px; color: var(--faint);
+  -webkit-user-select: none; user-select: none; position: relative; cursor: pointer; }
+.cs-gutter:hover .cs-gutter-add { opacity: 1; }
+.cs-gutter-add { position: absolute; left: -18px; top: 0; opacity: 0; transition: opacity .1s;
+  color: var(--accent); font-weight: 700; }
+.cs-gutter-dot { display: inline-block; width: 6px; height: 6px; border-radius: 999px;
+  background: var(--accent); margin-right: 4px; vertical-align: middle; }
+.cs-line-text { flex: 1; min-width: 0; white-space: pre; padding-right: 12px; }
+
+/* ---- right: thread rail ----------------------------------------------------- */
+.cs-rail { width: 340px; min-width: 260px; max-width: 420px; flex: none;
+  display: flex; flex-direction: column; border-left: 1px solid var(--border);
+  background: var(--surface-2); overflow: hidden; }
+.cs-rail-tabs { flex: none; display: flex; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
+.cs-rail-tab { flex: 1; border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  font: inherit; font-size: 12px; font-weight: 600; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+.cs-rail-tab.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.cs-rail-body { flex: 1; overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
+
+/* thread list chips (per-file thread rail) */
+.cs-thread-chip { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); cursor: pointer; }
+.cs-thread-chip:hover { border-color: var(--accent-line); }
+.cs-thread-chip .row1 { display: flex; align-items: center; gap: 6px; }
+.cs-thread-chip .anchor { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--faint); }
+.cs-thread-chip .kind-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  padding: 1px 6px; border-radius: 999px; }
+.cs-thread-chip .kind-tag.question { background: var(--accent-soft); color: var(--accent); }
+.cs-thread-chip .kind-tag.why { background: var(--violet-soft, var(--accent-soft)); color: var(--violet); }
+.cs-thread-chip .kind-tag.teach { background: var(--diff-add-soft, var(--accent-soft)); color: var(--diff-add); }
+.cs-thread-chip .kind-tag.note { background: var(--surface-3); color: var(--muted); }
+.cs-thread-chip .grow { flex: 1; }
+.cs-thread-chip .status-tag { font-size: 10.5px; color: var(--muted); }
+.cs-thread-chip .body-preview { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
+.cs-thread-chip .outdated-chip { font-size: 10.5px; color: var(--warn); display: flex; align-items: center; gap: 4px; }
+
+/* ---- composer (kind templates + @agent picker) ------------------------------ */
+.cs-composer { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); }
+.cs-composer-anchor { font-size: 11.5px; color: var(--muted); font-family: "JetBrains Mono", monospace; }
+.cs-templates { display: flex; flex-wrap: wrap; gap: 6px; }
+.cs-template-btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2);
+  font: inherit; font-size: 11.5px; font-weight: 600; padding: 5px 9px; border-radius: 999px; cursor: pointer; }
+.cs-template-btn:hover { border-color: var(--accent-line); color: var(--text); }
+.cs-template-btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.cs-composer-body { width: 100%; min-height: 64px; resize: vertical; background: var(--surface-2);
+  border: 1px solid var(--border); border-radius: 7px; color: var(--text); font: inherit; font-size: 13px;
+  padding: 8px 10px; outline: none; }
+.cs-composer-body:focus { border-color: var(--accent-line); box-shadow: var(--ring); }
+.cs-composer-row { display: flex; align-items: center; gap: 8px; }
+.cs-agent-select { flex: 1; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 6px 8px; font: inherit; font-size: 12.5px; }
+.cs-raise-hand-caption { font-size: 11.5px; color: var(--muted); font-style: italic; }
+
+/* ---- thread view (messages + reply + resolve) ------------------------------- */
+.cs-thread-view { display: flex; flex-direction: column; gap: 10px; }
+.cs-thread-back { align-self: flex-start; background: none; border: none; color: var(--accent); font: inherit;
+  font-size: 12.5px; cursor: pointer; padding: 0; }
+.cs-thread-head { display: flex; flex-direction: column; gap: 4px; }
+.cs-message { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--border); }
+.cs-message.human { border-color: var(--accent-line); }
+.cs-message-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); }
+.cs-message-body { font-size: 13px; color: var(--text); white-space: pre-wrap; }
+.cs-reply-row { display: flex; flex-direction: column; gap: 6px; }
+.cs-reply-actions { display: flex; align-items: center; gap: 8px; }
+
+/* ---- Live panel (Phase 2) ---------------------------------------------------- */
+.cs-live-runs { display: flex; flex-direction: column; gap: 6px; }
+.cs-live-run-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px; border: 1px solid var(--border);
+  border-radius: 7px; cursor: pointer; background: var(--surface); }
+.cs-live-run-row:hover { border-color: var(--accent-line); }
+.cs-live-run-row.on { border-color: var(--accent-line); background: var(--accent-soft); }
+.cs-live-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--diff-add); flex: none; }
+.cs-patch-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.cs-patch-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px;
+  background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.cs-patch-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: "JetBrains Mono", monospace; color: var(--text-2); }
+.cs-patch-lines { font-family: "JetBrains Mono", monospace; font-size: 12px; max-height: 220px; overflow: auto; }
+.cs-patch-lines .dl { padding: 0 10px; white-space: pre; }
+.cs-raise-hand-btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2);
+  font: inherit; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; cursor: pointer;
+  opacity: 0; transition: opacity .1s; }
+.cs-patch-lines .cs-patch-line-row:hover .cs-raise-hand-btn { opacity: 1; }
+.cs-patch-line-row { display: flex; align-items: center; gap: 6px; }
+.cs-patch-line-row .dl { flex: 1; }
+
+/* ---- Learn tab (Phase 4) ----------------------------------------------------- */
+.cs-learn-filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.cs-learn-filter-btn { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  font: inherit; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 999px; cursor: pointer; }
+.cs-learn-filter-btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.cs-learn-group { display: flex; flex-direction: column; gap: 4px; }
+.cs-learn-group-path { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--faint);
+  padding: 2px 0; }
+
+@media (max-width: 1100px) {
+  .cs-tree-pane { width: 220px; }
+  .cs-rail { width: 300px; }
+}
+@media (max-width: 860px) {
+  .content:has(.cs-shell) { height: auto; overflow: visible; }
+  .cs-body { flex-direction: column; }
+  .cs-tree-pane, .cs-rail { width: 100%; max-width: none; max-height: 280px; border: 0; border-bottom: 1px solid var(--border); }
+  .cs-code-pane { max-height: 480px; }
+}
