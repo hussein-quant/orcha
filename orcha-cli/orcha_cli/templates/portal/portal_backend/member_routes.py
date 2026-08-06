@@ -18,6 +18,7 @@ from portal_backend.identity_routes import (
     proxy_login,
     require_grant,
 )
+from portal_backend.plan_routes import require_feature
 from portal_backend.schemas import MemberCreate, MemberRemove, MemberRoleUpdate
 
 _MEMBER_FIELDS = (
@@ -115,7 +116,11 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
     involvement — that rule only fires while NO human is mapped). NOTE the cloud
     PERIMETER allowlist is synced separately cloud-side; inviting here does not by
     itself open the front door. 409 when the login is already a member (the partial
-    unique index backs this against races) or the alias is taken."""
+    unique index backs this against races) or the alias is taken.
+
+    PLAN GATING: member mutations are a Team-plan feature (docs/orcha-cloud-local-run.md
+    addendum) — 402 under the free solo tier, checked FIRST, before any DB work."""
+    require_feature("members")
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (conn, cur):
@@ -173,7 +178,11 @@ def update_member_role(cid: str, aid: str, body: MemberRoleUpdate, request: Requ
       * a role change TO or FROM owner;
       * any grants change (the "Permissions" expander is owner-only in the UI too).
     Demoting the LAST owner is refused (400) — a container without an owner could
-    never manage itself again."""
+    never manage itself again.
+
+    PLAN GATING: member mutations are a Team-plan feature (docs/orcha-cloud-local-run.md
+    addendum) — 402 under the free solo tier, checked FIRST, before any DB work."""
+    require_feature("members")
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     if not valid_uuid(aid):
@@ -236,7 +245,11 @@ def remove_member(
     never a hard delete (the audit trail and thread attribution keep pointing at the
     row). Removing an OWNER stays owner-only, and removing the LAST owner is refused
     (400). Any task naming the removed member as its reviewer reverts to
-    reviewer=anyone."""
+    reviewer=anyone.
+
+    PLAN GATING: member mutations are a Team-plan feature (docs/orcha-cloud-local-run.md
+    addendum) — 402 under the free solo tier, checked FIRST, before any DB work."""
+    require_feature("members")
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     if not valid_uuid(aid):
