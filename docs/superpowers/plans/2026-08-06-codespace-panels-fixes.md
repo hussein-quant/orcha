@@ -395,11 +395,10 @@ Inside the `CodeSpacePage` function body, add right after the `gutterDotsForLine
     if (!st) return;
     const delta = e.clientX - st.startX;
     st.startX = e.clientX;
-    // the rail's divider sits on its LEFT edge — dragging left (negative
-    // screen delta) must GROW the rail, so its delta is negated before
-    // reaching the hook (usePaneWidths.dragRail's own doc comment).
+    // dragRail negates the delta INTERNALLY (usePaneWidths.ts's own doc
+    // comment) — pass the raw pointer delta unmodified for both panes.
     if (st.pane === "tree") dragTree(delta);
-    else dragRail(-delta);
+    else dragRail(delta);
   }, [dragTree, dragRail]);
 
   const endDrag = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
