@@ -5,14 +5,31 @@
  * tree's fileBadge slot (CodeSpacePage wires that separately). Outline
  * (symbols/OutlineRail.tsx) is scoped to whatever file is currently open,
  * exactly like the Threads tab.
+ *
+ * Item 3 — when no file is open, the Threads tab's list is replaced by a
+ * repo-wide "Recent" section (newest threads across every path); when a file
+ * IS open, a compact "Recent" link sits above the per-file list so the
+ * quick-jump is always one click away, not just on the empty-file state.
+ *
+ * Item 5 — posting a thread (or a raise-hand) swaps the rail straight into
+ * that thread's ThreadView, seeded with the CreateThreadResponse the POST
+ * already returned — no loading flash, no waiting for the next 3s poll.
  */
 import { useEffect, useRef, useState } from "react";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent } from "../../types";
-import { fetchThreads } from "./codespaceApi";
-import { anchorLabel, kindLabel, shortSha, type CodeThreadSummary } from "./codespaceTypes";
+import { fetchRecentThreads, fetchThreads } from "./codespaceApi";
+import {
+  anchorLabel,
+  kindLabel,
+  shortSha,
+  type CodeThreadDetailPayload,
+  type CodeThreadSummary,
+  type CreateThreadResponse,
+} from "./codespaceTypes";
 import { LearnTab } from "./LearnTab";
 import { LivePanel } from "./LivePanel";
+import { RecentThreadsList } from "./RecentThreadsList";
 import { OutlineRail } from "./symbols/OutlineRail";
 import { ThreadComposer } from "./ThreadComposer";
 import { ThreadView } from "./ThreadView";
@@ -43,6 +60,11 @@ export interface ThreadRailProps {
   // fired from the Live tab's patch-card "raise hand" button; the parent page
   // owns the raiseHand state (so it can also switch the rail to Threads).
   onRaiseHandRequested?: (agentId: string, line: number) => void;
+  // Item 3 — a Recent-tab row was clicked: open that thread's file at its
+  // anchor with the thread selected. Optional so existing mounts/tests that
+  // don't wire it still render (Recent rows simply no-op without it, matching
+  // every other optional callback's convention in this file).
+  onNavigateToThread?: (thread: CodeThreadSummary) => void;
 }
 
 export function ThreadRail({
@@ -62,10 +84,18 @@ export function ThreadRail({
   raiseHand,
   onRaiseHandDone,
   onRaiseHandRequested,
+  onNavigateToThread,
 }: ThreadRailProps) {
   const { bump } = useSnapshot();
   const [threads, setThreads] = useState<CodeThreadSummary[]>([]);
+  const [recentThreads, setRecentThreads] = useState<CodeThreadSummary[]>([]);
+  const [showRecent, setShowRecent] = useState(false);
+  // Item 5 — optimistic seed for the thread ThreadView is about to open
+  // (set right when a composer's POST resolves; cleared once the rail moves
+  // on to a DIFFERENT thread id, a fresh open thread has no stale seed).
+  const [openSeed, setOpenSeed] = useState<CodeThreadDetailPayload | null>(null);
   const token = useRef(0);
+  const recentToken = useRef(0);
 
   useEffect(() => {
     if (!path) { setThreads([]); return; }
@@ -81,6 +111,25 @@ export function ThreadRail({
     // every other mutation surface does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cid, gitRef, path, bump]);
+
+  // Recent quick-jump: fetched whenever no file is open (it's the default
+  // view then) OR the human explicitly toggled the compact "Recent" link
+  // while a file IS open.
+  const wantsRecent = !path || showRecent;
+  useEffect(() => {
+    if (!wantsRecent) return;
+    const myToken = ++recentToken.current;
+    fetchRecentThreads(cid, { n: 20 }).then((res) => {
+      if (myToken !== recentToken.current) return;
+      if (res.ok) setRecentThreads(res.data.threads);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cid, wantsRecent, bump]);
+
+  const openCreatedThread = (created: CreateThreadResponse) => {
+    setOpenSeed({ thread: created.thread, messages: [created.message] });
+    onOpenThread(created.thread.id);
+  };
 
   return (
     <aside className="cs-rail">
@@ -101,7 +150,12 @@ export function ThreadRail({
       <div className="cs-rail-body">
         {tab === "threads" ? (
           openThreadId ? (
-            <ThreadView threadId={openThreadId} onBack={() => onOpenThread(null)} onJumpToPinnedSha={onJumpToPinnedSha} />
+            <ThreadView
+              threadId={openThreadId}
+              onBack={() => { onOpenThread(null); setOpenSeed(null); }}
+              onJumpToPinnedSha={onJumpToPinnedSha}
+              seed={openSeed && openSeed.thread.id === openThreadId ? openSeed : undefined}
+            />
           ) : raiseHand ? (
             <ThreadComposer
               cid={cid}
@@ -111,7 +165,7 @@ export function ThreadRail({
               endLine={raiseHand.line}
               agents={agents}
               preTaggedAgentId={raiseHand.agentId}
-              onCreated={(id) => { onRaiseHandDone(); onOpenThread(id); }}
+              onCreated={(created) => { onRaiseHandDone(); openCreatedThread(created); }}
               onCancel={onRaiseHandDone}
             />
           ) : composerSelection ? (
@@ -122,11 +176,25 @@ export function ThreadRail({
               startLine={composerSelection.start}
               endLine={composerSelection.end}
               agents={agents}
-              onCreated={(id) => { onComposerClose(); onOpenThread(id); }}
+              onCreated={(created) => { onComposerClose(); openCreatedThread(created); }}
               onCancel={onComposerClose}
             />
+          ) : path && !showRecent ? (
+            <>
+              <button type="button" className="cs-recent-link" onClick={() => setShowRecent(true)}>
+                Recent threads (all files)
+              </button>
+              <ThreadList threads={threads} onOpen={onOpenThread} onJumpToLine={onJumpToLine} />
+            </>
           ) : (
-            <ThreadList threads={threads} onOpen={onOpenThread} onJumpToLine={onJumpToLine} />
+            <>
+              {path ? (
+                <button type="button" className="cs-recent-link" onClick={() => setShowRecent(false)}>
+                  &larr; Back to {path}
+                </button>
+              ) : null}
+              <RecentThreadsList threads={recentThreads} onOpen={onNavigateToThread} />
+            </>
           )
         ) : null}
         {tab === "live" ? (

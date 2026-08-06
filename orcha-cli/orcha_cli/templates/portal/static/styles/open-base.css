@@ -253,6 +253,45 @@ svg.gl  { width: 13px; height: 13px; flex: none; }
 .ql-ai { font-family: "JetBrains Mono", monospace; font-size: 9.5px; font-weight: 600; letter-spacing: .04em;
   color: var(--muted); border: 1px solid var(--border-2); border-radius: 5px; padding: 2px 5px; line-height: 1; }
 
+/* ---- collapsible sidebar (icon rail) ----
+ * Ported from the cloud vanilla portal (app-shell.js / shell.css): state
+ * lives on <html data-sidebar="collapsed">, persisted client-side under the
+ * same localStorage key ("orcha:sidebar"). Collapsing is an explicit ask for
+ * real estate — labels, counts, and the "needs you" card give way to icons +
+ * title= tooltips; the attn card shrinks to a bell+count chip (.attn-mini)
+ * that still deep-links to the action queue. */
+.brand-row { display: flex; align-items: flex-start; }
+.brand-row .brand { flex: 1; min-width: 0; }
+.sb-toggle { width: 26px; height: 26px; margin: 8px 0 0; flex: none; display: grid; place-items: center;
+  background: transparent; border: 1px solid transparent; border-radius: 7px; color: var(--faint);
+  cursor: pointer; padding: 0; }
+.sb-toggle:hover { background: var(--hover); color: var(--text); border-color: var(--border); }
+.sb-toggle .ico { width: 15px; height: 15px; transform: rotate(90deg); transition: transform .15s ease; }
+.attn-mini { display: none; }
+
+html[data-sidebar="collapsed"] .app { grid-template-columns: 64px minmax(0, 1fr); }
+html[data-sidebar="collapsed"] .sidebar { padding: 18px 9px 16px; }
+html[data-sidebar="collapsed"] .brand-row { flex-direction: column; align-items: center; gap: 4px; }
+html[data-sidebar="collapsed"] .brand { padding: 4px 0 2px; }
+html[data-sidebar="collapsed"] .brand .word,
+html[data-sidebar="collapsed"] .nav .lbl,
+html[data-sidebar="collapsed"] .nav a .grow,
+html[data-sidebar="collapsed"] .nav .ncount,
+html[data-sidebar="collapsed"] .attn-card { display: none; }
+html[data-sidebar="collapsed"] .sb-toggle { margin: 0; }
+html[data-sidebar="collapsed"] .sb-toggle .ico { transform: rotate(-90deg); }
+html[data-sidebar="collapsed"] .nav { margin-top: 10px; }
+html[data-sidebar="collapsed"] .nav a { justify-content: center; padding: 9px 0; }
+html[data-sidebar="collapsed"] .attn-mini { display: flex; flex-direction: column; align-items: center;
+  gap: 3px; margin: 6px 0 8px; padding: 9px 6px; border-radius: 11px; color: var(--warn);
+  background: linear-gradient(180deg, var(--warn-soft), transparent); border: 1px solid var(--warn-line); }
+/* collapsing is an explicit ask for real estate — lift the content width cap
+   so the page actually uses the reclaimed space (inner wrappers like
+   .set-wrap keep their own caps where narrow columns are the point). */
+html[data-sidebar="collapsed"] .content { max-width: none; }
+.attn-mini svg { width: 16px; height: 16px; }
+.attn-mini .n { font-size: 13px; font-weight: 760; color: var(--text); }
+
 /* ---- main column ---- */
 .main { display: flex; flex-direction: column; min-width: 0; }
 .topbar {

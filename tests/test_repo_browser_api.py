@@ -1,10 +1,13 @@
 """GitHub-backed repository file browser (tree/file/search) — read-only, gated exactly
 like the GitHub hub (github_hub_routes.py). Per the test-teeth convention, the ONLY
-thing stubbed is the network leaf (`github_repo_browse_routes._gh_get`) plus the
+thing stubbed is the network leaf (`github_repo_browse_routes._gh_get`, and for the
+snapshot/tarball path, `_download_tarball_bytes` — a separate raw-bytes leaf) plus the
 installation-token file read — the routes, grant gate, ref resolution, caching, and
 error classification all run for real. Mirrors test_github_hub_routes.py's fixtures
 and fake-GitHub-response idioms.
 """
+import io
+import tarfile
 import uuid
 
 import pytest
@@ -14,14 +17,32 @@ from portal_backend import github_repo_browse_routes as browse
 
 @pytest.fixture(autouse=True)
 def _clear_caches():
-    """The tree/default-branch caches are plain module dicts — reset around every test
-    so one test's cached payload never leaks into the next (mirrors the hub's
-    _clear_cache fixture)."""
+    """The tree/default-branch/snapshot caches are plain module dicts — reset around
+    every test so one test's cached payload never leaks into the next (mirrors the
+    hub's _clear_cache fixture)."""
     browse._TREE_CACHE.clear()
     browse._DEFAULT_BRANCH_CACHE.clear()
+    browse._REPO_SNAPSHOT_CACHE.clear()
+    browse._REPO_SNAPSHOT_ORDER.clear()
     yield
     browse._TREE_CACHE.clear()
     browse._DEFAULT_BRANCH_CACHE.clear()
+    browse._REPO_SNAPSHOT_CACHE.clear()
+    browse._REPO_SNAPSHOT_ORDER.clear()
+
+
+def _make_tarball(files: dict, top_prefix: str = "acme-site-abc1234") -> bytes:
+    """A real in-memory gzip tarball (tarfile.open on BytesIO), each `files` entry
+    nested under `top_prefix/` — the same synthetic top-level directory shape GitHub's
+    own tarball archives use."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for path, content in files.items():
+            data = content if isinstance(content, bytes) else content.encode("utf-8")
+            info = tarfile.TarInfo(name=f"{top_prefix}/{path}")
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buf.getvalue()
 
 
 @pytest.fixture
@@ -720,3 +741,208 @@ async def test_tree_trusted_member_ok(client, container, make_agent, trust_proxy
     r = await client.get(
         f"/api/containers/{cid}/github/browse/tree", headers=OCTO)
     assert r.status_code == 200, r.text
+
+
+# ============================ repo snapshot (tarball) cache ============================
+#
+# `_fetch_repo_snapshot` / `_download_tarball_bytes` / `_extract_source_files` have no
+# route of their own yet (only code_space_routes' symbol indexer calls them) — these are
+# direct unit-style tests of the browse module's own helpers, calling them exactly as
+# code_space_routes does: `_fetch_repo_snapshot(repo, ref, token, cid, extensions, cap)`.
+
+def test_extract_source_files_keeps_only_matching_extensions_under_cap():
+    tarball = _make_tarball({
+        "a.py": "x = 1\n",
+        "README.md": "# not source\n",
+        "big.py": "x" * 50,
+    })
+    files = browse._extract_source_files(tarball, (".py",), max_file_bytes=10)
+    # big.py exceeds the 10-byte cap -> dropped; README.md isn't a matching extension.
+    assert files == {"a.py": b"x = 1\n"}
+
+
+def test_extract_source_files_strips_top_level_prefix():
+    tarball = _make_tarball({"src/a.py": "x = 1\n"}, top_prefix="acme-site-0123abcd")
+    files = browse._extract_source_files(tarball, (".py",), max_file_bytes=1000)
+    assert files == {"src/a.py": b"x = 1\n"}
+
+
+def test_extract_source_files_filters_traversal_and_absolute_members():
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        good = b"def safe():\n    pass\n"
+        info = tarfile.TarInfo(name="acme-site-abc1234/a.py")
+        info.size = len(good)
+        tar.addfile(info, io.BytesIO(good))
+
+        evil = b"pwned"
+        for evil_name in (
+            "acme-site-abc1234/../../etc/evil.py",
+            "../escape.py",
+            "/etc/absolute.py",
+        ):
+            info = tarfile.TarInfo(name=evil_name)
+            info.size = len(evil)
+            tar.addfile(info, io.BytesIO(evil))
+    tarball = buf.getvalue()
+
+    files = browse._extract_source_files(tarball, (".py",), max_file_bytes=1000)
+    assert files == {"a.py": good}
+    assert not any("evil" in p or "escape" in p or "absolute" in p for p in files)
+
+
+def test_extract_source_files_skips_symlink_members():
+    """A symlink member's `name` could look like a perfectly ordinary path while its
+    LINK TARGET is attacker-controlled — `_safe_tar_members` only yields regular files
+    (`member.isfile()`), so a symlink is dropped outright regardless of its name."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        link = tarfile.TarInfo(name="acme-site-abc1234/link.py")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "/etc/passwd"
+        tar.addfile(link)
+    tarball = buf.getvalue()
+
+    files = browse._extract_source_files(tarball, (".py",), max_file_bytes=1000)
+    assert files == {}
+
+
+def test_fetch_repo_snapshot_happy_path_caches_and_reuses(monkeypatch):
+    tarball = _make_tarball({"a.py": "def fn():\n    pass\n"})
+    calls = {"n": 0}
+
+    def fake_download(repo, resolved_ref, token):
+        calls["n"] += 1
+        return tarball
+
+    monkeypatch.setattr(browse, "_download_tarball_bytes", fake_download)
+    files = browse._fetch_repo_snapshot("acme/site", "main", "tok", "cid-1", (".py",), 1000)
+    assert files == {"a.py": b"def fn():\n    pass\n"}
+    assert calls["n"] == 1
+
+    # Second call within TTL reuses the cache — no second download.
+    again = browse._fetch_repo_snapshot("acme/site", "main", "tok", "cid-1", (".py",), 1000)
+    assert again == files
+    assert calls["n"] == 1
+
+
+def test_fetch_repo_snapshot_oversize_download_returns_none_never_caches(monkeypatch):
+    monkeypatch.setattr(browse, "_download_tarball_bytes", lambda *a, **k: None)
+    result = browse._fetch_repo_snapshot("acme/site", "main", "tok", "cid-2", (".py",), 1000)
+    assert result is None
+    assert browse._repo_snapshot_cache_get("cid-2", "main") is None
+
+
+class _FakeResponse:
+    """Mimics `urlopen`'s context-manager response object closely enough to exercise
+    `_download_tarball_bytes`'s own bounded `response.read(cap + 1)` call for real —
+    `full_body` is what a `read(n)` would return for that many bytes, exactly like a
+    real HTTP body being read incrementally."""
+
+    def __init__(self, full_body: bytes):
+        self._body = full_body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, n=-1):
+        if n is None or n < 0:
+            return self._body
+        return self._body[:n]
+
+
+def test_download_tarball_bytes_reads_within_cap(monkeypatch):
+    body = b"x" * 100
+    monkeypatch.setattr(browse, "REPO_SNAPSHOT_MAX_BYTES", 1000)
+    monkeypatch.setattr(browse.urllib.request, "urlopen", lambda *a, **k: _FakeResponse(body))
+    data = browse._download_tarball_bytes("acme/site", "main", "tok")
+    assert data == body
+
+
+def test_download_tarball_bytes_over_cap_returns_none(monkeypatch):
+    """A body strictly larger than REPO_SNAPSHOT_MAX_BYTES must come back as None (the
+    "too big, fall back" signal) — never a silently-truncated partial tarball, which
+    `tarfile` would fail to parse anyway but in a much less honest way."""
+    monkeypatch.setattr(browse, "REPO_SNAPSHOT_MAX_BYTES", 100)
+    body = b"x" * 101
+    monkeypatch.setattr(browse.urllib.request, "urlopen", lambda *a, **k: _FakeResponse(body))
+    data = browse._download_tarball_bytes("acme/site", "main", "tok")
+    assert data is None
+
+
+def test_download_tarball_bytes_exactly_at_cap_is_kept(monkeypatch):
+    monkeypatch.setattr(browse, "REPO_SNAPSHOT_MAX_BYTES", 100)
+    body = b"x" * 100
+    monkeypatch.setattr(browse.urllib.request, "urlopen", lambda *a, **k: _FakeResponse(body))
+    data = browse._download_tarball_bytes("acme/site", "main", "tok")
+    assert data == body
+
+
+def test_repo_snapshot_cache_evicts_oldest_beyond_max_cached(monkeypatch):
+    tarball = _make_tarball({"a.py": "def fn():\n    pass\n"})
+    monkeypatch.setattr(browse, "_download_tarball_bytes", lambda *a, **k: tarball)
+
+    assert browse.REPO_SNAPSHOT_MAX_CACHED == 2
+    browse._fetch_repo_snapshot("acme/site", "ref-1", "tok", "cid-evict", (".py",), 1000)
+    browse._fetch_repo_snapshot("acme/site", "ref-2", "tok", "cid-evict", (".py",), 1000)
+    browse._fetch_repo_snapshot("acme/site", "ref-3", "tok", "cid-evict", (".py",), 1000)
+
+    assert browse._repo_snapshot_cache_get("cid-evict", "ref-1") is None  # evicted
+    assert browse._repo_snapshot_cache_get("cid-evict", "ref-2") is not None
+    assert browse._repo_snapshot_cache_get("cid-evict", "ref-3") is not None
+    assert len(browse._REPO_SNAPSHOT_ORDER) == browse.REPO_SNAPSHOT_MAX_CACHED
+
+
+def test_repo_snapshot_cache_keyed_per_cid_and_ref(monkeypatch):
+    """Two different containers bound to the same ref name get independent snapshot
+    cache entries — the key is (cid, ref), not ref alone."""
+    tarball_a = _make_tarball({"a.py": "def from_a():\n    pass\n"})
+    tarball_b = _make_tarball({"a.py": "def from_b():\n    pass\n"})
+
+    monkeypatch.setattr(browse, "_download_tarball_bytes", lambda *a, **k: tarball_a)
+    files_a = browse._fetch_repo_snapshot("acme/site", "main", "tok", "cid-a", (".py",), 1000)
+
+    monkeypatch.setattr(browse, "_download_tarball_bytes", lambda *a, **k: tarball_b)
+    files_b = browse._fetch_repo_snapshot("acme/site", "main", "tok", "cid-b", (".py",), 1000)
+
+    assert files_a == {"a.py": b"def from_a():\n    pass\n"}
+    assert files_b == {"a.py": b"def from_b():\n    pass\n"}
+
+
+def test_fetch_repo_snapshot_ttl_expiry_refetches(monkeypatch):
+    tarball = _make_tarball({"a.py": "def fn():\n    pass\n"})
+    calls = {"n": 0}
+
+    def fake_download(repo, resolved_ref, token):
+        calls["n"] += 1
+        return tarball
+
+    monkeypatch.setattr(browse, "_download_tarball_bytes", fake_download)
+    browse._fetch_repo_snapshot("acme/site", "main", "tok", "cid-ttl", (".py",), 1000)
+    assert calls["n"] == 1
+
+    base = browse.time.monotonic()
+    monkeypatch.setattr(browse.time, "monotonic", lambda: base + browse.REPO_SNAPSHOT_TTL_SECONDS + 1)
+    browse._fetch_repo_snapshot("acme/site", "main", "tok", "cid-ttl", (".py",), 1000)
+    assert calls["n"] == 2
+
+
+def test_download_tarball_bytes_maps_http_error_to_github_status(monkeypatch):
+    """`_download_tarball_bytes` raises the SAME RuntimeError("github_status:<code>")
+    contract `_gh_get` uses, so callers can reuse the existing error-payload mapping
+    without a parallel error ladder for the tarball leaf."""
+    import urllib.error
+
+    class _FakeHTTPError(urllib.error.HTTPError):
+        def __init__(self):
+            super().__init__("url", 403, "forbidden", {}, None)
+
+    def fake_urlopen(*a, **k):
+        raise _FakeHTTPError()
+
+    monkeypatch.setattr(browse.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="github_status:403"):
+        browse._download_tarball_bytes("acme/site", "main", "tok")

@@ -38,6 +38,25 @@ function resolvedTheme(): string {
 }
 export function initTheme() { applyTheme(currentTheme()); }
 
+/* ---- collapsible sidebar (icon rail) --------------------------------- *
+ * Port of the cloud vanilla contract (app-shell.js sidebarCollapsed/
+ * toggleSidebar + shell.css): browser-local, persisted in localStorage
+ * "orcha:sidebar" ("collapsed" | "expanded"), applied as data-sidebar=
+ * "collapsed" on <html> — same key/attribute so cloud's shell.css collapse
+ * rules (if any) keep applying unmodified. index.html sets the attribute
+ * pre-paint from the same key; the initial useState below reads it too so
+ * React's first render already agrees with the DOM (no flash either way). */
+const SIDEBAR_KEY = "orcha:sidebar";
+function sidebarCollapsed(): boolean {
+  try { return localStorage.getItem(SIDEBAR_KEY) === "collapsed"; } catch { return false; }
+}
+function setSidebarCollapsed(collapsed: boolean) {
+  try { localStorage.setItem(SIDEBAR_KEY, collapsed ? "collapsed" : "expanded"); } catch { /* private mode */ }
+  const d = document.documentElement;
+  if (collapsed) d.setAttribute("data-sidebar", "collapsed");
+  else d.removeAttribute("data-sidebar");
+}
+
 /* ---- SPEC-1 autonomy rungs ----------------------------------------------- */
 const AUT_RUNGS = [
   { r: 0, label: "Paused" },
@@ -412,7 +431,19 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
   const location = useLocation();
   const [ncOpen, setNcOpen] = useState(false);
   const [, setThemeTick] = useState(0);
+  const [collapsed, setCollapsed] = useState(sidebarCollapsed);
   const searchRef = useRef<HTMLInputElement | null>(null);
+
+  const toggleSidebar = () => {
+    const next = !collapsed;
+    setSidebarCollapsed(next);
+    setCollapsed(next);
+  };
+
+  // Sync <html data-sidebar> from the persisted key on mount — normally a
+  // no-op (index.html's inline pre-paint script already set it before React
+  // ran), but keeps the DOM correct wherever that script didn't run first.
+  useEffect(() => { setSidebarCollapsed(collapsed); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { setNcOpen(false); }, [location.pathname]);
 
@@ -458,21 +489,35 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
   return (
     <div className="app">
       <aside className="sidebar" id="sidebar">
-        <Link className="brand" to="/" style={{ color: "inherit" }}>
-          <span className="mark"><OrcaMark /></span>
-          <span className="word">Orcha<small>orchestration portal</small></span>
-        </Link>
+        <div className="brand-row">
+          <Link className="brand" to="/" style={{ color: "inherit" }}>
+            <span className="mark"><OrcaMark /></span>
+            <span className="word">Orcha<small>orchestration portal</small></span>
+          </Link>
+          <button
+            className="sb-toggle" id="sbToggle" type="button"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
+            onClick={toggleSidebar}
+          >
+            <Icon name="chev" cls="ico" />
+          </button>
+        </div>
         <nav className="nav">
           <div className="lbl">Control room</div>
           {nv.map((n) => (
-            <Link key={n.key} to={n.href} className={n.key === page ? "active" : ""}>
+            <Link
+              key={n.key} to={n.href} className={n.key === page ? "active" : ""}
+              title={collapsed ? n.label + (n.count != null ? " · " + n.count : "") : undefined}
+            >
               <Icon name={n.ico} />
               <span className="grow">{n.label}</span>
               {n.count != null && <span className={"ncount" + (n.attn && n.count ? " attn" : "")}>{n.count}</span>}
             </Link>
           ))}
           <div className="lbl">Live</div>
-          <Link to="/agents" className="">
+          <Link to="/agents" className="" title={collapsed ? "Run feed" : undefined}>
             <Icon name="live" />
             <span className="grow">Run feed</span>
           </Link>
@@ -484,6 +529,9 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
           <div className="sub">{attnN.verify} to verify · {attnN.esc} escalation{attnN.esc === 1 ? "" : "s"}</div>
           <Link className="go" to="/">Open action queue <Icon name="arrow" cls="" /></Link>
         </div>
+        <Link className="attn-mini" to="/" title={`Needs you · ${attnN.total} — open action queue`}>
+          <Icon name="bell" cls="" /><span className="n tnum">{attnN.total}</span>
+        </Link>
         <div className="maker">
           <div className="dev">Developed by</div>
           <div className="ql-logo">

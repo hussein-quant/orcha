@@ -26,6 +26,10 @@ export interface SymbolSearchProps {
   // a previous prefill (e.g. clicking the same identifier twice).
   prefill?: string;
   prefillToken?: number;
+  // Landing-state quick action ("Search symbols") — bumping this focuses +
+  // opens the palette from OUTSIDE the component, same re-trigger-on-token
+  // idiom as prefillToken (no query text change needed, unlike a prefill).
+  focusToken?: number;
 }
 
 type SearchState =
@@ -34,7 +38,7 @@ type SearchState =
   | { phase: "error"; error: GhError }
   | { phase: "loaded"; results: WorkspaceSymbol[]; truncated: boolean };
 
-export function SymbolSearch({ cid, gitRef, onNavigate, prefill, prefillToken }: SymbolSearchProps) {
+export function SymbolSearch({ cid, gitRef, onNavigate, prefill, prefillToken, focusToken }: SymbolSearchProps) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<SearchState>({ phase: "idle" });
@@ -66,6 +70,13 @@ export function SymbolSearch({ cid, gitRef, onNavigate, prefill, prefillToken }:
     inputRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillToken]);
+
+  useEffect(() => {
+    if (!focusToken) return;
+    setOpen(true);
+    inputRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusToken]);
 
   useEffect(() => {
     if (!debouncedQuery.trim()) { setState({ phase: "idle" }); return; }

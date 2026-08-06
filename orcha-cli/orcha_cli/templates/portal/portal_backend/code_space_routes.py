@@ -51,9 +51,25 @@ Phase 3 — built-in symbol provider
   GET /api/containers/{cid}/code/symbols?ref=&q=   — workspace symbol search
   GET /api/containers/{cid}/code/outline?ref=&path= — one file's outline
 
-Built entirely on the repo browser's existing cached recursive tree
+Indexing warm-up, snapshot-first (docs/code-space-indexing-research.md §3 Phase A):
+`search_code_symbols` first tries `github_repo_browse_routes._fetch_repo_snapshot` — a
+SINGLE tarball fetch (`GET /repos/{repo}/tarball/{ref}`) extracted in-memory, replacing
+the entire per-file Contents-API loop. When a snapshot is available the WHOLE repo is
+indexed synchronously within this one request (`indexing:false` immediately in the
+response — no polling needed, no budget bookkeeping) and cached 10 min per (cid, ref),
+same TTL idea as the pre-existing symbol-state cache below. SYMBOL_INDEX_BUDGET and the
+`pending`-list machinery become the FALLBACK path only, used when no snapshot is
+available (the tarball exceeded REPO_SNAPSHOT_MAX_BYTES, or the download/extraction
+failed) — same behavior as before this change: each request advances the index by at
+most SYMBOL_INDEX_BUDGET per-file Contents-API fetches and `indexing`/`indexed`/`total`
+report real progress across polls.
+
+Built on the repo browser's existing cached recursive tree
 (`github_repo_browse_routes._fetch_full_tree`, 60s TTL per (cid,ref) — reused
-directly, never refetched here) plus on-demand single-file fetches
+directly, never refetched here) — still needed even on the snapshot path, both to
+compute `total` and because the snapshot only carries file BYTES, not the tree's
+size/type metadata used to decide what counts as indexable in the first place — plus,
+on the fallback path only, on-demand single-file fetches
 (`github_repo_browse_routes.browse_file`'s underlying `_gh_get` contents call,
 reused via `_fetch_source_file` below). A small regex definition extractor per
 language (Kotlin, Swift, TS/JS, Python, Go) pulls functions / classes-structs-
@@ -78,6 +94,7 @@ from portal_backend.database import db_cursor
 from portal_backend.github_hub_routes import _detail_error_payload, _error_payload
 from portal_backend.github_repo_browse_routes import (
     _fetch_full_tree,
+    _fetch_repo_snapshot,
     _gh_get,
     _is_binary_content,
     _load_binding,
@@ -162,12 +179,20 @@ def _render_wake_payload(thread_id: str, anchor: dict, kind: str, body: str) -> 
     the thread kind, the human/agent's question body, and the literal reply
     instruction — naming the REAL thread id, since it already exists by the time this
     is called — so the woken agent knows exactly how to answer without guessing an
-    endpoint shape."""
+    endpoint shape. Also appends a portal deep-link line so a human reading the
+    conversation/request surface can jump straight to the thread in Code Space; the
+    conversation UI's linkify (lib/format.ts) only turns http(s) URLs into anchors,
+    not portal-relative paths, so this renders as copyable plain text there — the
+    reverse direction (thread -> request) is a clickable chip in ThreadView instead
+    (see ThreadView.tsx's "via request <id>" chip), giving bidirectional linking
+    without inventing a second portal-relative-link renderer."""
     location = f"{anchor['path']}:{anchor['start_line']}-{anchor['end_line']}"
+    deep_link = f"/code?path={urllib.parse.quote(anchor['path'])}&thread={thread_id}"
     return (
         f"[code thread — {kind}] {anchor['repo']}@{anchor['sha'][:7]} {location}\n"
         f"{body}\n\n"
-        f"reply via POST /api/code/threads/{thread_id}/messages with your agent id as actor_agent_id"
+        f"reply via POST /api/code/threads/{thread_id}/messages with your agent id as actor_agent_id\n"
+        f"view/reply in the portal: {deep_link}"
     )
 
 
@@ -271,6 +296,9 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
     return JSONResponse(status_code=201, content=thread)
 
 
+RECENT_THREADS_MAX = 50
+
+
 @app.get("/api/containers/{cid}/code/threads")
 def list_code_threads(
     cid: str,
@@ -278,20 +306,27 @@ def list_code_threads(
     ref: str = Query(default=""),
     path: str = Query(default=""),
     status: str = Query(default=""),
+    recent: int = Query(default=0),
 ):
     """List a container's code threads, optionally filtered by `path` and/or
     `status`. `ref` is NEVER a row filter — a thread pinned to an older sha still
     belongs to its file and must still surface when browsing that file at a newer
     ref (that's exactly the "outdated — pinned to <sha7>" honesty case the design
     calls for); `ref` only steers which CURRENT blob shas `blob_match` is computed
-    against. When `path` is omitted, returns per-file thread COUNTS instead of full
-    thread rows (the directory-tree/file-list overview surface) — each entry is
-    `{path, count, open_count}`. When `path` is given, returns the full thread rows
-    for that file, each stamped with `blob_match` (bool): whether the file's blob at
-    the CURRENT `ref` (or the thread's own creation ref if `ref` is omitted) still
-    matches the blob the thread was anchored against — computed via the repo
-    browser's cached recursive-tree blob shas, never a fresh raw-blob fetch per
-    thread. `blob_match` is omitted (None) when the repo/ref can't be resolved
+    against. When `path` is omitted and `recent` is unset, returns per-file thread
+    COUNTS instead of full thread rows (the directory-tree/file-list overview
+    surface) — each entry is `{path, count, open_count}`. When `path` is omitted
+    and `recent=<n>` is given (n capped at RECENT_THREADS_MAX), returns
+    `{threads: [...]}` — the n newest threads across every path in the container,
+    newest-first (Code Space's "Recent" quick-jump; no blob_match is computed for
+    this shape, same as the by_path counts branch it replaces — the caller isn't
+    viewing a specific file/ref pair to compare blobs against). When `path` is
+    given, returns the full thread rows for that file, each stamped with
+    `blob_match` (bool): whether the file's blob at the CURRENT `ref` (or the
+    thread's own creation ref if `ref` is omitted) still matches the blob the
+    thread was anchored against — computed via the repo browser's cached
+    recursive-tree blob shas, never a fresh raw-blob fetch per thread.
+    `blob_match` is omitted (None) when the repo/ref can't be resolved
     (rate-limited, not connected, etc.) — an honest "don't know", never a guessed
     true/false.
     """
@@ -305,6 +340,38 @@ def list_code_threads(
 
         if status and status not in VALID_STATUSES:
             raise HTTPException(400, f"status must be one of {VALID_STATUSES}")
+
+        if not path and recent:
+            n = min(recent, RECENT_THREADS_MAX)
+            query = "SELECT * FROM code_threads WHERE container_id=%s"
+            params = [cid]
+            if status:
+                query += " AND status=%s"
+                params.append(status)
+            query += " ORDER BY created_at DESC LIMIT %s"
+            params.append(n)
+            cur.execute(query, params)
+            recent_rows = cur.fetchall()
+            recent_threads = [_thread_row_to_dict(r) for r in recent_rows]
+
+            # First-message snippet per thread (Code Space's Recent quick-jump row) —
+            # one query for the whole page rather than N+1: DISTINCT ON picks each
+            # thread's earliest message by created_at, matching "the opening note"
+            # every thread is created with (see create_code_thread's own first
+            # INSERT into code_thread_messages).
+            if recent_threads:
+                ids = [t["id"] for t in recent_threads]
+                cur.execute(
+                    """SELECT DISTINCT ON (thread_id) thread_id, body
+                         FROM code_thread_messages
+                        WHERE thread_id = ANY(%s)
+                        ORDER BY thread_id, created_at ASC""",
+                    (ids,),
+                )
+                first_body_by_thread = {str(r["thread_id"]): r["body"] for r in cur.fetchall()}
+                for t in recent_threads:
+                    t["first_message"] = first_body_by_thread.get(t["id"])
+            return {"threads": recent_threads}
 
         if not path:
             query = "SELECT path, status FROM code_threads WHERE container_id=%s"
@@ -682,18 +749,18 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
     except RuntimeError as exc:
         return {**_detail_error_payload(exc), "repo": repo}
 
-    # Budgeted incremental indexing: a cold index would otherwise fetch EVERY
-    # source file serially (minutes + rate-limit burn on real repos). Each
-    # request advances the index by at most SYMBOL_INDEX_BUDGET files and
-    # returns what it has; `indexing`/`indexed`/`total` report progress and
-    # follow-up requests (or the next poll) converge. State keyed (cid, ref).
+    # Cold-start indexing. Snapshot-first (docs/code-space-indexing-research.md §3 Phase
+    # A): a single tarball fetch + in-memory extraction can index the WHOLE repo within
+    # this one request, so the SYMBOL_INDEX_BUDGET/pending-list machinery below only
+    # runs as the FALLBACK — when no snapshot is available (oversize tarball, or the
+    # tarball download/extraction failed). State keyed (cid, ref) either way.
     state = _symbol_state_get(cid, resolved_ref)
     if state is None:
         try:
             entries, _truncated = _fetch_full_tree(repo, resolved_ref, token, cid)
         except RuntimeError as exc:
             return {**_error_payload(exc), "repo": repo}
-        pending = []
+        indexable = []
         for entry in entries:
             if entry.get("type") != "blob":
                 continue
@@ -704,9 +771,49 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
             size = entry.get("size")
             if size is not None and size > MAX_SOURCE_FILE_BYTES:
                 continue
-            pending.append(path)
-        state = {"symbols": [], "pending": pending, "total": len(pending)}
+            indexable.append(path)
+
+        snapshot = None
+        try:
+            snapshot = _fetch_repo_snapshot(
+                repo, resolved_ref, token, cid,
+                tuple(LANGUAGE_BY_EXTENSION), MAX_SOURCE_FILE_BYTES,
+            )
+        except RuntimeError:
+            # Tarball download failed (rate limit, network) — not fatal to indexing
+            # itself, since the per-file fallback below may still succeed (or itself
+            # hit the same error and report it the same way it always has). Snapshot
+            # is just an optimization; losing it never turns a working request into a
+            # failing one.
+            snapshot = None
+
+        if snapshot is not None:
+            # Whole-repo indexing in ONE pass: every indexable path's bytes are already
+            # in `snapshot` (or the tree listed a path the tarball didn't have — a rare
+            # skew, e.g. a submodule/symlink entry — skipped honestly rather than
+            # guessed). `pending` stays empty: indexing:false immediately below, no
+            # polling required for a snapshot-backed repo.
+            symbols = []
+            for path in indexable:
+                raw_bytes = snapshot.get(path)
+                if raw_bytes is None:
+                    continue
+                if _is_binary_content(raw_bytes):
+                    continue
+                text = raw_bytes.decode("utf-8", errors="ignore")
+                language = _language_for_path(path)
+                for definition in _extract_definitions(text, language):
+                    symbols.append({**definition, "path": path})
+            state = {"symbols": symbols, "pending": [], "total": len(indexable)}
+        else:
+            # Fallback: budgeted incremental indexing exactly as before snapshot
+            # support existed. A cold index would otherwise fetch EVERY source file
+            # serially (minutes + rate-limit burn on real repos); each request
+            # advances the index by at most SYMBOL_INDEX_BUDGET files and returns what
+            # it has, `indexing`/`indexed`/`total` reporting real progress across polls.
+            state = {"symbols": [], "pending": list(indexable), "total": len(indexable)}
         _symbol_state_put(cid, resolved_ref, state)
+
     budget = SYMBOL_INDEX_BUDGET
     while state["pending"] and budget > 0:
         path = state["pending"].pop(0)

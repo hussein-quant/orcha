@@ -15,7 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchSnapshot } from "../api/client";
-import { ensureCidInLocation, installCidLinkInterceptor, resolveCidScope } from "../lib/scope";
+import { ensureCidInLocation, installCidLinkInterceptor, registerScope, resolveCidScope } from "../lib/scope";
 import { extensions, type Identity } from "../extensions";
 import type { Agent, OrchaRequest, Snapshot, Task } from "../types";
 
@@ -58,6 +58,7 @@ export function SnapshotProvider({ children, pollMs = 3000 }: { children: ReactN
         multiRef.current = scope.multi;
         setCid(scope.cid);
         setMulti(scope.multi);
+        registerScope(scope);
         setCidResolved(true);
         // multi-container: pin the resolved scope into the URL immediately
         ensureCidInLocation(scope);

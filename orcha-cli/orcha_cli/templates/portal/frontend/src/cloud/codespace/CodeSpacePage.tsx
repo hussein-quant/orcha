@@ -15,8 +15,10 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Md } from "../../components/ui";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import { Shell } from "../../shell/Shell";
+import { extOf } from "../github/browse/browseTypes";
 import { highlightLine, type Token } from "../github/browse/highlight";
 import {
   BrowseErrorBody,
@@ -25,12 +27,27 @@ import {
   ContentPaneChrome,
 } from "../shared/browseTree";
 import { useBrowseTree } from "../shared/useBrowseTree";
+import { Breadcrumbs } from "./Breadcrumbs";
+import { CodeSpaceLanding } from "./CodeSpaceLanding";
 import type { CodeThreadSummary } from "./codespaceTypes";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { isLineSelected, rangeFrom, singleLine, type LineSelection } from "./gutter";
+import { recordFileView } from "./recentFiles";
+import { RecentFilesDropdown } from "./RecentFilesDropdown";
 import { IdentifierTokens } from "./symbols/IdentifierTokens";
 import { SymbolSearch } from "./symbols/SymbolSearch";
 import { ThreadRail, type RailTab } from "./ThreadRail";
 import "./codespace.css";
+
+// Item 1 — Markdown files render through the house Md component (esc-first,
+// safe inline markdown) by default; a small Raw|Rendered toggle in the
+// content-pane header lets a human drop back to line-anchored Raw mode
+// (gutter selection is disabled in Rendered mode — there ARE no gutter lines
+// to anchor against prose, so the tooltip is honest about why).
+type ViewMode = "raw" | "rendered";
+function isMarkdownPath(path: string): boolean {
+  return extOf(path) === "md";
+}
 
 // jsdom has no scrollIntoView (RequestsPage.tsx / AgentsPage.tsx's same
 // feature-detect precedent) — production browsers always have it.
@@ -39,6 +56,24 @@ function scrollLineIntoView(line: number): void {
   if (el && typeof (el as HTMLElement).scrollIntoView === "function") {
     (el as HTMLElement).scrollIntoView({ block: "center" });
   }
+}
+
+// Item 3 — breadcrumb segment click: scroll that directory's tree row into
+// view and give it a brief highlight pulse ("filters" the tree to it without
+// hiding siblings — BrowseTree/browseTree.tsx is a SHARED component owned by
+// the GitHub browse surface too, so this stays a self-contained DOM nudge in
+// codespace/** rather than a new prop threaded through shared code). The dir
+// row's title attribute already carries its full path (BrowseTree's own
+// convention) — reused here rather than inventing a new data-attribute.
+function pulseTreeRow(dirPath: string): void {
+  const selector = dirPath
+    ? `.cs-tree-pane .dfv-dir[title="${CSS.escape(dirPath)}"]`
+    : ".cs-tree-pane .rb-tree-scroll";
+  const el = document.querySelector(selector) as HTMLElement | null;
+  if (!el) return;
+  if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "center" });
+  el.classList.add("cs-tree-row-pulse");
+  window.setTimeout(() => el.classList.remove("cs-tree-row-pulse"), 900);
 }
 
 export function CodeSpacePage() {
@@ -66,6 +101,17 @@ export function CodeSpacePage() {
   const [symbolPrefill, setSymbolPrefill] = useState<string | undefined>(undefined);
   const [symbolPrefillToken, setSymbolPrefillToken] = useState(0);
 
+  // Item 1 — Raw|Rendered toggle: Rendered is the default ONLY for .md files;
+  // every other extension only ever sees Raw (the toggle itself is hidden for
+  // them). Re-derives per file so navigating from a .md file to a non-.md
+  // file (or vice versa) always lands on the right default instead of
+  // carrying over the previous file's choice.
+  const isMd = isMarkdownPath(path);
+  const [viewMode, setViewMode] = useState<ViewMode>(isMd ? "rendered" : "raw");
+  useEffect(() => {
+    setViewMode(isMarkdownPath(path) ? "rendered" : "raw");
+  }, [path]);
+
   // deep-linked ?line= scrolls to that line once the file paints.
   useEffect(() => {
     if (!filePayload || !lineParam) return;
@@ -73,6 +119,22 @@ export function CodeSpacePage() {
     if (!Number.isFinite(ln)) return;
     scrollLineIntoView(ln);
   }, [filePayload, lineParam]);
+
+  // Item 2/3 — "recently viewed files": record on every file open, regardless
+  // of entry point (tree click, breadcrumb, symbol nav, thread nav, recent-
+  // files dropdown/landing card, deep link, or browser back/forward all
+  // funnel through the SAME ?path= URL state) — a single effect keyed on
+  // (cid, path) is the one place that's guaranteed to fire exactly once per
+  // distinct file open, never on tab-switch/line-jump/thread-open (those
+  // don't change path). recentFilesToken bumps so the header dropdown (a
+  // separate mount reading its own localStorage snapshot) re-reads instead of
+  // going stale for the component's lifetime.
+  const [recentFilesToken, setRecentFilesToken] = useState(0);
+  useEffect(() => {
+    if (!cid || !path) return;
+    recordFileView(cid, path);
+    setRecentFilesToken((n) => n + 1);
+  }, [cid, path]);
 
   const navigate = useCallback((next: { ref?: string; path?: string; line?: number | null; thread?: string | null }, replace = false) => {
     setSearchParams((prev) => {
@@ -118,6 +180,16 @@ export function CodeSpacePage() {
     setRaiseHand(null);
   }, []);
 
+  // Usability sweep papercut: closing the composer (Escape, or its own
+  // Cancel button) left the just-picked line's ".cs-line.selected" highlight
+  // stuck in the code pane with no way to clear it short of clicking another
+  // line — canceling should leave the pane exactly as if nothing had been
+  // picked yet.
+  const closeComposer = useCallback(() => {
+    setComposerOpen(false);
+    setSelection(null);
+  }, []);
+
   const onRaiseHand = useCallback((agentId: string, line: number) => {
     setRaiseHand({ agentId, line });
     setRailTab("threads");
@@ -139,6 +211,56 @@ export function CodeSpacePage() {
     setSymbolPrefill(word);
     setSymbolPrefillToken((n) => n + 1);
   }, []);
+
+  // Item 2 — landing state's "Search symbols" quick action: focuses/opens the
+  // header SymbolSearch WITHOUT a prefill (a plain open, unlike identifier
+  // click). Cmd/Ctrl+P already does this itself (SymbolSearch's own document
+  // keydown listener) — this bumps the same open affordance via a prop so it
+  // also works as a mouse-driven action from the landing card.
+  const [symbolFocusToken, setSymbolFocusToken] = useState(0);
+  const focusSymbolSearch = useCallback(() => {
+    setSymbolFocusToken((n) => n + 1);
+  }, []);
+
+  // Item 3 — breadcrumb segment click: make sure that directory is expanded
+  // in the tree (toggleDir is a TOGGLE, so only call it if not already open —
+  // clicking a currently-open ancestor's crumb must never collapse it), then
+  // scroll/pulse its row so the click has a visible destination.
+  const openDirInTree = useCallback((dirPath: string) => {
+    if (!expanded.has(dirPath)) toggleDir(dirPath);
+    // scroll after the (possibly async) row exists — a microtask is enough
+    // for already-cached dirs; freshly-expanded ones settle on the next
+    // fetch-driven render, which re-queries by title and no-ops harmlessly
+    // if the row isn't painted yet.
+    requestAnimationFrame(() => pulseTreeRow(dirPath));
+  }, [expanded, toggleDir]);
+
+  // Item 4 — landing state's "Browse the file tree" quick action: scrolls the
+  // first row into view with a brief highlight pulse. Deliberately NOT a
+  // .focus() call (usability-sweep correction) — BrowseTree's rows
+  // (cloud/shared/browseTree.tsx, owned by the GitHub browse surface too)
+  // are plain unfocusable <div>s with no tabIndex, so calling .focus() on one
+  // is a silent no-op that would have made this "quick action" a lie for
+  // keyboard users; a visible pulse is honest about what it actually does.
+  const focusTree = useCallback(() => {
+    const el = document.querySelector(".cs-tree-pane .dfv-r") as HTMLElement | null;
+    if (!el) return;
+    el.scrollIntoView?.({ block: "center" });
+    el.classList.add("cs-tree-row-pulse");
+    window.setTimeout(() => el.classList.remove("cs-tree-row-pulse"), 900);
+  }, []);
+
+  // Item 3 — Recent tab row click: open that thread's file at its anchor line
+  // WITH the thread itself selected (unlike navigateToSymbol, which clears
+  // ?thread= — here the whole point is landing straight in the thread view).
+  const navigateToThread = useCallback((t: CodeThreadSummary) => {
+    setSelection(null);
+    setComposerOpen(false);
+    setRailTab("threads");
+    setOpenThreadId(t.id);
+    navigate({ path: t.path, line: t.start_line, thread: t.id }, false);
+    scrollLineIntoView(t.start_line);
+  }, [navigate]);
 
   const agents = snap?.agents ?? [];
   const htmlUrl = null; // Code Space has no repo html_url context handy here; the file pane omits the GitHub link.
@@ -167,89 +289,147 @@ export function CodeSpacePage() {
             onNavigate={navigateToSymbol}
             prefill={symbolPrefill}
             prefillToken={symbolPrefillToken}
+            focusToken={symbolFocusToken}
           />
+          {path ? (
+            <RecentFilesDropdown
+              cid={cid}
+              currentPath={path}
+              onOpenFile={selectFile}
+              refreshToken={recentFilesToken}
+            />
+          ) : null}
         </div>
         <div className="cs-body">
           <div className="cs-tree-pane">
             <div className="rb-tree-scroll">
-              <BrowseTree
-                rows={rows}
-                dirCache={dirCache}
-                expanded={expanded}
-                selectedPath={path}
-                onToggleDir={toggleDir}
-                onSelectFile={selectFile}
-                fileBadge={(p) => {
-                  const n = fileThreads.filter((t) => t.path === p).length;
-                  return n ? <span className="cs-tree-badge">{n}</span> : null;
-                }}
-              />
+              <ErrorBoundary label="tree">
+                <BrowseTree
+                  rows={rows}
+                  dirCache={dirCache}
+                  expanded={expanded}
+                  selectedPath={path}
+                  onToggleDir={toggleDir}
+                  onSelectFile={selectFile}
+                  fileBadge={(p) => {
+                    const n = fileThreads.filter((t) => t.path === p).length;
+                    return n ? <span className="cs-tree-badge">{n}</span> : null;
+                  }}
+                />
+              </ErrorBoundary>
             </div>
           </div>
 
           <div className="cs-code-pane">
             <div className="cs-code-scroll">
+              <ErrorBoundary label="content" key={path}>
               {!path ? (
-                <div className="rb-empty-pane muted">Select a file to view its contents.</div>
+                <CodeSpaceLanding
+                  cid={cid}
+                  onNavigateToThread={navigateToThread}
+                  onOpenFile={selectFile}
+                  onSearchSymbols={focusSymbolSearch}
+                  onFocusTree={focusTree}
+                />
               ) : fileLoading && !filePayload ? (
                 <BrowseSkeletonPane />
               ) : fileError ? (
                 <BrowseErrorBody err={fileError} what="File" />
               ) : filePayload ? (
-                <ContentPaneChrome gitRef={gitRef} payload={filePayload} htmlUrl={htmlUrl}>
-                  <div className="rb-code mono">
-                    {(filePayload.content ?? "").split("\n").map((line, i) => {
-                      const lineNo = i + 1;
-                      const threadsHere = gutterDotsForLine.get(lineNo) || [];
-                      const selected = isLineSelected(selection, lineNo);
-                      const tokens: Token[] = highlightLine(line, filePayload.path);
-                      return (
-                        <div
-                          key={lineNo}
-                          className={"cs-line" + (selected ? " selected" : "")}
-                          data-cs-line={lineNo}
-                        >
-                          <span
-                            className="cs-gutter"
-                            onClick={(e) => onGutterClick(lineNo, e.shiftKey)}
-                            title="Click to start a thread, shift-click to extend the range"
+                <ContentPaneChrome
+                  gitRef={gitRef}
+                  payload={filePayload}
+                  htmlUrl={htmlUrl}
+                  headerExtra={
+                    <>
+                      <Breadcrumbs path={path} onOpenDir={openDirInTree} />
+                      {isMd ? (
+                        <div className="cs-view-toggle" role="group" aria-label="View mode">
+                          <button
+                            type="button"
+                            className={"cs-view-toggle-btn" + (viewMode === "raw" ? " on" : "")}
+                            onClick={() => setViewMode("raw")}
                           >
-                            <span className="cs-gutter-add" aria-hidden="true">+</span>
-                            {threadsHere.length ? <span className="cs-gutter-dot" /> : null}
-                            {lineNo}
-                          </span>
-                          <span className="cs-line-text">
-                            <IdentifierTokens tokens={tokens} onIdentifierClick={onIdentifierClick} />
-                          </span>
+                            Raw
+                          </button>
+                          <button
+                            type="button"
+                            className={"cs-view-toggle-btn" + (viewMode === "rendered" ? " on" : "")}
+                            onClick={() => setViewMode("rendered")}
+                          >
+                            Rendered
+                          </button>
                         </div>
-                      );
-                    })}
-                  </div>
+                      ) : null}
+                    </>
+                  }
+                >
+                  {isMd && viewMode === "rendered" ? (
+                    <div
+                      className="cs-md-rendered"
+                      title="switch to Raw to anchor a thread"
+                    >
+                      <Md text={filePayload.content ?? ""} />
+                    </div>
+                  ) : (
+                    <div className="rb-code mono">
+                      {(filePayload.content ?? "").split("\n").map((line, i) => {
+                        const lineNo = i + 1;
+                        const threadsHere = gutterDotsForLine.get(lineNo) || [];
+                        const selected = isLineSelected(selection, lineNo);
+                        const tokens: Token[] = highlightLine(line, filePayload.path);
+                        return (
+                          <div
+                            key={lineNo}
+                            className={"cs-line" + (selected ? " selected" : "")}
+                            data-cs-line={lineNo}
+                          >
+                            <span
+                              className="cs-gutter"
+                              onClick={(e) => onGutterClick(lineNo, e.shiftKey)}
+                              title="Click to start a thread, shift-click to extend the range"
+                            >
+                              <span className="cs-gutter-add" aria-hidden="true">+</span>
+                              {threadsHere.length ? <span className="cs-gutter-dot" /> : null}
+                              {lineNo}
+                            </span>
+                            <span className="cs-line-text">
+                              <IdentifierTokens tokens={tokens} onIdentifierClick={onIdentifierClick} />
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </ContentPaneChrome>
               ) : (
                 <BrowseSkeletonPane />
               )}
+              </ErrorBoundary>
             </div>
           </div>
 
-          <ThreadRail
-            cid={cid}
-            gitRef={gitRef}
-            path={path}
-            agents={agents}
-            tab={railTab}
-            onTabChange={setRailTab}
-            composerSelection={composerOpen ? selection : null}
-            onComposerClose={() => setComposerOpen(false)}
-            onJumpToLine={jumpToLine}
-            onJumpToPinnedSha={jumpToPinnedSha}
-            openThreadId={openThreadId}
-            onOpenThread={openThread}
-            onThreadsLoaded={setFileThreads}
-            raiseHand={raiseHand}
-            onRaiseHandDone={() => setRaiseHand(null)}
-            onRaiseHandRequested={onRaiseHand}
-          />
+          <ErrorBoundary label="rail">
+            <ThreadRail
+              cid={cid}
+              gitRef={gitRef}
+              path={path}
+              agents={agents}
+              tab={railTab}
+              onTabChange={setRailTab}
+              composerSelection={composerOpen ? selection : null}
+              onComposerClose={closeComposer}
+              onJumpToLine={jumpToLine}
+              onJumpToPinnedSha={jumpToPinnedSha}
+              openThreadId={openThreadId}
+              onOpenThread={openThread}
+              onThreadsLoaded={setFileThreads}
+              raiseHand={raiseHand}
+              onRaiseHandDone={() => setRaiseHand(null)}
+              onRaiseHandRequested={onRaiseHand}
+              onNavigateToThread={navigateToThread}
+            />
+          </ErrorBoundary>
         </div>
       </div>
     </Shell>

@@ -105,3 +105,19 @@ export function installCidLinkInterceptor(getScope: () => CidScope): () => void 
   document.addEventListener("click", onClick, true);
   return () => document.removeEventListener("click", onClick, true);
 }
+
+
+/* ---- programmatic navigation that keeps project scope ---------------------
+ * The click interceptor upgrades <a> clicks, but raw `location.href = ...`
+ * assignments bypass it entirely — on a multi-project stack that full load
+ * re-resolves to the DEFAULT container and silently switches projects.
+ * SnapshotProvider registers the live scope here; navigateScoped is the only
+ * sanctioned way to hard-navigate. */
+let _currentScope: CidScope = { cid: null, multi: false };
+export function registerScope(scope: CidScope): void {
+  _currentScope = scope;
+}
+export function navigateScoped(href: string): void {
+  const s = _currentScope;
+  window.location.href = s.multi && s.cid ? withCid(href, s.cid) : href;
+}

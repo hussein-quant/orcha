@@ -11,6 +11,14 @@
         var t = localStorage.getItem("orcha:theme");
         if (t) document.documentElement.setAttribute("data-theme", t);
       } catch (e) {}
+      // pre-paint sidebar: same idiom, same key as the vanilla portal
+      // (orcha:sidebar) — collapsed state applied before first paint so the
+      // rail never flashes at the wrong width on a full-page navigation.
+      try {
+        if (localStorage.getItem("orcha:sidebar") === "collapsed") {
+          document.documentElement.setAttribute("data-sidebar", "collapsed");
+        }
+      } catch (e) {}
     </script>
     <!-- the shared styles.css token layer is injected at runtime by main.tsx:
          a <link> here would get base-prefixed by Vite to /assets/dist/... -->

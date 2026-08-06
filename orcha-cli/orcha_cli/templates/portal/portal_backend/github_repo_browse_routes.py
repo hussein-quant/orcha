@@ -23,11 +23,42 @@ convenience: resolved via the SAME `/pulls/{number}` fetch idiom github_hub_rout
 for PR detail, to that PR's head sha, before the real GitHub call is made. Omitting
 `ref` entirely resolves the repo's default branch (one extra `/repos/{repo}` call,
 cached like everything else here).
+
+Repo snapshot (tarball) cache
+------------------------------
+`_fetch_repo_snapshot` replaces "one Contents-API fetch per file" with a single
+`GET /repos/{repo}/tarball/{ref}` (per docs/code-space-indexing-research.md §1c/§3
+Phase A: ~790 calls -> 1-2 calls for a cold 789-file repo). The tarball response is a
+redirect to codeload.github.com; `urllib.request.urlopen` follows it natively (a GET,
+no auth needed on the signed codeload URL). Streamed into a bounded buffer (hard cap
+REPO_SNAPSHOT_MAX_BYTES, ~80MB) and extracted IN MEMORY with stdlib `tarfile` — only
+source-extension members under a caller-supplied byte cap are kept (everything else,
+including oversized/binary/non-source members, is skipped DURING extraction, so the
+full repo is never materialized). Every member name is validated against path
+traversal (`../`, absolute paths, symlink/hardlink members) before being trusted — see
+`_safe_tar_members`. The tarball's synthetic top-level directory
+(`{owner}-{repo}-{shortsha}/...`, GitHub's own convention) is stripped so callers see
+plain repo-relative paths, matching every other path in this module.
+
+Cached per (cid, resolved_ref) like the tree/default-branch caches above it, but with
+its own generous TTL (REPO_SNAPSHOT_TTL_SECONDS, 10 min — matching the symbol
+indexer's SYMBOL_STATE_TTL_SECONDS in code_space_routes, since re-fetching+re-extracting
+a whole tarball is the expensive operation this cache exists to amortize) and an
+explicit memory bound: at most REPO_SNAPSHOT_MAX_CACHED snapshots held at once,
+oldest-inserted evicted first once a NEW snapshot would exceed that count.
+
+A repo whose tarball exceeds the size cap returns None (never partially cached) —
+callers fall back to the existing per-file Contents-API path and should surface a
+`snapshot_unavailable` marker rather than pretend the snapshot path was used.
 """
 
 import base64
+import io
+import tarfile
 import time
+import urllib.error
 import urllib.parse
+import urllib.request
 
 from fastapi import HTTPException, Query, Request
 
@@ -43,6 +74,7 @@ from portal_backend.github_hub_routes import (
 )
 
 GITHUB_API = "https://api.github.com"
+GITHUB_TIMEOUT_SECONDS = 10
 
 # Directory-tree cache (recursive tree fetches for search:names) — short-lived, keyed
 # per (cid, ref): GitHub's recursive git/trees call is the heaviest one this module
@@ -61,8 +93,30 @@ FILE_CONTENT_CAP_BYTES = 500_000
 NAMES_SEARCH_MAX_RESULTS = 200
 CONTENTS_SEARCH_MAX_RESULTS = 50
 
+# Repo snapshot (tarball) cache — see module docstring. Larger than a single tarball's
+# raw download size can legitimately be (a repo's uncompressed tree can exceed this even
+# when the compressed tarball itself is smaller); this caps the STREAMED DOWNLOAD, the
+# bound that actually protects the 4GB shared VM.
+REPO_SNAPSHOT_MAX_BYTES = 80_000_000
+# Warm snapshots kept 10 min — matches code_space_routes.SYMBOL_STATE_TTL_SECONDS, since
+# re-fetching+re-extracting the tarball is the expensive step both the symbol indexer and
+# any future snapshot-backed file read want to amortize together.
+REPO_SNAPSHOT_TTL_SECONDS = 600
+# Explicit memory bound: at most this many (cid, ref) snapshots held in-process at once.
+# Each holds every source-extension file's bytes for a full repo, so this is a real cap,
+# not a nicety — a container flipping between refs/branches shouldn't accumulate an
+# unbounded number of whole-repo copies in memory.
+REPO_SNAPSHOT_MAX_CACHED = 2
+
 _TREE_CACHE: dict = {}
 _DEFAULT_BRANCH_CACHE: dict = {}
+_REPO_SNAPSHOT_CACHE: dict = {}
+# Insertion order of currently-cached (cid, ref) snapshot keys — oldest first — so
+# eviction always drops the least-recently-INSERTED snapshot once the bound is exceeded.
+# (Insertion order, not last-access order: a snapshot cache is refreshed wholesale on a
+# TTL-expired re-fetch, not touched on every read, so LRU-by-access would need extra
+# bookkeeping this cache has no other use for.)
+_REPO_SNAPSHOT_ORDER: list = []
 
 
 def _tree_cache_get(cid: str, ref: str):
@@ -85,6 +139,27 @@ def _default_branch_cache_get(cid: str):
 
 def _default_branch_cache_put(cid: str, branch: str) -> None:
     _DEFAULT_BRANCH_CACHE[cid] = (time.monotonic() + DEFAULT_BRANCH_CACHE_TTL_SECONDS, branch)
+
+
+def _repo_snapshot_cache_get(cid: str, ref: str):
+    hit = _REPO_SNAPSHOT_CACHE.get((cid, ref))
+    if hit and hit[0] > time.monotonic():
+        return hit[1]
+    return None
+
+
+def _repo_snapshot_cache_put(cid: str, ref: str, files: dict) -> None:
+    key = (cid, ref)
+    if key not in _REPO_SNAPSHOT_CACHE:
+        _REPO_SNAPSHOT_ORDER.append(key)
+    _REPO_SNAPSHOT_CACHE[key] = (time.monotonic() + REPO_SNAPSHOT_TTL_SECONDS, files)
+    # Evict oldest-inserted snapshots beyond the bound. A loop (not a single pop) in case
+    # the bound itself was ever lowered, or a stale key lingers past its own TTL without
+    # having been read (and thus never lazily swept) — both self-heal here rather than
+    # only handling the "insert one over" steady-state case.
+    while len(_REPO_SNAPSHOT_ORDER) > REPO_SNAPSHOT_MAX_CACHED:
+        oldest = _REPO_SNAPSHOT_ORDER.pop(0)
+        _REPO_SNAPSHOT_CACHE.pop(oldest, None)
 
 
 def _resolve_default_branch(repo: str, token: str, cid: str) -> str:
@@ -131,6 +206,135 @@ def _is_binary_content(content_bytes: bytes) -> bool:
     heuristic git/most editors use. Called on already-fetched, already-decoded bytes;
     never on the still-base64 wire form."""
     return b"\0" in content_bytes
+
+
+def _download_tarball_bytes(repo: str, resolved_ref: str, token: str):
+    """Stream `GET /repos/{repo}/tarball/{resolved_ref}` into memory, bounded at
+    REPO_SNAPSHOT_MAX_BYTES + 1 (so an oversize download is detected without ever fully
+    buffering an unbounded response). Returns the raw tarball bytes, or None when the
+    download exceeds the cap (caller falls back to the per-file path — never raises for
+    "too big", since that's an expected, handled shape, not a failure). Raises
+    RuntimeError("github_status:<code>") / RuntimeError("github_unreachable:...") on a
+    real GitHub/network failure, the SAME contract as `_gh_get`, so callers can reuse
+    the existing error-payload mapping. This is the ONE network leaf for tarball bytes;
+    tests monkeypatch this function, never urllib directly. The 302 redirect to
+    codeload.github.com is a signed, short-lived URL — `urllib.request.urlopen` follows
+    it with its default redirect handling (a plain GET, no Authorization header needed
+    on the codeload hop, unlike Slack's cross-host download flow)."""
+    url = f"{GITHUB_API}/repos/{repo}/tarball/{urllib.parse.quote(resolved_ref)}"
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "orcha-portal",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=GITHUB_TIMEOUT_SECONDS) as response:
+            data = response.read(REPO_SNAPSHOT_MAX_BYTES + 1)
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"github_status:{exc.code}") from exc
+    except Exception as exc:  # DNS, timeout, TLS — one graceful shape, matches _gh_get
+        raise RuntimeError(f"github_unreachable:{exc}") from exc
+    if len(data) > REPO_SNAPSHOT_MAX_BYTES:
+        return None
+    return data
+
+
+def _safe_tar_members(tar: "tarfile.TarFile"):
+    """Yield only tar members safe to trust: regular files whose name, after stripping
+    the tarball's synthetic top-level directory, never escapes the extraction root.
+
+    SECURITY (path traversal): a malicious or corrupt tarball could contain a member
+    named e.g. `../../etc/passwd` or an absolute path; naively trusting `member.name`
+    when building an in-memory `{path: bytes}` dict would let such a member's path
+    collide with/overwrite an unrelated key or (if this code is ever adapted to extract
+    to disk) escape the target directory. Every member is checked here BEFORE its bytes
+    are ever read: reject absolute paths, any path whose normalized form starts with
+    `..` or contains a `..` segment, and reject symlink/hardlink/device/fifo members
+    outright (only `isfile()` — regular files — are extracted; a symlink's target is
+    attacker-controlled and never followed). This is a `data`-filter-equivalent
+    allowlist applied manually (rather than relying solely on `tarfile`'s built-in
+    `filter="data"`) so the same check governs which members are even considered for
+    the top-level-prefix-stripping step below, not just the final extraction call."""
+    for member in tar.getmembers():
+        if not member.isfile():
+            continue
+        name = member.name or ""
+        if name.startswith("/") or name.startswith("\\"):
+            continue
+        # Strip the tarball's own top-level dir here too (consistent with the stripping
+        # done on the accepted path) purely to normalize what we validate against —
+        # traversal is checked on the FULL original name, since a crafted top-level
+        # segment is itself part of the attack surface.
+        normalized = name.replace("\\", "/")
+        parts = normalized.split("/")
+        if any(p == ".." for p in parts):
+            continue
+        if len(parts) < 2:
+            # No top-level directory component to strip (a bare filename at the tar
+            # root) — GitHub's own tarballs always nest under {owner}-{repo}-{sha}/, so
+            # this shape isn't a real repo file; skip it rather than guess.
+            continue
+        yield member, "/".join(parts[1:])
+
+
+def _extract_source_files(tarball_bytes: bytes, extensions, max_file_bytes: int) -> dict:
+    """Extract `tarball_bytes` (a GitHub repo tarball, gzip-compressed) IN MEMORY into
+    `{repo_relative_path: bytes}`, keeping only members whose extension is in
+    `extensions` and whose size is <= `max_file_bytes` — every other member (docs,
+    images, lockfiles, oversized files, anything not on the source-extension allowlist)
+    is skipped DURING iteration and its bytes are never read, so the full repo is never
+    materialized in memory even though the whole tarball's member LIST is walked.
+    Members are validated via `_safe_tar_members` (path traversal, symlinks) before
+    their path is trusted. Uses `tarfile.open(fileobj=io.BytesIO(...))` — extraction
+    stays fully in-process, no temp files on disk, no `extractall`."""
+    files: dict = {}
+    with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz") as tar:
+        for member, rel_path in _safe_tar_members(tar):
+            if not rel_path:
+                continue
+            if not any(rel_path.endswith(ext) for ext in extensions):
+                continue
+            if member.size > max_file_bytes:
+                continue
+            extracted = tar.extractfile(member)
+            if extracted is None:
+                continue
+            files[rel_path] = extracted.read()
+    return files
+
+
+def _fetch_repo_snapshot(repo: str, resolved_ref: str, token: str, cid: str, extensions, max_file_bytes: int):
+    """The whole repo's source files at `resolved_ref`, as `{path: bytes}` — ONE tarball
+    fetch (`_download_tarball_bytes`) + one in-memory extraction
+    (`_extract_source_files`), replacing an entire per-file Contents-API loop. Cached
+    per (cid, resolved_ref) for REPO_SNAPSHOT_TTL_SECONDS (see module docstring).
+
+    Returns None when no snapshot is available — either the tarball exceeded
+    REPO_SNAPSHOT_MAX_BYTES (`_download_tarball_bytes` returned None) or the extraction
+    itself failed unexpectedly (a corrupt/unexpected tarball shape; logged as a
+    RuntimeError-free None rather than raising, since "no snapshot" is a handled
+    fallback path here, not an error the caller needs to classify through the
+    github_status ladder). Callers use None as the `snapshot_unavailable` signal and
+    fall back to the existing per-file path. Raises RuntimeError("github_status:<code>")
+    / RuntimeError("github_unreachable:...") only for a genuine GitHub/network failure
+    on the download itself — the same contract every other fetch in this module uses,
+    so callers can reuse `_error_payload`/`_detail_error_payload`.
+    """
+    cached = _repo_snapshot_cache_get(cid, resolved_ref)
+    if cached is not None:
+        return cached
+    tarball_bytes = _download_tarball_bytes(repo, resolved_ref, token)
+    if tarball_bytes is None:
+        return None
+    try:
+        files = _extract_source_files(tarball_bytes, extensions, max_file_bytes)
+    except tarfile.TarError:
+        return None
+    _repo_snapshot_cache_put(cid, resolved_ref, files)
+    return files
 
 
 @app.get("/api/containers/{cid}/github/browse/tree")

@@ -9,12 +9,12 @@
  * the run's agent, with the honest "queued — the agent addresses this at its
  * next checkpoint" caption instead of a free @agent picker.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useToast } from "../../components/ui";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent } from "../../types";
 import { createThread } from "./codespaceApi";
-import { anchorLabel, THREAD_TEMPLATES, type ThreadKind } from "./codespaceTypes";
+import { anchorLabel, THREAD_TEMPLATES, type CreateThreadResponse, type ThreadKind } from "./codespaceTypes";
 
 export interface ThreadComposerProps {
   cid: string;
@@ -28,7 +28,10 @@ export interface ThreadComposerProps {
   // Phase 2 raise-hand: pre-tag a specific agent and lock the picker, with
   // the honest queued-caption instead of the free picker.
   preTaggedAgentId?: string | null;
-  onCreated?: (threadId: string) => void;
+  // Item 5 — the full create response (thread + opening message), not just
+  // the id: lets the caller (ThreadRail) seed ThreadView optimistically
+  // instead of waiting on a fresh GET /code/threads/{id}.
+  onCreated?: (created: CreateThreadResponse) => void;
   onCancel?: () => void;
 }
 
@@ -52,6 +55,18 @@ export function ThreadComposer({
 
   const aiAgents = agents.filter((a) => a.kind === "ai");
   const raiseHand = !!preTaggedAgentId;
+
+  // Usability sweep — Escape closes the composer (papercut: this was the
+  // only transient panel in Code Space WITHOUT an Escape handler; matches
+  // SymbolSearch's palette and RecentFilesDropdown's convention).
+  useEffect(() => {
+    if (!onCancel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
 
   const pickTemplate = (t: (typeof THREAD_TEMPLATES)[number]) => {
     setKind(t.kind);
@@ -79,7 +94,7 @@ export function ThreadComposer({
         return;
       }
       toast("Thread posted", "ok");
-      onCreated?.(res.data.thread.id);
+      onCreated?.(res.data);
     });
   };
 

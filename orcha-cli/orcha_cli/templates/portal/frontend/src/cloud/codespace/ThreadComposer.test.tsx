@@ -133,6 +133,25 @@ describe("ThreadComposer", () => {
     expect(screen.queryByLabelText(/tag an agent/i)).not.toBeInTheDocument();
     expect(screen.getByText("@forge")).toBeInTheDocument();
   });
+
+  // Usability sweep papercut: the composer was the one transient Code Space
+  // panel with no Escape handler (SymbolSearch's palette and the header's
+  // Recent files dropdown both already closed on Escape).
+  it("Escape calls onCancel, closing the composer", async () => {
+    stubFetch();
+    const onCancel = vi.fn();
+    mount({ onCancel });
+    await screen.findByText("Post");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape is a no-op when no onCancel is provided (no crash)", async () => {
+    stubFetch();
+    mount({ onCancel: undefined });
+    await screen.findByText("Post");
+    expect(() => fireEvent.keyDown(document, { key: "Escape" })).not.toThrow();
+  });
 });
 
 async function waitForPost(calls: Call[]): Promise<Call> {

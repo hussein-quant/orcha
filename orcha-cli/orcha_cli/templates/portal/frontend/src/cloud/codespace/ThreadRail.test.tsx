@@ -3,6 +3,7 @@
  * "outdated — pinned to <sha7>" honesty chip when blob_match=false), opening
  * a thread swaps in ThreadView, and switching tabs mounts Live/Learn.
  */
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/ui";
@@ -28,12 +29,30 @@ const THREADS_PAYLOAD = {
   ],
 };
 
-function stubFetch() {
+const RECENT_PAYLOAD = {
+  threads: [
+    {
+      id: "r1", ref: "HEAD", sha: "abc1234def", path: "b.ts", start_line: 7, end_line: 7,
+      kind: "why", status: "open", created_at: "2026-08-06T12:00:00Z", updated_at: "now",
+      first_message: "why is this async?",
+    },
+    {
+      id: "r2", ref: "HEAD", sha: "abc1234def", path: "a.ts", start_line: 3, end_line: 3,
+      kind: "question", status: "open", created_at: "2026-08-06T11:00:00Z", updated_at: "now",
+      first_message: "how does this work?",
+    },
+  ],
+};
+
+function stubFetch(opts: { recent?: unknown } = {}) {
   const json = (data: unknown, status = 200) =>
     ({ ok: status < 400, status, json: async () => data }) as unknown as Response;
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.startsWith("/api/containers/c1/code/threads")) return json(THREADS_PAYLOAD);
+    if (url.startsWith("/api/containers/c1/code/threads")) {
+      if (url.includes("recent=")) return json(opts.recent ?? RECENT_PAYLOAD);
+      return json(THREADS_PAYLOAD);
+    }
     if (url.startsWith("/api/containers/c1")) {
       return json({
         container: { id: "c1", name: "Acme", status: "active", autonomy_level: "plan" },
@@ -161,5 +180,153 @@ describe("ThreadRail — tabs", () => {
     }) as unknown as typeof fetch;
     mount({ tab: "outline" });
     expect(await screen.findByText("helper")).toBeInTheDocument();
+  });
+});
+
+describe("ThreadRail — Recent quick-jump (item 3)", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("no file open: shows the Recent section by default, newest-first with kind glyph/loc/snippet/time", async () => {
+    stubFetch();
+    mount({ path: "" });
+    const row1 = await screen.findByText(/b\.ts:7/);
+    expect(row1).toBeInTheDocument();
+    expect(screen.getByText("why is this async?")).toBeInTheDocument();
+    expect(screen.getByText(/a\.ts:3/)).toBeInTheDocument();
+    expect(screen.getByText("how does this work?")).toBeInTheDocument();
+    // newest-first ordering: b.ts's row precedes a.ts's row in the DOM
+    const rows = document.querySelectorAll(".cs-recent-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("b.ts:7");
+    expect(rows[1].textContent).toContain("a.ts:3");
+  });
+
+  it("a file IS open: the per-file list shows by default, with a compact Recent link", async () => {
+    stubFetch();
+    mount({ path: "a.ts" });
+    expect(await screen.findByText("Question")).toBeInTheDocument();
+    expect(screen.getByText(/recent threads/i)).toBeInTheDocument();
+    expect(document.querySelector(".cs-recent-row")).toBeNull();
+  });
+
+  it("clicking the compact Recent link switches to the repo-wide Recent list", async () => {
+    stubFetch();
+    mount({ path: "a.ts" });
+    await screen.findByText("Question");
+    fireEvent.click(screen.getByText(/recent threads/i));
+    expect(await screen.findByText(/b\.ts:7/)).toBeInTheDocument();
+    expect(screen.getByText(/back to a\.ts/i)).toBeInTheDocument();
+  });
+
+  it("clicking a Recent row calls onNavigateToThread with that thread", async () => {
+    stubFetch();
+    const onNavigateToThread = vi.fn();
+    mount({ path: "", onNavigateToThread });
+    const row = await screen.findByText(/b\.ts:7/);
+    fireEvent.click(row.closest(".cs-recent-row") as HTMLElement);
+    expect(onNavigateToThread).toHaveBeenCalledWith(expect.objectContaining({ id: "r1", path: "b.ts" }));
+  });
+
+  it("shows an empty state when there are no recent threads", async () => {
+    stubFetch({ recent: { threads: [] } });
+    mount({ path: "" });
+    expect(await screen.findByText(/no threads yet/i)).toBeInTheDocument();
+  });
+});
+
+describe("ThreadRail — optimistic post-to-conversation (item 5)", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("posting a new thread swaps straight into its ThreadView, seeded with the posted message, no extra click", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url.startsWith("/api/containers/c1/code/threads") && method === "POST") {
+        return {
+          ok: true, status: 201,
+          json: async () => ({
+            thread: {
+              id: "new1", ref: "HEAD", sha: "deadbee", path: "a.ts", start_line: 5, end_line: 5,
+              kind: "question", status: "open", created_at: "now", updated_at: "now",
+            },
+            message: { id: "m1", is_human: true, body: "How does auth work here?", created_at: "now" },
+          }),
+        } as unknown as Response;
+      }
+      if (url.startsWith("/api/containers/c1/code/threads")) {
+        return { ok: true, status: 200, json: async () => THREADS_PAYLOAD } as unknown as Response;
+      }
+      if (url.startsWith("/api/code/threads/new1")) {
+        // the poll/GET path — deliberately slow-ish in spirit; the seed must
+        // already be on screen before this ever resolves in the test.
+        return { ok: true, status: 200, json: async () => ({
+          thread: {
+            id: "new1", ref: "HEAD", sha: "deadbee", path: "a.ts", start_line: 5, end_line: 5,
+            kind: "question", status: "open", created_at: "now", updated_at: "now",
+          },
+          messages: [{ id: "m1", is_human: true, body: "How does auth work here?", created_at: "now" }],
+        }) } as unknown as Response;
+      }
+      if (url.startsWith("/api/containers/c1")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            container: { id: "c1", name: "Acme", status: "active", autonomy_level: "plan" },
+            agents: AGENTS, tasks: [], requests: [],
+          }),
+        } as unknown as Response;
+      }
+      if (url === "/api/containers") return { ok: true, status: 200, json: async () => [{ id: "c1", status: "active" }] } as unknown as Response;
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const onOpenThread = vi.fn();
+    // ThreadRail is a controlled component (the parent, CodeSpacePage, owns
+    // openThreadId) — a thin stateful wrapper here plays that parent role so
+    // the "swap to ThreadView on post" behavior is observable end-to-end,
+    // exactly like CodeSpacePage really wires it.
+    function Harness() {
+      const [openThreadId, setOpenThreadId] = useState<string | null>(null);
+      const [composerSelection, setComposerSelection] = useState<{ start: number; end: number } | null>({ start: 5, end: 5 });
+      return (
+        <ThreadRail
+          cid="c1" gitRef="HEAD" path="a.ts" agents={AGENTS} tab="threads"
+          onTabChange={vi.fn()}
+          composerSelection={composerSelection}
+          onComposerClose={() => setComposerSelection(null)}
+          onJumpToLine={vi.fn()}
+          openThreadId={openThreadId}
+          onOpenThread={(id: string | null) => { onOpenThread(id); setOpenThreadId(id); }}
+          raiseHand={null}
+          onRaiseHandDone={vi.fn()}
+        />
+      );
+    }
+    render(
+      <ToastProvider>
+        <SnapshotProvider>
+          <Harness />
+        </SnapshotProvider>
+      </ToastProvider>,
+    );
+    await screen.findByText(/line 5/i);
+    fireEvent.change(screen.getByLabelText(/thread message/i), { target: { value: "How does auth work here?" } });
+    fireEvent.click(screen.getByText("Post"));
+
+    // seeded straight into ThreadView — the posted message is visible without
+    // an extra click or waiting for the poll.
+    // seeded straight into ThreadView — the posted message is visible without
+    // an extra click or waiting for the poll. Scope the query to a message
+    // bubble specifically: the composer's OWN textarea is a React-controlled
+    // element whose value also renders as a text-node child, so an unscoped
+    // queryByText would false-positive-match the still-mounted composer
+    // before the real swap to ThreadView happens.
+    const message = await screen.findByText(
+      "How does auth work here?",
+      { selector: ".cs-message-body" },
+    );
+    expect(message).toBeInTheDocument();
+    expect(onOpenThread).toHaveBeenCalledWith("new1");
   });
 });
