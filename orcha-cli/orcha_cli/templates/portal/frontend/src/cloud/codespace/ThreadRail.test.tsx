@@ -138,4 +138,28 @@ describe("ThreadRail — tabs", () => {
     mount({ tab: "learn" });
     expect(await screen.findByText(/no teach\/why threads yet/i)).toBeInTheDocument();
   });
+
+  it("renders an Outline tab button alongside Threads/Live/Learn", () => {
+    stubFetch();
+    mount();
+    expect(screen.getByRole("tab", { name: "Outline" })).toBeInTheDocument();
+  });
+
+  it("renders the Outline tab's symbols for the open file", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/code/outline")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            available: true, ref: "HEAD", path: "a.ts", language: "typescript",
+            symbols: [{ name: "helper", kind: "function", line: 3 }],
+          }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    mount({ tab: "outline" });
+    expect(await screen.findByText("helper")).toBeInTheDocument();
+  });
 });

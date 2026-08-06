@@ -1,8 +1,10 @@
 /**
  * The right rail: Threads (Phase 1, current-file scoped) / Live (Phase 2) /
- * Learn (Phase 4) tabs. Threads-tab list polls on the house 3s bump; anchor
- * chips jump to lines, count badges optional via the tree's fileBadge slot
- * (CodeSpacePage wires that separately).
+ * Learn (Phase 4) / Outline (Phase 3) tabs. Threads-tab list polls on the
+ * house 3s bump; anchor chips jump to lines, count badges optional via the
+ * tree's fileBadge slot (CodeSpacePage wires that separately). Outline
+ * (symbols/OutlineRail.tsx) is scoped to whatever file is currently open,
+ * exactly like the Threads tab.
  */
 import { useEffect, useRef, useState } from "react";
 import { useSnapshot } from "../../state/SnapshotProvider";
@@ -11,10 +13,11 @@ import { fetchThreads } from "./codespaceApi";
 import { anchorLabel, kindLabel, shortSha, type CodeThreadSummary } from "./codespaceTypes";
 import { LearnTab } from "./LearnTab";
 import { LivePanel } from "./LivePanel";
+import { OutlineRail } from "./symbols/OutlineRail";
 import { ThreadComposer } from "./ThreadComposer";
 import { ThreadView } from "./ThreadView";
 
-export type RailTab = "threads" | "live" | "learn";
+export type RailTab = "threads" | "live" | "learn" | "outline";
 
 export interface ThreadRailProps {
   cid: string;
@@ -91,6 +94,9 @@ export function ThreadRail({
         <button type="button" role="tab" aria-selected={tab === "learn"} className={"cs-rail-tab" + (tab === "learn" ? " on" : "")} onClick={() => onTabChange("learn")}>
           Learn
         </button>
+        <button type="button" role="tab" aria-selected={tab === "outline"} className={"cs-rail-tab" + (tab === "outline" ? " on" : "")} onClick={() => onTabChange("outline")}>
+          Outline
+        </button>
       </div>
       <div className="cs-rail-body">
         {tab === "threads" ? (
@@ -127,6 +133,7 @@ export function ThreadRail({
           <LivePanel cid={cid} agents={agents} onJumpToLine={onJumpToLine} onRaiseHand={onRaiseHandRequested} />
         ) : null}
         {tab === "learn" ? <LearnTab cid={cid} agents={agents} /> : null}
+        {tab === "outline" ? <OutlineRail cid={cid} gitRef={gitRef} path={path} onJumpToLine={onJumpToLine} /> : null}
       </div>
     </aside>
   );
