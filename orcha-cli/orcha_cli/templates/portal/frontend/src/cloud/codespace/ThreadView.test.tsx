@@ -32,13 +32,12 @@ function stubFetch(overrides: { detail?: unknown } = {}) {
     const url = String(input);
     const method = init?.method || "GET";
     if (url.startsWith("/api/code/threads/") && !url.includes("/messages")) {
-      return json(overrides.detail ?? THREAD_DETAIL);
+      const d = (overrides.detail ?? THREAD_DETAIL) as { thread?: object; messages?: unknown[] };
+      // real wire: FLAT thread + inline messages
+      return json(d.thread ? { ...d.thread, messages: d.messages ?? [] } : d);
     }
     if (url.includes("/messages") && method === "POST") {
-      return json({
-        thread: { ...THREAD_DETAIL.thread },
-        message: { id: "m2", is_human: true, body: "a reply", created_at: "now" },
-      }, 201);
+      return json({ ...THREAD_DETAIL.thread }, 201); // real wire: flat thread row only
     }
     if (url.startsWith("/api/containers/c1")) {
       return json({
@@ -162,15 +161,12 @@ describe("ThreadView — item 5: optimistic seed + optimistic reply", () => {
         return new Promise((resolve) => {
           resolvers.push(() => resolve({
             ok: true, status: 201,
-            json: async () => ({
-              thread: { ...THREAD_DETAIL.thread },
-              message: { id: "m2", is_human: true, body: "a reply", created_at: "now" },
-            }),
+            json: async () => ({ ...THREAD_DETAIL.thread }), // real wire: flat row
           } as unknown as Response));
         });
       }
       if (url.startsWith("/api/code/threads/")) {
-        return { ok: true, status: 200, json: async () => THREAD_DETAIL } as unknown as Response;
+        return { ok: true, status: 200, json: async () => ({ ...THREAD_DETAIL.thread, messages: THREAD_DETAIL.messages }) } as unknown as Response;
       }
       if (url.startsWith("/api/containers/c1")) {
         return {
@@ -210,7 +206,7 @@ describe("ThreadView — item 5: optimistic seed + optimistic reply", () => {
         return { ok: false, status: 500, json: async () => ({ detail: "boom" }) } as unknown as Response;
       }
       if (url.startsWith("/api/code/threads/")) {
-        return { ok: true, status: 200, json: async () => THREAD_DETAIL } as unknown as Response;
+        return { ok: true, status: 200, json: async () => ({ ...THREAD_DETAIL.thread, messages: THREAD_DETAIL.messages }) } as unknown as Response;
       }
       if (url.startsWith("/api/containers/c1")) {
         return {
