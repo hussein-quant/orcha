@@ -4,6 +4,10 @@ Turn any Ubuntu-ish VM (Hetzner CX32, or a customer VPC box) into an
 auth-fronted Orcha with sandboxed agent wakes. This is the manual v1 of what
 the control plane will automate.
 
+> **Just want to run Orcha Cloud on your own laptop, no box?** See
+> [`deploy/local/README.md`](local/README.md) — same portal, `orcha init &&
+> orcha up`, `localhost` only, with an optional real-login overlay.
+
 ## 0. Prerequisites
 
 - DNS A record: `orcha.<yourdomain>` → the box's IP
