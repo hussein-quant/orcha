@@ -329,6 +329,7 @@ export function CodeSpacePage() {
             prefill={symbolPrefill}
             prefillToken={symbolPrefillToken}
             focusToken={symbolFocusToken}
+            path={path}
           />
           {path ? (
             <RecentFilesDropdown

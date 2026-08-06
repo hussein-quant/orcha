@@ -110,4 +110,35 @@ describe("SymbolSearch", () => {
     await act(async () => { vi.advanceTimersByTime(300); });
     expect(await screen.findByText("helper")).toBeInTheDocument();
   });
+
+  it("BUG 4: closes when the current file path changes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch({ available: true, ref: "HEAD", results: [{ name: "helper", kind: "function", path: "a.ts", line: 2 }] });
+    const { rerender } = render(<SymbolSearch cid="c1" gitRef="HEAD" onNavigate={vi.fn()} path="a.ts" />);
+    fireEvent.change(screen.getByPlaceholderText(/search symbols/i), { target: { value: "helper" } });
+    fireEvent.focus(screen.getByPlaceholderText(/search symbols/i));
+    await act(async () => { vi.advanceTimersByTime(300); });
+    expect(await screen.findByText("helper")).toBeInTheDocument();
+
+    rerender(<SymbolSearch cid="c1" gitRef="HEAD" onNavigate={vi.fn()} path="b.ts" />);
+    expect(screen.queryByText("helper")).not.toBeInTheDocument();
+  });
+
+  it("BUG 4: closes on scroll (capture-phase, any scrollable ancestor)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch({ available: true, ref: "HEAD", results: [{ name: "helper", kind: "function", path: "a.ts", line: 2 }] });
+    render(<SymbolSearch cid="c1" gitRef="HEAD" onNavigate={vi.fn()} path="a.ts" />);
+    fireEvent.change(screen.getByPlaceholderText(/search symbols/i), { target: { value: "helper" } });
+    fireEvent.focus(screen.getByPlaceholderText(/search symbols/i));
+    await act(async () => { vi.advanceTimersByTime(300); });
+    expect(await screen.findByText("helper")).toBeInTheDocument();
+
+    fireEvent.scroll(window);
+    expect(screen.queryByText("helper")).not.toBeInTheDocument();
+  });
+
+  it("does NOT close on scroll while the panel is already closed (no-op guard)", () => {
+    render(<SymbolSearch cid="c1" gitRef="HEAD" onNavigate={vi.fn()} path="a.ts" />);
+    expect(() => fireEvent.scroll(window)).not.toThrow();
+  });
 });
