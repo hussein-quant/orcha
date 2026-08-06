@@ -728,3 +728,108 @@ describe("CodeSpacePage — resizable panes", () => {
     expect(screen.queryByText(/line 1/i)).not.toBeInTheDocument();
   });
 });
+
+/* ---- BUG 3: stale file content during file-switch loading ---------------- */
+describe("CodeSpacePage — bug 3: no stale content while switching files", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  const FILE_B = { ref: "HEAD", path: "b.ts", content: "const z = 9;", size: 12 };
+  const TREE_ROOT_B = {
+    ref: "HEAD", path: "",
+    entries: [{ name: "a.ts", path: "a.ts", type: "file" }, { name: "b.ts", path: "b.ts", type: "file" }],
+  };
+
+  // A fetch stub whose file-content responses can be held open (resolved
+  // manually) so the test can inspect the DOM MID-transition, exactly the
+  // race window the live repro caught.
+  function stubFetchWithControllableFileLoad() {
+    const fileResolvers: Record<string, (v: unknown) => void> = {};
+    const json = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as unknown as Response;
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/github/browse/tree")) return json(TREE_ROOT_B);
+      if (url.startsWith("/api/containers/c1/github/browse/file")) {
+        const isB = url.includes("path=b.ts");
+        const key = isB ? "b.ts" : "a.ts";
+        return new Promise((resolve) => { fileResolvers[key] = () => resolve(json(isB ? FILE_B : FILE_A)); });
+      }
+      if (url.startsWith("/api/containers/c1/code/threads")) return json(THREADS_MD);
+      if (url.startsWith("/api/containers/c1")) {
+        return json({ container: { id: "c1", name: "Acme", status: "active", autonomy_level: "plan" }, agents: AGENTS, tasks: [], requests: [] });
+      }
+      if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
+      return json({});
+    }) as unknown as typeof fetch;
+    return fileResolvers;
+  }
+
+  it("does not render the PREVIOUS file's lines while the NEW file is still loading", async () => {
+    const resolvers = stubFetchWithControllableFileLoad();
+    mount();
+    await vi.waitFor(() => expect(resolvers["a.ts"]).toBeTypeOf("function"));
+    resolvers["a.ts"]({});
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    // a.ts's real content is 3 lines; confirm it painted before switching.
+    expect(document.querySelector('[data-cs-line="3"]')).not.toBeNull();
+
+    fireEvent.click(screen.getByText("b.ts", { selector: ".dfv-nm" }));
+    // b.ts's fetch is still pending (resolver not called yet) — the pane
+    // must NOT still show "a.ts" as the active file path, and must show a
+    // loading skeleton rather than a.ts's stale content.
+    expect(document.querySelector(".rb-file-path")?.textContent).not.toBe("a.ts");
+  });
+
+  it("gutter clicks during the loading window do nothing (no composer opens for stale content)", async () => {
+    const resolvers = stubFetchWithControllableFileLoad();
+    mount();
+    await vi.waitFor(() => expect(resolvers["a.ts"]).toBeTypeOf("function"));
+    resolvers["a.ts"]({});
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+
+    fireEvent.click(screen.getByText("b.ts", { selector: ".dfv-nm" }));
+    // still mid-load — there should be NO clickable .cs-gutter at all right
+    // now (the skeleton has no gutter), so no stray composer can open.
+    expect(document.querySelector(".cs-gutter")).toBeNull();
+
+    resolvers["b.ts"]({});
+    await screen.findByText("b.ts", { selector: ".rb-file-path" });
+    // once loaded, b.ts's own single line IS clickable and anchors correctly.
+    const gutter1 = document.querySelector('[data-cs-line="1"] .cs-gutter') as HTMLElement;
+    fireEvent.click(gutter1);
+    expect(await screen.findByText(/line 1/i)).toBeInTheDocument();
+  });
+
+  it("flow (a): after opening an existing thread, clicking a DIFFERENT line in the SAME file reopens the composer", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const chip = await screen.findByText("Question");
+    fireEvent.click(chip.closest(".cs-thread-chip") as HTMLElement);
+    expect(await screen.findByText(/back to threads/i)).toBeInTheDocument();
+
+    const gutter3 = document.querySelector('[data-cs-line="3"] .cs-gutter') as HTMLElement;
+    fireEvent.click(gutter3);
+    expect(await screen.findByText(/line 3/i)).toBeInTheDocument();
+    expect(screen.queryByText(/back to threads/i)).not.toBeInTheDocument();
+  });
+
+  it("flow (b): after opening a thread, switching file and clicking a line reopens the composer AND the rail shows the new file's own context", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const chip = await screen.findByText("Question");
+    fireEvent.click(chip.closest(".cs-thread-chip") as HTMLElement);
+    expect(await screen.findByText(/back to threads/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("readme.md"));
+    await screen.findByText("readme.md", { selector: ".rb-file-path" });
+    fireEvent.click(screen.getByText("Raw")); // readme.md defaults to Rendered — need Raw for a gutter
+
+    const gutter1 = document.querySelector('[data-cs-line="1"] .cs-gutter') as HTMLElement;
+    fireEvent.click(gutter1);
+    expect(await screen.findByText(/line 1/i)).toBeInTheDocument();
+    // rail must NOT be stuck on the repo-wide Recent list.
+    expect(screen.queryByText(/recent threads \(all files\)/i)).not.toBeInTheDocument();
+  });
+});

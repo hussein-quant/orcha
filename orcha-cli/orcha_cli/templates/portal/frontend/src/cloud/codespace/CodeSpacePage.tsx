@@ -380,7 +380,19 @@ export function CodeSpacePage() {
                   onSearchSymbols={focusSymbolSearch}
                   onFocusTree={focusTree}
                 />
-              ) : fileLoading && !filePayload ? (
+              ) : fileLoading || (filePayload && filePayload.path !== path) ? (
+                // BUG 3 root-cause fix — the old guard (fileLoading &&
+                // !filePayload) only blocked stale content on the very
+                // FIRST load. Switching files sets fileLoading=true but
+                // filePayload still holds the PREVIOUS file until the fetch
+                // resolves, so the previous file's lines/gutter rendered
+                // under the NEW file's path/breadcrumb for one paint — a
+                // gutter click in that window anchored a composer to the
+                // wrong path/line. `fileLoading` ALONE now gates the
+                // skeleton on every load, first or not; the
+                // `filePayload.path !== path` clause is a second
+                // independent guard against the same class of bug if
+                // fileLoading and path ever race each other in the future.
                 <BrowseSkeletonPane />
               ) : fileError ? (
                 <BrowseErrorBody err={fileError} what="File" />
