@@ -95,6 +95,43 @@ describe("ThreadView", () => {
     await screen.findByText("how does this work?");
     expect(screen.queryByText(/via request/i)).not.toBeInTheDocument();
   });
+
+  // Learn-tab black-screen regression (root cause): GET /api/code/threads/{id}
+  // resolving "ok" with a body that has no `thread` key (empty object, or any
+  // other shape mismatch) used to throw destructuring `thread.blob_match`,
+  // unmounting the whole page with no boundary to catch it. ThreadView must
+  // degrade to an inline "couldn't load" message instead of crashing.
+  it("a malformed detail payload (no thread key) degrades instead of crashing", async () => {
+    stubFetch({ detail: {} });
+    const onBack = vi.fn();
+    mount({ onBack });
+    expect(await screen.findByText(/couldn.t load this thread/i)).toBeInTheDocument();
+    // the back affordance still works from the degraded state.
+    fireEvent.click(screen.getByText(/back to threads/i));
+    expect(onBack).toHaveBeenCalled();
+  });
+
+  it("a null detail payload also degrades instead of crashing", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/code/threads/")) {
+        return { ok: true, status: 200, json: async () => null } as unknown as Response;
+      }
+      if (url.startsWith("/api/containers/c1")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            container: { id: "c1", name: "Acme", status: "active", autonomy_level: "plan" },
+            agents: AGENTS, tasks: [], requests: [],
+          }),
+        } as unknown as Response;
+      }
+      if (url === "/api/containers") return { ok: true, status: 200, json: async () => [{ id: "c1", status: "active" }] } as unknown as Response;
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    mount();
+    expect(await screen.findByText(/couldn.t load this thread/i)).toBeInTheDocument();
+  });
 });
 
 describe("ThreadView — item 5: optimistic seed + optimistic reply", () => {

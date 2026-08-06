@@ -9,7 +9,7 @@
  * the run's agent, with the honest "queued — the agent addresses this at its
  * next checkpoint" caption instead of a free @agent picker.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useToast } from "../../components/ui";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent } from "../../types";
@@ -55,6 +55,18 @@ export function ThreadComposer({
 
   const aiAgents = agents.filter((a) => a.kind === "ai");
   const raiseHand = !!preTaggedAgentId;
+
+  // Usability sweep — Escape closes the composer (papercut: this was the
+  // only transient panel in Code Space WITHOUT an Escape handler; matches
+  // SymbolSearch's palette and RecentFilesDropdown's convention).
+  useEffect(() => {
+    if (!onCancel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onCancel]);
 
   const pickTemplate = (t: (typeof THREAD_TEMPLATES)[number]) => {
     setKind(t.kind);

@@ -21,16 +21,15 @@ import type { Agent } from "../../types";
 import { fetchRecentThreads, fetchThreads } from "./codespaceApi";
 import {
   anchorLabel,
-  kindGlyph,
   kindLabel,
   shortSha,
   type CodeThreadDetailPayload,
   type CodeThreadSummary,
   type CreateThreadResponse,
 } from "./codespaceTypes";
-import { relTime, trunc } from "../../lib/format";
 import { LearnTab } from "./LearnTab";
 import { LivePanel } from "./LivePanel";
+import { RecentThreadsList } from "./RecentThreadsList";
 import { OutlineRail } from "./symbols/OutlineRail";
 import { ThreadComposer } from "./ThreadComposer";
 import { ThreadView } from "./ThreadView";
@@ -194,7 +193,7 @@ export function ThreadRail({
                   &larr; Back to {path}
                 </button>
               ) : null}
-              <RecentList threads={recentThreads} onOpen={onNavigateToThread} />
+              <RecentThreadsList threads={recentThreads} onOpen={onNavigateToThread} />
             </>
           )
         ) : null}
@@ -239,33 +238,5 @@ function ThreadList({
         </div>
       ))}
     </>
-  );
-}
-
-// Item 3 — repo-wide "Recent" rows: kind glyph, path:lines, first-message
-// snippet, relative time. The snippet comes from `first_message` (only
-// populated by the ?recent= list mode — see code_space_routes.py); falls
-// back to the kind label in the unlikely case a thread has none.
-function RecentList({
-  threads,
-  onOpen,
-}: {
-  threads: CodeThreadSummary[];
-  onOpen?: (thread: CodeThreadSummary) => void;
-}) {
-  if (!threads.length) return <div className="none" style={{ padding: 10 }}>No threads yet.</div>;
-  return (
-    <div className="cs-recent-list">
-      {threads.map((t) => (
-        <div key={t.id} className="cs-recent-row" onClick={() => onOpen?.(t)}>
-          <span className="cs-recent-glyph" aria-hidden="true">{kindGlyph(t.kind)}</span>
-          <div className="cs-recent-body">
-            <div className="cs-recent-loc mono">{t.path}:{anchorLabel(t.start_line, t.end_line)}</div>
-            <div className="cs-recent-snippet">{trunc(t.first_message, 60) || kindLabel(t.kind)}</div>
-          </div>
-          <span className="cs-recent-time">{relTime(t.created_at)}</span>
-        </div>
-      ))}
-    </div>
   );
 }
