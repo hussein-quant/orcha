@@ -232,6 +232,34 @@ describe("ThreadRail — Recent quick-jump (item 3)", () => {
     mount({ path: "" });
     expect(await screen.findByText(/no threads yet/i)).toBeInTheDocument();
   });
+
+  it("BUG 3: switching to a different file resets showRecent back to the per-file list", async () => {
+    stubFetch();
+    const { rerender } = mount({ path: "a.ts" });
+    await screen.findByText("Question");
+    fireEvent.click(screen.getByText(/recent threads/i));
+    expect(await screen.findByText(/back to a\.ts/i)).toBeInTheDocument();
+
+    // simulate CodeSpacePage navigating to a different file (path prop changes)
+    rerender(
+      <ToastProvider>
+        <SnapshotProvider>
+          <ThreadRail
+            cid="c1" gitRef="HEAD" path="b.ts" agents={AGENTS} tab="threads"
+            onTabChange={vi.fn()} composerSelection={null} onComposerClose={vi.fn()}
+            onJumpToLine={vi.fn()} openThreadId={null} onOpenThread={vi.fn()}
+            raiseHand={null} onRaiseHandDone={vi.fn()}
+          />
+        </SnapshotProvider>
+      </ToastProvider>,
+    );
+
+    // must NOT still show the repo-wide "Recent threads (all files)" state —
+    // it should be back to b.ts's own per-file list (with its own compact
+    // Recent link, not the "back to a.ts" link from before).
+    expect(screen.queryByText(/back to a\.ts/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/b\.ts:7/)).not.toBeInTheDocument();
+  });
 });
 
 describe("ThreadRail — optimistic post-to-conversation (item 5)", () => {

@@ -233,3 +233,49 @@ describe("ThreadView — item 5: optimistic seed + optimistic reply", () => {
     expect((screen.getByLabelText(/reply to thread/i) as HTMLTextAreaElement).value).toBe("will fail");
   });
 });
+
+describe("ThreadView — chat-feel animation + auto-scroll (panel improvements item 2)", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("newly-mounted messages carry the mount animation class", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("how does this work?");
+    const bubble = document.querySelector(".cs-message");
+    expect(bubble).not.toBeNull();
+    expect(bubble!.className).toContain("cs-message-mount");
+  });
+
+  it("a pending (optimistic) message also carries the mount class, not a hard pending/settled swap", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method || "GET";
+      if (url.includes("/messages") && method === "POST") {
+        return new Promise(() => {}); // never resolves — stays pending for this test
+      }
+      if (url.startsWith("/api/code/threads/")) {
+        return { ok: true, status: 200, json: async () => ({ ...THREAD_DETAIL.thread, messages: THREAD_DETAIL.messages }) } as unknown as Response;
+      }
+      if (url.startsWith("/api/containers/c1")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            container: { id: "c1", name: "Acme", status: "active", autonomy_level: "plan" },
+            agents: AGENTS, tasks: [], requests: [],
+          }),
+        } as unknown as Response;
+      }
+      if (url === "/api/containers") return { ok: true, status: 200, json: async () => [{ id: "c1", status: "active" }] } as unknown as Response;
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    mount();
+    await screen.findByText("how does this work?");
+    fireEvent.change(screen.getByLabelText(/reply to thread/i), { target: { value: "hello" } });
+    fireEvent.click(screen.getByText("Reply"));
+    const pending = document.querySelector(".cs-message.pending");
+    expect(pending).not.toBeNull();
+    expect(pending!.className).toContain("cs-message-mount");
+  });
+});

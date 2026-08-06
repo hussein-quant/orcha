@@ -19,6 +19,7 @@
 import { useEffect, useRef, useState } from "react";
 import { relTime } from "../../lib/format";
 import { useToast, Md } from "../../components/ui";
+import { nearBottom, pinToBottom } from "../../lib/logScroll";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import { fetchThread, postThreadMessage } from "./codespaceApi";
 import {
@@ -49,6 +50,8 @@ export function ThreadView({ threadId, onBack, onJumpToPinnedSha, seed }: Thread
   const [busy, setBusy] = useState(false);
   const token = useRef(0);
   const seededThreadId = useRef<string | null>(seed ? threadId : null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  const prevMessageCount = useRef(0);
 
   useEffect(() => {
     // A seed for THIS thread id already painted synchronously on mount —
@@ -68,6 +71,21 @@ export function ThreadView({ threadId, onBack, onJumpToPinnedSha, seed }: Thread
     // house 3s bump — polls the thread's messages without a manual refresh
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId, bump]);
+
+  // Panel improvements item 2 — auto-scroll the thread pane to the newest
+  // message on append, but ONLY if the reader is already at/near the
+  // bottom (logScroll.ts's house rule: "stick to the bottom while the
+  // reader is at the bottom", reused verbatim rather than reimplemented —
+  // this hook must run unconditionally, so it reads detail via optional
+  // chaining rather than living after the early-return below).
+  useEffect(() => {
+    const count = detail?.messages?.length ?? 0;
+    const el = messagesRef.current;
+    if (el && count > prevMessageCount.current && nearBottom(el)) {
+      pinToBottom(el);
+    }
+    prevMessageCount.current = count;
+  }, [detail?.messages?.length]);
 
   if (!detail) return <div className="none" style={{ padding: 14 }}>Loading thread…</div>;
   // Root-cause guard (Learn-tab black-screen bug): a malformed/short-circuited
@@ -154,9 +172,15 @@ export function ThreadView({ threadId, onBack, onJumpToPinnedSha, seed }: Thread
           </div>
         ) : null}
       </div>
-      <div className="cs-messages">
+      <div className="cs-messages" ref={messagesRef}>
         {(messages ?? []).map((m) => (
-          <div key={m.id} className={"cs-message" + (m.is_human ? " human" : "") + (m.id.startsWith("optimistic-") ? " pending" : "")}>
+          // Panel improvements item 2 — every bubble always carries
+          // cs-message-mount: a CSS mount-triggered keyframe only ever
+          // plays once per DOM node's lifetime, and each message's stable
+          // key={m.id} means an already-on-screen bubble never remounts/
+          // replays it — no need to distinguish "just arrived" from
+          // "already there" at the React layer.
+          <div key={m.id} className={"cs-message cs-message-mount" + (m.is_human ? " human" : "") + (m.id.startsWith("optimistic-") ? " pending" : "")}>
             <div className="cs-message-meta">
               <span>{m.is_human ? "human" : m.author_alias || "agent"}</span>
               <span>{m.id.startsWith("optimistic-") ? "sending…" : relTime(m.created_at)}</span>

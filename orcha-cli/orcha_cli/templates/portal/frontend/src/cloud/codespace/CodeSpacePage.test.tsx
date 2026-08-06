@@ -623,3 +623,213 @@ describe("CodeSpacePage — history: pushState per file open, no spam on tab swi
     await screen.findByText("a.ts", { selector: ".rb-file-path" });
   });
 });
+
+/* ---- resizable panes (Code Space panel improvements) --------------------- */
+describe("CodeSpacePage — resizable panes", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  // jsdom has no PointerEvent constructor AT ALL — @testing-library/dom's
+  // fireEvent.pointerDown/Move/Up silently fall back to a plain `Event`
+  // that never picks up a `clientX` option (verified: the dispatched event
+  // has no own `clientX` property). A hand-built Event with clientX forced
+  // on via defineProperty is the only way to get a real coordinate through
+  // in this environment — React's synthetic event system reads `clientX`
+  // straight off the native event it wraps, so this reaches onPointerDown
+  // correctly; a plain `document.addEventListener("pointermove", ...)`
+  // reads the same native event directly, so both paths see the value.
+  function firePointer(el: Element | Document, type: "pointerdown" | "pointermove" | "pointerup", clientX: number) {
+    const ev = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(ev, "clientX", { value: clientX, configurable: true });
+    Object.defineProperty(ev, "pointerId", { value: 1, configurable: true });
+    // a raw dispatchEvent (unlike RTL's fireEvent.* helpers) does NOT
+    // auto-wrap in act() — the pointermove/up handlers are plain
+    // document.addEventListener callbacks (not React synthetic events), so
+    // their setState calls need an explicit act() to flush synchronously
+    // before the test's next assertion reads the DOM.
+    act(() => { el.dispatchEvent(ev); });
+  }
+
+  it("renders a divider between the tree and code panes, and between code and rail", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    expect(document.querySelector(".cs-divider-tree")).not.toBeNull();
+    expect(document.querySelector(".cs-divider-rail")).not.toBeNull();
+  });
+
+  it("dragging the tree divider changes the tree pane's width and persists it", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const treePane = document.querySelector(".cs-tree-pane") as HTMLElement;
+    const before = treePane.style.width;
+    const divider = document.querySelector(".cs-divider-tree") as HTMLElement;
+
+    firePointer(divider, "pointerdown", 280);
+    firePointer(document, "pointermove", 340); // +60px right
+    firePointer(document, "pointerup", 340);
+
+    expect(treePane.style.width).not.toBe(before);
+    expect(treePane.style.width).toBe("340px");
+    const raw = localStorage.getItem("orcha:cs:panes");
+    expect(raw).not.toBeNull();
+    expect(JSON.parse(raw as string).tree).toBe(340);
+  });
+
+  it("restores a persisted width on mount", async () => {
+    localStorage.setItem("orcha:cs:panes", JSON.stringify({ tree: 200, rail: 260 }));
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const treePane = document.querySelector(".cs-tree-pane") as HTMLElement;
+    const railPane = document.querySelector(".cs-rail") as HTMLElement;
+    expect(treePane.style.width).toBe("200px");
+    expect(railPane.style.width).toBe("260px");
+  });
+
+  it("double-clicking the tree divider resets just the tree pane to its default width", async () => {
+    localStorage.setItem("orcha:cs:panes", JSON.stringify({ tree: 200, rail: 260 }));
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const divider = document.querySelector(".cs-divider-tree") as HTMLElement;
+    fireEvent.doubleClick(divider);
+    const treePane = document.querySelector(".cs-tree-pane") as HTMLElement;
+    const railPane = document.querySelector(".cs-rail") as HTMLElement;
+    expect(treePane.style.width).toBe("280px"); // DEFAULT_WIDTHS.tree
+    expect(railPane.style.width).toBe("260px"); // untouched
+  });
+
+  it("dragging the rail divider left grows the rail pane", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const railPane = document.querySelector(".cs-rail") as HTMLElement;
+    const beforeWidth = parseInt(railPane.style.width || "340", 10);
+    const divider = document.querySelector(".cs-divider-rail") as HTMLElement;
+
+    firePointer(divider, "pointerdown", 900);
+    firePointer(document, "pointermove", 860); // dragged 40px LEFT
+    firePointer(document, "pointerup", 860);
+
+    expect(parseInt(railPane.style.width, 10)).toBe(beforeWidth + 40);
+  });
+
+  it("a plain click on the code pane (not a drag) still selects text normally — no stray preventDefault", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    // sanity: clicking a line's text span (not the gutter) doesn't throw and
+    // doesn't open the composer — regression guard against a global
+    // pointerdown handler swallowing normal code-pane interaction.
+    const lineText = document.querySelector('[data-cs-line="1"] .cs-line-text') as HTMLElement;
+    fireEvent.mouseDown(lineText);
+    expect(screen.queryByText(/line 1/i)).not.toBeInTheDocument();
+  });
+});
+
+/* ---- BUG 3: stale file content during file-switch loading ---------------- */
+describe("CodeSpacePage — bug 3: no stale content while switching files", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  const FILE_B = { ref: "HEAD", path: "b.ts", content: "const z = 9;", size: 12 };
+  const TREE_ROOT_B = {
+    ref: "HEAD", path: "",
+    entries: [{ name: "a.ts", path: "a.ts", type: "file" }, { name: "b.ts", path: "b.ts", type: "file" }],
+  };
+
+  // A fetch stub whose file-content responses can be held open (resolved
+  // manually) so the test can inspect the DOM MID-transition, exactly the
+  // race window the live repro caught.
+  function stubFetchWithControllableFileLoad() {
+    const fileResolvers: Record<string, (v: unknown) => void> = {};
+    const json = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as unknown as Response;
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/github/browse/tree")) return json(TREE_ROOT_B);
+      if (url.startsWith("/api/containers/c1/github/browse/file")) {
+        const isB = url.includes("path=b.ts");
+        const key = isB ? "b.ts" : "a.ts";
+        return new Promise((resolve) => { fileResolvers[key] = () => resolve(json(isB ? FILE_B : FILE_A)); });
+      }
+      if (url.startsWith("/api/containers/c1/code/threads")) return json(THREADS_MD);
+      if (url.startsWith("/api/containers/c1")) {
+        return json({ container: { id: "c1", name: "Acme", status: "active", autonomy_level: "plan" }, agents: AGENTS, tasks: [], requests: [] });
+      }
+      if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
+      return json({});
+    }) as unknown as typeof fetch;
+    return fileResolvers;
+  }
+
+  it("does not render the PREVIOUS file's lines while the NEW file is still loading", async () => {
+    const resolvers = stubFetchWithControllableFileLoad();
+    mount();
+    await vi.waitFor(() => expect(resolvers["a.ts"]).toBeTypeOf("function"));
+    resolvers["a.ts"]({});
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    // a.ts's real content is 3 lines; confirm it painted before switching.
+    expect(document.querySelector('[data-cs-line="3"]')).not.toBeNull();
+
+    fireEvent.click(screen.getByText("b.ts", { selector: ".dfv-nm" }));
+    // b.ts's fetch is still pending (resolver not called yet) — the pane
+    // must NOT still show "a.ts" as the active file path, and must show a
+    // loading skeleton rather than a.ts's stale content.
+    expect(document.querySelector(".rb-file-path")?.textContent).not.toBe("a.ts");
+  });
+
+  it("gutter clicks during the loading window do nothing (no composer opens for stale content)", async () => {
+    const resolvers = stubFetchWithControllableFileLoad();
+    mount();
+    await vi.waitFor(() => expect(resolvers["a.ts"]).toBeTypeOf("function"));
+    resolvers["a.ts"]({});
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+
+    fireEvent.click(screen.getByText("b.ts", { selector: ".dfv-nm" }));
+    // still mid-load — there should be NO clickable .cs-gutter at all right
+    // now (the skeleton has no gutter), so no stray composer can open.
+    expect(document.querySelector(".cs-gutter")).toBeNull();
+
+    resolvers["b.ts"]({});
+    await screen.findByText("b.ts", { selector: ".rb-file-path" });
+    // once loaded, b.ts's own single line IS clickable and anchors correctly.
+    const gutter1 = document.querySelector('[data-cs-line="1"] .cs-gutter') as HTMLElement;
+    fireEvent.click(gutter1);
+    expect(await screen.findByText(/line 1/i)).toBeInTheDocument();
+  });
+
+  it("flow (a): after opening an existing thread, clicking a DIFFERENT line in the SAME file reopens the composer", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const chip = await screen.findByText("Question");
+    fireEvent.click(chip.closest(".cs-thread-chip") as HTMLElement);
+    expect(await screen.findByText(/back to threads/i)).toBeInTheDocument();
+
+    const gutter3 = document.querySelector('[data-cs-line="3"] .cs-gutter') as HTMLElement;
+    fireEvent.click(gutter3);
+    expect(await screen.findByText(/line 3/i)).toBeInTheDocument();
+    expect(screen.queryByText(/back to threads/i)).not.toBeInTheDocument();
+  });
+
+  it("flow (b): after opening a thread, switching file and clicking a line reopens the composer AND the rail shows the new file's own context", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const chip = await screen.findByText("Question");
+    fireEvent.click(chip.closest(".cs-thread-chip") as HTMLElement);
+    expect(await screen.findByText(/back to threads/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("readme.md"));
+    await screen.findByText("readme.md", { selector: ".rb-file-path" });
+    fireEvent.click(screen.getByText("Raw")); // readme.md defaults to Rendered — need Raw for a gutter
+
+    const gutter1 = document.querySelector('[data-cs-line="1"] .cs-gutter') as HTMLElement;
+    fireEvent.click(gutter1);
+    expect(await screen.findByText(/line 1/i)).toBeInTheDocument();
+    // rail must NOT be stuck on the repo-wide Recent list.
+    expect(screen.queryByText(/recent threads \(all files\)/i)).not.toBeInTheDocument();
+  });
+});
