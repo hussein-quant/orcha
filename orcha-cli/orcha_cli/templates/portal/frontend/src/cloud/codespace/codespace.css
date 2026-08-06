@@ -216,9 +216,29 @@
   font-size: 12.5px; cursor: pointer; padding: 0; }
 .cs-thread-head { display: flex; flex-direction: column; gap: 4px; }
 .cs-message { display: flex; flex-direction: column; gap: 3px; padding: 8px 10px; border-radius: 8px;
-  background: var(--surface); border: 1px solid var(--border); }
+  background: var(--surface); border: 1px solid var(--border);
+  /* Panel improvements item 2 — pending->settled softens via an opacity
+     transition rather than a hard class-swap flash; the optimistic bubble
+     fades to full opacity the instant `pending` is removed (reconcile()
+     in ThreadView.tsx swaps the class in the same render the real row
+     lands). */
+  transition: opacity .18s ease-out; }
 .cs-message.human { border-color: var(--accent-line); }
 .cs-message.pending { opacity: 0.6; }
+
+/* Chat-feel mount animation — ~180ms ease-out slide-up+fade, CSS-only so it
+   plays exactly once per bubble's mount (stable `key={m.id}` means an
+   already-on-screen message never remounts/replays this). Respects
+   prefers-reduced-motion: users who've asked for less motion get an
+   instant, static appearance instead. */
+@keyframes cs-message-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cs-message-mount { animation: cs-message-in .18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .cs-message-mount { animation: none; }
+}
 .cs-message-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--faint); }
 .cs-message-body { font-size: 13px; color: var(--text); white-space: pre-wrap; }
 .cs-request-chip { align-self: flex-start; font-size: 11px; color: var(--accent); text-decoration: none;
