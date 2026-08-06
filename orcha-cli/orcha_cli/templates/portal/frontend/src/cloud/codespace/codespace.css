@@ -30,9 +30,49 @@
 
 .cs-shell { display: flex; flex-direction: column; flex: 1; min-height: 0; height: 100dvh;
   max-height: 100dvh; padding: 0 16px 16px; gap: 10px; box-sizing: border-box; }
-.cs-head { flex: none; display: flex; align-items: center; gap: 10px; padding-top: 12px; }
+.cs-head { flex: none; display: flex; align-items: center; gap: 10px; padding-top: 12px; position: relative; z-index: 20; }
 .cs-head h1 { font-size: 15px; margin: 0; }
 .cs-head .muted { font-size: 12px; }
+
+/* ---- Phase 3: workspace symbol search (header affordance) ------------------ */
+.cs-symsearch { position: relative; width: 340px; max-width: 100%; }
+.cs-symsearch-box { display: flex; align-items: center; }
+.cs-symsearch-in { width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; }
+.cs-symsearch-in:focus { border-color: var(--accent-line); box-shadow: var(--ring); outline: none; }
+.cs-symsearch-panel { position: absolute; top: calc(100% + 6px); left: 0; right: 0; max-height: 360px;
+  overflow: auto; background: var(--raised); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); padding: 6px; z-index: 30; }
+.cs-symsearch-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 4px; }
+.cs-symsearch-group-path { font-size: 11px; color: var(--faint); padding: 4px 6px 2px; }
+.cs-symsearch-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+.cs-symsearch-row:hover { background: var(--hover); }
+.cs-symsearch-name { font-size: 12.5px; color: var(--text); }
+.cs-symsearch-line { font-size: 11px; }
+.cs-symsearch-note { font-size: 11px; padding: 6px 8px; }
+
+/* ---- Phase 3: outline rail (per-kind grouping, house kind-tag pill style) -- */
+.cs-outline { display: flex; flex-direction: column; gap: 10px; }
+.cs-outline-group { display: flex; flex-direction: column; gap: 3px; }
+.cs-outline-group-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--faint); padding: 2px 0; }
+.cs-outline-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+.cs-outline-row:hover { background: var(--hover); }
+.cs-outline-name { font-size: 12.5px; color: var(--text); }
+.cs-outline-line { font-size: 11px; }
+
+/* per-kind kind-tag colors (extends the thread .kind-tag idiom to symbol kinds) */
+.kind-tag.cs-symkind-function { background: var(--accent-soft); color: var(--accent); }
+.kind-tag.cs-symkind-class { background: var(--violet-soft, var(--accent-soft)); color: var(--violet); }
+.kind-tag.cs-symkind-interface { background: var(--diff-add-soft, var(--accent-soft)); color: var(--diff-add); }
+.kind-tag.cs-symkind-type { background: var(--surface-3); color: var(--muted); }
+.kind-tag.cs-symkind-const { background: var(--accent-soft); color: var(--accent); }
+.kind-tag.cs-symkind-var { background: var(--surface-3); color: var(--muted); }
+
+/* identifier-click affordance (Phase 3 best-effort v1: workspace symbol
+   search prefill, never "go to definition") */
+.cs-ident-tok { cursor: pointer; border-radius: 3px; }
+.cs-ident-tok:hover { background: var(--accent-soft); text-decoration: underline dotted; }
 
 .cs-body { flex: 1; min-height: 0; display: flex; gap: 0; border: 1px solid var(--border);
   border-radius: 10px; overflow: hidden; background: var(--surface); }

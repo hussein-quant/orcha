@@ -5,7 +5,7 @@
  * viewer. fetch stubbed like GitHubPage.test.tsx; mounted through the real
  * SnapshotProvider + MemoryRouter.
  */
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../components/ui";
@@ -25,6 +25,11 @@ const THREADS_A = {
   ],
 };
 
+const SYMBOL_SEARCH_RESULT = {
+  available: true, ref: "HEAD",
+  results: [{ name: "x", kind: "var", path: "a.ts", line: 1 }],
+};
+
 function stubFetch() {
   const json = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as unknown as Response;
   global.fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -32,6 +37,10 @@ function stubFetch() {
     if (url.startsWith("/api/containers/c1/github/browse/tree")) return json(TREE_ROOT);
     if (url.startsWith("/api/containers/c1/github/browse/file")) return json(FILE_A);
     if (url.startsWith("/api/containers/c1/code/threads")) return json(THREADS_A);
+    if (url.startsWith("/api/containers/c1/code/outline")) {
+      return json({ available: true, ref: "HEAD", path: "a.ts", language: "typescript", symbols: [] });
+    }
+    if (url.startsWith("/api/containers/c1/code/symbols")) return json(SYMBOL_SEARCH_RESULT);
     if (url.startsWith("/api/containers/c1")) {
       return json({ container: { id: "c1", name: "Acme", status: "active", autonomy_level: "plan" }, agents: AGENTS, tasks: [], requests: [] });
     }
@@ -88,5 +97,27 @@ describe("CodeSpacePage", () => {
     stubFetch();
     mount();
     expect(await screen.findByText("1", { selector: ".cs-tree-badge" })).toBeInTheDocument();
+  });
+
+  it("renders a header symbol search input", async () => {
+    stubFetch();
+    mount();
+    expect(await screen.findByPlaceholderText(/search symbols/i)).toBeInTheDocument();
+  });
+
+  it("clicking an identifier token in the code pane offers a symbol-search affordance, prefilled", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    stubFetch();
+    mount();
+    await screen.findByText("a.ts", { selector: ".rb-file-path" });
+    const identTok = document.querySelectorAll(".cs-ident-tok");
+    expect(identTok.length).toBeGreaterThan(0);
+    const consoleTok = Array.from(identTok).find((el) => el.textContent === "console");
+    expect(consoleTok).toBeTruthy();
+    fireEvent.click(consoleTok as HTMLElement);
+    const input = await screen.findByPlaceholderText(/search symbols/i) as HTMLInputElement;
+    expect(input.value).toBe("console");
+    await act(async () => { vi.advanceTimersByTime(300); });
+    vi.useRealTimers();
   });
 });

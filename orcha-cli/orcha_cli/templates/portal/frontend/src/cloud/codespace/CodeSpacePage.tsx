@@ -23,11 +23,12 @@ import {
   BrowseSkeletonPane,
   BrowseTree,
   ContentPaneChrome,
-  TokenSpans,
 } from "../shared/browseTree";
 import { useBrowseTree } from "../shared/useBrowseTree";
 import type { CodeThreadSummary } from "./codespaceTypes";
 import { isLineSelected, rangeFrom, singleLine, type LineSelection } from "./gutter";
+import { IdentifierTokens } from "./symbols/IdentifierTokens";
+import { SymbolSearch } from "./symbols/SymbolSearch";
 import { ThreadRail, type RailTab } from "./ThreadRail";
 import "./codespace.css";
 
@@ -58,6 +59,12 @@ export function CodeSpacePage() {
   const [openThreadId, setOpenThreadId] = useState<string | null>(threadParam);
   const [fileThreads, setFileThreads] = useState<CodeThreadSummary[]>([]);
   const [raiseHand, setRaiseHand] = useState<{ agentId: string; line: number } | null>(null);
+  // Identifier click (Phase 3, best-effort v1): prefills the header's
+  // SymbolSearch with the clicked word — "Find symbol", never "go to
+  // definition". prefillToken forces a re-trigger even on a repeat click of
+  // the same word.
+  const [symbolPrefill, setSymbolPrefill] = useState<string | undefined>(undefined);
+  const [symbolPrefillToken, setSymbolPrefillToken] = useState(0);
 
   // deep-linked ?line= scrolls to that line once the file paints.
   useEffect(() => {
@@ -119,6 +126,20 @@ export function CodeSpacePage() {
     setSelection(null);
   }, []);
 
+  // Workspace symbol search result navigation (header search AND identifier
+  // click both land here): switch to the clicked file at the symbol's line.
+  const navigateToSymbol = useCallback((symbolPath: string, line: number) => {
+    setSelection(null);
+    setComposerOpen(false);
+    navigate({ path: symbolPath, line, thread: null }, false);
+    scrollLineIntoView(line);
+  }, [navigate]);
+
+  const onIdentifierClick = useCallback((word: string) => {
+    setSymbolPrefill(word);
+    setSymbolPrefillToken((n) => n + 1);
+  }, []);
+
   const agents = snap?.agents ?? [];
   const htmlUrl = null; // Code Space has no repo html_url context handy here; the file pane omits the GitHub link.
 
@@ -139,6 +160,15 @@ export function CodeSpacePage() {
   return (
     <Shell page="code" title="Code Space" ctx={snap?.container?.name}>
       <div className="cs-shell">
+        <div className="cs-head">
+          <SymbolSearch
+            cid={cid}
+            gitRef={gitRef}
+            onNavigate={navigateToSymbol}
+            prefill={symbolPrefill}
+            prefillToken={symbolPrefillToken}
+          />
+        </div>
         <div className="cs-body">
           <div className="cs-tree-pane">
             <div className="rb-tree-scroll">
@@ -189,7 +219,7 @@ export function CodeSpacePage() {
                             {lineNo}
                           </span>
                           <span className="cs-line-text">
-                            <TokenSpans tokens={tokens} />
+                            <IdentifierTokens tokens={tokens} onIdentifierClick={onIdentifierClick} />
                           </span>
                         </div>
                       );
