@@ -19,6 +19,7 @@ import { MembersPage, MembersSection } from "./cloud/members/MembersPage";
 // Importing the appearance module also runs its module-level boot hook
 // (restore the persisted data-skin + kick the /api/prefs sync) at app boot.
 import { AppearanceSection } from "./cloud/settings/AppearanceSection";
+import { GitHubAccessSection } from "./cloud/settings/GitHubAccessSection";
 import { ProviderKeysSection } from "./cloud/settings/ProviderKeysSection";
 import { PairingButton, PairingSection } from "./cloud/settings/pairing";
 
@@ -107,6 +108,7 @@ export const extensions: Extensions = {
   // Provider keys section renders it as its FIRST card, keys all in one home.
   settingsSections: [
     { key: "provider-keys", title: "Provider keys", element: ProviderKeysSection },
+    { key: "github-access", title: "GitHub access", element: GitHubAccessSection },
     { key: "members", title: "Members", element: MembersSection },
     { key: "pairing", title: "Phone pairing", element: PairingSection },
     { key: "appearance", title: "Appearance", element: AppearanceSection },
