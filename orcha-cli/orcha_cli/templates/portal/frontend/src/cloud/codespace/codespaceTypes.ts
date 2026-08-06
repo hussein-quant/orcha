@@ -154,6 +154,7 @@ export function groupByPath(threads: CodeThreadSummary[]): Map<string, CodeThrea
 }
 
 // Phase 4: teach|why threads only, aggregated repo-wide.
-export function learnThreads(threads: CodeThreadSummary[]): CodeThreadSummary[] {
-  return threads.filter((t) => t.kind === "teach" || t.kind === "why");
+export function learnThreads(threads: CodeThreadSummary[] | null | undefined): CodeThreadSummary[] {
+  // null-safe: a shape mismatch here once black-screened the rail (Learn bug).
+  return (threads ?? []).filter((t) => t.kind === "teach" || t.kind === "why");
 }
