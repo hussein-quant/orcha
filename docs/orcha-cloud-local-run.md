@@ -86,3 +86,29 @@ Contracts frozen by this doc; built by cheaper models in parallel
 (backend PAT source + listing fallback + settings routes | settings card |
 deploy/local docs + overlays), Fable reviews, integrates, and verifies by
 actually running the stack locally end-to-end.
+
+## Addendum — plan gating (2026-08-06, second requirement)
+
+Local run is the **free solo tier**. Team features stay VISIBLE as entry
+points but render a paywall that routes to premium; the server enforces it.
+
+- **Plan source**: env `ORCHA_PLAN` — `solo` (default, local) | `team`
+  (hosted boxes set it). `GET /api/plan` →
+  `{plan, features: {members: bool}, upgrade_url}`;
+  `upgrade_url` from env `ORCHA_UPGRADE_URL`
+  (default `https://orcha.nursoftai.com/#pricing`).
+- **Server gates (solo)**: member mutations
+  (`POST/PATCH/DELETE /api/containers/{cid}/members*`) → **402**
+  `{detail: {premium: "members", message, upgrade_url}}`. Roster GET stays
+  readable (it lists the solo operator; harmless + keeps UI honest).
+- **Frontend gates (solo)**: Members page renders the paywall card (feature
+  pitch + "Upgrade to Orcha Cloud Team" button → upgrade_url, new tab);
+  invite/role/grant affordances never render. Nav entry stays (entry point =
+  visible). A shared `<PremiumGate feature=…>` card component makes future
+  gates one-liners. Plan is fetched once via the extensions seam alongside
+  identity.
+- Solo keeps: everything else — GitHub hub, repo browser, Code Space,
+  reviewer picker (self-assign), metrics, PAT, provider keys.
+- deploy/local/README.md positions local run as the free solo tier and names
+  the team tier as hosted/paid (the OAuth overlay section notes multi-user
+  login is a team feature).
