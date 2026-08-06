@@ -43,6 +43,7 @@ const I: Record<string, string> = {
   refresh: '<path d="M15.5 6.5A6 6 0 1 0 16 10M16 4v3h-3"/>',
   stop: '<rect x="5.5" y="5.5" width="9" height="9" rx="1.6"/>',
   sliders: '<path d="M4 6h7M14 6h2M4 14h2M9 14h7"/><circle cx="12.5" cy="6" r="1.8"/><circle cx="7.5" cy="14" r="1.8"/>',
+  code: '<path d="M7 6.5 3.5 10 7 13.5M13 6.5 16.5 10 13 13.5M11 4.5l-2 11"/>',
 };
 
 export function Icon({ name, cls = "ico" }: { name: string; cls?: string }) {
