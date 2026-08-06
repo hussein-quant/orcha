@@ -70,6 +70,13 @@ def requests_page():
     return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
 
 
+@app.get("/code", response_class=HTMLResponse)
+def code_space_page():
+    """Orcha Code Space (docs/orcha-code-space-design.md): line-anchored
+    threads + live edit view + symbols over the GitHub-backed repo. SPA shell."""
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)
+
+
 @app.get("/metrics", response_class=HTMLResponse)
 def metrics_page():
     """Usage/cost visibility per agent — stat cards, per-agent cost table, daily bars.
