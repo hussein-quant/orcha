@@ -67,6 +67,25 @@ const PULLS = {
 
 const CHECKS = { available: true, checks: { "12": { passed: 3, failing: 0, pending: 0, total: 3 } } };
 
+const PULL_DETAIL = {
+  repo: "acme/app",
+  pull: {
+    number: 12,
+    title: "Add OAuth flow",
+    head: "feat/oauth",
+    base: "main",
+    draft: false,
+    state: "open",
+    updated_at: "2026-08-01T00:00:00Z",
+    html_url: "https://github.com/acme/app/pull/12",
+    requested_reviewers: ["kedar"],
+    checks: { passed: 3, failing: 0, pending: 0, total: 3 },
+    mergeable_state: "clean",
+    tracked_task_id: null,
+    body_markdown: "adds OAuth",
+  },
+};
+
 function stubFetch(agents: unknown[]): Call[] {
   const calls: Call[] = [];
   const json = (data: unknown, status = 200) =>
@@ -79,7 +98,10 @@ function stubFetch(agents: unknown[]): Call[] {
       body: init?.body ? JSON.parse(String(init.body)) : null,
     });
     // order matters: the github routes share the /api/containers/c1 prefix
+    if (url.startsWith("/api/containers/c1/github/browse/tree")) return json({ ref: "HEAD", path: "", entries: [] });
+    if (url.startsWith("/api/containers/c1/github/browse/file")) return json({ ref: "HEAD", path: "README.md", content: "# hi", size: 4 });
     if (url.startsWith("/api/containers/c1/github/issues")) return json(ISSUES);
+    if (url.startsWith("/api/containers/c1/github/pulls/12")) return json(PULL_DETAIL);
     if (url.startsWith("/api/containers/c1/github/pulls")) return json(PULLS);
     if (url.startsWith("/api/containers/c1/github/checks")) return json(CHECKS);
     if (url.startsWith("/api/containers/c1/github/start")) return json({ task_id: "t-99", existing: false }, 201);
@@ -247,5 +269,46 @@ describe("GitHubPage Start flow (human-gated mutation)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dispatch an agent to work on this issue" }));
     expect(await screen.findByText("Pick an acting human first")).toBeInTheDocument();
     expect(calls.some((c) => c.url === "/api/containers/c1/github/start")).toBe(false);
+  });
+});
+
+describe("GitHubPage Files sub-view integration (?browse=1&ref=&path=)", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("the \"Browse files\" affordance mounts RepoBrowser under ?browse=1", async () => {
+    const calls = stubFetch(AGENTS_WITH_HUMAN);
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByRole("button", { name: /browse files/i }));
+    // the list card is gone; RepoBrowser's own wrapper mounts instead
+    await waitFor(() => expect(document.querySelector(".rb-wrap")).not.toBeNull());
+    expect(calls.some((c) => c.url.includes("/github/browse/tree"))).toBe(true);
+  });
+
+  it("deep-links straight into the Files view from ?browse=1&ref=&path=", async () => {
+    stubFetch(AGENTS_WITH_HUMAN);
+    mount("/github?browse=1&ref=HEAD&path=README.md");
+    await waitFor(() => expect(document.querySelector(".rb-wrap")).not.toBeNull());
+    // list/detail loaders never fire while browsing
+    expect(screen.queryByText("Fix login bug")).not.toBeInTheDocument();
+  });
+
+  it("a PR detail's \"Browse head\" link routes into Files at ref=pr/<number>", async () => {
+    stubFetch(AGENTS_WITH_HUMAN);
+    mount("/github?pr=12");
+    expect(await screen.findByRole("heading", { name: /Add OAuth flow/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /browse head/i }));
+    await waitFor(() => expect(document.querySelector(".rb-wrap")).not.toBeNull());
+  });
+
+  it("exiting the Files view (back link) returns to the list", async () => {
+    stubFetch(AGENTS_WITH_HUMAN);
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByRole("button", { name: /browse files/i }));
+    await waitFor(() => expect(document.querySelector(".rb-wrap")).not.toBeNull());
+    fireEvent.click(document.querySelector('[data-gh-back="1"]') as HTMLElement);
+    expect(await screen.findByText("Fix login bug")).toBeInTheDocument();
   });
 });
