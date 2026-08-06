@@ -9,6 +9,7 @@
  * POST /api/tasks/{tid}/verify, both carrying the acting human's id.
  */
 import { useEffect, useState } from "react";
+import { navigateScoped } from "../../lib/scope";
 import { sendJSON } from "../../api/client";
 import { esc, relTime, trunc } from "../../lib/format";
 import { reviewFor } from "../../lib/reviewer";
@@ -523,7 +524,7 @@ export function HomePage() {
                       return (
                         <tr
                           className="clickable" key={a.id}
-                          onClick={() => { window.location.href = "/agents?agent=" + encodeURIComponent(a.alias); }}
+                          onClick={() => { navigateScoped("/agents?agent=" + encodeURIComponent(a.alias)); }}
                         >
                           <td>
                             <div className="row">
@@ -614,7 +615,7 @@ export function HomePage() {
                       return (
                         <div
                           className="kcard" key={t.id}
-                          onClick={() => { window.location.href = "/tasks?task=" + encodeURIComponent(t.id); }}
+                          onClick={() => { navigateScoped("/tasks?task=" + encodeURIComponent(t.id)); }}
                         >
                           <div className="kt">{t.title}</div>
                           <div className="kf">
