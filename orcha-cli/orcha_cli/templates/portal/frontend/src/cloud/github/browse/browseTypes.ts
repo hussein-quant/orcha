@@ -25,7 +25,7 @@ export interface BrowseTreePayload {
 export interface BrowseFilePayload {
   ref: string;
   path: string;
-  content: string;
+  content?: string; // OMITTED by the backend when binary:true
   size: number;
   truncated?: boolean;
   binary?: boolean;

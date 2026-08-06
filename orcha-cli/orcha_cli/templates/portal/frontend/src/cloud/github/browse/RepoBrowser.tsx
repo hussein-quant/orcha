@@ -519,7 +519,7 @@ function ContentPane({
               {htmlUrl ? <> <a href={htmlUrl} target="_blank" rel="noopener noreferrer">View on GitHub <Icon name="ext" cls="gl" /></a></> : null}
             </div>
           ) : null}
-          <CodeLines content={payload.content} path={payload.path} />
+          <CodeLines content={payload.content ?? ""} path={payload.path} />
         </>
       )}
     </>
