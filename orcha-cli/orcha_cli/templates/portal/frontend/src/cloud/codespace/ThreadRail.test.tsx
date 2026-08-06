@@ -245,12 +245,11 @@ describe("ThreadRail — optimistic post-to-conversation (item 5)", () => {
       if (url.startsWith("/api/containers/c1/code/threads") && method === "POST") {
         return {
           ok: true, status: 201,
+          // real wire: flat thread row only — the api wrapper synthesizes
+          // the seeded message from the posted body.
           json: async () => ({
-            thread: {
-              id: "new1", ref: "HEAD", sha: "deadbee", path: "a.ts", start_line: 5, end_line: 5,
-              kind: "question", status: "open", created_at: "now", updated_at: "now",
-            },
-            message: { id: "m1", is_human: true, body: "How does auth work here?", created_at: "now" },
+            id: "new1", ref: "HEAD", sha: "deadbee", path: "a.ts", start_line: 5, end_line: 5,
+            kind: "question", status: "open", created_at: "now", updated_at: "now",
           }),
         } as unknown as Response;
       }
@@ -261,10 +260,8 @@ describe("ThreadRail — optimistic post-to-conversation (item 5)", () => {
         // the poll/GET path — deliberately slow-ish in spirit; the seed must
         // already be on screen before this ever resolves in the test.
         return { ok: true, status: 200, json: async () => ({
-          thread: {
-            id: "new1", ref: "HEAD", sha: "deadbee", path: "a.ts", start_line: 5, end_line: 5,
-            kind: "question", status: "open", created_at: "now", updated_at: "now",
-          },
+          id: "new1", ref: "HEAD", sha: "deadbee", path: "a.ts", start_line: 5, end_line: 5,
+          kind: "question", status: "open", created_at: "now", updated_at: "now",
           messages: [{ id: "m1", is_human: true, body: "How does auth work here?", created_at: "now" }],
         }) } as unknown as Response;
       }
