@@ -37,6 +37,7 @@ import { RecentFilesDropdown } from "./RecentFilesDropdown";
 import { IdentifierTokens } from "./symbols/IdentifierTokens";
 import { SymbolSearch } from "./symbols/SymbolSearch";
 import { ThreadRail, type RailTab } from "./ThreadRail";
+import { usePaneWidths } from "./usePaneWidths";
 import "./codespace.css";
 
 // Item 1 — Markdown files render through the house Md component (esc-first,
@@ -277,6 +278,44 @@ export function CodeSpacePage() {
     return m;
   }, [fileThreads]);
 
+  // Panel improvements item 1 — resizable tree/code/rail panes. Native
+  // Pointer Events via DOCUMENT-level listeners registered for the
+  // duration of a drag (not React's onPointerMove/onPointerUp on the
+  // divider itself) — the cursor routinely leaves the divider's own 6px hit
+  // area mid-drag, and document listeners keep tracking it regardless,
+  // without needing setPointerCapture (which jsdom doesn't implement — see
+  // scrollLineIntoView's identical feature-detect precedent elsewhere in
+  // this file for the general house convention). No drag library — this
+  // codebase adds zero new dependencies for UI interactions like this.
+  const { widths, dragTree, dragRail, resetTree, resetRail } = usePaneWidths();
+  const dragStateRef = useRef<{ pane: "tree" | "rail"; startX: number } | null>(null);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const st = dragStateRef.current;
+      if (!st) return;
+      const delta = e.clientX - st.startX;
+      st.startX = e.clientX;
+      // dragRail negates the delta INTERNALLY (usePaneWidths.ts's own doc
+      // comment) — pass the raw pointer delta unmodified for both panes.
+      if (st.pane === "tree") dragTree(delta);
+      else dragRail(delta);
+    };
+    const onUp = () => {
+      dragStateRef.current = null;
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    return () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+  }, [dragTree, dragRail]);
+
+  const startDrag = useCallback((pane: "tree" | "rail") => (e: React.PointerEvent<HTMLDivElement>) => {
+    dragStateRef.current = { pane, startX: e.clientX };
+  }, []);
+
   if (!cid) return null;
 
   return (
@@ -290,6 +329,7 @@ export function CodeSpacePage() {
             prefill={symbolPrefill}
             prefillToken={symbolPrefillToken}
             focusToken={symbolFocusToken}
+            path={path}
           />
           {path ? (
             <RecentFilesDropdown
@@ -301,7 +341,7 @@ export function CodeSpacePage() {
           ) : null}
         </div>
         <div className="cs-body">
-          <div className="cs-tree-pane">
+          <div className="cs-tree-pane" style={{ width: widths.tree }}>
             <div className="rb-tree-scroll">
               <ErrorBoundary label="tree">
                 <BrowseTree
@@ -320,6 +360,16 @@ export function CodeSpacePage() {
             </div>
           </div>
 
+          <div
+            className="cs-divider cs-divider-tree"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize file tree pane"
+            title="Drag to resize, double-click to reset"
+            onPointerDown={startDrag("tree")}
+            onDoubleClick={resetTree}
+          />
+
           <div className="cs-code-pane">
             <div className="cs-code-scroll">
               <ErrorBoundary label="content" key={path}>
@@ -331,7 +381,19 @@ export function CodeSpacePage() {
                   onSearchSymbols={focusSymbolSearch}
                   onFocusTree={focusTree}
                 />
-              ) : fileLoading && !filePayload ? (
+              ) : fileLoading || (filePayload && filePayload.path !== path) ? (
+                // BUG 3 root-cause fix — the old guard (fileLoading &&
+                // !filePayload) only blocked stale content on the very
+                // FIRST load. Switching files sets fileLoading=true but
+                // filePayload still holds the PREVIOUS file until the fetch
+                // resolves, so the previous file's lines/gutter rendered
+                // under the NEW file's path/breadcrumb for one paint — a
+                // gutter click in that window anchored a composer to the
+                // wrong path/line. `fileLoading` ALONE now gates the
+                // skeleton on every load, first or not; the
+                // `filePayload.path !== path` clause is a second
+                // independent guard against the same class of bug if
+                // fileLoading and path ever race each other in the future.
                 <BrowseSkeletonPane />
               ) : fileError ? (
                 <BrowseErrorBody err={fileError} what="File" />
@@ -409,6 +471,16 @@ export function CodeSpacePage() {
             </div>
           </div>
 
+          <div
+            className="cs-divider cs-divider-rail"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize thread rail pane"
+            title="Drag to resize, double-click to reset"
+            onPointerDown={startDrag("rail")}
+            onDoubleClick={resetRail}
+          />
+
           <ErrorBoundary label="rail">
             <ThreadRail
               cid={cid}
@@ -428,6 +500,7 @@ export function CodeSpacePage() {
               onRaiseHandDone={() => setRaiseHand(null)}
               onRaiseHandRequested={onRaiseHand}
               onNavigateToThread={navigateToThread}
+              width={widths.rail}
             />
           </ErrorBoundary>
         </div>
