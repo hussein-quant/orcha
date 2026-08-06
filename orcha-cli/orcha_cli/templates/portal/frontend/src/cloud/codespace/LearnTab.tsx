@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent } from "../../types";
-import { fetchThreads } from "./codespaceApi";
+import { fetchRecentThreads } from "./codespaceApi";
 import { anchorLabel, groupByPath, kindLabel, learnThreads, type CodeThreadSummary, type ThreadKind } from "./codespaceTypes";
 import { ThreadView } from "./ThreadView";
 
@@ -28,10 +28,11 @@ export function LearnTab({ cid, agents }: LearnTabProps) {
 
   useEffect(() => {
     const myToken = ++token.current;
-    // repo-wide: no ?path= filter
-    fetchThreads(cid, {}).then((res) => {
+    // repo-wide: the pathless list returns {by_path} COUNTS — threads come
+    // from the recent mode (wire contract; the Learn crash was this mismatch).
+    fetchRecentThreads(cid, { n: 50 }).then((res) => {
       if (myToken !== token.current) return;
-      if (res.ok) setThreads(res.data.threads);
+      if (res.ok) setThreads(res.data.threads ?? []);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cid, bump]);

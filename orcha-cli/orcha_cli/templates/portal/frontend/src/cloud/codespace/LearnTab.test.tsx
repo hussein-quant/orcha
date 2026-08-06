@@ -99,3 +99,25 @@ describe("LearnTab", () => {
     expect(await screen.findByText(/no teach\/why threads yet/i)).toBeInTheDocument();
   });
 });
+
+
+it("REGRESSION (Learn black-screen): fetches via the recent mode, never the pathless counts shape", async () => {
+  const calls: string[] = [];
+  global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    if (url.includes("/code/threads")) {
+      // pathless WITHOUT recent returns {by_path} — that shape crashed the rail once.
+      if (!url.includes("recent=")) return { ok: true, status: 200, json: async () => ({ by_path: [] }) } as unknown as Response;
+      return { ok: true, status: 200, json: async () => ({ threads: [] }) } as unknown as Response;
+    }
+    if (String(input) === "/api/containers") return { ok: true, status: 200, json: async () => [{ id: "c1", status: "active" }] } as unknown as Response;
+    return { ok: true, status: 200, json: async () => ({ container: { id: "c1" }, agents: [], tasks: [], requests: [] }) } as unknown as Response;
+  }) as unknown as typeof fetch;
+  mount();
+  await vi.waitFor(() => {
+    const threadCalls = calls.filter((u) => u.includes("/code/threads"));
+    expect(threadCalls.length).toBeGreaterThan(0);
+    threadCalls.forEach((u) => expect(u).toContain("recent="));
+  });
+});
