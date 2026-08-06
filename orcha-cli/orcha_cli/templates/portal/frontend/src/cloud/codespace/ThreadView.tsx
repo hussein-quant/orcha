@@ -18,7 +18,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { relTime } from "../../lib/format";
-import { useToast } from "../../components/ui";
+import { useToast, Md } from "../../components/ui";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import { fetchThread, postThreadMessage } from "./codespaceApi";
 import {
@@ -42,6 +42,7 @@ let optimisticSeq = 0;
 
 export function ThreadView({ threadId, onBack, onJumpToPinnedSha, seed }: ThreadViewProps) {
   const { snap, bump } = useSnapshot();
+  const snapTasks = snap?.tasks ?? [];
   const toast = useToast();
   const [detail, setDetail] = useState<CodeThreadDetailPayload | null>(seed ?? null);
   const [reply, setReply] = useState("");
@@ -160,7 +161,7 @@ export function ThreadView({ threadId, onBack, onJumpToPinnedSha, seed }: Thread
               <span>{m.is_human ? "human" : m.author_alias || "agent"}</span>
               <span>{m.id.startsWith("optimistic-") ? "sending…" : relTime(m.created_at)}</span>
             </div>
-            <div className="cs-message-body">{m.body}</div>
+            <Md text={m.body} tasks={snapTasks} className="cs-message-body tx md" />
           </div>
         ))}
       </div>
