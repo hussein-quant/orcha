@@ -28,6 +28,7 @@ import { hue, mdText, relTime } from "../../lib/format";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import { Shell } from "../../shell/Shell";
 import type { Agent, Task } from "../../types";
+import { RepoBrowser } from "./browse/RepoBrowser";
 import {
   CHECKS_BATCH_CAP,
   CLEAN_STATES,
@@ -514,6 +515,9 @@ function CommentRow({ c, tasks }: { c: GhComment; tasks: Task[] }) {
 /* ---- route shape ----------------------------------------------------------- */
 interface GhRoute { kind: GhKind | null; number: number | null }
 type ListKey = "issues" | "pulls";
+// ?browse=1&ref=&path= — the Files sub-view (browse/RepoBrowser.tsx), mutually
+// exclusive with ?pr=/?issue= the same way those two are mutually exclusive.
+interface BrowseRoute { on: boolean; ref: string; path: string }
 type DetailPayload = { __number: number; repo?: string | null; pull?: GhPullDetail; issue?: GhIssueDetail };
 type NumberedError = GhError & { __number: number };
 
@@ -535,6 +539,36 @@ export function GitHubPage() {
     return { kind: null, number: null };
   }, [searchParams]);
   const routeKey = route.kind ? route.kind + ":" + route.number : "list";
+
+  // ---- browse route (?browse=1&ref=&path=) — the Files sub-view, checked
+  // independently of ?pr=/?issue= (browse takes the mount over both, same as
+  // a deep link to either of those takes it over the list).
+  const browseRoute: BrowseRoute = useMemo(() => {
+    const on = searchParams.get("browse") === "1";
+    return { on, ref: searchParams.get("ref") || "HEAD", path: searchParams.get("path") || "" };
+  }, [searchParams]);
+  const gotoBrowse = useCallback((next: { ref?: string; path?: string } = {}, replace = false) => {
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.delete("pr");
+      p.delete("issue");
+      p.set("browse", "1");
+      const ref = next.ref !== undefined ? next.ref : p.get("ref") || "HEAD";
+      const path = next.path !== undefined ? next.path : p.get("path") || "";
+      if (ref) p.set("ref", ref); else p.delete("ref");
+      if (path) p.set("path", path); else p.delete("path");
+      return p;
+    }, { replace });
+  }, [setSearchParams]);
+  const exitBrowse = useCallback(() => {
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.delete("browse");
+      p.delete("ref");
+      p.delete("path");
+      return p;
+    });
+  }, [setSearchParams]);
 
   // ---- volatile UI state (never clobbered by the 3s snapshot re-render)
   const [tab, setTab] = useState<ListKey>(() => {
@@ -655,19 +689,22 @@ export function GitHubPage() {
       });
   }, [cid]);
 
-  // load the active route's data (boot + route/tab changes)
+  // load the active route's data (boot + route/tab changes) — the browse
+  // route owns its own data fetching (RepoBrowser talks to browse/* directly)
+  // so the issues/pulls/detail loaders skip entirely while it's mounted.
   useEffect(() => {
-    if (!cid) return;
+    if (!cid || browseRoute.on) return;
     if (route.kind) loadDetail(route.kind, route.number as number, false);
     else loadList(tab, false);
-  }, [cid, routeKey, tab, route.kind, route.number, loadDetail, loadList]);
+  }, [cid, routeKey, tab, route.kind, route.number, loadDetail, loadList, browseRoute.on]);
 
   // 60s refresh cadence — heavier GitHub-backed fetches never ride the 3s tick
-  const tickRef = useRef({ route, tab, loadList, loadDetail });
-  tickRef.current = { route, tab, loadList, loadDetail };
+  const tickRef = useRef({ route, tab, loadList, loadDetail, browseOn: browseRoute.on });
+  tickRef.current = { route, tab, loadList, loadDetail, browseOn: browseRoute.on };
   useEffect(() => {
     const iv = setInterval(() => {
       const t = tickRef.current;
+      if (t.browseOn) return; // RepoBrowser owns its own fetch cadence
       if (t.route.kind) t.loadDetail(t.route.kind, t.route.number as number, true);
       else t.loadList(t.tab, true);
     }, 60000);
@@ -844,6 +881,15 @@ export function GitHubPage() {
         <a className="btn ghost sm gh-open-ext" href={item.html_url || "#"} target="_blank" rel="noopener noreferrer">
           <Icon name="ext" cls="gl" />Open on GitHub
         </a>
+        {kind === "pull" ? (
+          <button
+            type="button"
+            className="btn ghost sm gh-browse-head"
+            onClick={(e) => { e.stopPropagation(); gotoBrowse({ ref: `pr/${item.number}`, path: "" }); }}
+          >
+            <Icon name="search" cls="gl" />Browse head
+          </button>
+        ) : null}
       </div>
     );
   };
@@ -1119,7 +1165,7 @@ export function GitHubPage() {
   return (
     <Shell page="github" title="GitHub" ctx={snap?.container?.name}>
       <div className="gh-wrap">
-        <div className={"gh-head" + (route.kind ? " hidden" : "")} id="ghHead">
+        <div className={"gh-head" + (route.kind || browseRoute.on ? " hidden" : "")} id="ghHead">
           <nav className="aut" id="ghTabs" role="tablist" aria-label="GitHub hub sections">
             <span
               className={"seg" + (tab === "issues" ? " on" : "")}
@@ -1142,6 +1188,9 @@ export function GitHubPage() {
               Pull requests
             </span>
           </nav>
+          <button type="button" className="btn subtle sm gh-browse-cta" onClick={() => gotoBrowse()}>
+            <Icon name="search" cls="gl" />Browse files
+          </button>
           <div className="grow"></div>
           <input
             id="ghSearch"
@@ -1155,11 +1204,35 @@ export function GitHubPage() {
           />
         </div>
 
-        <div className="filters" id="ghFilters">{route.kind ? null : filterChips()}</div>
+        {browseRoute.on ? (
+          <div className="gh-crumb">
+            <a className="gh-crumb-back" href="?" data-gh-back="1" onClick={(e) => { e.preventDefault(); exitBrowse(); }}>
+              <GhIcon name="arrow" cls="gl gh-crumb-ico" /><span>{tab === "pulls" ? "Pull requests" : "Issues"}</span>
+            </a>
+            <span className="gh-crumb-sep">·</span>
+            <span className="gh-crumb-repo mono">Files</span>
+          </div>
+        ) : null}
 
-        <div className={"card ghlist-card" + (route.kind ? " gh-detail-mode" : "")} id="ghlist">
-          {route.kind ? detailBody() : listBody()}
-        </div>
+        <div className="filters" id="ghFilters">{route.kind || browseRoute.on ? null : filterChips()}</div>
+
+        {browseRoute.on ? (
+          cid ? (
+            <RepoBrowser
+              cid={cid}
+              gitRef={browseRoute.ref}
+              path={browseRoute.path}
+              htmlUrlBase={(payload.issues && payload.issues.repo) || (payload.pulls && payload.pulls.repo)
+                ? `https://github.com/${(payload.issues && payload.issues.repo) || (payload.pulls && payload.pulls.repo)}`
+                : null}
+              onNavigate={(next) => gotoBrowse(next, true)}
+            />
+          ) : null
+        ) : (
+          <div className={"card ghlist-card" + (route.kind ? " gh-detail-mode" : "")} id="ghlist">
+            {route.kind ? detailBody() : listBody()}
+          </div>
+        )}
       </div>
 
       {dd
