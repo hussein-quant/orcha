@@ -15,6 +15,17 @@ Contract under test (portal_backend/user_pref_routes.py):
 """
 import pytest
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _team_plan(monkeypatch):
+    """Prefs tests bind members via invites as SETUP — a Team-plan surface under
+    the plan-gating addendum. This suite tests prefs, not the gate (that's
+    tests/test_plan_gating.py), so it stays on the team plan."""
+    monkeypatch.setenv("ORCHA_PLAN", "team")
+
+
 OCTO = {"X-Auth-Request-User": "octocat"}      # bound owner of the arena
 HUBOT = {"X-Auth-Request-User": "hubot"}       # invited member
 KEDAR = {"X-Auth-Request-User": "kedar1607"}   # member of project B ONLY
@@ -160,15 +171,24 @@ async def test_prefs_must_be_an_object(client, container, make_agent, trust_prox
 
 # ---------- trust / mapping gates ----------
 
-async def test_untrusted_null_and_403(client, container, make_agent, no_trust_proxy):
-    """Trust off (self-host): GET is the explicit stay-on-localStorage signal —
-    a 200 null, never an error — and PUT is refused even with a header present
-    (the header is untrusted noise without the proxy opt-in)."""
+async def test_untrusted_local_sentinel_round_trip(
+    client, container, make_agent, no_trust_proxy
+):
+    """Trust off (self-host/laptop): the portal is a single-operator surface, so
+    prefs collapse to ONE local-sentinel row — appearance now survives browser
+    switches and app reinstalls on a laptop stack instead of dying with
+    per-origin localStorage. The identity header is untrusted noise and is
+    IGNORED (everything lands on the same sentinel row, header or not)."""
     await make_agent("root", "operator", kind="human")
     r = await client.get("/api/prefs", headers=OCTO)
-    assert r.status_code == 200 and r.json() == {"prefs": None}
+    # server prefs are ACTIVE (empty) for the local operator — {} not null, so the
+    # frontend mirrors its local picks up on the first write-through
+    assert r.status_code == 200 and r.json() == {"prefs": {}}
     r = await client.put("/api/prefs", json={"prefs": {"theme": "dark"}}, headers=OCTO)
-    assert r.status_code == 403
+    assert r.status_code == 200
+    # headerless read sees the same sentinel row — single operator, one bag
+    r = await client.get("/api/prefs")
+    assert r.status_code == 200 and r.json() == {"prefs": {"theme": "dark"}}
 
 
 async def test_trusted_headerless_lane_null(client, container, make_agent, trust_proxy):
