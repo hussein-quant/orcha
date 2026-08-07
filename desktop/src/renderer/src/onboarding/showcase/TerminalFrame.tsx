@@ -10,11 +10,11 @@ const LINES = [
  *  visible long enough for the CSS to play once per loop pass. */
 export default function TerminalFrame() {
   return (
-    <div className="flex h-full w-full flex-col gap-1 rounded-lg border border-border bg-bg p-3 font-mono text-[10px]">
-      <div className="mb-1 flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-danger/60" />
-        <span className="h-2 w-2 rounded-full bg-warning/60" />
-        <span className="h-2 w-2 rounded-full bg-ok/60" />
+    <div className="flex h-full w-full flex-col gap-2 rounded-xl border border-border bg-bg p-5 font-mono text-xs">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="h-2.5 w-2.5 rounded-full bg-danger/60" />
+        <span className="h-2.5 w-2.5 rounded-full bg-warning/60" />
+        <span className="h-2.5 w-2.5 rounded-full bg-ok/60" />
       </div>
       {LINES.map((line, i) => (
         <div

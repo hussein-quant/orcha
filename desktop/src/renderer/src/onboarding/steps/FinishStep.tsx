@@ -21,7 +21,7 @@ export default function FinishStep({
   onOpenPortal: () => void
 }) {
   return (
-    <div className="flex flex-col items-center gap-6 py-6 text-center">
+    <div className="mx-auto flex w-full max-w-[640px] flex-col items-center gap-6 py-6 text-center">
       <span aria-hidden className="onb-wave onb-glyph-in text-4xl">
         🐋
       </span>

@@ -163,7 +163,7 @@ export default function FleetStep({
 
   if (state.kind === 'loading') {
     return (
-      <div className="flex flex-col items-center gap-3 py-16 text-text/60">
+      <div className="mx-auto flex w-full max-w-[720px] flex-col items-center gap-3 py-16 text-text/60">
         <span className="onb-spin flex h-5 w-5 items-center justify-center">
           <Loader2 className="h-5 w-5 text-accent" />
         </span>
@@ -176,7 +176,7 @@ export default function FleetStep({
 
   if (state.kind === 'done') {
     return (
-      <div className="flex flex-col gap-4 animate-slide-in">
+      <div className="mx-auto flex w-full max-w-[680px] flex-col gap-4 animate-slide-in">
         <div className="flex flex-col gap-1">
           <span className="onb-eyebrow">Fleet</span>
           <h2 className="onb-title text-2xl">Fleet created</h2>
@@ -202,7 +202,7 @@ export default function FleetStep({
   const creating = state.kind === 'creating'
 
   return (
-    <div className="flex flex-col gap-4 animate-slide-in">
+    <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 animate-slide-in">
       <div className="flex flex-col gap-1">
         <span className="onb-eyebrow">Fleet</span>
         <h2 className="onb-title text-2xl">Meet your suggested fleet</h2>

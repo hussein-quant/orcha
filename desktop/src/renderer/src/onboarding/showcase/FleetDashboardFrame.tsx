@@ -13,21 +13,21 @@ export default function FleetDashboardFrame() {
     blocked: 'bg-warning'
   }
   return (
-    <div className="flex h-full w-full flex-col gap-2 rounded-lg border border-border bg-bg p-3">
-      <div className="flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-danger/60" />
-        <span className="h-2 w-2 rounded-full bg-warning/60" />
-        <span className="h-2 w-2 rounded-full bg-ok/60" />
-        <span className="ml-2 text-[10px] text-text/40">Orcha stacks</span>
+    <div className="flex h-full w-full flex-col gap-3 rounded-xl border border-border bg-bg p-5">
+      <div className="flex items-center gap-2">
+        <span className="h-2.5 w-2.5 rounded-full bg-danger/60" />
+        <span className="h-2.5 w-2.5 rounded-full bg-warning/60" />
+        <span className="h-2.5 w-2.5 rounded-full bg-ok/60" />
+        <span className="ml-2 text-xs text-text/40">Orcha stacks</span>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid flex-1 grid-cols-2 gap-3">
         {agents.map((a) => (
-          <div key={a.alias} className="flex flex-col gap-1 rounded-md border border-border bg-card px-2 py-1.5">
-            <div className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 rounded-full ${dot[a.status]}`} aria-hidden />
-              <span className="truncate text-[11px] font-medium text-text">{a.alias}</span>
+          <div key={a.alias} className="flex flex-col gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${dot[a.status]}`} aria-hidden />
+              <span className="truncate text-sm font-medium text-text">{a.alias}</span>
             </div>
-            <span className="text-[10px] text-text/50">{a.role}</span>
+            <span className="text-xs text-text/50">{a.role}</span>
           </div>
         ))}
       </div>

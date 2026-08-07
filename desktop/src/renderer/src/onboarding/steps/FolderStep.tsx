@@ -23,7 +23,7 @@ export default function FolderStep({
   }
 
   return (
-    <div className="flex flex-col gap-4 animate-slide-in">
+    <div className="mx-auto flex w-full max-w-[680px] flex-col gap-4 animate-slide-in">
       <div className="flex flex-col gap-1">
         <span className="onb-eyebrow">Source</span>
         <h2 className="onb-title text-2xl">Choose a project folder</h2>

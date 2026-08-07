@@ -46,7 +46,7 @@ export default function WelcomeStep({ onContinue }: { onContinue: () => void }) 
   }
 
   return (
-    <div className="flex flex-col items-center gap-8 py-6 text-center">
+    <div className="mx-auto flex w-full max-w-[760px] flex-col items-center gap-8 py-6 text-center">
       <div className="onb-glyph-in flex flex-col items-center gap-3">
         <span
           aria-hidden
@@ -60,16 +60,16 @@ export default function WelcomeStep({ onContinue }: { onContinue: () => void }) 
         <span className="onb-caret">|</span>
       </p>
       {showFeatures && (
-        <div className="onb-stagger grid w-full grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="onb-stagger grid w-full grid-cols-2 gap-4 sm:grid-cols-4">
           {FEATURES.map((f, i) => (
             <Card
               key={f.title}
-              className="flex flex-col items-center gap-2 text-center"
+              className="flex flex-col items-center gap-2 p-4 text-center"
               style={{ '--onb-stagger-i': i } as React.CSSProperties}
             >
-              <f.icon className="h-4 w-4 text-accent" />
-              <span className="text-xs font-medium text-text">{f.title}</span>
-              <span className="text-[11px] text-text/50">{f.body}</span>
+              <f.icon className="h-5 w-5 text-accent" />
+              <span className="text-sm font-medium text-text">{f.title}</span>
+              <span className="text-xs text-text/50">{f.body}</span>
             </Card>
           ))}
         </div>

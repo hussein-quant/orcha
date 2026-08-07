@@ -15,7 +15,7 @@ export default function DetailsStep({
   const [name, setName] = useState(suggestedName)
   const [objective, setObjective] = useState('')
   return (
-    <div className="flex flex-col gap-4 animate-slide-in">
+    <div className="mx-auto flex w-full max-w-[680px] flex-col gap-4 animate-slide-in">
       <div className="flex flex-col gap-1">
         <span className="onb-eyebrow">Details</span>
         <h2 className="onb-title text-2xl">Project details</h2>

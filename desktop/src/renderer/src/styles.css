@@ -192,6 +192,16 @@ body {
 .onb-showcase-frame {
   animation: onb-showcase-cycle 16s cubic-bezier(0.65, 0, 0.35, 1) infinite;
 }
+/* Caption dots reuse the same cycle class for their fade — the dot itself is a plain
+ * static circle sized/positioned here, not part of the shared keyframe's transform. */
+.onb-showcase-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  position: static;
+  inset: auto;
+}
 .onb-showcase-frame[data-frame='0'] {
   animation-delay: 0s;
 }
@@ -313,11 +323,11 @@ body {
 .onb-pills {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .onb-pill {
-  height: 4px;
-  width: 22px;
+  height: 5px;
+  width: 28px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-text) 25%, transparent);
   border: none;
@@ -335,7 +345,7 @@ body {
   background: var(--color-accent);
 }
 .onb-pill[data-state='current'] {
-  width: 34px;
+  width: 42px;
   background: var(--color-accent);
 }
 .onb-pill[data-state='upcoming'] {
@@ -371,14 +381,6 @@ body {
   background: var(--color-accent);
   color: var(--color-bg);
   flex-shrink: 0;
-}
-
-/* Provision/Setup steps: balanced two-column stage (checklist+title left, showcase right,
- * ~1:1). Stacks vertically below 900px so the showcase never gets squeezed into a sliver. */
-@media (max-width: 899px) {
-  .onb-two-col {
-    grid-template-columns: 1fr !important;
-  }
 }
 
 /* Checklist rows inside Setup/Provision — taller touch targets, roomier vertical rhythm

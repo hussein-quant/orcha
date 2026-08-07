@@ -29,26 +29,26 @@ export default function CodeSpaceFrame() {
   }, [])
 
   return (
-    <div className="flex h-full w-full gap-2 rounded-lg border border-border bg-bg p-3">
-      <div className="flex w-14 flex-col gap-1 border-r border-border pr-2 text-[9px] text-text/40">
+    <div className="flex h-full w-full gap-4 rounded-xl border border-border bg-bg p-5">
+      <div className="flex w-24 flex-col gap-1.5 border-r border-border pr-3 text-xs text-text/40">
         <span className="text-text/60">src/</span>
         <span className="pl-2 text-accent">sync.ts</span>
         <span className="pl-2">types.ts</span>
       </div>
-      <div className="flex flex-1 flex-col gap-1 font-mono text-[9px] text-text/50">
+      <div className="flex flex-1 flex-col gap-1.5 font-mono text-xs text-text/50">
         <div>1 &nbsp;async function sync() &#123;</div>
-        <div className="relative rounded bg-accent/10 px-1 text-text/80">2 &nbsp;&nbsp;await push(delta)</div>
-        <div className="ml-4 mt-1 flex max-w-[85%] flex-col gap-1 rounded-md border border-accent/30 bg-card px-2 py-1">
-          <span className="text-[8px] font-semibold uppercase tracking-wide text-accent">Sable</span>
-          <span className="text-[9px] text-text/80">
+        <div className="relative rounded bg-accent/10 px-1.5 py-0.5 text-text/80">2 &nbsp;&nbsp;await push(delta)</div>
+        <div className="ml-5 mt-2 flex max-w-[85%] flex-col gap-1 rounded-md border border-accent/30 bg-card px-3 py-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-accent">Sable</span>
+          <span className="text-xs text-text/80">
             <span ref={caretRef} />
             <span className="onb-caret">|</span>
           </span>
         </div>
         {showReply && (
-          <div className="onb-rise-in ml-4 flex max-w-[85%] flex-col gap-1 rounded-md border border-border bg-card px-2 py-1">
-            <span className="text-[8px] font-semibold uppercase tracking-wide text-text/60">Atlas</span>
-            <span className="text-[9px] text-text/80">Yeah — three attempts, then escalate.</span>
+          <div className="onb-rise-in ml-5 flex max-w-[85%] flex-col gap-1 rounded-md border border-border bg-card px-3 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-text/60">Atlas</span>
+            <span className="text-xs text-text/80">Yeah — three attempts, then escalate.</span>
           </div>
         )}
         <div>3 &nbsp;&#125;</div>
