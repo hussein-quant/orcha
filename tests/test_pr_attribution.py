@@ -30,9 +30,11 @@ def test_migration_042_exists_and_is_next_sequential():
     # cloud #64 (per-agent autonomy overrides) added 043_agent_autonomy_override.sql; the GitHub
     # hub + Slack seam then added 044_slack_integration.sql as the next sequential migration, so 044
     # is now the latest. 042 (git_email) still exists (asserted above).
-    # 045 added by Code Space (docs/orcha-code-space-design.md); keep this pin
+    # 045 added by Code Space (docs/orcha-code-space-design.md); 046 added by the GitHub PAT
+    # storage seam (Orcha Cloud local run gap #1, docs/orcha-cloud-local-run.md §1); 047 added by
+    # the host-side roster analysis storage seam (docs/orcha-cloud-local-run.md). Keep this pin
     # moving with the chain tip so gaps/dupes still fail loudly.
-    assert numbers[-1] == 45, f"045 must be the latest migration, saw {numbers[-1]:03d}"
+    assert numbers[-1] == 47, f"047 must be the latest migration, saw {numbers[-1]:03d}"
 
 
 def test_agents_git_email_column_applied(db):

@@ -28,7 +28,12 @@ import { hue, mdText, relTime } from "../../lib/format";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import { Shell } from "../../shell/Shell";
 import type { Agent, Task } from "../../types";
+import { CloudIcon } from "../projects/icons";
 import { RepoBrowser } from "./browse/RepoBrowser";
+import { ConnectRepoModal } from "./ConnectRepoModal";
+import { isLocalRepo } from "./connectRepo";
+import "./connectRepo.css";
+import { RepoBadge } from "./RepoBadge";
 import {
   CHECKS_BATCH_CAP,
   CLEAN_STATES,
@@ -36,6 +41,7 @@ import {
   classifyError,
   dispatchLabel,
   fixOutstandingItems,
+  isLocalSourcePayload,
   labelColors,
   matchesFilter,
   matchesSearch,
@@ -180,12 +186,49 @@ function BranchChips({ base, head }: { base: string | null | undefined; head: st
 }
 
 /* ---- empty / error states ------------------------------------------------- */
-function EmptyRepo() {
+function EmptyRepo({ onConnect }: { onConnect: () => void }) {
   return (
     <div className="gh-empty card-empty">
-      <div className="t1">No GitHub repo connected</div>
-      <p>Connect this project to a repository to see its open issues and pull requests here.</p>
-      <Link className="btn subtle sm" to="/">Go to Dashboard -&gt; Connect repo</Link>
+      <div className="t1">No repo connected</div>
+      <p>Connect this project to a repository — this machine&#39;s own git repo, or GitHub — to see issues and pull requests here.</p>
+      <button className="btn subtle sm" type="button" onClick={onConnect}>Connect repo</button>
+    </div>
+  );
+}
+// Orcha Cloud local run, Addendum 2 (hub degradation): the bound repo is the
+// local git working tree, not GitHub — browse/Code Space keep working, only
+// issues/PRs/checks are affected. Honest callout + a way to connect GitHub
+// on top, reusing the settings sc-* banner idiom.
+//
+// Local-binding + GitHub-origin fall-through: this only renders when the
+// fall-through DIDN'T happen (no origin, or an origin with no usable token —
+// available:true payloads render the list normally instead). Two wordings:
+// an `originDetected` repo names it specifically ("this clone comes from
+// <owner/name> — add GitHub access"); no origin at all keeps the generic
+// "connect GitHub repo" wording.
+function LocalSourceCallout({ onConnect, originDetected }: { onConnect: () => void; originDetected?: string | null }) {
+  const message = originDetected
+    ? `This clone comes from ${originDetected} on GitHub — add GitHub access in Settings to see its issues & PRs.`
+    : "Browsing the local repository. Connect a GitHub repo for issues, PRs, and checks.";
+  return (
+    <div className="gh-empty card-empty gh-local-callout">
+      <div className="sc-banner muted">
+        <div className="bt">
+          <CloudIcon name="folder" cls="" />
+          <span>{message}</span>
+        </div>
+      </div>
+      <div className="sc-acts">
+        {originDetected ? (
+          <Link className="btn sm" to="/settings">
+            <Icon name="link" cls="" />Add GitHub access
+          </Link>
+        ) : (
+          <button className="btn sm" type="button" onClick={onConnect}>
+            <Icon name="link" cls="" />Connect GitHub repo
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -213,9 +256,10 @@ function DetailNotFound({ kind }: { kind: GhKind }) {
     </div>
   );
 }
-function GhErrorBody({ err, notFoundKind }: { err: GhError; notFoundKind?: GhKind }) {
+function GhErrorBody({ err, notFoundKind, onConnect }: { err: GhError; notFoundKind?: GhKind; onConnect: () => void }) {
   if (err.kind === "not_found" && notFoundKind) return <DetailNotFound kind={notFoundKind} />;
-  if (err.kind === "not_connected") return <EmptyRepo />;
+  if (err.kind === "local_source") return <LocalSourceCallout onConnect={onConnect} originDetected={err.originDetected} />;
+  if (err.kind === "not_connected") return <EmptyRepo onConnect={onConnect} />;
   if (err.kind === "rate_limited") return <RateLimit detail={err.detail} />;
   return <GenericError status={err.status} detail={err.detail} />;
 }
@@ -624,6 +668,34 @@ export function GitHubPage() {
   }, [cid]);
   const myLogin = (me && me.github_login) || null;
 
+  // ---- repo binding + Connect-repo picker (Orcha Cloud local run, Addendum 2)
+  // GET /api/containers/{cid}/github -> {repo}; refetched whenever a list
+  // payload lands too (payload.repo mirrors the same binding once it loads),
+  // so the header badge is correct even before the first list response.
+  const [binding, setBinding] = useState<string | null | undefined>(undefined);
+  const [connectOpen, setConnectOpen] = useState(false);
+  useEffect(() => {
+    if (!cid) return;
+    let alive = true;
+    getJSON<{ repo?: string | null }>("/api/containers/" + encodeURIComponent(cid) + "/github")
+      .then((d) => { if (alive) setBinding((d && d.repo) ?? null); })
+      .catch(() => { if (alive) setBinding(null); });
+    return () => { alive = false; };
+  }, [cid]);
+  // local-binding + GitHub-origin fall-through: the CONTAINER binding (`binding`,
+  // straight off GET .../github) stays "local" even when the fall-through served
+  // GitHub data — a hub payload's own `repo` field echoes the ORIGIN in that case
+  // (see github_hub_routes' repo reassignment), never the "local" sentinel. `binding`
+  // therefore wins whenever it's local, so the badge always renders the Local branch
+  // for a local-bound container instead of being fooled into the plain-GitHub
+  // branch by a fall-through payload's origin `repo`; the origin is surfaced
+  // separately as a muted suffix (`fallthroughOriginRepo`) so BOTH truths show at
+  // once rather than one silently overwriting the other.
+  const hubPayloadRepo = (payload.issues && payload.issues.repo) || (payload.pulls && payload.pulls.repo) || null;
+  const boundRepo = isLocalRepo(binding) ? binding : (hubPayloadRepo || binding || null);
+  const fallthroughOriginRepo =
+    isLocalRepo(binding) && hubPayloadRepo && !isLocalRepo(hubPayloadRepo) ? hubPayloadRepo : null;
+
   const theme = ghResolvedTheme();
   const agents = snap?.agents ?? [];
   const tasks = snap?.tasks ?? [];
@@ -905,7 +977,7 @@ export function GitHubPage() {
         <GhIcon name="arrow" cls="gl gh-crumb-ico" /><span>{kind === "pull" ? "Pull requests" : "Issues"}</span>
       </a>
       <span className="gh-crumb-sep">·</span>
-      <span className="gh-crumb-repo mono">{repo || ""}</span>
+      <span className="gh-crumb-repo mono">{isLocalRepo(repo) ? "Local" : repo || ""}</span>
       <span className="gh-crumb-sep">·</span>
       <span className="gh-crumb-num">#{number}</span>
     </div>
@@ -989,8 +1061,11 @@ export function GitHubPage() {
     // unsettled (no payload AND no error yet): the vanilla page's OrchaSkeleton
     // "list-rows" shimmer, behind the same 120ms show delay (nothing before it)
     if (pl == null && err == null) return skeletonReady ? <GhSkeleton kind="list-rows" /> : null;
-    if (err) return <GhErrorBody err={err} />;
-    if (!pl || !pl.repo) return <EmptyRepo />;
+    if (err) return <GhErrorBody err={err} onConnect={() => setConnectOpen(true)} />;
+    // list endpoints answer HTTP 200 even when available:false (see ghlib's
+    // classifyError docstring) — the local-run degrade never reaches loadError.
+    if (isLocalSourcePayload(pl)) return <LocalSourceCallout onConnect={() => setConnectOpen(true)} originDetected={pl?.origin_detected} />;
+    if (!pl || !pl.repo) return <EmptyRepo onConnect={() => setConnectOpen(true)} />;
     const kind: GhKind = key === "pulls" ? "pull" : "issue";
     const rawItems: GhItem[] = (pl.issues || pl.pulls || []) as GhItem[];
     // merge the progressively-filled checks map onto still-null rollups
@@ -1125,7 +1200,7 @@ export function GitHubPage() {
     const p = dp && dp.__number === number ? dp : null;
     const de = detailError[kind];
     const err = de && de.__number === number ? de : null;
-    if (!p && err) return <GhErrorBody err={err} notFoundKind={kind} />;
+    if (!p && err) return <GhErrorBody err={err} notFoundKind={kind} onConnect={() => setConnectOpen(true)} />;
     const item = p ? (kind === "pull" ? p.pull : p.issue) : null;
     // no item yet (and no error) -> the vanilla "detail-pane" skeleton,
     // regardless of fetch timing (same 120ms show delay as the list)
@@ -1191,6 +1266,12 @@ export function GitHubPage() {
           <button type="button" className="btn subtle sm gh-browse-cta" onClick={() => gotoBrowse()}>
             <Icon name="search" cls="gl" />Browse files
           </button>
+          {boundRepo ? (
+            <RepoBadge repo={boundRepo} workspaceName={snap?.container?.name} originRepo={fallthroughOriginRepo} />
+          ) : null}
+          <button type="button" className="btn subtle sm" onClick={() => setConnectOpen(true)}>
+            <CloudIcon name="folder" cls="gl" />{boundRepo ? "Change repo" : "Connect repo"}
+          </button>
           <div className="grow"></div>
           <input
             id="ghSearch"
@@ -1222,9 +1303,9 @@ export function GitHubPage() {
               cid={cid}
               gitRef={browseRoute.ref}
               path={browseRoute.path}
-              htmlUrlBase={(payload.issues && payload.issues.repo) || (payload.pulls && payload.pulls.repo)
-                ? `https://github.com/${(payload.issues && payload.issues.repo) || (payload.pulls && payload.pulls.repo)}`
-                : null}
+              // never build a github.com/local link for the local sentinel —
+              // Orcha Cloud local run, Addendum 2 (RepoBadge deliverable).
+              htmlUrlBase={boundRepo && !isLocalRepo(boundRepo) ? `https://github.com/${boundRepo}` : null}
               onNavigate={(next) => gotoBrowse(next, true)}
             />
           ) : null
@@ -1234,6 +1315,26 @@ export function GitHubPage() {
           </div>
         )}
       </div>
+
+      {connectOpen && cid ? (
+        <ConnectRepoModal
+          cid={cid}
+          currentRepo={boundRepo}
+          fallbackLocalName={snap?.container?.name || null}
+          onClose={() => setConnectOpen(false)}
+          onBound={(repo) => {
+            setBinding(repo);
+            // fresh binding invalidates every cached list/detail payload so
+            // the hub re-fetches against the new repo instead of showing
+            // stale rows from the previous connection.
+            setPayload({ issues: null, pulls: null });
+            setDetailPayload({ pull: null, issue: null });
+            setLoadError({ issues: null, pulls: null });
+            checksRequested.current = {};
+            setChecksByNumber({});
+          }}
+        />
+      ) : null}
 
       {dd
         ? createPortal(

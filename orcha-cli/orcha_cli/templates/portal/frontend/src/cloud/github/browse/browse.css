@@ -1,6 +1,6 @@
 /* Repo file browser (RepoBrowser) styles — an IDE-style three-part surface
    mounted under GitHubPage's ?browse=1 view. Token-driven only (var(--surface-
-   2/-3/--border/...)) so classic, swiss, and minimal all read correctly — no
+   2/-3/--border/...)) so classic, swiss, minimal, and gold all read correctly — no
    hex literals anywhere in this file. Reuses the shared .dfv-* tree idiom
    (static/styles/open-base.css) for the directory tree so it matches
    FilesChanged's look exactly; syntax token colors reuse the diff color

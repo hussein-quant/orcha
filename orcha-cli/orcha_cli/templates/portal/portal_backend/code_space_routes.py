@@ -87,18 +87,20 @@ import urllib.parse
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from portal_backend import request_creation_routes
+from portal_backend import local_git, request_creation_routes
 from portal_backend.agent_status import bump_agent, log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.github_hub_routes import _detail_error_payload, _error_payload
 from portal_backend.github_repo_browse_routes import (
+    LOCAL_REPO,
     _fetch_full_tree,
     _fetch_repo_snapshot,
     _gh_get,
     _is_binary_content,
     _load_binding,
     _not_connected,
+    is_vendored_path,
     _resolve_ref,
     _resolve_repo_token,
 )
@@ -119,6 +121,37 @@ from portal_backend.schemas.requests import RequestCreate
 
 VALID_KINDS = ("question", "why", "teach", "note")
 VALID_STATUSES = ("open", "answered", "resolved")
+
+
+QUESTION_LIKE_KINDS = ("question", "why", "teach")  # NOT note — see _default_ai_agent_id
+
+
+def _default_ai_agent_id(cur, cid: str):
+    """The container's default AI agent: the first live (`terminated_at IS NULL`)
+    `kind='ai'` agent by `created_at` — the lead/main convention (Atlas in
+    practice), same 'oldest live ai agent' shape as
+    `task_start_core.find_orchestrator_agent` and `slack_routes._live_ai_agents`,
+    minus the role-string filter (this wants ANY default, not specifically an
+    orchestrator-titled one).
+
+    Used by create_code_thread to auto-target a question-like thread
+    (question | why | teach) left untagged: an unowned question is a broken
+    promise — silence nobody notices until a human goes looking. `note` is
+    deliberately excluded, both here and by the caller — a note is not a
+    request for an answer, so it stays untargeted by design, exactly as if a
+    human had chosen not to @tag anyone.
+
+    Returns the agent id (str) or None (no live ai agent in the container —
+    caller keeps the untargeted, pre-existing behavior)."""
+    cur.execute(
+        """SELECT id FROM agents
+            WHERE container_id=%s AND kind='ai' AND terminated_at IS NULL
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1""",
+        (cid,),
+    )
+    row = cur.fetchone()
+    return str(row["id"]) if row else None
 
 
 def _require_actor_in_container(cur, cid: str, actor_agent_id: str):
@@ -154,6 +187,27 @@ def _thread_row_to_dict(row) -> dict:
 
 
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# A local-source "token" placeholder — never sent anywhere (local_git needs no
+# credential), just a truthy value so the shared `token = ...; if not token: return
+# _not_connected()` gate below reads identically for both sources. Every downstream
+# call this token gets threaded into (_resolve_ref, _fetch_full_tree,
+# _fetch_repo_snapshot, _gh_get-based helpers) already branches on `repo == LOCAL_REPO`
+# BEFORE ever using the token value, so this placeholder is never actually consulted.
+_LOCAL_TOKEN_PLACEHOLDER = "local"
+
+
+def _resolve_token_for(repo: str, cid: str = None):
+    """The single chokepoint every code-space route uses to answer "do we have
+    something to read this repo with": LOCAL_REPO always yields the placeholder
+    (local_git needs no token — see `_LOCAL_TOKEN_PLACEHOLDER`); any other repo falls
+    through to the SAME `_resolve_repo_token` resolution every hub/browse route uses.
+    None means "not connected" either way, so every existing
+    `token = ...; if not token: return _not_connected()` call site needed only this
+    one-line swap to become local-aware."""
+    if repo == LOCAL_REPO:
+        return _LOCAL_TOKEN_PLACEHOLDER
+    return _resolve_repo_token(repo, cid)
 
 
 def _resolve_commit_sha(repo: str, token: str, cid: str, ref) -> str:
@@ -209,6 +263,18 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
         creator = _require_actor_in_container(cur, cid, body.actor_agent_id)
+
+        # An untagged question-like thread (question | why | teach — NOT note) is a
+        # broken promise: nobody owns it, so it sits unanswered until a human
+        # notices. Backfill tagged_agent_id to the container's default AI agent
+        # BEFORE the existing tagged branch below, so an auto-routed question is
+        # indistinguishable from one the user explicitly @tagged — same directed
+        # request, same wake nudge, no forked logic. `note` and containers with no
+        # live ai agent are untouched (both keep the pre-existing untargeted
+        # behavior).
+        if body.tagged_agent_id is None and body.kind in QUESTION_LIKE_KINDS:
+            body.tagged_agent_id = _default_ai_agent_id(cur, cid)
+
         tagged_agent = None
         if body.tagged_agent_id is not None:
             tagged_agent = _require_actor_in_container(cur, cid, body.tagged_agent_id)
@@ -217,7 +283,7 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
         repo = cur.fetchone()["github_repo"]
         if not repo:
             return _not_connected()
-        token = _resolve_repo_token(repo)
+        token = _resolve_token_for(repo, cid)
         if not token:
             return _not_connected()
         try:
@@ -407,7 +473,7 @@ def list_code_threads(
         for t in threads:
             t["blob_match"] = None
         return {"threads": threads}
-    token = _resolve_repo_token(repo)
+    token = _resolve_token_for(repo, cid)
     if not token:
         for t in threads:
             t["blob_match"] = None
@@ -623,7 +689,25 @@ def _fetch_source_file(repo: str, resolved_ref: str, token: str, path: str):
     skipped (binary, non-decodeable, or >MAX_SOURCE_FILE_BYTES). Mirrors
     github_repo_browse_routes.browse_file's decode/binary-sniff logic directly (kept as
     a small local copy rather than calling the route function, since that route also
-    does its own ref-resolution/binding load we've already done here)."""
+    does its own ref-resolution/binding load we've already done here).
+
+    Local source (repo == LOCAL_REPO): reads via `local_git.file_bytes` instead of the
+    GitHub contents API — `token` is unused on this path. Used only as the FALLBACK
+    per-file fetch (both the symbol indexer and the outline route try the whole-repo
+    snapshot first — see `_fetch_repo_snapshot`/`_fetch_local_repo_snapshot` — so this
+    is rarely reached at all for a local repo; kept local-aware anyway so a snapshot
+    failure never silently reaches out to `_gh_get` for a repo that was never
+    GitHub-backed in the first place)."""
+    if repo == LOCAL_REPO:
+        raw_bytes = local_git.file_bytes(resolved_ref, path)
+        if raw_bytes is None:
+            return None
+        if len(raw_bytes) > MAX_SOURCE_FILE_BYTES:
+            return None
+        if _is_binary_content(raw_bytes):
+            return None
+        return raw_bytes.decode("utf-8", errors="ignore")
+
     import base64
 
     query = urllib.parse.urlencode({"ref": resolved_ref})
@@ -726,6 +810,80 @@ def _extract_definitions(text: str, language: str) -> list:
     return results
 
 
+def _index_from_snapshot(indexable, snapshot) -> list:
+    """Regex-extract every definition from the snapshot's bytes for `indexable` paths —
+    the whole-repo one-pass indexing body, shared by the symbols route (cold path) and
+    the local background warmer (`warm_local_symbol_index`)."""
+    symbols = []
+    for path in indexable:
+        raw_bytes = snapshot.get(path)
+        if raw_bytes is None:
+            continue
+        if _is_binary_content(raw_bytes):
+            continue
+        text = raw_bytes.decode("utf-8", errors="ignore")
+        language = _language_for_path(path)
+        for definition in _extract_definitions(text, language):
+            symbols.append({**definition, "path": path})
+    return symbols
+
+
+def warm_local_symbol_index() -> bool:
+    """Pre-build the snapshot + symbol index for every container bound to the LOCAL
+    repo, so the first go-to-symbol/outline click is warm instead of paying the cold
+    cost (a bind-mounted `git archive` + whole-repo regex pass — ~10s+ on Docker for
+    Mac). Called from a background thread (startup + periodic re-warm inside the cache
+    TTL, see application_lifecycle) — NEVER from a request path. Returns whether any
+    index was (re)built; all failures are swallowed (warming is an optimization, the
+    request-path cold build remains the source of truth)."""
+    try:
+        from portal_backend import local_git
+        if not local_git.available():
+            return False
+        with db_cursor() as (_, cur):
+            cur.execute(
+                "SELECT id FROM containers WHERE github_repo=%s", (LOCAL_REPO,)
+            )
+            cids = [str(r["id"]) for r in cur.fetchall()]
+        if not cids:
+            return False
+        sha = local_git.resolve_ref("HEAD")
+        if not sha:
+            return False
+        built = False
+        for cid in cids:
+            if _symbol_state_get(cid, sha) is not None:
+                continue
+            entries, _tr = _fetch_full_tree(LOCAL_REPO, sha, None, cid)
+            indexable = []
+            for entry in entries:
+                if entry.get("type") != "blob":
+                    continue
+                path = entry.get("path") or ""
+                if is_vendored_path(path):
+                    continue
+                if _language_for_path(path) is None:
+                    continue
+                size = entry.get("size")
+                if size is not None and size > MAX_SOURCE_FILE_BYTES:
+                    continue
+                indexable.append(path)
+            snapshot = _fetch_repo_snapshot(
+                LOCAL_REPO, sha, None, cid,
+                tuple(LANGUAGE_BY_EXTENSION), MAX_SOURCE_FILE_BYTES,
+            )
+            if snapshot is None:
+                continue
+            _symbol_state_put(cid, sha, {
+                "symbols": _index_from_snapshot(indexable, snapshot),
+                "pending": [], "total": len(indexable),
+            })
+            built = True
+        return built
+    except Exception:
+        return False
+
+
 @app.get("/api/containers/{cid}/code/symbols")
 def search_code_symbols(cid: str, request: Request, ref: str = Query(default=""), q: str = Query(default="")):
     """Workspace symbol search: every definition across every indexable source file at
@@ -741,7 +899,7 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
-    token = _resolve_repo_token(repo)
+    token = _resolve_token_for(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -765,6 +923,8 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
             if entry.get("type") != "blob":
                 continue
             path = entry.get("path") or ""
+            if is_vendored_path(path):
+                continue
             language = _language_for_path(path)
             if language is None:
                 continue
@@ -793,18 +953,10 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
             # skew, e.g. a submodule/symlink entry — skipped honestly rather than
             # guessed). `pending` stays empty: indexing:false immediately below, no
             # polling required for a snapshot-backed repo.
-            symbols = []
-            for path in indexable:
-                raw_bytes = snapshot.get(path)
-                if raw_bytes is None:
-                    continue
-                if _is_binary_content(raw_bytes):
-                    continue
-                text = raw_bytes.decode("utf-8", errors="ignore")
-                language = _language_for_path(path)
-                for definition in _extract_definitions(text, language):
-                    symbols.append({**definition, "path": path})
-            state = {"symbols": symbols, "pending": [], "total": len(indexable)}
+            state = {
+                "symbols": _index_from_snapshot(indexable, snapshot),
+                "pending": [], "total": len(indexable),
+            }
         else:
             # Fallback: budgeted incremental indexing exactly as before snapshot
             # support existed. A cold index would otherwise fetch EVERY source file
@@ -865,7 +1017,7 @@ def get_code_outline(cid: str, request: Request, ref: str = Query(default=""), p
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
-    token = _resolve_repo_token(repo)
+    token = _resolve_token_for(repo, cid)
     if not token:
         return _not_connected()
     try:

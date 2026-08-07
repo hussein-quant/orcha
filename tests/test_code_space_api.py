@@ -107,7 +107,10 @@ def _stub_tarball(monkeypatch, files: dict, top_prefix: str = "acme-site-abc1234
 async def test_create_thread_resolves_sha_and_persists_anchor(client, container, make_agent, token_env, monkeypatch):
     cid = container["id"]
     await _bind_repo(client, cid)
-    author = await make_agent("Author")
+    # Human actor, no ai agent in the container at all — keeps this test's own
+    # assertion (`tagged_agent_id is None`) about sha/anchor resolution, not
+    # default-agent auto-routing (see test_default_routing_* below for that).
+    author = await make_agent("Author", kind="human")
 
     def fake_get(path, token):
         if "/commits/" in path:
@@ -337,6 +340,177 @@ async def test_untagged_create_makes_no_request(client, db, container, make_agen
     assert r.status_code == 201, r.text
     assert r.json()["request_id"] is None
     assert not [x for x in db.event_rows(author["agent_id"]) if x["event_name"] == "request_created"]
+
+
+# ------------------- default routing: untagged question -> default ai agent ---
+#
+# An untagged question-like thread (question | why | teach — NOT note) is a
+# broken promise if nobody owns it. code_space_routes._default_ai_agent_id
+# backfills tagged_agent_id to the container's default AI agent (first live
+# kind='ai' agent by created_at — the lead/main convention, Atlas in practice)
+# BEFORE the existing tagged branch runs, so these assert the exact same
+# directed-request + wake side effects as the explicit-tag tests above.
+
+async def test_default_routing_untagged_question_targets_default_ai_agent(
+    client, db, container, make_agent, token_env, monkeypatch
+):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    human = await make_agent("Homer", kind="human")
+    # Two live ai agents — created in order, so "lead" (first by created_at) is
+    # unambiguous: Atlas, then Forge.
+    lead = await make_agent("Atlas")
+    await make_agent("Forge")
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        return {"default_branch": "main"}
+
+    _stub_gh(monkeypatch, fake_get)
+    r = await client.post(
+        f"/api/containers/{cid}/code/threads",
+        json={
+            "actor_agent_id": human["agent_id"], "path": "src/a.py",
+            "start_line": 1, "end_line": 1, "kind": "question",
+            "body": "how does this work?",
+        },
+    )
+    assert r.status_code == 201, r.text
+    thread = r.json()
+    # Backfilled exactly as if the human had @tagged the lead agent.
+    assert thread["tagged_agent_id"] == lead["agent_id"]
+    request_id = thread["request_id"]
+    assert request_id is not None
+
+    req = await client.get(f"/api/requests/{request_id}")
+    assert req.status_code == 200, req.text
+    assert req.json()["target_id"] == lead["agent_id"]
+    assert req.json()["status"] == "open"
+
+    # Same wake rails as the explicit-tag path.
+    agent_rows = [r for r in db.event_rows(lead["agent_id"]) if r["event_name"] == "request_created"]
+    assert len(agent_rows) == 1
+    assert agent_rows[0]["payload"]["request_id"] == request_id
+
+
+async def test_default_routing_applies_to_why_and_teach_too(
+    client, db, container, make_agent, token_env, monkeypatch
+):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    human = await make_agent("Homer", kind="human")
+    lead = await make_agent("Atlas")
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        return {"default_branch": "main"}
+
+    _stub_gh(monkeypatch, fake_get)
+    for kind in ("why", "teach"):
+        r = await client.post(
+            f"/api/containers/{cid}/code/threads",
+            json={
+                "actor_agent_id": human["agent_id"], "path": "src/a.py",
+                "start_line": 1, "end_line": 1, "kind": kind,
+                "body": f"{kind} body",
+            },
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["tagged_agent_id"] == lead["agent_id"]
+        assert r.json()["request_id"] is not None
+
+
+async def test_default_routing_untagged_note_stays_untargeted(
+    client, db, container, make_agent, token_env, monkeypatch
+):
+    """`note` is deliberately excluded from auto-routing — a note is not a
+    request for an answer, so it stays untargeted exactly like before this
+    change, even though a default ai agent exists and could catch it."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    human = await make_agent("Homer", kind="human")
+    await make_agent("Atlas")
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        return {"default_branch": "main"}
+
+    _stub_gh(monkeypatch, fake_get)
+    r = await client.post(
+        f"/api/containers/{cid}/code/threads",
+        json={
+            "actor_agent_id": human["agent_id"], "path": "src/a.py",
+            "start_line": 1, "end_line": 1, "kind": "note",
+            "body": "just a note",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tagged_agent_id"] is None
+    assert r.json()["request_id"] is None
+
+
+async def test_default_routing_no_ai_agent_keeps_untargeted(
+    client, db, container, make_agent, token_env, monkeypatch
+):
+    """No live ai agent in the container at all -> unchanged pre-existing
+    behavior (untargeted), even for a question-like kind."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    human = await make_agent("Homer", kind="human")
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        return {"default_branch": "main"}
+
+    _stub_gh(monkeypatch, fake_get)
+    r = await client.post(
+        f"/api/containers/{cid}/code/threads",
+        json={
+            "actor_agent_id": human["agent_id"], "path": "src/a.py",
+            "start_line": 1, "end_line": 1, "kind": "question",
+            "body": "how does this work?",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tagged_agent_id"] is None
+    assert r.json()["request_id"] is None
+    assert not [x for x in db.event_rows(human["agent_id"]) if x["event_name"] == "request_created"]
+
+
+async def test_default_routing_terminated_ai_agent_not_picked(
+    client, db, container, make_agent, token_env, monkeypatch
+):
+    """A terminated ai agent is not a valid default target — only a live
+    (`terminated_at IS NULL`) one counts, mirroring find_orchestrator_agent /
+    _live_ai_agents elsewhere in this codebase."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    human = await make_agent("Homer", kind="human")
+    gone = await make_agent("Retired")
+    live = await make_agent("Atlas")
+
+    db.execute("UPDATE agents SET terminated_at=now() WHERE id=%s", (gone["agent_id"],))
+
+    def fake_get(path, token):
+        if "/commits/" in path:
+            return {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+        return {"default_branch": "main"}
+
+    _stub_gh(monkeypatch, fake_get)
+    r = await client.post(
+        f"/api/containers/{cid}/code/threads",
+        json={
+            "actor_agent_id": human["agent_id"], "path": "src/a.py",
+            "start_line": 1, "end_line": 1, "kind": "question",
+            "body": "how does this work?",
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["tagged_agent_id"] == live["agent_id"]
 
 
 # ------------------------------- reply flips status ---------------------------

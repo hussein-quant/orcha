@@ -11,10 +11,12 @@ Endpoints (all GETs share the SAME grant model; the two writes are only /start):
 The detail GETs are READ-ONLY: no approve/close/rerun write endpoints — deliberate; the
 portal's only GitHub action stays Start.
 
-Auth/token plumbing is SHARED with github_routes.py — the same GitHub App INSTALLATION
-token the host-side refresh timer maintains (never a personal token). For a container's
-bound `owner/name` repo we resolve the installation token for `owner` from the multi-org
-token map, falling back to the legacy single-token file, exactly as github_routes does.
+Auth/token plumbing is SHARED with github_routes.py — the same resolution chain: the
+GitHub App INSTALLATION token the host-side refresh timer maintains (multi-org token map,
+then the legacy single-token file), and — Orcha Cloud local run gap #1 — a personal
+access token as the lowest-precedence fallback when no App token is wired (env
+ORCHA_GITHUB_PAT, else the DB-stored per-container PAT). App files, where present, always
+keep winning. See `_resolve_repo_token`.
 
 Network calls go through small monkeypatchable leaf functions (`_gh_get`) — tests stub
 that leaf and NEVER hit live GitHub (mirroring github_routes._fetch_installation_repos).
@@ -48,10 +50,11 @@ import urllib.request
 
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import local_git
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
-from portal_backend.github_routes import _read_token, _read_token_map
+from portal_backend.github_routes import _read_pat, _read_token, _read_token_map
 from portal_backend.identity_routes import require_member_read, trusted_actor
 from portal_backend.schemas.github_hub import GithubStartBody
 from portal_backend.task_start_core import (
@@ -59,6 +62,14 @@ from portal_backend.task_start_core import (
     find_open_gh_tasks,
     start_task_from_github,
 )
+
+# The repo-binding sentinel meaning "this project's own working tree" (Addendum 2).
+# Duplicated here (rather than imported from github_repo_browse_routes) to avoid a
+# circular import: that module already imports several names FROM this one. Both
+# modules must agree on the literal string; a value drift would silently break the
+# local-source degrade below, so keep this in sync with
+# github_repo_browse_routes.LOCAL_REPO if either ever changes.
+LOCAL_REPO = "local"
 
 GITHUB_API = "https://api.github.com"
 GITHUB_TIMEOUT_SECONDS = 10
@@ -119,15 +130,23 @@ def _cache_invalidate(cid: str) -> None:
         _CACHE.pop(key, None)
 
 
-def _resolve_repo_token(repo: str):
-    """The installation token that can read `owner/name`, or None when the App isn't
-    wired for this owner. Multi-org: prefer the per-owner token from the map; else the
-    legacy single-token file (self-host default). Mirrors github_routes' resolution."""
+def _resolve_repo_token(repo: str, cid: str = None):
+    """The token that can read `owner/name`, or None when nothing is wired for it.
+    Multi-org: prefer the per-owner token from the map; else the legacy single-token
+    file; else — Orcha Cloud local run gap #1 — the PAT fallback (env ORCHA_GITHUB_PAT,
+    else the DB-stored PAT for `cid`). Mirrors github_routes' resolution precedence
+    exactly; App files, where present, keep winning unchanged. `cid` is optional so
+    existing callers that only have a `repo` string keep working (env-only PAT still
+    applies), but every route below passes its container id so the DB-stored PAT can
+    participate too."""
     owner = (repo or "").split("/", 1)[0].lower()
     token_map = _read_token_map()
     if token_map and owner in token_map:
         return token_map[owner]
-    return _read_token()
+    token = _read_token()
+    if token:
+        return token
+    return _read_pat(cid)
 
 
 def _gh_get(path: str, token: str):
@@ -209,6 +228,47 @@ def _not_connected():
             "detail": "no GitHub repo is connected to this project"}
 
 
+def _local_source_unavailable(origin_detected: "str | None" = None):
+    """The container is bound to the LOCAL_REPO sentinel (Addendum 2) — a real code
+    source (browse/Code Space work fine against it), but the hub's issues/PRs/checks
+    have no GitHub equivalent to show. Same {available:false,...} shape every other
+    graceful hub off-state uses, with a DISTINCT `reason` ("local_source", never
+    "repo_not_connected") so the frontend can render "connect GitHub for issues & PRs"
+    instead of the generic "no repo connected" empty state — the project IS connected
+    to something, just not to GitHub.
+
+    `origin_detected` (owner/name | None) — local-binding + GitHub-origin fall-through:
+    when the local working tree's `origin` remote points at GitHub
+    (`local_git.origin_repo()`) but no token is wired for it, this is that repo's
+    owner/name, so the frontend can render "this clone comes from <owner/name> — add
+    GitHub access" instead of the generic "no origin at all" wording. None when the
+    local repo has no GitHub origin (or origin detection itself isn't applicable),
+    distinguishing the two flavors of degrade from a single boolean-shaped reason."""
+    return {"available": False, "reason": "local_source",
+            "detail": "issues & PRs need a connected GitHub repo — this project is "
+                       "using its local working tree as the code source",
+            "origin_detected": origin_detected}
+
+
+def _local_fallthrough_repo(cid: str) -> "str | None":
+    """Local-binding + GitHub-origin fall-through (simultaneous local binding + GitHub
+    hub): when a container is bound to LOCAL_REPO, resolve the working tree's `origin`
+    remote (`local_git.origin_repo()`) and, ONLY if a token can also be resolved for
+    it, return that `owner/name` so the caller can serve the hub route against the
+    ORIGIN exactly as if the container had been bound to it directly — same
+    `_resolve_repo_token`/`_gh_get` path downstream, no local-specific reshaping
+    needed anywhere past this point. Returns None when there's no GitHub origin, or
+    there is one but no token is wired for it — either case, the caller falls back to
+    the existing `_local_source_unavailable()` degrade (passing the origin along for
+    the UI's benefit even on a None-token miss; see call sites)."""
+    origin = local_git.origin_repo()
+    if not origin:
+        return None
+    if not _resolve_repo_token(origin, cid):
+        return None
+    return origin
+
+
 def _with_tracked_list(cid: str, items: list) -> list:
     """Stamp `tracked_task_id` (str | None) onto every row of an issues/pulls LIST
     payload, batched into ONE query via task_start_core.find_open_gh_tasks — the SAME
@@ -275,7 +335,7 @@ def _fetch_gh_item(cur, container_id, kind: str, number: int):
     repo = row["github_repo"] if row else None
     if not repo:
         return None
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, container_id)
     if not token:
         return None
     path = f"/repos/{repo}/pulls/{number}" if kind == "pull" else f"/repos/{repo}/issues/{number}"
@@ -666,10 +726,25 @@ def list_github_issues(cid: str, request: Request):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2 + local-binding/GitHub-origin fall-through: a local-source
+        # binding has no GitHub issues/PRs/checks to show UNLESS the working tree's
+        # `origin` remote points at a GitHub repo we hold a token for — in that case
+        # serve this route against the ORIGIN exactly as if bound to it directly
+        # (reassign `repo` and fall through to the normal GitHub path below). Only
+        # when there's no such origin (or no token for it) does this degrade, with a
+        # DISTINCT reason (see _local_source_unavailable) so the frontend can render
+        # "connect GitHub for issues & PRs" rather than the generic not-connected
+        # empty state. Browse/Code Space stay fully functional against local either
+        # way; only this hub surface is affected.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     cached = _cache_get(cid, "issues")
     if cached is not None:
         return {**cached, "issues": _with_tracked_list(cid, cached["issues"])}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     # GitHub's issues list includes PRs; filter them out (PRs carry pull_request).
@@ -730,10 +805,17 @@ def list_github_pulls(cid: str, request: Request):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2 + local-binding/GitHub-origin fall-through — see the identical
+        # comment on list_github_issues above for the full rationale.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     cached = _cache_get(cid, "pulls")
     if cached is not None:
         return {**cached, "pulls": _with_tracked_list(cid, cached["pulls"])}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -763,6 +845,13 @@ def list_github_checks(cid: str, request: Request, numbers: str = Query(...)):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2 + local-binding/GitHub-origin fall-through — see the identical
+        # comment on list_github_issues above for the full rationale.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     raw_numbers = [n for n in numbers.split(",") if n.strip()]
     if len(raw_numbers) > CHECKS_BATCH_MAX_NUMBERS:
         raise HTTPException(
@@ -773,7 +862,7 @@ def list_github_checks(cid: str, request: Request, numbers: str = Query(...)):
         raise HTTPException(400, "numbers must be a comma-separated list of integers")
     if not wanted:
         return {"available": True, "checks": {}}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -832,10 +921,17 @@ def get_github_pull(cid: str, number: int, request: Request):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2 + local-binding/GitHub-origin fall-through — see the identical
+        # comment on list_github_issues above for the full rationale.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     cached = _cache_get(cid, "pull", number)
     if cached is not None:
         return {**cached, "pull": _with_tracked_one(cid, number, cached["pull"])}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -864,10 +960,17 @@ def get_github_issue(cid: str, number: int, request: Request):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2 + local-binding/GitHub-origin fall-through — see the identical
+        # comment on list_github_issues above for the full rationale.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     cached = _cache_get(cid, "issue", number)
     if cached is not None:
         return {**cached, "issue": _with_tracked_one(cid, number, cached["issue"])}
-    token = _resolve_repo_token(repo)
+    token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -960,7 +1063,7 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
             if body.kind == "pull":
                 cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
                 repo = cur.fetchone()["github_repo"]
-                token = _resolve_repo_token(repo) if repo else None
+                token = _resolve_repo_token(repo, cid) if repo else None
                 if token:
                     try:
                         ctx = _pull_fix_context(repo, body.number, token)

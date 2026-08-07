@@ -1,6 +1,6 @@
 /* Code Space (/code) — full-page three-pane surface: directory tree + search
    | code viewer | thread rail. Token-driven only (var(--surface-2/-3/--border/
-   ...)) so classic/swiss/minimal all read correctly. Reuses browse.css's
+   ...)) so classic/swiss/minimal/gold all read correctly. Reuses browse.css's
    .rb-* tree/content idioms via the shared BrowseTree/CodeViewer pieces
    refactored out of RepoBrowser.tsx — this file only adds Code-Space-specific
    chrome: the full-bleed page shell, the gutter affordances, the thread rail,
@@ -229,6 +229,7 @@
 .cs-agent-select { flex: 1; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
   border-radius: 7px; padding: 6px 8px; font: inherit; font-size: 12.5px; }
 .cs-raise-hand-caption { font-size: 11.5px; color: var(--muted); font-style: italic; }
+.cs-routing-hint { font-size: 11.5px; color: var(--muted); }
 
 /* ---- thread view (messages + reply + resolve) ------------------------------- */
 .cs-thread-view { display: flex; flex-direction: column; gap: 10px; }
@@ -349,6 +350,67 @@
 .cs-pane-crash { display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
   padding: 16px; height: 100%; box-sizing: border-box; }
 .cs-pane-crash-msg { font-size: 12.5px; color: var(--muted); }
+
+/* ---- Changes tab (working-tree, local run addendum) ------------------------ */
+.cs-rail-tab { position: relative; }
+.cs-rail-tab-badge { margin-left: 5px; display: inline-flex; align-items: center; justify-content: center;
+  min-width: 15px; height: 15px; padding: 0 4px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: var(--warn-soft); color: var(--warn); vertical-align: middle; }
+.cs-changes { display: flex; flex-direction: column; gap: 8px; }
+.cs-changes-summary { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 600;
+  color: var(--text-2); padding: 2px 2px 6px; border-bottom: 1px solid var(--border); }
+.cs-changes-summary .a { color: var(--diff-add); }
+.cs-changes-summary .d { color: var(--diff-del); }
+.cs-changes-list { display: flex; flex-direction: column; gap: 4px; }
+.cs-changes-row { display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  border: 1px solid var(--border); border-radius: 8px; cursor: pointer; background: var(--surface); }
+.cs-changes-row:hover { border-color: var(--accent-line); }
+.cs-changes-row.on { background: var(--accent-soft); border-color: var(--accent-line); }
+.cs-changes-row .a { color: var(--diff-add); font-size: 11px; }
+.cs-changes-row .d { color: var(--diff-del); font-size: 11px; }
+.cs-changes-path { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; }
+.cs-changes-badge { flex: none; font-family: "JetBrains Mono", monospace; font-size: 10.5px; font-weight: 700;
+  padding: 1px 5px; border-radius: 5px; }
+.cs-changes-badge.M { color: var(--warn); background: var(--warn-soft); }
+.cs-changes-badge.A { color: var(--ok); background: var(--ok-soft); }
+.cs-changes-badge.D { color: var(--danger); background: var(--danger-soft); }
+.cs-changes-badge.R { color: var(--info); background: var(--info-soft); }
+.cs-changes-badge.u { color: var(--muted); background: var(--surface-2); }
+.cs-wt-bin { font-size: 11px; }
+
+/* ---- working-tree diff pane (center pane, WorktreeDiffPane.tsx) ------------ */
+.cs-worktree-diff { display: flex; flex-direction: column; height: 100%; }
+.cs-worktree-banner { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); background: var(--warn-soft); }
+.cs-worktree-banner-label { font-size: 12px; font-weight: 700; color: var(--warn); flex: none; }
+.cs-worktree-path { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; }
+.cs-worktree-head-link { flex: none; border: 1px solid var(--border); background: var(--surface);
+  color: var(--accent); font: inherit; font-size: 11.5px; font-weight: 600; padding: 4px 9px;
+  border-radius: 6px; cursor: pointer; }
+.cs-worktree-head-link:hover { border-color: var(--accent-line); }
+
+/* ---- History popover (HistoryPanel.tsx, file header) ------------------------ */
+.cs-history-anchor { position: relative; flex: none; }
+.cs-history-btn { border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  font: inherit; font-size: 11.5px; font-weight: 600; padding: 4px 9px; border-radius: 6px; cursor: pointer; }
+.cs-history-btn:hover, .cs-history-btn[aria-expanded="true"] { border-color: var(--accent-line); color: var(--accent); }
+.cs-history-popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: 20; width: 320px;
+  max-height: 360px; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); overflow: hidden; }
+.cs-history-head { flex: none; display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 700; color: var(--text-2); }
+.cs-history-close { border: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1;
+  cursor: pointer; padding: 0 2px; }
+.cs-history-close:hover { color: var(--text); }
+.cs-history-list { overflow: auto; padding: 6px; display: flex; flex-direction: column; gap: 3px; }
+.cs-history-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; cursor: pointer; }
+.cs-history-row:hover { background: var(--surface-2); }
+.cs-history-sha { flex: none; font-size: 10.5px; }
+.cs-history-summary { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; }
+.cs-history-time { flex: none; font-size: 10.5px; }
 
 @media (max-width: 1100px) {
   .cs-tree-pane { width: 220px; }

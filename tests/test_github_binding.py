@@ -110,6 +110,7 @@ async def test_repos_success_with_token_and_fake_github(client, monkeypatch, tmp
             {"full_name": "acme/docs", "private": False, "description": None,
              "html_url": "https://github.com/acme/docs"},
         ],
+        "source": "app",
     }
     assert seen["token"] == "ghs_testtoken"        # the file's token reached the fetch, stripped
 

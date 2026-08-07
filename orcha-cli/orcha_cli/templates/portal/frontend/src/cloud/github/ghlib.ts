@@ -99,11 +99,26 @@ export interface GhListPayload {
   repo?: string | null;
   issues?: GhIssueRow[];
   pulls?: GhPullRow[];
+  // present on the unavailable degrade shape (available:false), including
+  // the local-run "local_source" reason (Orcha Cloud local run, Addendum 2).
+  reason?: string | null;
+  detail?: string | null;
+  // local-binding + GitHub-origin fall-through: on a "local_source" degrade, the
+  // working tree's GitHub `origin` repo (owner/name) when one was detected but no
+  // token could be resolved for it — null when there's no GitHub origin at all.
+  // Absent (undefined) on every other payload shape.
+  origin_detected?: string | null;
 }
 export interface GhError {
-  kind: "not_connected" | "rate_limited" | "not_found" | "error";
+  // "local_source" — Orcha Cloud local run, Addendum 2: the bound repo is
+  // the local git working tree, not GitHub, so issues/PRs/checks degrade
+  // honestly (browse + Code Space keep working; only the hub is affected).
+  kind: "not_connected" | "rate_limited" | "not_found" | "error" | "local_source";
   status?: number;
   detail?: string | null;
+  // local-binding + GitHub-origin fall-through — see GhListPayload's docstring.
+  // Only ever set alongside kind:"local_source".
+  originDetected?: string | null;
 }
 export interface TaskState {
   task_id: string;
@@ -113,21 +128,42 @@ export type GhKind = "issue" | "pull";
 export type GhItem = GhIssueRow | GhPullRow;
 
 /* ---- error classifiers (github-render.js verbatim) ------------------------ */
-export function classifyError(status: number, body: { detail?: string } | null): GhError {
+type GhErrorBody = { reason?: string; detail?: string; origin_detected?: string | null };
+export function classifyError(status: number, body: GhErrorBody | null): GhError {
+  // Orcha Cloud local run, Addendum 2: a local-bound repo answers the hub
+  // endpoints with reason:"local_source" (HTTP 200, available:false) — this
+  // branch also covers the rare case a caller reaches classifyError() with a
+  // non-2xx status carrying the same reason, so it's checked first.
+  if (body && body.reason === "local_source") {
+    return { kind: "local_source", status, detail: (body && body.detail) || null,
+             originDetected: (body && body.origin_detected) ?? null };
+  }
   if (status === 404) return { kind: "not_connected", status, detail: (body && body.detail) || null };
   if (status === 403 || status === 429) return { kind: "rate_limited", status, detail: (body && body.detail) || null };
   return { kind: "error", status, detail: (body && body.detail) || null };
 }
 // Detail 404s are number-scoped (`reason:"not_found"`), distinct from the list
 // endpoints' 404-means-not-connected reading — trust the body's reason field.
-export function classifyDetailError(status: number, body: { reason?: string; detail?: string } | null): GhError {
+export function classifyDetailError(status: number, body: GhErrorBody | null): GhError {
   const reason = body && body.reason;
+  if (reason === "local_source") {
+    return { kind: "local_source", status, detail: (body && body.detail) || null,
+             originDetected: (body && body.origin_detected) ?? null };
+  }
   if (reason === "not_found") return { kind: "not_found", status, detail: (body && body.detail) || null };
   if (reason === "repo_not_connected") return { kind: "not_connected", status, detail: (body && body.detail) || null };
   if (reason === "rate_limited") return { kind: "rate_limited", status, detail: (body && body.detail) || null };
   if (status === 404) return { kind: "not_found", status, detail: (body && body.detail) || null };
   if (status === 403 || status === 429) return { kind: "rate_limited", status, detail: (body && body.detail) || null };
   return { kind: "error", status, detail: (body && body.detail) || null };
+}
+
+/** Body-level check for the list endpoints, which answer HTTP 200 even when
+ * `available:false` (see classifyError's docstring) — GitHubPage's list body
+ * needs this BEFORE the "no repo" empty state so a local binding renders the
+ * degrade callout instead of "No GitHub repo connected". */
+export function isLocalSourcePayload(body: { available?: boolean; reason?: string | null } | null | undefined): boolean {
+  return !!body && body.available === false && body.reason === "local_source";
 }
 
 /* ---- merge chip states / dispatch labels ---------------------------------- */

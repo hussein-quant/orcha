@@ -148,6 +148,7 @@ from portal_backend.agent_event_routes import (  # noqa: E402
 )
 from portal_backend.application_lifecycle import (  # noqa: E402
     configure_compatibility as _configure_lifecycle,
+    start_local_index_warmer as _start_local_index_warmer,
     startup_migrate as _startup_migrate,
 )
 from portal_backend.embodiment_token_routes import (  # noqa: E402
@@ -204,6 +205,7 @@ _configure_agent_digest(_digest_curate)
 _configure_agent_events(_publish_prompt)
 _configure_lifecycle(lambda: run_migrations)
 app.on_event("startup")(_startup_migrate)
+app.on_event("startup")(_start_local_index_warmer)
 _configure_active_conversations(lambda: _MODEL_IDS)
 agent_registration_routes.configure_model_ids(lambda: _MODEL_IDS)
 agent_model_routes.configure_catalogs(lambda: _MODEL_IDS, lambda: _REASONING_EFFORT_IDS)

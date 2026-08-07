@@ -17,6 +17,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getJSON } from "../../api/client";
 import { Icon, OrcaMark, useToast } from "../../components/ui";
+import { RepoBadge } from "../github/RepoBadge";
+import "../github/connectRepo.css";
 import { CloudIcon } from "./icons";
 import { Face, GhAvatar } from "./avatars";
 import { PairingModal, type PairingIdentity } from "./PairingModal";
@@ -98,7 +100,7 @@ function ProjectCard({ c, stars, defCid, onStar, onPair }: {
       </div>
       <div className="pdesc">{c.description || "No description yet."}</div>
       {c.github_repo && (
-        <span className="prepo" title={c.github_repo}><Icon name="link" cls="" />{c.github_repo}</span>
+        <RepoBadge repo={c.github_repo} workspaceName={c.name} className="prepo" />
       )}
       <div className="pstats">
         <span><b>{Number(c.agents || 0)}</b> agent{Number(c.agents) === 1 ? "" : "s"}</span>

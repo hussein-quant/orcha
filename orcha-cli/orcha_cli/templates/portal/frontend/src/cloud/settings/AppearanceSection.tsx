@@ -29,6 +29,8 @@ export const SKINS = [
     sw: ["#151517", "#5a72ff", "#ff7a52", "#f2f2ee"] },
   { id: "minimal", name: "Minimalist", desc: "clean · gold",
     sw: ["#161616", "#c9a24b", "#f5f0e6", "#ffffff"] },
+  { id: "gold", name: "Gold", desc: "Desktop's amber accent, hairline borders — the same minimalist chrome, matched.",
+    sw: ["#141311", "#f0b94b", "#1d1b18", "#efe9df"] },
 ];
 
 export function currentSkin(): string {

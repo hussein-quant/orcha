@@ -1,6 +1,6 @@
 /* Skeleton loading states + the gentle content-swap fade (modules/app-skeleton.js).
    Token-driven only (var(--surface-2/-3), var(--border)) — correct in every skin
-   (classic, swiss, minimal) with zero skin-specific overrides needed. A single
+   (classic, swiss, minimal, gold) with zero skin-specific overrides needed. A single
    left-to-right shimmer sweep, same gradient shape as the pre-existing dormant
    `.sk` shimmer in styles/components.css, kept as its own `.ork-sk` class so this
    file has no dependency on that one. */
