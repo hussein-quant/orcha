@@ -368,7 +368,7 @@ def build_roster(signals: set, evidence: dict) -> "tuple[str, list]":
             _specialist(
                 "forge", "Backend engineer",
                 f"Owns the {label} service and its API surface",
-                _cite(evidence, "fastapi", "django", "flask", "go", "rust", "pyproject", "requirements"),
+                _cite(evidence, "fastapi", "django", "flask", "go", "rust", "pyproject", "requirements", "py_sources"),
             )
         )
         kinds.append("backend")
@@ -378,7 +378,7 @@ def build_roster(signals: set, evidence: dict) -> "tuple[str, list]":
             _specialist(
                 "swift", "iOS engineer",
                 "Builds and maintains the iOS/Swift app",
-                _cite(evidence, "xcodeproj", "swift_package", "ios_dir"),
+                _cite(evidence, "xcodeproj", "swift_package", "ios_dir", "swift_sources"),
             )
         )
         kinds.append("ios")
@@ -388,7 +388,7 @@ def build_roster(signals: set, evidence: dict) -> "tuple[str, list]":
             _specialist(
                 "droid", "Android engineer",
                 "Builds and maintains the Android/Kotlin app",
-                _cite(evidence, "android_dir", "gradle"),
+                _cite(evidence, "android_dir", "gradle", "kotlin_sources"),
             )
         )
         kinds.append("android")
