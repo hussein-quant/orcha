@@ -114,3 +114,34 @@ points but render a paywall that routes to premium; the server enforces it.
 - deploy/local/README.md positions local run as the free solo tier and names
   the team tier as hosted/paid (the OAuth overlay section notes multi-user
   login is a team feature).
+
+## Addendum 2 — code source: local or GitHub (2026-08-06, third requirement)
+
+Projects must be browsable from **either source**: the machine's own git
+repository (zero setup — the project directory orcha was init'd in) or
+GitHub. Local is the default that always works; GitHub layers on top.
+
+- **Token zero-setup first**: `orcha up` now mints `gh auth token` host-side
+  and passes it as `ORCHA_GITHUB_PAT` (App tokens > explicit env > gh);
+  the Settings PAT card is the fallback (stablyai/orca's model, adapted to
+  a containerized portal).
+- **Stack**: the portal mounts the project root read-only
+  (`..:/app/workspace:ro`, env `ORCHA_LOCAL_REPO_DIR=/app/workspace`);
+  the portal image gains the `git` binary.
+- **Binding**: the container's repo binding accepts the sentinel **`local`**
+  = "this project's own working tree". Every code path that resolves a
+  GitHub token/repo branches on it.
+- **LocalGitSource** (backend): the browse/tree/file/search/snapshot and
+  Code Space anchor layers run `git -C $ORCHA_LOCAL_REPO_DIR` —
+  rev-parse (ref→sha), ls-tree (tree + blob shas → honest outdated chips),
+  cat-file (file), git grep (contents search), `git archive` (the tarball
+  snapshot path, reusing the existing snapshot cache + symbol indexer
+  unchanged). v1 reads COMMITTED state (HEAD/branches); uncommitted diffs
+  stay the run-feed's job — documented, not fudged.
+- **GitHub-only surfaces degrade honestly**: the hub (issues/PRs/checks)
+  shows "connect GitHub for issues & PRs" when the binding is local —
+  browse/Code Space keep working.
+- **Frontend**: the Connect-repo picker shows two sections — “This
+  machine — local repository (<dirname>)” and the GitHub repo list (whatever
+  token source is active); a `Local` badge marks a local binding. The repo
+  listing payload carries the local entry so the picker needs no new route.
