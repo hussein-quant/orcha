@@ -7,6 +7,7 @@ import os
 import pathlib
 import re
 import secrets
+import shutil
 import socket
 import subprocess
 from typing import Callable, Optional
@@ -188,6 +189,31 @@ def export_pairing_host(discover: Callable[[], Optional[str]]) -> None:
         os.environ[PAIRING_HOST_ENV] = host
 
 
+def export_gh_token() -> None:
+    """Local run: ride the developer's existing `gh` login for GitHub features.
+
+    The portal runs in a container and can't reach the host keyring, but the
+    host CLI can — mint the token gh already holds and pass it through the
+    compose env as ORCHA_GITHUB_PAT (lowest-precedence token source; App
+    installation tokens still win). An explicit ORCHA_GITHUB_PAT, a missing
+    gh, or a logged-out gh all leave the env untouched — the Settings →
+    GitHub access card remains the fallback. Never raises."""
+    if (os.environ.get("ORCHA_GITHUB_PAT") or "").strip():
+        return
+    if not shutil.which("gh"):
+        return
+    try:
+        probe = subprocess.run(
+            ["gh", "auth", "token"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    token = (probe.stdout or "").strip()
+    if probe.returncode == 0 and token:
+        os.environ["ORCHA_GITHUB_PAT"] = token
+        print("[orcha] GitHub: using your `gh` CLI login for the portal's GitHub features")
+
+
 def compose(
     orcha_dir: pathlib.Path,
     *args: str,
@@ -205,5 +231,6 @@ def compose(
                 pass
         ensure_key(orcha_dir)
         export_host()
+        export_gh_token()
     command = ["docker", "compose", "-f", str(orcha_dir / "docker-compose.yml"), *args]
     return subprocess.run(command, check=check, capture_output=capture, text=capture)
