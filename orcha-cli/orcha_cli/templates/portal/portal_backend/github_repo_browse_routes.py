@@ -529,7 +529,12 @@ def _local_file_response(repo: str, resolved_ref: str, cid: str, clean_path: str
         raise HTTPException(400, f"path {clean_path!r} is a directory, not a file")
     raw_bytes = local_git.file_bytes(resolved_ref, clean_path)
     if raw_bytes is None:
-        raise RuntimeError("github_status:404")
+        # Honest local wording — the shared hub mapper would say "issue or pull
+        # request not found", which is nonsense for a local file read.
+        return {
+            "available": False, "reason": "not_found", "repo": repo,
+            "detail": f"path {clean_path!r} not found at {resolved_ref[:7]} in the local repository",
+        }
     size = len(raw_bytes)
     if _is_binary_content(raw_bytes):
         return {

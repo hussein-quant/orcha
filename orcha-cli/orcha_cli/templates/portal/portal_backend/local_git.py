@@ -332,9 +332,13 @@ def log1(ref=None) -> "dict | None":
 
 
 def workspace_name() -> "str | None":
-    """The workspace directory's own basename — used as the local entry's display
-    `name` in the repos list (e.g. "Orcha" for a project mounted at .../Orcha).
-    None when the env dir isn't set."""
+    """The local entry's display `name` in the repos list. Inside the container the
+    mount lands at a fixed path (/app/workspace), whose basename says nothing about
+    the project — so the stack passes the real project name via ORCHA_LOCAL_REPO_NAME
+    (compose template) and the mount basename is only the fallback."""
+    explicit = (os.environ.get("ORCHA_LOCAL_REPO_NAME") or "").strip()
+    if explicit:
+        return explicit
     path = _env_dir()
     if not path:
         return None
