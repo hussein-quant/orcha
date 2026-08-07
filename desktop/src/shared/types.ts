@@ -1,8 +1,10 @@
-/** Fixed width (CSS px) of the renderer's left rail (stacks + All-projects + Add-project).
- *  Shared between main (embedded portal view bounds — see main/viewBounds.ts) and the
- *  renderer (the Rail component's own width) so the view's left edge always lines up
- *  exactly with the rail's right edge — no gap, no overlap. */
-export const RAIL_WIDTH = 64
+/** Fixed height (CSS px) of the renderer's top bar, shown above the embedded portal view
+ *  once a project is open ("← Projects" + name + status dot). Shared between main (embedded
+ *  portal view bounds — see main/viewBounds.ts) and the renderer (the TopBar component's own
+ *  height) so the view's top edge always lines up exactly with the bar's bottom edge — no
+ *  gap, no overlap. Replaces the removed left icon rail (RAIL_WIDTH) — navigation is now a
+ *  project-cards home screen + this bar, not a permanent side rail. */
+export const TOPBAR_HEIGHT = 40
 
 /** One orcha-* Docker compose stack (stack:db:container is 1:1:1 per orcha's model). */
 export interface Stack {
@@ -21,6 +23,24 @@ export interface Stack {
   /** Absolute project root on disk (parent of .orcha), from the compose working_dir label;
    *  null when the label is absent. Used by Delete & reset to clean on-disk artifacts. */
   folder: string | null
+}
+
+// ---- Home screen: per-container project cards (GET /api/containers) --------------------
+// Mirrors the cloud hub's ProjectsPage contract (resources/orcha-templates/portal/frontend/
+// src/cloud/projects/ProjectsPage.tsx + its portal_backend route) — the desktop home renders
+// one card per container, not per stack, since a stack can (per mig 037) hold more than one
+// project. `github_repo === 'local'` is the LOCAL-binding sentinel (see RepoBadge upstream).
+
+export interface ProjectContainer {
+  id: string
+  name: string
+  description: string | null
+  status: string | null
+  github_repo: string | null
+  agents: number
+  tasks: number
+  needs_you: number
+  member_count: number | null
 }
 
 export type BridgeError =
@@ -284,6 +304,14 @@ export interface OrchaDesktopApi {
   /** POST a JSON body to a path on a stack's own localhost portal. Same port/path
    *  validation and error shape as portalGet. */
   portalPost(apiPort: number, path: string, body: unknown): Promise<unknown>
+  /** PUT a JSON body to a path on a stack's own localhost portal. Same port/path
+   *  validation and error shape as portalGet — used by the code-source auto-bind (PUT
+   *  .../github) and the roster analysis persist call. */
+  portalPut(apiPort: number, path: string, body: unknown): Promise<unknown>
+  /** Deep roster analysis of `folder` via the user's own local Claude Code subscription.
+   *  Never rejects — {ok:false, reason} on any failure (claude absent, timeout, malformed
+   *  output); the caller (FleetStep) treats that as "nothing to show", not an error. */
+  analyzeProject(folder: string): Promise<AnalyzeProjectResult>
 }
 
 // ---- Fleet suggestion (post-provision "Meet your suggested fleet" step) -----------------
@@ -308,6 +336,21 @@ export interface RosterSuggestResponse {
 export interface RosterAcceptResult {
   created: string[]
 }
+
+// ---- Deep roster analysis (local Claude Code subscription) ------------------------------
+// Runs the host `claude` CLI once against a compact README+tree prompt. Never throws —
+// {ok:false, reason} on any failure (claude absent, timeout, malformed output).
+
+export interface AnalyzeAgentSuggestion {
+  alias: string
+  role: string
+  focus: string
+  rationale: string
+}
+
+export type AnalyzeProjectResult =
+  | { ok: true; summary: string; agents: AnalyzeAgentSuggestion[] }
+  | { ok: false; reason: string }
 
 /** One thing waiting on the human, surfaced in tray/popover/notifications/cards. */
 export interface AttentionItem {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import { provision, type EngineDeps } from './initEngine'
 import type { ProgressEvent, ProvisionStep } from '../shared/types'
 
@@ -178,5 +178,58 @@ describe('provision — non-fatal steps', () => {
       .mockRejectedValueOnce(new Error('boom')) // human
     const res = await provision({ folder: '/proj', mode: 'init', name: 'demo' }, () => {}, d)
     expect(res.warnings.some((w) => /human/i.test(w))).toBe(true)
+  })
+})
+
+describe('provision — gh token injection at compose-up (parity with `orcha up`)', () => {
+  const origPat = process.env.ORCHA_GITHUB_PAT
+
+  afterEach(() => {
+    if (origPat === undefined) delete process.env.ORCHA_GITHUB_PAT
+    else process.env.ORCHA_GITHUB_PAT = origPat
+  })
+
+  it('passes the resolved gh token as extraEnv on the compose up call when ORCHA_GITHUB_PAT is unset', async () => {
+    delete process.env.ORCHA_GITHUB_PAT
+    const ghAuthToken = vi.fn().mockResolvedValue('gho_from_host')
+    const d = deps({ ghAuthToken })
+    ;(d.fetchJson as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ container_id: 'c1' })
+      .mockResolvedValueOnce({ agent_id: 'h1' })
+    await provision({ folder: '/proj', mode: 'init', name: 'demo' }, () => {}, d)
+    expect(ghAuthToken).toHaveBeenCalled()
+    const calls = (d.exec as ReturnType<typeof vi.fn>).mock.calls as Array<[string, string[], NodeJS.ProcessEnv?]>
+    const upCall = calls.find(([, args]) => args.includes('up'))
+    expect(upCall?.[2]).toEqual({ ORCHA_GITHUB_PAT: 'gho_from_host' })
+  })
+
+  it('does not call ghAuthToken (or pass extraEnv) when ORCHA_GITHUB_PAT is already set', async () => {
+    process.env.ORCHA_GITHUB_PAT = 'preset-token'
+    const ghAuthToken = vi.fn().mockResolvedValue('gho_from_host')
+    const d = deps({ ghAuthToken })
+    ;(d.fetchJson as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ container_id: 'c1' })
+      .mockResolvedValueOnce({ agent_id: 'h1' })
+    await provision({ folder: '/proj', mode: 'init', name: 'demo' }, () => {}, d)
+    expect(ghAuthToken).not.toHaveBeenCalled()
+    const calls = (d.exec as ReturnType<typeof vi.fn>).mock.calls as Array<[string, string[], NodeJS.ProcessEnv?]>
+    const upCall = calls.find(([, args]) => args.includes('up'))
+    expect(upCall?.[2]).toBeUndefined()
+  })
+
+  it('does not pass extraEnv when gh has no token (null) or the dep is omitted', async () => {
+    delete process.env.ORCHA_GITHUB_PAT
+    const ghAuthToken = vi.fn().mockResolvedValue(null)
+    const d = deps({ ghAuthToken })
+    ;(d.fetchJson as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ container_id: 'c1' })
+      .mockResolvedValueOnce({ agent_id: 'h1' })
+    await provision({ folder: '/proj', mode: 'init', name: 'demo' }, () => {}, d)
+    const calls = (d.exec as ReturnType<typeof vi.fn>).mock.calls as Array<[string, string[], NodeJS.ProcessEnv?]>
+    const upCall = calls.find(([, args]) => args.includes('up'))
+    expect(upCall?.[2]).toBeUndefined()
   })
 })

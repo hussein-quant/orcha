@@ -37,7 +37,9 @@ beforeEach(() => {
     onNavigate: vi.fn().mockReturnValue(() => {}),
     onPortalActive: vi.fn().mockReturnValue(() => {}),
     portalGet: vi.fn().mockRejectedValue({ code: 'PORTAL_REQUEST_FAILED', status: 404 }),
-    portalPost: vi.fn().mockRejectedValue({ code: 'PORTAL_REQUEST_FAILED', status: 404 })
+    portalPost: vi.fn().mockRejectedValue({ code: 'PORTAL_REQUEST_FAILED', status: 404 }),
+    portalPut: vi.fn().mockRejectedValue({ code: 'PORTAL_REQUEST_FAILED', status: 404 }),
+    analyzeProject: vi.fn().mockResolvedValue({ ok: false, reason: 'claude is not installed on this Mac' })
   }
 })
 
@@ -98,6 +100,68 @@ describe('OnboardingWizard — local folder source', () => {
     await waitFor(() => expect(onDone).toHaveBeenCalled())
   })
 
+  it('auto-binds the code source (PUT .../github) right after a successful provision of a git folder', async () => {
+    ;(window.orchaDesktop.portalGet as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_apiPort: number, path: string) => {
+        if (path === '/api/containers') return { containers: [{ id: 'c1' }] }
+        if (path === '/api/containers/c1') return { agents: [{ id: 'h1', kind: 'human' }] }
+        throw { code: 'PORTAL_REQUEST_FAILED', status: 404 }
+      }
+    )
+    ;(window.orchaDesktop.portalPut as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true })
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} />)
+
+    await continueToSource(user)
+    await user.click(screen.getByRole('button', { name: /local folder/i }))
+    await user.click(screen.getByRole('button', { name: /choose existing folder/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /next/i })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: /next/i }))
+    await waitFor(() => expect(screen.getByDisplayValue('demo')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /create project/i }))
+
+    await waitFor(() =>
+      expect(window.orchaDesktop.portalPut).toHaveBeenCalledWith(8001, '/api/containers/c1/github', {
+        repo: 'local',
+        actor_agent_id: 'h1'
+      })
+    )
+    // Surfaced on the Finish step's summary once bound.
+    await waitFor(() => expect(screen.getByRole('button', { name: /open your portal/i })).toBeInTheDocument())
+    expect(screen.getByText('Code source')).toBeInTheDocument()
+    expect(screen.getByText('local repository')).toBeInTheDocument()
+  })
+
+  it('tolerates a non-200 on the github bind (e.g. an open-portal stack rejecting "local") — never blocks the wizard', async () => {
+    ;(window.orchaDesktop.portalGet as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_apiPort: number, path: string) => {
+        if (path === '/api/containers') return { containers: [{ id: 'c1' }] }
+        if (path === '/api/containers/c1') return { agents: [{ id: 'h1', kind: 'human' }] }
+        throw { code: 'PORTAL_REQUEST_FAILED', status: 404 }
+      }
+    )
+    ;(window.orchaDesktop.portalPut as ReturnType<typeof vi.fn>).mockRejectedValue({
+      code: 'PORTAL_REQUEST_FAILED',
+      status: 400
+    })
+    const onDone = vi.fn()
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={onDone} />)
+
+    await continueToSource(user)
+    await user.click(screen.getByRole('button', { name: /local folder/i }))
+    await user.click(screen.getByRole('button', { name: /choose existing folder/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /next/i })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: /next/i }))
+    await waitFor(() => expect(screen.getByDisplayValue('demo')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /create project/i }))
+
+    // The wizard still completes normally — no error surfaced for the failed bind.
+    await finishFromPortal(user, 'orcha-demo')
+    await waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(screen.queryByText('Code source')).not.toBeInTheDocument()
+  })
+
   it('reconnects (mode upgrade) and skips the Details step for an already-initialized folder', async () => {
     ;(window.orchaDesktop.inspectFolder as ReturnType<typeof vi.fn>).mockResolvedValue({
       initialized: true,
@@ -147,9 +211,12 @@ describe('OnboardingWizard — local folder source', () => {
     expect(await screen.findByText(/git init.*unlocks the local code-source features/i)).toBeInTheDocument()
     // Paused — the Fleet/Finish handoff waits on the explicit Continue click.
     expect(window.orchaDesktop.openOnboardingPortal).not.toHaveBeenCalled()
+    // Auto-bind is skipped entirely for a non-git folder — never calls portalPut.
+    expect(window.orchaDesktop.portalPut).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: /^continue$/i }))
     await finishFromPortal(user, 'orcha-demo')
     await waitFor(() => expect(onDone).toHaveBeenCalled())
+    expect(window.orchaDesktop.portalPut).not.toHaveBeenCalled()
   })
 
   it('ignores progress events from a stale run id', async () => {
@@ -318,10 +385,17 @@ describe('OnboardingWizard — walker: welcome / fleet / finish', () => {
         { alias: 'Atlas', role: 'Lead', focus: 'Coordination', is_main: true, rationale: 'found ios/' }
       ]
     }
-    ;(window.orchaDesktop.portalGet as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ containers: [{ id: 'c1' }] })
-      .mockResolvedValueOnce(suggestPayload)
-      .mockResolvedValueOnce({ agents: [{ id: 'h1', kind: 'human' }] })
+    // Keyed on path (not a shared mockResolvedValueOnce queue) — the auto-bind fire-and-forget
+    // call (bindCodeSource, wired into finishProvision) ALSO hits portalGet/portalPut around
+    // the same time FleetStep mounts, so a shared once-queue is order-dependent and flaky.
+    ;(window.orchaDesktop.portalGet as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_apiPort: number, path: string) => {
+        if (path === '/api/containers') return { containers: [{ id: 'c1' }] }
+        if (path === '/api/containers/c1/roster/suggest') return suggestPayload
+        if (path === '/api/containers/c1') return { agents: [{ id: 'h1', kind: 'human' }] }
+        throw { code: 'PORTAL_REQUEST_FAILED', status: 404 }
+      }
+    )
     ;(window.orchaDesktop.portalPost as ReturnType<typeof vi.fn>).mockResolvedValue({ created: ['Atlas'] })
 
     const user = userEvent.setup()

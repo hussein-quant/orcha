@@ -1,35 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Crown, Loader2 } from 'lucide-react'
-import type { RosterSuggestion, RosterSuggestResponse } from '../../../../shared/types'
+import { Crown, Loader2, Sparkles } from 'lucide-react'
+import type { RosterSuggestResponse } from '../../../../shared/types'
 import { Button } from '../../ui/Button'
 import { Card } from '../../ui/Card'
-
-interface ContainerRow {
-  id: string
-}
-interface AgentRow {
-  id: string
-  kind: string
-}
-
-/** Resolve the container id for a just-provisioned stack: GET /api/containers and take the
- *  newest/only one (mirrors how attention.ts's fetchStackAttention learns cid post-provision —
- *  there's exactly one container per stack in orcha's model). */
-async function resolveContainerId(apiPort: number): Promise<string | null> {
-  const res = (await window.orchaDesktop.portalGet(apiPort, '/api/containers')) as {
-    containers: ContainerRow[]
-  }
-  return res.containers[0]?.id ?? null
-}
-
-/** Find the human actor id from the container snapshot's agent roster (kind: 'human') — the
- *  accept call attributes fleet creation to the person running onboarding. */
-async function resolveHumanAgentId(apiPort: number, cid: string): Promise<string | null> {
-  const detail = (await window.orchaDesktop.portalGet(apiPort, `/api/containers/${cid}`)) as {
-    agents: AgentRow[]
-  }
-  return detail.agents.find((a) => a.kind === 'human')?.id ?? null
-}
+import { resolveContainerId, resolveHumanAgentId } from '../portalIdentity'
+import ProjectAnalysisCard from './ProjectAnalysisCard'
+import { useProjectAnalysis, mergeSuggestions, type MergedSuggestion } from './useProjectAnalysis'
 
 type LoadState =
   | { kind: 'loading' }
@@ -41,18 +17,31 @@ type LoadState =
 /** "Meet your suggested fleet" — shown after a successful provision (first-run AND
  *  add-project). Feature-detects the roster/suggest endpoint: any non-200 (older/open CLI
  *  portals without it, most commonly 404) skips this step entirely and silently via
- *  `onUnavailable`, so the wizard's walker treats it like it was never there. */
+ *  `onUnavailable`, so the wizard's walker treats it like it was never there.
+ *
+ *  Alongside the instant heuristic suggestions, a deep analysis of the project via the
+ *  user's own local Claude Code subscription runs in the background (see
+ *  onboarding/steps/useProjectAnalysis.ts) — its suggested agents get merged into the same
+ *  card grid (badged "Claude"), and its summary appears in a card above them once it
+ *  resolves. The step is fully usable before/without it: accept is enabled immediately, and
+ *  a late analysis result just appends more cards. */
 export default function FleetStep({
   apiPort,
+  folder = null,
   onDone,
   onUnavailable
 }: {
   apiPort: number
+  /** The just-provisioned project's folder — kicks off the background analysis. null/absent
+   *  skips the analysis entirely (no shimmer), e.g. if the wizard never resolved a folder. */
+  folder?: string | null
   onDone: () => void
   onUnavailable: () => void
 }) {
   const [state, setState] = useState<LoadState>({ kind: 'loading' })
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const analysis = useProjectAnalysis(folder)
+  const [persisted, setPersisted] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -89,6 +78,55 @@ export default function FleetStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiPort])
 
+  // Once BOTH the container id and a successful analysis are known, persist it to the
+  // portal (feature-detected: a 404 — older/open CLI portal without the route — is silently
+  // swallowed). Fires once per mount via the `persisted` guard.
+  useEffect(() => {
+    if (persisted) return
+    if (state.kind !== 'ready' && state.kind !== 'creating') return
+    if (analysis.kind !== 'done' || !analysis.result.ok) return
+    setPersisted(true)
+    const { cid, humanAgentId } = state
+    const { summary, agents } = analysis.result
+    void window.orchaDesktop
+      .portalPut(apiPort, `/api/containers/${cid}/roster/analysis`, {
+        summary,
+        suggestions: agents,
+        source: 'claude-local',
+        actor_agent_id: humanAgentId
+      })
+      .catch(() => {
+        // Feature-detect: no such route (older/open portal) or any other failure — this is
+        // a nice-to-have persist, never worth surfacing to the user.
+      })
+  }, [analysis, state, apiPort, persisted])
+
+  // Once the analysis resolves, default its NEW (non-duplicate) aliases to selected too —
+  // same as the heuristic list's initial seed — without touching any selection the user
+  // already toggled. Written into real `selected` state (not just a render-time display
+  // default) so accept — which filters by `selected` — actually includes them.
+  useEffect(() => {
+    if (state.kind !== 'ready') return
+    if (analysis.kind !== 'done' || !analysis.result.ok) return
+    const heuristicAliases = new Set(state.data.suggestions.map((s) => s.alias.toLowerCase()))
+    const newAliases = analysis.result.agents
+      .map((a) => a.alias)
+      .filter((alias) => !heuristicAliases.has(alias.toLowerCase()))
+    if (newAliases.length === 0) return
+    setSelected((prev) => {
+      const next = new Set(prev)
+      let changed = false
+      for (const alias of newAliases) {
+        if (!next.has(alias)) {
+          next.add(alias)
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysis, state])
+
   function toggle(alias: string): void {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -103,7 +141,9 @@ export default function FleetStep({
     const { cid, humanAgentId, data } = state
     setState({ kind: 'creating', cid, humanAgentId, data })
     try {
-      const chosen = data.suggestions.filter((s) => selected.has(s.alias))
+      const analysisAgents = analysis.kind === 'done' && analysis.result.ok ? analysis.result.agents : []
+      const merged = mergeSuggestions(data.suggestions, analysisAgents)
+      const chosen = merged.filter((s) => selected.has(s.alias)).map(({ source: _source, ...s }) => s)
       const res = (await window.orchaDesktop.portalPost(apiPort, `/api/containers/${cid}/roster/suggest/accept`, {
         suggestions: chosen,
         actor_agent_id: humanAgentId
@@ -151,7 +191,9 @@ export default function FleetStep({
   }
 
   const { data } = state
-  const sorted = [...data.suggestions].sort((a, b) => Number(b.is_main) - Number(a.is_main))
+  const analysisAgents = analysis.kind === 'done' && analysis.result.ok ? analysis.result.agents : []
+  const merged = mergeSuggestions(data.suggestions, analysisAgents)
+  const sorted = [...merged].sort((a, b) => Number(b.is_main) - Number(a.is_main))
   const creating = state.kind === 'creating'
 
   return (
@@ -163,6 +205,11 @@ export default function FleetStep({
           Based on {data.signals.join(', ') || 'your project'}, here's who we'd bring on.
         </p>
       </div>
+
+      {analysis.kind === 'pending' && (
+        <p className="onb-shimmer text-xs text-text/40">Analyzing your project with Claude…</p>
+      )}
+      {analysis.kind === 'done' && analysis.result.ok && <ProjectAnalysisCard summary={analysis.result.summary} />}
 
       <div className="onb-stagger flex flex-col gap-2">
         {sorted.map((s, i) => (
@@ -199,7 +246,7 @@ function FleetCard({
   checked,
   onToggle
 }: {
-  suggestion: RosterSuggestion
+  suggestion: MergedSuggestion
   index: number
   checked: boolean
   onToggle: () => void
@@ -222,6 +269,12 @@ function FleetCard({
           {suggestion.is_main && <Crown className="h-3.5 w-3.5 text-accent" aria-label="Lead agent" />}
           <span className="font-medium text-text">{suggestion.alias}</span>
           <span className="text-xs text-text/50">{suggestion.role}</span>
+          {suggestion.source === 'claude' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+              <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
+              Claude
+            </span>
+          )}
         </div>
         <span className="text-xs text-text/70">{suggestion.focus}</span>
         <span className="text-[11px] text-text/40">{suggestion.rationale}</span>

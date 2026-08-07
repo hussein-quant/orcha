@@ -22,6 +22,21 @@ export async function ghIsAuthenticated(exec: Exec): Promise<boolean> {
   }
 }
 
+/** `gh auth token` — the host's gh CLI's own OAuth token, when logged in. Used to give a
+ *  freshly-provisioned stack's container the same GitHub access the desktop user already
+ *  has (parity with the CLI's `orcha up`, which does the same host-side lookup), without
+ *  ever asking the user to paste a PAT. null on any failure (gh missing, logged out, no
+ *  token) — never throws; callers treat null as "nothing to inject". */
+export async function ghAuthToken(exec: Exec): Promise<string | null> {
+  try {
+    const res = await exec('gh', ['auth', 'token'])
+    const token = res.stdout.trim()
+    return token || null
+  } catch {
+    return null
+  }
+}
+
 /** The user's repos via `gh repo list --json nameWithOwner,description --limit 100`.
  *  Empty array (not a throw) on any failure — the renderer falls back to the URL field. */
 export async function ghListRepos(exec: Exec): Promise<GhRepo[]> {

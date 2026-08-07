@@ -4,6 +4,7 @@ import { Button } from '../ui/Button'
 import { ProgressPills, type PillSegment } from './ProgressPills'
 import { SkipConfirmDialog } from './SkipConfirmDialog'
 import { useProvisionStream } from './useProvisionStream'
+import { bindCodeSource } from './bindCodeSource'
 import WelcomeStep from './steps/WelcomeStep'
 import PreflightStep from './steps/PreflightStep'
 import SourceStep, { type ProjectSource } from './steps/SourceStep'
@@ -107,6 +108,8 @@ export default function OnboardingWizard({
   const [project, setProject] = useState<string | null>(null)
   const [apiPort, setApiPort] = useState<number | null>(null)
   const [fleetCreated, setFleetCreated] = useState(false)
+  const [codeSourceBound, setCodeSourceBound] = useState(false)
+  const [projectFolder, setProjectFolder] = useState<string | null>(null)
   const [confirmingSkip, setConfirmingSkip] = useState(false)
   const { events } = useProvisionStream(null)
 
@@ -147,10 +150,19 @@ export default function OnboardingWizard({
     onDone()
   }
 
-  function finishProvision(res: { project: string; apiPort: number; warnings: string[] }, showGitTip: boolean): void {
+  function finishProvision(
+    res: { project: string; apiPort: number; warnings: string[] },
+    showGitTip: boolean,
+    isGitRepo: boolean
+  ): void {
     setDone(true)
     setProject(res.project)
     setApiPort(res.apiPort)
+    // Auto-bind the code source (fixes the "Code Space blank after clone/pick" bug) —
+    // fire-and-forget: never gates the wizard walker, and bindCodeSource itself never
+    // throws (feature-detects the endpoint, swallows any non-200). The Finish step's
+    // summary line only appears once this resolves true.
+    void bindCodeSource(res.apiPort, isGitRepo).then(setCodeSourceBound)
     // If something needs the user's attention (e.g. the agent worker couldn't start, or
     // this folder isn't a git repo yet), pause on a plain-language note rather than
     // silently walking them into the Fleet step.
@@ -173,6 +185,7 @@ export default function OnboardingWizard({
     setPhase('provision')
     setProvisioning(true)
     setError(null)
+    setProjectFolder(choice.folder)
     try {
       // A folder with .orcha already provisioned reconnects (mode 'upgrade': preserves
       // the existing ports/config, skips container-create + human-register) instead of
@@ -183,7 +196,7 @@ export default function OnboardingWizard({
         name,
         objective
       })
-      finishProvision(res, !state.isGitRepo)
+      finishProvision(res, !state.isGitRepo, state.isGitRepo)
     } catch (err) {
       failProvision(err)
     } finally {
@@ -197,9 +210,11 @@ export default function OnboardingWizard({
     setPhase('provision')
     setProvisioning(true)
     setError(null)
+    setProjectFolder(dest)
     try {
       const res = await window.orchaDesktop.cloneAndProvision({ repoUrl, dest })
-      finishProvision(res, false)
+      // A repo we just cloned is always a git repo.
+      finishProvision(res, false, true)
     } catch (err) {
       failProvision(err)
     } finally {
@@ -298,6 +313,7 @@ export default function OnboardingWizard({
         {phase === 'fleet' && apiPort !== null && (
           <FleetStep
             apiPort={apiPort}
+            folder={projectFolder}
             onDone={() => {
               setFleetCreated(true)
               setPhase('finish')
@@ -310,6 +326,7 @@ export default function OnboardingWizard({
             project={project}
             portalUrl={apiPort !== null ? `http://localhost:${apiPort}` : ''}
             fleetCreated={fleetCreated}
+            codeSourceBound={codeSourceBound}
             onOpenPortal={() => void openPortalAndFinish(project)}
           />
         )}

@@ -8,11 +8,16 @@ export default function FinishStep({
   project,
   portalUrl,
   fleetCreated,
+  codeSourceBound = false,
   onOpenPortal
 }: {
   project: string
   portalUrl: string
   fleetCreated: boolean
+  /** True once bindCodeSource resolved the just-provisioned container to its local git
+   *  repo (see onboarding/bindCodeSource.ts) — surfaced as one extra summary line, never
+   *  blocking: a false here just means an older portal or a non-git folder, not an error. */
+  codeSourceBound?: boolean
   onOpenPortal: () => void
 }) {
   return (
@@ -37,6 +42,12 @@ export default function FinishStep({
           <span className="text-text/50">Fleet</span>
           <span className="font-medium text-text">{fleetCreated ? 'Created' : 'Not created'}</span>
         </Card>
+        {codeSourceBound && (
+          <Card className="flex items-center justify-between text-sm" style={{ '--onb-stagger-i': 3 } as React.CSSProperties}>
+            <span className="text-text/50">Code source</span>
+            <span className="font-medium text-text">local repository</span>
+          </Card>
+        )}
       </div>
       <Button size="lg" className="onb-rise-in" data-onb-primary="true" onClick={onOpenPortal}>
         Open your portal

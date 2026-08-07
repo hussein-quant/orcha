@@ -1,74 +1,65 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AttentionItem, Stack, WizardVariant } from '../../shared/types'
-import ManagerView from './components/ManagerView'
+import type { Stack, WizardVariant } from '../../shared/types'
+import ProjectsHome from './home/ProjectsHome'
 import OnboardingWizard from './onboarding/OnboardingWizard'
-import Rail from './components/Rail'
+import TopBar from './components/TopBar'
 
 type AppMode = 'loading' | 'manager' | 'onboarding'
 
-const RAIL_POLL_MS = 5000
-
-function countsByProject(items: AttentionItem[]): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const item of items) counts.set(item.project, (counts.get(item.project) ?? 0) + 1)
-  return counts
-}
-
+/** Single-window shell: the project-cards home screen (ProjectsHome) is the app's only
+ *  navigation surface now — the old left icon rail is gone. When a project is open, a slim
+ *  TopBar ("← Projects" + name + status dot) sits above the embedded portal WebContentsView
+ *  (main draws that view itself; this bar is native chrome the view never covers — see
+ *  main/viewBounds.ts, which now reserves TOP space instead of LEFT). */
 export default function App() {
   const [mode, setMode] = useState<AppMode>('loading')
   // Which framing the wizard uses when mode === 'onboarding'. Defaults to 'first-run' —
   // the zero-stack path below sets it explicitly; add-project entry points override it.
   const [wizardVariant, setWizardVariant] = useState<WizardVariant>('first-run')
-  // Rail data: kept independent of ManagerView's own poll so the rail (always on screen,
-  // even while a portal view covers the rest of the window) stays live regardless of mode.
-  const [railStacks, setRailStacks] = useState<Stack[]>([])
-  const [attentionCounts, setAttentionCounts] = useState<Map<string, number>>(new Map())
   // Which stack's embedded portal view (main-process WebContentsView) is currently showing.
-  // null = the renderer's own content (home/manager or the wizard) is on screen. Main is the
-  // source of truth (a notification click or deep link can change this without any click
-  // here), mirrored via onPortalActive.
+  // null = the renderer's own content (home/manager or the wizard) is on screen — no TopBar.
+  // Main is the source of truth (a notification click or deep link can change this without
+  // any click here), mirrored via onPortalActive; we also keep the live Stack object (not
+  // just its project id) so TopBar can show a name + running dot without a second fetch.
   const [activeProject, setActiveProject] = useState<string | null>(null)
+  const [stacks, setStacks] = useState<Stack[]>([])
 
-  const refreshRail = useCallback(async () => {
+  const refreshStacks = useCallback(async () => {
     try {
-      const [stacks, attention] = await Promise.all([
-        window.orchaDesktop.listStacks(),
-        window.orchaDesktop.listAttention().catch((): AttentionItem[] => [])
-      ])
-      setRailStacks(stacks)
-      setAttentionCounts(countsByProject(attention))
+      setStacks(await window.orchaDesktop.listStacks())
     } catch {
-      setRailStacks([])
-      setAttentionCounts(new Map())
+      setStacks([])
     }
   }, [])
 
-  // Decide the initial mode before showing the manager: zero stacks → onboarding.
+  // Decide the initial mode before showing the home screen: zero stacks → onboarding.
   useEffect(() => {
     let cancelled = false
     void window.orchaDesktop
       .listStacks()
-      .then((stacks) => {
+      .then((s) => {
         if (cancelled) return
+        setStacks(s)
         setWizardVariant('first-run')
-        setMode(stacks.length === 0 ? 'onboarding' : 'manager')
+        setMode(s.length === 0 ? 'onboarding' : 'manager')
       })
       .catch(() => {
-        if (!cancelled) setMode('manager') // Docker down → manager shows its banner
+        if (!cancelled) setMode('manager') // Docker down → ProjectsHome shows its banner
       })
     return () => {
       cancelled = true
     }
   }, [])
 
+  // Keep a live stack list for the TopBar's name/status lookup — cheap poll, independent of
+  // ProjectsHome's own (richer, per-container) refresh cycle.
   useEffect(() => {
-    void refreshRail()
-    const timer = setInterval(() => void refreshRail(), RAIL_POLL_MS)
+    const timer = setInterval(() => void refreshStacks(), 5000)
     return () => clearInterval(timer)
-  }, [refreshRail])
+  }, [refreshStacks])
 
   // Main is the source of truth for which portal view is showing (tray/notification/deep
-  // link can change it without a click in this window) — mirror it into rail highlight state.
+  // link can change it without a click in this window).
   useEffect(() => window.orchaDesktop.onPortalActive(({ project }) => setActiveProject(project)), [])
 
   // File→Add Project (main) asks us to switch. Main already hides any embedded portal view
@@ -85,16 +76,6 @@ export default function App() {
     []
   )
 
-  /** Open a stack's portal embedded in the window (replaces the old per-portal
-   *  BrowserWindow) and make sure we're not still showing the wizard/onboarding DOM —
-   *  a WebContentsView draws above renderer content, so leaving the wizard mounted
-   *  underneath a shown portal would just be wasted render, not a visual bug, but
-   *  switching modes keeps the two mutually exclusive as designed. */
-  const showStackPortal = useCallback((stack: Stack) => {
-    setMode('manager')
-    void window.orchaDesktop.portalShow(stack.project)
-  }, [])
-
   const showHome = useCallback(() => {
     void window.orchaDesktop.portalHide()
     setMode('manager')
@@ -109,16 +90,11 @@ export default function App() {
 
   if (mode === 'loading') return <div className="h-full animate-fade-in" />
 
+  const activeStack = activeProject !== null ? stacks.find((s) => s.project === activeProject) : undefined
+
   return (
-    <div className="flex h-full">
-      <Rail
-        stacks={railStacks}
-        activeProject={mode === 'onboarding' ? null : activeProject}
-        attentionCounts={attentionCounts}
-        onSelectStack={showStackPortal}
-        onSelectHome={showHome}
-        onAddProject={startAddProject}
-      />
+    <div className="flex h-full flex-col">
+      {mode === 'manager' && activeStack && <TopBar stack={activeStack} onBack={showHome} />}
       <div className="min-w-0 flex-1">
         {mode === 'onboarding' ? (
           <OnboardingWizard
@@ -127,7 +103,10 @@ export default function App() {
             onCancel={wizardVariant === 'add-project' ? () => setMode('manager') : undefined}
           />
         ) : (
-          <ManagerView onCreate={startAddProject} />
+          // The home grid renders underneath the embedded portal view even while a project is
+          // open (the WebContentsView draws above it) — cheap to leave mounted, and it's
+          // instantly there once the TopBar's back button hides the view.
+          <ProjectsHome onCreate={startAddProject} />
         )}
       </div>
     </div>

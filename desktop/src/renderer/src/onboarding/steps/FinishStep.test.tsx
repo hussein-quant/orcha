@@ -31,4 +31,25 @@ describe('FinishStep', () => {
     )
     expect(screen.getByText('Not created')).toBeInTheDocument()
   })
+
+  it('shows a "Code source: local repository" line when codeSourceBound is true', () => {
+    render(
+      <FinishStep
+        project="orcha-demo"
+        portalUrl="http://localhost:8001"
+        fleetCreated={false}
+        codeSourceBound
+        onOpenPortal={vi.fn()}
+      />
+    )
+    expect(screen.getByText('Code source')).toBeInTheDocument()
+    expect(screen.getByText('local repository')).toBeInTheDocument()
+  })
+
+  it('omits the code source line when codeSourceBound is false/absent', () => {
+    render(
+      <FinishStep project="orcha-demo" portalUrl="http://localhost:8001" fleetCreated={false} onOpenPortal={vi.fn()} />
+    )
+    expect(screen.queryByText('Code source')).not.toBeInTheDocument()
+  })
 })

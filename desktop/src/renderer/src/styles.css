@@ -212,6 +212,21 @@ body {
   animation-delay: calc(var(--onb-stagger-i, 0) * 70ms);
 }
 
+/* Subtle "still working" line for the background project analysis — a slow opacity breathe,
+ * not a spinner (the step is already fully usable while this shows). */
+@keyframes onb-shimmer-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+.onb-shimmer {
+  animation: onb-shimmer-breathe 1.8s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .onb-rise-in,
   .onb-stagger > * {
@@ -248,6 +263,10 @@ body {
   .onb-qr-pulse {
     animation: none;
     opacity: 1;
+  }
+  .onb-shimmer {
+    animation: none;
+    opacity: 0.6;
   }
   .onb-showcase-frame {
     animation: none;

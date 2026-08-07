@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import type { BridgeError, Stack } from '../../../shared/types'
 
-/** Busy/error/run-action state shared by StackCard (card view) and StackRow
- *  (list view) so both render identical labels and disabled states. */
+/** Busy/error/run-action state for a stack-level Start/Stop/Remove control — used by the
+ *  home screen's StoppedStackRow (a running stack's actions live per-project on its card
+ *  instead; a stopped stack has no containers to show cards for). */
 export interface StackActions {
   busy: boolean
   /** stderr tail (COMPOSE_FAILED) or the bridge error code; null when clean. */

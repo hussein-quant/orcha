@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { ghIsAuthenticated, ghListRepos, defaultClonesParent, resolveCloneDest } from './githubSource'
+import { ghAuthToken, ghIsAuthenticated, ghListRepos, defaultClonesParent, resolveCloneDest } from './githubSource'
 import type { Exec } from './dockerExec'
 
 function tmp(): string {
@@ -18,6 +18,24 @@ describe('ghIsAuthenticated', () => {
   it('false when gh is missing or logged out (never throws)', async () => {
     const exec = vi.fn().mockRejectedValue(new Error('ENOENT')) as unknown as Exec
     expect(await ghIsAuthenticated(exec)).toBe(false)
+  })
+})
+
+describe('ghAuthToken', () => {
+  it('returns the trimmed token when `gh auth token` succeeds', async () => {
+    const exec = vi.fn().mockResolvedValue({ stdout: 'gho_abc123\n' }) as unknown as Exec
+    expect(await ghAuthToken(exec)).toBe('gho_abc123')
+    expect(exec).toHaveBeenCalledWith('gh', ['auth', 'token'])
+  })
+
+  it('returns null (never throws) when gh is missing or logged out', async () => {
+    const exec = vi.fn().mockRejectedValue(new Error('ENOENT')) as unknown as Exec
+    expect(await ghAuthToken(exec)).toBeNull()
+  })
+
+  it('returns null on empty output', async () => {
+    const exec = vi.fn().mockResolvedValue({ stdout: '   \n' }) as unknown as Exec
+    expect(await ghAuthToken(exec)).toBeNull()
   })
 })
 

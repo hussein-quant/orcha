@@ -52,7 +52,9 @@ beforeEach(() => {
     onNavigate: vi.fn().mockReturnValue(() => {}),
     onPortalActive: vi.fn().mockReturnValue(() => {}),
     portalGet: vi.fn(),
-    portalPost: vi.fn()
+    portalPost: vi.fn(),
+    portalPut: vi.fn(),
+    analyzeProject: vi.fn()
   }
 })
 

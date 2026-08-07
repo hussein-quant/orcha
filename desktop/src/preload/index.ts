@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type {
+  AnalyzeProjectResult,
   AttentionItem,
   CloneAndProvisionOptions,
   CloneDestSuggestion,
@@ -83,7 +84,10 @@ const api: OrchaDesktopApi = {
   // fleet:
   portalGet: (apiPort: number, path: string) => invoke<unknown>('orcha:portalGet', apiPort, path),
   portalPost: (apiPort: number, path: string, body: unknown) =>
-    invoke<unknown>('orcha:portalPost', apiPort, path, body)
+    invoke<unknown>('orcha:portalPost', apiPort, path, body),
+  portalPut: (apiPort: number, path: string, body: unknown) =>
+    invoke<unknown>('orcha:portalPut', apiPort, path, body),
+  analyzeProject: (folder: string) => invoke<AnalyzeProjectResult>('orcha:analyzeProject', folder)
 }
 
 contextBridge.exposeInMainWorld('orchaDesktop', api)

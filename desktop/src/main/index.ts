@@ -18,12 +18,15 @@ import { inspectFolder } from './folderModes'
 import { templatesRoot } from './templates'
 import { provision, type EngineDeps, type EngineFs } from './initEngine'
 import { startHostWorker, nodeHostWorkerDeps, hostToolPath } from './hostWorker'
+import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } from './analyzeProject'
 import { resetStack } from './resetEngine'
 import { buildAppMenuTemplate } from './appMenu'
 import { adminOsascriptArgs, planInstall, runInstall } from './installers'
-import { ghIsAuthenticated, ghListRepos, defaultClonesParent, resolveCloneDest } from './githubSource'
+import { ghAuthToken, ghIsAuthenticated, ghListRepos, defaultClonesParent, resolveCloneDest } from './githubSource'
 import { validateRepoUrl } from '../shared/repoUrl'
 import { computeViewBounds } from './viewBounds'
+import { readAppearance, writeAppearance, isEmpty, type Appearance } from './appearanceStore'
+import { buildReadAppearanceScript, buildApplyAppearanceScript } from './appearanceScripts'
 import type {
   AttentionItem,
   BridgeError,
@@ -94,7 +97,9 @@ function engineDeps(): EngineDeps {
     user: os.userInfo().username || 'operator',
     // After the portal is up, start the host-side agent worker (orcha CLI notifier) so
     // assigned tasks actually run — without this the portal opens but nothing picks up work.
-    startWorker: (folder) => startHostWorker(folder, nodeHostWorkerDeps)
+    startWorker: (folder) => startHostWorker(folder, nodeHostWorkerDeps),
+    // gh token injection at provision (parity with `orcha up`) — see initEngine's compose-up step.
+    ghAuthToken: () => ghAuthToken(dockerExec)
   }
 }
 
@@ -318,7 +323,7 @@ app.setAsDefaultProtocolClient('orcha')
 
 let managerWindow: BrowserWindow | null = null
 /** One WebContentsView per stack, embedded into managerWindow's contentView and covering
- *  everything right of the rail. Views persist across hide/show (setVisible, not
+ *  everything below the renderer's native TopBar. Views persist across hide/show (setVisible, not
  *  add/removeChildView) so switching stacks is instant and each portal's in-page state
  *  (scroll position, any client-side view state) survives the switch. Only ever destroyed
  *  when the stack itself disappears from discovery would be nice-to-have; v1 leaks at most
@@ -352,7 +357,7 @@ function createManagerWindow(): void {
   managerWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   managerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   // Keep every embedded portal view's bounds in sync with the window's content area as it
-  // resizes (rail width is constant — only the view's width/height change).
+  // resizes (the TopBar's height is constant — only the view's width/height change).
   managerWindow.on('resize', () => resizeActivePortalView())
   managerWindow.on('closed', () => {
     managerWindow = null
@@ -370,6 +375,85 @@ function resizeActivePortalView(): void {
   if (!view) return
   const [width, height] = managerWindow.getContentSize()
   view.setBounds(computeViewBounds({ width, height }))
+}
+
+// ---- Appearance sync across embedded portal views -----------------------------------
+// Each stack's portal is a SEPARATE origin (localhost:<its own port>), so localStorage
+// theme/skin never carries across stacks or survives a rebuilt container — the desktop app
+// owns one small appearance.json as the cross-stack source of truth and pushes it into
+// every live view. See appearanceStore.ts / appearanceScripts.ts for the pure pieces.
+
+const APPEARANCE_POLL_MS = 3000
+let appearancePoller: ReturnType<typeof setInterval> | null = null
+/** Last known bag read off the currently-active view's own localStorage, used to detect a
+ *  user-initiated change (e.g. clicking the theme toggle inside the portal) between polls. */
+let lastPolledAppearance: Appearance | null = null
+
+/** Push `appearance` into every OTHER live view besides `exceptProject` (best-effort — a
+ *  view that isn't finished loading yet just misses this round; the next dom-ready sync or
+ *  poll tick catches it up). */
+function pushAppearanceToOtherViews(appearance: Appearance, exceptProject: string | null): void {
+  const script = buildApplyAppearanceScript(appearance)
+  for (const [project, view] of portalViews) {
+    if (project === exceptProject) continue
+    if (view.webContents.isDestroyed()) continue
+    view.webContents.executeJavaScript(script).catch(() => {
+      // Best-effort — a view mid-navigation can reject this harmlessly.
+    })
+  }
+}
+
+/** On a view's dom-ready: read its current localStorage appearance. If the app's own store
+ *  is EMPTY (first launch, nothing chosen yet anywhere), adopt whatever this view already
+ *  has — seeding the store from wherever the user last set it, rather than overwriting a
+ *  real preference with nothing. Otherwise, if the store differs from this view, push the
+ *  store's values into it (localStorage write + live DOM apply). */
+async function syncAppearanceOnDomReady(view: WebContentsView, project: string): Promise<void> {
+  try {
+    const current = (await view.webContents.executeJavaScript(buildReadAppearanceScript())) as Appearance
+    const userDataDir = app.getPath('userData')
+    const stored = readAppearance(userDataDir)
+    if (isEmpty(stored)) {
+      if (!isEmpty(current)) writeAppearance(userDataDir, current)
+      return
+    }
+    const differs = stored.theme !== current.theme || stored.skin !== current.skin
+    if (differs) {
+      await view.webContents.executeJavaScript(buildApplyAppearanceScript(stored))
+    }
+    if (project === activeProject) lastPolledAppearance = stored
+  } catch {
+    // Best-effort — a view that errors here just doesn't get synced this round.
+  }
+}
+
+/** Poll the ACTIVE view's own appearance every ~3s: if it changed since the last tick (the
+ *  user picked a new theme/skin inside that portal), save it to the store and push it to
+ *  every OTHER live view. Cheap (one executeJavaScript per tick, only against the visible
+ *  view), and needs no changes on the portal side — it's still just reading/writing its own
+ *  ordinary localStorage keys. */
+function startAppearancePoller(): void {
+  if (appearancePoller) return
+  appearancePoller = setInterval(() => {
+    if (activeProject === null) return
+    const view = portalViews.get(activeProject)
+    if (!view || view.webContents.isDestroyed()) return
+    const project = activeProject
+    view.webContents
+      .executeJavaScript(buildReadAppearanceScript())
+      .then((current: Appearance) => {
+        if (isEmpty(current)) return
+        const prev = lastPolledAppearance
+        const changed = !prev || prev.theme !== current.theme || prev.skin !== current.skin
+        if (!changed) return
+        lastPolledAppearance = current
+        writeAppearance(app.getPath('userData'), current)
+        pushAppearanceToOtherViews(current, project)
+      })
+      .catch(() => {
+        // Best-effort — a mid-navigation view just misses this tick.
+      })
+  }, APPEARANCE_POLL_MS)
 }
 
 /** Create (if needed) and return the embedded WebContentsView for a stack's portal. */
@@ -395,6 +479,7 @@ function getOrCreatePortalView(stack: Stack): WebContentsView {
     }
     return { action: 'deny' }
   })
+  view.webContents.on('dom-ready', () => void syncAppearanceOnDomReady(view, stack.project))
   portalViews.set(stack.project, view)
   return view
 }
@@ -403,8 +488,8 @@ function getOrCreatePortalView(stack: Stack): WebContentsView {
  *  reusing (not re-navigating) it on subsequent switches — the one exception is that we
  *  always navigate when the caller passes a specific path (e.g. an attention item or the
  *  onboarding finish screen), since that's a deliberate "go here" request. Hides whichever
- *  other view was showing; the rail stays interactive because the view's bounds start
- *  right of it (see computeViewBounds). */
+ *  other view was showing; the renderer's native TopBar stays interactive because the
+ *  view's bounds start below it (see computeViewBounds). */
 function showPortalView(stack: Stack, path = '/'): void {
   if (!managerWindow || managerWindow.isDestroyed() || stack.apiPort === null) return
   managerWindow.show()
@@ -546,7 +631,7 @@ async function requireKnownStack(project: string): Promise<Stack> {
 async function portalRequest(
   apiPortRaw: unknown,
   pathRaw: unknown,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT',
   body?: unknown
 ): Promise<unknown> {
   const apiPort = typeof apiPortRaw === 'number' ? apiPortRaw : NaN
@@ -734,6 +819,17 @@ app.whenReady().then(() => {
     })
   )
 
+  ipcMain.handle('orcha:analyzeProject', (_event, folder: unknown) =>
+    asResult(async (): Promise<AnalyzeProjectResult> => {
+      // Deep roster analysis via the user's OWN local Claude Code subscription — never
+      // throws (analyzeProject collapses every failure to {ok:false, reason}), so this
+      // handler never rejects; the renderer treats a false `ok` as "nothing to show".
+      if (typeof folder !== 'string' || !folder) return { ok: false, reason: 'no folder given' }
+      const pathEnv = nodeHostWorkerDeps.pathEnv ?? hostToolPath()
+      return analyzeProject(folder, nodeAnalyzeProjectDeps(pathEnv))
+    })
+  )
+
   ipcMain.handle('orcha:openExternal', (_event, url: unknown) =>
     asResult(async () => {
       // Allowlist https only — the renderer can't be tricked into opening file:// or app schemes.
@@ -752,6 +848,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('orcha:portalPost', (_event, apiPort: unknown, path: unknown, body: unknown) =>
     asResult(async () => portalRequest(apiPort, path, 'POST', body))
+  )
+
+  ipcMain.handle('orcha:portalPut', (_event, apiPort: unknown, path: unknown, body: unknown) =>
+    asResult(async () => portalRequest(apiPort, path, 'PUT', body))
   )
 
   // App menu with File → Add Project. The provisioning wizard lives inside the manager
@@ -801,6 +901,7 @@ app.whenReady().then(() => {
     }
   })
   poller.start()
+  startAppearancePoller()
 
   // One window. The renderer decides whether to show onboarding (zero stacks) or
   // the manager from its own listStacks() — no second window, no force-open here.
@@ -825,5 +926,6 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   poller?.stop()
+  if (appearancePoller) clearInterval(appearancePoller)
   tray?.destroy()
 })
