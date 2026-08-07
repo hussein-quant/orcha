@@ -412,10 +412,19 @@ async function syncAppearanceOnDomReady(view: WebContentsView, project: string):
   try {
     const current = (await view.webContents.executeJavaScript(buildReadAppearanceScript())) as Appearance
     const userDataDir = app.getPath('userData')
-    const stored = readAppearance(userDataDir)
+    let stored = readAppearance(userDataDir)
     if (isEmpty(stored)) {
-      if (!isEmpty(current)) writeAppearance(userDataDir, current)
-      return
+      if (!isEmpty(current)) {
+        // Adopt whatever the user last set in a portal, rather than overwriting a
+        // real preference with the default.
+        writeAppearance(userDataDir, current)
+        return
+      }
+      // TRUE first launch — nothing chosen anywhere: the product default is the
+      // gold-minimalist look (dark + the portal's "gold" skin). Seed the store and
+      // fall through so it's pushed into this very first view too.
+      stored = { theme: 'dark', skin: 'gold' }
+      writeAppearance(userDataDir, stored)
     }
     const differs = stored.theme !== current.theme || stored.skin !== current.skin
     if (differs) {
