@@ -29,7 +29,7 @@ from fastapi import HTTPException, Query, Request
 from portal_backend import local_git
 from portal_backend.application import app
 from portal_backend.database import db_cursor
-from portal_backend.github_repo_browse_routes import LOCAL_REPO, _load_binding
+from portal_backend.github_repo_browse_routes import LOCAL_REPO, _load_binding, is_vendored_path
 
 # Unified diff text is capped the same spirit as browse/file's FILE_CONTENT_CAP_BYTES —
 # an oversized diff is truncated with a marker, never silently dropped or left to blow
@@ -109,6 +109,12 @@ def get_worktree_changes(cid: str, request: Request):
     total_deletions = 0
     for entry in status_entries:
         path = entry["path"]
+        # Orcha's own runtime files are not the agents' work: the stack dir
+        # (.orcha/ — portal copies, pycache the running portal itself writes)
+        # and vendored/generated dirs would make every project read as
+        # permanently dirty. Same segment filter the symbol indexer uses.
+        if path.startswith(".orcha/") or is_vendored_path(path):
+            continue
         counts = counts_by_path.get(path, {})
         additions = counts.get("additions")
         deletions = counts.get("deletions")
