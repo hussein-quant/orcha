@@ -147,8 +147,13 @@ export default function FleetStep({
       const res = (await window.orchaDesktop.portalPost(apiPort, `/api/containers/${cid}/roster/suggest/accept`, {
         suggestions: chosen,
         actor_agent_id: humanAgentId
-      })) as { created?: string[] }
-      setState({ kind: 'done', created: res.created ?? chosen.map((s) => s.alias) })
+      })) as { created?: Array<string | { alias?: string }> }
+      // The accept API returns [{agent_id, alias}] rows — surface ALIASES, never
+      // stringified objects ("[object Object]" bug).
+      const createdAliases = (res.created ?? chosen).map((c) =>
+        typeof c === 'string' ? c : (c.alias ?? '')
+      ).filter(Boolean)
+      setState({ kind: 'done', created: createdAliases.length ? createdAliases : chosen.map((s) => s.alias) })
     } catch {
       // Accept failing isn't fatal to onboarding — fall through to Finish without a fleet
       // rather than stranding the user on an error screen for a non-essential step.

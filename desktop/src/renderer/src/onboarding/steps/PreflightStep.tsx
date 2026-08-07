@@ -148,8 +148,8 @@ export default function PreflightStep({ onContinue }: { onContinue: () => void }
   }
 
   return (
-    <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_auto]">
-      <div className="flex flex-col gap-4 animate-slide-in">
+    <div className="onb-two-col grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
+      <div className="flex flex-col gap-5 animate-slide-in">
         <div className="flex flex-col gap-1">
           <span className="onb-eyebrow">Setup</span>
           <h2 className="onb-title text-2xl">What Orcha needs</h2>
@@ -159,7 +159,7 @@ export default function PreflightStep({ onContinue }: { onContinue: () => void }
           </p>
         </div>
 
-        <Card className="flex flex-col gap-3 text-sm">
+        <Card className="onb-checklist flex flex-col gap-4 p-5 text-[15px]">
           {checking && !probe ? (
             <span className="flex items-center gap-2 text-text/70">
               <span className="onb-spin flex h-4 w-4 items-center justify-center">
@@ -171,13 +171,13 @@ export default function PreflightStep({ onContinue }: { onContinue: () => void }
             REQUIREMENTS.map((r) => {
               const ok = have(r.key)
               return (
-                <div key={r.key} className="flex items-start gap-2">
+                <div key={r.key} className="flex items-start gap-3">
                   {ok ? (
                     <span className="onb-check-pop onb-check-badge mt-0.5">
-                      <Check className="h-3 w-3" />
+                      <Check className="h-3.5 w-3.5" />
                     </span>
                   ) : (
-                    <Circle className="mt-0.5 h-4 w-4 shrink-0 text-text/30" />
+                    <Circle className="mt-0.5 h-5 w-5 shrink-0 text-text/30" />
                   )}
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     <span className={ok ? 'text-text' : 'text-text/70'}>{r.label}</span>
@@ -244,7 +244,7 @@ export default function PreflightStep({ onContinue }: { onContinue: () => void }
         </div>
       </div>
 
-      <div className="hidden w-64 shrink-0 lg:block">
+      <div className="hidden lg:block">
         <ShowcaseCarousel />
       </div>
     </div>

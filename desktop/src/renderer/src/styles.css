@@ -282,6 +282,13 @@ body {
 
 /* ---- Onboarding design tokens: eyebrows, step titles, progress pills, accent tints ---- */
 
+/* The wizard fills the window as a centered stage rather than hugging the top-left — see
+ * OnboardingWizard's <main>. Vertical centering has a slight top bias (justify-content on
+ * the inner column, not this element) so content doesn't visually sink under the header. */
+.onb-stage {
+  min-height: 100%;
+}
+
 .onb-eyebrow {
   font-size: 11px;
   font-weight: 600;
@@ -364,6 +371,20 @@ body {
   background: var(--color-accent);
   color: var(--color-bg);
   flex-shrink: 0;
+}
+
+/* Provision/Setup steps: balanced two-column stage (checklist+title left, showcase right,
+ * ~1:1). Stacks vertically below 900px so the showcase never gets squeezed into a sliver. */
+@media (max-width: 899px) {
+  .onb-two-col {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Checklist rows inside Setup/Provision — taller touch targets, roomier vertical rhythm
+ * than the default Card padding/gap. */
+.onb-checklist > * + * {
+  padding-top: 4px;
 }
 
 /* Full-screen scrim (confirm dialogs only) — blur ONLY here, never on content surfaces. */

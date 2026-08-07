@@ -238,98 +238,104 @@ export default function OnboardingWizard({
     : []
 
   return (
-    <main className="mx-auto flex h-full max-w-3xl flex-col gap-6 p-8 animate-fade-in">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">{TITLES[variant]}</h1>
-        {canSkip() && (
-          <Button variant="ghost" size="sm" onClick={() => setConfirmingSkip(true)}>
-            Cancel
-          </Button>
+    <main className="onb-stage flex h-full flex-col items-center overflow-y-auto p-8 animate-fade-in">
+      <div className="mx-auto flex w-full max-w-[1180px] flex-1 flex-col justify-center gap-6 py-8">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-semibold">{TITLES[variant]}</h1>
+          {canSkip() && (
+            <Button variant="ghost" size="sm" onClick={() => setConfirmingSkip(true)}>
+              Cancel
+            </Button>
+          )}
+        </div>
+        {segments.length > 0 && (
+          <div className="flex justify-center">
+            <ProgressPills
+              segments={segments}
+              onJump={(key) => {
+                // Only jump to phases already visited — 'done' segments only, mirroring
+                // back-navigation. Pick the canonical phase for that segment.
+                const target = (Object.entries(SEGMENT_FOR) as [Phase, string][]).find(([, v]) => v === key)?.[0]
+                const seg = segments.find((s) => s.key === key)
+                if (target && seg?.state === 'done') setPhase(target)
+              }}
+            />
+          </div>
         )}
-      </div>
-      {segments.length > 0 && (
-        <ProgressPills
-          segments={segments}
-          onJump={(key) => {
-            // Only jump to phases already visited — 'done' segments only, mirroring
-            // back-navigation. Pick the canonical phase for that segment.
-            const target = (Object.entries(SEGMENT_FOR) as [Phase, string][]).find(([, v]) => v === key)?.[0]
-            const seg = segments.find((s) => s.key === key)
-            if (target && seg?.state === 'done') setPhase(target)
-          }}
-        />
-      )}
-      <div className="flex-1">
-        {phase === 'welcome' && <WelcomeStep onContinue={() => setPhase('preflight')} />}
-        {phase === 'preflight' && <PreflightStep onContinue={() => setPhase('source')} />}
-        {phase === 'source' && (
-          <SourceStep
-            onChoose={(s) => {
-              setSource(s)
-              setPhase(s === 'local' ? 'folder' : 'github')
-            }}
-          />
-        )}
-        {phase === 'folder' && (
-          <FolderStep
-            onBack={() => setPhase('source')}
-            onNext={(c, s) => {
-              setChoice(c)
-              setFolderState(s)
-              // Reconnecting ignores name/objective (mode 'upgrade' reads the existing
-              // config), so there's nothing useful to ask on the Details step — skip it.
-              if (s.initialized) {
-                void create(c, s, s.suggestedName, '')
-              } else {
-                setPhase('details')
+        <div className="flex flex-1 flex-col justify-center">
+          {phase === 'welcome' && <WelcomeStep onContinue={() => setPhase('preflight')} />}
+          {phase === 'preflight' && <PreflightStep onContinue={() => setPhase('source')} />}
+          {phase === 'source' && (
+            <SourceStep
+              onChoose={(s) => {
+                setSource(s)
+                setPhase(s === 'local' ? 'folder' : 'github')
+              }}
+            />
+          )}
+          {phase === 'folder' && (
+            <FolderStep
+              onBack={() => setPhase('source')}
+              onNext={(c, s) => {
+                setChoice(c)
+                setFolderState(s)
+                // Reconnecting ignores name/objective (mode 'upgrade' reads the existing
+                // config), so there's nothing useful to ask on the Details step — skip it.
+                if (s.initialized) {
+                  void create(c, s, s.suggestedName, '')
+                } else {
+                  setPhase('details')
+                }
+              }}
+            />
+          )}
+          {phase === 'github' && (
+            <GithubSourceStep
+              onBack={() => setPhase('source')}
+              onNext={(repoUrl, dest) => void cloneAndCreate(repoUrl, dest)}
+            />
+          )}
+          {phase === 'details' && (
+            <DetailsStep
+              suggestedName={folderState?.suggestedName ?? ''}
+              onBack={() => setPhase('folder')}
+              onCreate={(name, objective) =>
+                choice && folderState && void create(choice, folderState, name, objective)
               }
-            }}
-          />
-        )}
-        {phase === 'github' && (
-          <GithubSourceStep
-            onBack={() => setPhase('source')}
-            onNext={(repoUrl, dest) => void cloneAndCreate(repoUrl, dest)}
-          />
-        )}
-        {phase === 'details' && (
-          <DetailsStep
-            suggestedName={folderState?.suggestedName ?? ''}
-            onBack={() => setPhase('folder')}
-            onCreate={(name, objective) => choice && folderState && void create(choice, folderState, name, objective)}
-          />
-        )}
-        {phase === 'provision' && (
-          <ProvisionStep
-            events={events}
-            done={done && !provisioning}
-            error={error}
-            warnings={warnings}
-            gitTip={done && !provisioning ? gitTip : null}
-            withClone={source === 'github'}
-            onContinue={project ? () => setPhase('fleet') : undefined}
-          />
-        )}
-        {phase === 'fleet' && apiPort !== null && (
-          <FleetStep
-            apiPort={apiPort}
-            folder={projectFolder}
-            onDone={() => {
-              setFleetCreated(true)
-              setPhase('finish')
-            }}
-            onUnavailable={() => setPhase('finish')}
-          />
-        )}
-        {phase === 'finish' && project && (
-          <FinishStep
-            project={project}
-            portalUrl={apiPort !== null ? `http://localhost:${apiPort}` : ''}
-            fleetCreated={fleetCreated}
-            codeSourceBound={codeSourceBound}
-            onOpenPortal={() => void openPortalAndFinish(project)}
-          />
-        )}
+            />
+          )}
+          {phase === 'provision' && (
+            <ProvisionStep
+              events={events}
+              done={done && !provisioning}
+              error={error}
+              warnings={warnings}
+              gitTip={done && !provisioning ? gitTip : null}
+              withClone={source === 'github'}
+              onContinue={project ? () => setPhase('fleet') : undefined}
+            />
+          )}
+          {phase === 'fleet' && apiPort !== null && (
+            <FleetStep
+              apiPort={apiPort}
+              folder={projectFolder}
+              onDone={() => {
+                setFleetCreated(true)
+                setPhase('finish')
+              }}
+              onUnavailable={() => setPhase('finish')}
+            />
+          )}
+          {phase === 'finish' && project && (
+            <FinishStep
+              project={project}
+              portalUrl={apiPort !== null ? `http://localhost:${apiPort}` : ''}
+              fleetCreated={fleetCreated}
+              codeSourceBound={codeSourceBound}
+              onOpenPortal={() => void openPortalAndFinish(project)}
+            />
+          )}
+        </div>
       </div>
       {confirmingSkip && (
         <SkipConfirmDialog

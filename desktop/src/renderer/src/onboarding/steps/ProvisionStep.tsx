@@ -46,29 +46,29 @@ export default function ProvisionStep({
   }
   const visibleSteps = Object.entries(STEP_LABELS).filter(([step]) => withClone || step !== 'clone-repo')
   return (
-    <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1fr_auto]">
-      <div className="flex flex-col gap-4 animate-slide-in">
+    <div className="onb-two-col grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
+      <div className="flex flex-col gap-5 animate-slide-in">
         <div className="flex flex-col gap-1">
           <span className="onb-eyebrow">Create</span>
           <h2 className="onb-title text-2xl">{done ? 'Project ready' : 'Creating your project…'}</h2>
         </div>
-        <Card className="flex flex-col gap-2">
+        <Card className="onb-checklist flex flex-col gap-3 p-5">
           {visibleSteps.map(([step, label]) => {
             const s = status.get(step)
             return (
-              <div key={step} className="flex items-center gap-2 text-sm">
+              <div key={step} className="flex items-center gap-3 text-[15px]">
                 {s === 'ok' ? (
                   <span className="onb-check-pop onb-check-badge">
-                    <Check className="h-3 w-3" />
+                    <Check className="h-3.5 w-3.5" />
                   </span>
                 ) : s === 'fail' ? (
-                  <X className="h-4 w-4 text-danger" />
+                  <X className="h-5 w-5 text-danger" />
                 ) : s === 'start' ? (
-                  <span className="onb-spin flex h-4 w-4 items-center justify-center">
-                    <Loader2 className="h-4 w-4 text-accent" />
+                  <span className="onb-spin flex h-5 w-5 items-center justify-center">
+                    <Loader2 className="h-5 w-5 text-accent" />
                   </span>
                 ) : (
-                  <span className="h-4 w-4 rounded-full border border-border" />
+                  <span className="h-5 w-5 rounded-full border border-border" />
                 )}
                 <span className={s === 'skip' ? 'text-text/40' : 'text-text/80'}>{label}</span>
               </div>
@@ -111,7 +111,7 @@ export default function ProvisionStep({
         )}
       </div>
 
-      <div className="hidden w-64 shrink-0 lg:block">
+      <div className="hidden lg:block">
         <ShowcaseCarousel />
       </div>
     </div>

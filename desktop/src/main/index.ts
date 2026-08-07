@@ -811,11 +811,14 @@ app.whenReady().then(() => {
 
   ipcMain.handle('orcha:openOnboardingPortal', (_event, project: string) =>
     asResult(async () => {
-      // Reuse the portal-show path: discover the just-created stack and show /onboarding
-      // in the embedded view (the wizard, still on screen, will unmount once onDone fires).
+      // Reuse the portal-show path: discover the just-created stack and land on the
+      // DASHBOARD ('/'), not '/onboarding' — by the time the wizard's Finish fires,
+      // provisioning has already registered the operator and (usually) created the
+      // fleet, and the portal's own first-run page would greet that fully-set-up
+      // workspace with "your workspace is empty".
       const stacks = await listStacks()
       const stack = stacks.find((s) => s.project === project)
-      if (stack && stack.running && stack.apiPort !== null) showPortalView(stack, '/onboarding')
+      if (stack && stack.running && stack.apiPort !== null) showPortalView(stack, '/')
     })
   )
 
