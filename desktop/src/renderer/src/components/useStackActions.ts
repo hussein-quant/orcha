@@ -47,7 +47,7 @@ export default function useStackActions(stack: Stack, onChanged: () => void): St
       : stack.running
         ? 'Stop'
         : 'Start',
-    openPortal: () => void run(() => api.openPortal(stack.project)),
+    openPortal: () => void run(() => api.portalShow(stack.project)),
     toggleStack: () =>
       void run(() => (stack.running ? api.stopStack(stack.project) : api.startStack(stack.project))),
     resetStack: () => void run(() => api.resetStack(stack.project))

@@ -29,7 +29,8 @@ beforeEach(() => {
     startStack: vi.fn().mockResolvedValue(undefined),
     stopStack: vi.fn().mockResolvedValue(undefined),
     resetStack: vi.fn().mockResolvedValue(undefined),
-    openPortal: vi.fn().mockResolvedValue(undefined),
+    portalShow: vi.fn().mockResolvedValue(undefined),
+    portalHide: vi.fn().mockResolvedValue(undefined),
     listAttention: vi.fn().mockResolvedValue([]),
     openManager: vi.fn(),
     quitApp: vi.fn(),
@@ -53,6 +54,7 @@ beforeEach(() => {
     openExternal: vi.fn().mockResolvedValue(undefined),
     onProvisionProgress: vi.fn().mockReturnValue(() => {}),
     onNavigate: vi.fn().mockReturnValue(() => {}),
+    onPortalActive: vi.fn().mockReturnValue(() => {}),
     portalGet: vi.fn(),
     portalPost: vi.fn()
   }
@@ -83,10 +85,10 @@ describe('StackCard', () => {
     expect(window.orchaDesktop.stopStack).toHaveBeenCalledWith('orcha-quantal-ehr')
   })
 
-  it('calls openPortal with the project on Open portal click', async () => {
+  it('calls portalShow with the project on Open portal click', async () => {
     render(<StackCard stack={runningStack} onChanged={vi.fn()} />)
     await userEvent.click(screen.getByRole('button', { name: 'Open portal' }))
-    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-quantal-ehr')
+    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-quantal-ehr')
   })
 
   it('shows an attention badge when the stack has attention items', () => {

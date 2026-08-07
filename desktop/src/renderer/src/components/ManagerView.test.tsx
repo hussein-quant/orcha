@@ -21,7 +21,8 @@ beforeEach(() => {
     startStack: vi.fn(),
     stopStack: vi.fn(),
     resetStack: vi.fn(),
-    openPortal: vi.fn(),
+    portalShow: vi.fn(),
+    portalHide: vi.fn(),
     listAttention: vi.fn().mockResolvedValue([]),
     openManager: vi.fn(),
     quitApp: vi.fn(),
@@ -45,6 +46,7 @@ beforeEach(() => {
     openExternal: vi.fn().mockResolvedValue(undefined),
     onProvisionProgress: vi.fn().mockReturnValue(() => {}),
     onNavigate: vi.fn().mockReturnValue(() => {}),
+    onPortalActive: vi.fn().mockReturnValue(() => {}),
     portalGet: vi.fn(),
     portalPost: vi.fn()
   }

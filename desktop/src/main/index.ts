@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, WebContentsView } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -23,6 +23,7 @@ import { buildAppMenuTemplate } from './appMenu'
 import { adminOsascriptArgs, planInstall, runInstall } from './installers'
 import { ghIsAuthenticated, ghListRepos, defaultClonesParent, resolveCloneDest } from './githubSource'
 import { validateRepoUrl } from '../shared/repoUrl'
+import { computeViewBounds } from './viewBounds'
 import type {
   AttentionItem,
   BridgeError,
@@ -316,14 +317,24 @@ app.setName('Orcha')
 app.setAsDefaultProtocolClient('orcha')
 
 let managerWindow: BrowserWindow | null = null
-const portalWindows = new Map<string, BrowserWindow>()
+/** One WebContentsView per stack, embedded into managerWindow's contentView and covering
+ *  everything right of the rail. Views persist across hide/show (setVisible, not
+ *  add/removeChildView) so switching stacks is instant and each portal's in-page state
+ *  (scroll position, any client-side view state) survives the switch. Only ever destroyed
+ *  when the stack itself disappears from discovery would be nice-to-have; v1 leaks at most
+ *  one WebContents per stack the user has opened this session, which is bounded and cheap. */
+const portalViews = new Map<string, WebContentsView>()
+/** Which stack's view (if any) is currently the visible one — null means the renderer's
+ *  own content (home/manager or the wizard) is showing. Used to restore the previous
+ *  portal after a temporary hide (e.g. opening the add-project wizard). */
+let activeProject: string | null = null
 let tray: TrayController | null = null
 let poller: AttentionPoller | null = null
 
 function createManagerWindow(): void {
   managerWindow = new BrowserWindow({
-    width: 760,
-    height: 560,
+    width: 1100,
+    height: 760,
     title: 'Orcha',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -340,9 +351,96 @@ function createManagerWindow(): void {
   // The manager renderer never navigates; deny everything (bridge must not ride a navigation).
   managerWindow.webContents.on('will-navigate', (event) => event.preventDefault())
   managerWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // Keep every embedded portal view's bounds in sync with the window's content area as it
+  // resizes (rail width is constant — only the view's width/height change).
+  managerWindow.on('resize', () => resizeActivePortalView())
   managerWindow.on('closed', () => {
     managerWindow = null
+    portalViews.clear()
+    activeProject = null
   })
+}
+
+/** Recompute and apply bounds for whichever portal view is currently visible. Hidden views
+ *  don't need their bounds kept current (they're not drawn), so this only ever touches the
+ *  active one — cheap even with several stacks' views alive in the map. */
+function resizeActivePortalView(): void {
+  if (!managerWindow || managerWindow.isDestroyed() || activeProject === null) return
+  const view = portalViews.get(activeProject)
+  if (!view) return
+  const [width, height] = managerWindow.getContentSize()
+  view.setBounds(computeViewBounds({ width, height }))
+}
+
+/** Create (if needed) and return the embedded WebContentsView for a stack's portal. */
+function getOrCreatePortalView(stack: Stack): WebContentsView {
+  const existing = portalViews.get(stack.project)
+  if (existing) return existing
+
+  const view = new WebContentsView({
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  })
+  const portalOrigin = `http://localhost:${stack.apiPort}`
+  // Portal content may link out (docs, repos): keep same-origin navigation in the
+  // embedded view, push everything else to the system browser.
+  view.webContents.on('will-navigate', (event, url) => {
+    if (!url.startsWith(`${portalOrigin}/`)) {
+      event.preventDefault()
+      void shell.openExternal(url)
+    }
+  })
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    if (!url.startsWith(`${portalOrigin}/`)) {
+      void shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+  portalViews.set(stack.project, view)
+  return view
+}
+
+/** Show the embedded portal view for `stack` at `path`, creating it on first use and
+ *  reusing (not re-navigating) it on subsequent switches — the one exception is that we
+ *  always navigate when the caller passes a specific path (e.g. an attention item or the
+ *  onboarding finish screen), since that's a deliberate "go here" request. Hides whichever
+ *  other view was showing; the rail stays interactive because the view's bounds start
+ *  right of it (see computeViewBounds). */
+function showPortalView(stack: Stack, path = '/'): void {
+  if (!managerWindow || managerWindow.isDestroyed() || stack.apiPort === null) return
+  managerWindow.show()
+  managerWindow.focus()
+
+  const isNewView = !portalViews.has(stack.project)
+  const view = getOrCreatePortalView(stack)
+
+  for (const [project, other] of portalViews) {
+    if (project !== stack.project) other.setVisible(false)
+  }
+  if (!managerWindow.contentView.children.includes(view)) {
+    managerWindow.contentView.addChildView(view)
+  }
+  const [width, height] = managerWindow.getContentSize()
+  view.setBounds(computeViewBounds({ width, height }))
+  view.setVisible(true)
+  activeProject = stack.project
+
+  // Navigate on first creation, or whenever the caller asked for a specific path — reusing
+  // an existing view otherwise means "switch back to what was on screen", not "reload".
+  if (isNewView || path !== '/') {
+    void view.webContents.loadURL(`http://localhost:${stack.apiPort}${path}`)
+  }
+  sendToManager('orcha:portalActive', { project: stack.project })
+}
+
+/** Hide whichever portal view is showing, returning to the renderer's own content
+ *  (home/manager or the wizard). The view itself is left alive (just setVisible(false))
+ *  so re-showing it later is instant. */
+function hidePortalView(): void {
+  if (activeProject !== null) {
+    portalViews.get(activeProject)?.setVisible(false)
+    activeProject = null
+  }
+  sendToManager('orcha:portalActive', { project: null })
 }
 
 /** Open-or-focus: reuse the existing manager window when it's still alive. */
@@ -392,7 +490,10 @@ async function openPortalByProject(project: string, path?: string): Promise<void
   try {
     const stacks = await listStacks()
     const stack = stacks.find((s) => s.project === project)
-    if (stack && stack.running && stack.apiPort !== null) openPortalWindow(stack, path)
+    if (stack && stack.running && stack.apiPort !== null) {
+      showManagerWindow()
+      showPortalView(stack, path)
+    }
   } catch {
     // Docker down or discovery hiccup at click time — nothing sensible to open.
   }
@@ -409,49 +510,6 @@ function showAttentionNotification(item: AttentionItem): void {
   )
   n.on('click', () => void openPortalByProject(item.project, item.path))
   n.show()
-}
-
-function openPortalWindow(stack: Stack, path = '/'): void {
-  const url = `http://localhost:${stack.apiPort}${path}`
-  const existing = portalWindows.get(stack.project)
-  if (existing && !existing.isDestroyed()) {
-    existing.loadURL(url)
-    existing.focus()
-    return
-  }
-  const win = new BrowserWindow({
-    width: 1100,
-    height: 800,
-    title: `Orcha — ${stack.projectShort}`,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
-  })
-  win.loadURL(url)
-  // Portal content may link out (docs, repos): keep same-origin navigation in-window,
-  // push everything else to the system browser.
-  const portalOrigin = `http://localhost:${stack.apiPort}`
-  win.webContents.on('will-navigate', (event, url) => {
-    if (!url.startsWith(`${portalOrigin}/`)) {
-      event.preventDefault()
-      void shell.openExternal(url)
-    }
-  })
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(`${portalOrigin}/`)) {
-      void shell.openExternal(url)
-      return { action: 'deny' }
-    }
-    return { action: 'allow' }
-  })
-  // The portal page's own <title> ("Orcha · Dashboard") would overwrite the window
-  // title — keep the project name in front so multiple portals stay distinguishable.
-  win.webContents.on('page-title-updated', (event, pageTitle) => {
-    event.preventDefault()
-    win.setTitle(`${stack.projectShort} · ${pageTitle.replace(/^Orcha\s*·\s*/, '')}`)
-  })
-  win.on('closed', () => {
-    portalWindows.delete(stack.project)
-  })
-  portalWindows.set(stack.project, win)
 }
 
 /** Wrap a handler so structured BridgeErrors survive IPC (thrown Errors get
@@ -543,16 +601,18 @@ app.whenReady().then(() => {
     })
   )
 
-  ipcMain.handle('orcha:openPortal', (_event, project: string, path?: unknown) =>
+  ipcMain.handle('orcha:portalShow', (_event, project: string, path?: unknown) =>
     asResult(async () => {
       const stack = await requireKnownStack(project)
       if (!stack.running || stack.apiPort === null) throw { code: 'UNKNOWN_STACK' } as const
       // Renderer-supplied path: require a single leading slash (no protocol-relative
       // // and no /\ — URL parsers treat backslash as a segment separator too).
       const safePath = typeof path === 'string' && /^\/(?![/\\])/.test(path) ? path : '/'
-      openPortalWindow(stack, safePath)
+      showPortalView(stack, safePath)
     })
   )
+
+  ipcMain.handle('orcha:portalHide', () => asResult(async () => hidePortalView()))
 
   ipcMain.handle('orcha:listAttention', () => asResult(async () => poller?.current() ?? []))
 
@@ -666,10 +726,11 @@ app.whenReady().then(() => {
 
   ipcMain.handle('orcha:openOnboardingPortal', (_event, project: string) =>
     asResult(async () => {
-      // Reuse the portal-open path: discover the just-created stack and open /onboarding.
+      // Reuse the portal-show path: discover the just-created stack and show /onboarding
+      // in the embedded view (the wizard, still on screen, will unmount once onDone fires).
       const stacks = await listStacks()
       const stack = stacks.find((s) => s.project === project)
-      if (stack && stack.running && stack.apiPort !== null) openPortalWindow(stack, '/onboarding')
+      if (stack && stack.running && stack.apiPort !== null) showPortalView(stack, '/onboarding')
     })
   )
 
@@ -701,6 +762,10 @@ app.whenReady().then(() => {
       buildAppMenuTemplate({
         onAddProject: () => {
           showManagerWindow()
+          // The wizard renders as DOM in the renderer; any embedded portal WebContentsView
+          // would still draw ABOVE it, so hide the view before switching (rule: wizard/home
+          // = no view visible — see showPortalView/hidePortalView).
+          hidePortalView()
           sendToManager('orcha:navigate', { target: 'onboarding', variant: 'add-project' })
         }
       })

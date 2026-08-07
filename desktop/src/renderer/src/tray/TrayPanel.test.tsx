@@ -25,7 +25,8 @@ beforeEach(() => {
     startStack: vi.fn(),
     stopStack: vi.fn(),
     resetStack: vi.fn(),
-    openPortal: vi.fn().mockResolvedValue(undefined),
+    portalShow: vi.fn().mockResolvedValue(undefined),
+    portalHide: vi.fn().mockResolvedValue(undefined),
     listAttention: vi.fn().mockResolvedValue(items),
     openManager: vi.fn().mockResolvedValue(undefined),
     quitApp: vi.fn().mockResolvedValue(undefined),
@@ -49,6 +50,7 @@ beforeEach(() => {
     openExternal: vi.fn().mockResolvedValue(undefined),
     onProvisionProgress: vi.fn().mockReturnValue(() => {}),
     onNavigate: vi.fn().mockReturnValue(() => {}),
+    onPortalActive: vi.fn().mockReturnValue(() => {}),
     portalGet: vi.fn(),
     portalPost: vi.fn()
   }
@@ -71,7 +73,7 @@ describe('TrayPanel', () => {
   it('clicking a stack row opens its portal', async () => {
     render(<TrayPanel />)
     await userEvent.click(await screen.findByText('quantal-ehr'))
-    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-quantal-ehr')
+    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-quantal-ehr')
   })
 
   it('the gear opens the manager window', async () => {
@@ -83,7 +85,7 @@ describe('TrayPanel', () => {
   it('the primary button opens the most-urgent stack portal', async () => {
     render(<TrayPanel />)
     await userEvent.click(await screen.findByRole('button', { name: 'Open portal' }))
-    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-quantal-ehr')
+    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-quantal-ehr')
   })
 
   it('lists each attention item under its stack with a kind chip', async () => {
@@ -97,6 +99,6 @@ describe('TrayPanel', () => {
   it('clicking an attention item deep-links into the portal', async () => {
     render(<TrayPanel />)
     await userEvent.click(await screen.findByText('[Atlas → operator] Need a decision on PR #90.'))
-    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-quantal-ehr', '/requests?req=r1')
+    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-quantal-ehr', '/requests?req=r1')
   })
 })

@@ -1,3 +1,9 @@
+/** Fixed width (CSS px) of the renderer's left rail (stacks + All-projects + Add-project).
+ *  Shared between main (embedded portal view bounds — see main/viewBounds.ts) and the
+ *  renderer (the Rail component's own width) so the view's left edge always lines up
+ *  exactly with the rail's right edge — no gap, no overlap. */
+export const RAIL_WIDTH = 64
+
 /** One orcha-* Docker compose stack (stack:db:container is 1:1:1 per orcha's model). */
 export interface Stack {
   /** Full compose project name, e.g. "orcha-todo-app". */
@@ -212,7 +218,14 @@ export interface OrchaDesktopApi {
   listStacks(): Promise<Stack[]>
   startStack(project: string): Promise<void>
   stopStack(project: string): Promise<void>
-  openPortal(project: string, path?: string): Promise<void>
+  /** Switch the main window's embedded portal view to this stack (creating it on first
+   *  use) and show it, covering the content area right of the rail. Replaces the old
+   *  "open a new BrowserWindow" behavior — there is only ever one app window. */
+  portalShow(project: string, path?: string): Promise<void>
+  /** Hide whichever embedded portal view is currently showing, returning to the
+   *  renderer's own content (home/manager or the wizard). The view is kept alive
+   *  (not destroyed) so switching back to it is instant and its state is preserved. */
+  portalHide(): Promise<void>
   /** Destructively delete a stack: down -v + remove its portal image + on-disk Orcha files.
    *  Irreversible; the renderer gates it behind a type-to-confirm prompt. */
   resetStack(project: string): Promise<void>
@@ -258,6 +271,10 @@ export interface OrchaDesktopApi {
    *  distinguishes the provisioning wizard's framing when target is 'onboarding'; absent
    *  for plain 'manager' navigation. */
   onNavigate(cb: (nav: { target: 'onboarding' | 'manager'; variant?: WizardVariant }) => void): () => void
+  /** Subscribe to which stack's embedded portal view is active (main is the source of
+   *  truth — a notification click or deep link can change it without any renderer click).
+   *  `project` is null when no view is showing (home/manager or the wizard is on screen). */
+  onPortalActive(cb: (active: { project: string | null }) => void): () => void
   // fleet (post-provision):
   /** GET a JSON path on a stack's own localhost portal (port + path validated in main —
    *  the renderer can't reach localhost directly under sandbox:true). Rejects with

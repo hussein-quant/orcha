@@ -35,7 +35,8 @@ const api: OrchaDesktopApi = {
   listStacks: () => invoke<Stack[]>('orcha:listStacks'),
   startStack: (project) => invoke<void>('orcha:startStack', project),
   stopStack: (project) => invoke<void>('orcha:stopStack', project),
-  openPortal: (project, path) => invoke<void>('orcha:openPortal', project, path),
+  portalShow: (project, path) => invoke<void>('orcha:portalShow', project, path),
+  portalHide: () => invoke<void>('orcha:portalHide'),
   resetStack: (project) => invoke<void>('orcha:resetStack', project),
   listAttention: () => invoke<AttentionItem[]>('orcha:listAttention'),
   openManager: () => invoke<void>('orcha:openManager'),
@@ -73,6 +74,11 @@ const api: OrchaDesktopApi = {
     ): void => cb(nav)
     ipcRenderer.on('orcha:navigate', listener)
     return () => ipcRenderer.removeListener('orcha:navigate', listener)
+  },
+  onPortalActive: (cb) => {
+    const listener = (_e: IpcRendererEvent, active: { project: string | null }): void => cb(active)
+    ipcRenderer.on('orcha:portalActive', listener)
+    return () => ipcRenderer.removeListener('orcha:portalActive', listener)
   },
   // fleet:
   portalGet: (apiPort: number, path: string) => invoke<unknown>('orcha:portalGet', apiPort, path),
