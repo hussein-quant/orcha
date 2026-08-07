@@ -528,17 +528,45 @@ def browse_tree(cid: str, request: Request, ref: str = Query(default=""), path: 
     }
 
 
+def _snapshot_bytes_for_path(cid: str, resolved_ref: str, clean_path: str):
+    """The path's raw bytes from the ALREADY-CACHED repo snapshot
+    (`_repo_snapshot_cache_get` — the SAME (cid, resolved_ref)-keyed cache
+    `_fetch_repo_snapshot`/`_fetch_local_repo_snapshot` populate, which the local
+    background warmer (`code_space_routes.warm_local_symbol_index`) keeps hot). None
+    when no snapshot has been built for this ref yet, or the snapshot exists but
+    doesn't carry this path (non-source extension, or over the symbol indexer's
+    MAX_SOURCE_FILE_BYTES cap — the indexer's snapshot is deliberately narrower than a
+    raw file read's own 500KB/any-extension contract). Callers treat None as "fall back
+    to `local_git.file_bytes`" — never a failure signal in its own right; this function
+    never triggers a snapshot BUILD itself (no `git archive` call on a miss), only
+    reads whatever is already warm — a cold miss must stay cheap (a dict lookup), not
+    trade one subprocess call for a much bigger one."""
+    cached = _repo_snapshot_cache_get(cid, resolved_ref)
+    if cached is None:
+        return None
+    return cached.get(clean_path)
+
+
 def _local_file_response(repo: str, resolved_ref: str, cid: str, clean_path: str) -> dict:
-    """browse_file's local-source body: fetch bytes via `local_git.file_bytes`, apply
-    the SAME cap/binary-sniff rules the GitHub path uses (`_is_binary_content`,
-    FILE_CONTENT_CAP_BYTES), and return the identical response shape. Raises
-    HTTPException(400) when `clean_path` names a directory (mirrors the GitHub path's
-    `isinstance(raw, list)` check) — checked via the SAME cached full tree
-    `_local_tree_level`/blob-match already use, BEFORE trusting `file_bytes`: `git show
-    <sha>:<dir>` does NOT fail the way a missing path does (it succeeds with a
-    plain-text tree listing), so `file_bytes` alone can't tell "directory" apart from
-    "a real file whose content happens to look tree-ish" — the tree lookup is the only
-    reliable signal."""
+    """browse_file's local-source body — BLAZING-fast path (docs/orcha-cloud-local-run.md
+    addendum, local-run perf bar): try the already-warm symbol-indexer snapshot FIRST
+    (`_snapshot_bytes_for_path`, same (cid, resolved_ref) cache the background warmer —
+    `code_space_routes.warm_local_symbol_index` — keeps hot) and serve bytes straight
+    from memory, no subprocess at all. Only when the snapshot has no entry for this path
+    (non-source extension, oversize, or no snapshot built yet for this ref) does this
+    fall back to `local_git.file_bytes` — one `git show` subprocess call over the bind
+    mount (~100-300ms on Docker for Mac), the same cost the pre-snapshot code paid on
+    EVERY call. Same cap/binary-sniff rules and response shape either way
+    (`_is_binary_content`, FILE_CONTENT_CAP_BYTES) — the caller can't tell which path
+    served a given response.
+
+    Raises HTTPException(400) when `clean_path` names a directory (mirrors the GitHub
+    path's `isinstance(raw, list)` check) — checked via the SAME cached full tree
+    `_local_tree_level`/blob-match already use, BEFORE trusting either byte source: `git
+    show <sha>:<dir>` does NOT fail the way a missing path does (it succeeds with a
+    plain-text tree listing), so bytes alone can't tell "directory" apart from "a real
+    file whose content happens to look tree-ish" — the tree lookup is the only reliable
+    signal."""
     entries, _truncated = _fetch_full_tree(repo, resolved_ref, None, cid)
     is_dir = any(
         (e.get("path") or "") == clean_path and e.get("type") == "tree"
@@ -546,7 +574,9 @@ def _local_file_response(repo: str, resolved_ref: str, cid: str, clean_path: str
     )
     if is_dir:
         raise HTTPException(400, f"path {clean_path!r} is a directory, not a file")
-    raw_bytes = local_git.file_bytes(resolved_ref, clean_path)
+    raw_bytes = _snapshot_bytes_for_path(cid, resolved_ref, clean_path)
+    if raw_bytes is None:
+        raw_bytes = local_git.file_bytes(resolved_ref, clean_path)
     if raw_bytes is None:
         # Honest local wording — the shared hub mapper would say "issue or pull
         # request not found", which is nonsense for a local file read.
@@ -685,6 +715,50 @@ def _fetch_full_tree(repo: str, resolved_ref: str, token: str, cid: str):
     return result
 
 
+def _in_memory_grep(cid: str, resolved_ref: str, q: str):
+    """Content search over the ALREADY-CACHED repo snapshot in-process — no `git grep`
+    subprocess, no bind-mount I/O at all (BLAZING-fast local reads bar,
+    docs/orcha-cloud-local-run.md addendum). Case-insensitive substring match (mirrors
+    `_names_search`'s own case-insensitive convention, and stays a strict SUBSET
+    relationship to `local_git.grep`'s `-F` fixed-string semantics — no regex either
+    way, so a warm-snapshot search and a cold `git grep` fallback never disagree on
+    what counts as a match), first-match line number per file computed by scanning the
+    file's own decoded text (`str.split("\\n")`, 1-indexed) — the snapshot carries
+    whole-file bytes, not pre-computed line offsets, so this is the one place that cost
+    is paid, and it's paid in-memory (no subprocess) rather than shelling out per file.
+    Binary files (`_is_binary_content`) are skipped, same as `local_git.grep -I`.
+    Results capped at `local_git.GREP_MAX_RESULTS` (the SAME cap the git-grep fallback
+    uses) so a broad query returns an identically-shaped, identically-bounded result
+    set regardless of which path served it.
+
+    Returns None when no snapshot is cached for (cid, resolved_ref) yet — the caller's
+    signal to fall back to `local_git.grep` (a cold git-grep subprocess), exactly like
+    `_snapshot_bytes_for_path`'s own None-means-fallback contract for single-file
+    reads. Returns [] (not None) for a genuine "snapshot warm, zero matches" result —
+    the same None-vs-[] distinction `local_git.grep` itself documents."""
+    snapshot = _repo_snapshot_cache_get(cid, resolved_ref)
+    if snapshot is None:
+        return None
+    needle = q.lower()
+    results = []
+    for path in sorted(snapshot):
+        if len(results) >= local_git.GREP_MAX_RESULTS:
+            break
+        raw_bytes = snapshot[path]
+        if _is_binary_content(raw_bytes):
+            continue
+        text = raw_bytes.decode("utf-8", errors="ignore")
+        if needle not in text.lower():
+            continue
+        for line_no, line_text in enumerate(text.split("\n"), start=1):
+            if needle in line_text.lower():
+                results.append({"path": path, "line": line_no, "text": line_text})
+                break
+            if len(results) >= local_git.GREP_MAX_RESULTS:
+                break
+    return results
+
+
 def _names_search(repo: str, resolved_ref: str, token: str, cid: str, q: str) -> dict:
     entries, truncated = _fetch_full_tree(repo, resolved_ref, token, cid)
     needle = q.lower()
@@ -764,8 +838,12 @@ def browse_search(
     CONTENTS_SEARCH_MAX_RESULTS files.
     Local source (repo == LOCAL_REPO): `names` filters the SAME cached local tree
     (`_names_search`, unchanged — `_fetch_full_tree` already dispatches on
-    LOCAL_REPO); `contents` runs `local_git.grep` at the RESOLVED ref (not pinned to
-    a "default branch" — that GitHub limitation doesn't apply locally), returning
+    LOCAL_REPO); `contents` tries the in-process, in-memory search FIRST
+    (`_in_memory_grep`, over the same warm repo snapshot `code_space_routes`'
+    background warmer keeps hot — target <30ms server-side, no subprocess at all) and
+    falls back to `local_git.grep` (a `git grep` subprocess over the bind mount) only
+    when no snapshot is cached yet for this ref. Not pinned to a "default branch" (that
+    GitHub limitation doesn't apply locally) either way — always returns
     `default_branch_only: false` honestly.
     """
     if mode not in ("names", "contents"):
@@ -780,7 +858,9 @@ def browse_search(
         except RuntimeError as exc:
             return {**_detail_error_payload(exc), "repo": repo}
         if mode == "contents":
-            results = local_git.grep(resolved_ref, q)
+            results = _in_memory_grep(cid, resolved_ref, q)
+            if results is None:
+                results = local_git.grep(resolved_ref, q)
             if results is None:
                 return {**_error_payload(RuntimeError("github_status:404")), "repo": repo}
             return {

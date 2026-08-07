@@ -1,10 +1,13 @@
 /**
  * The right rail: Threads (Phase 1, current-file scoped) / Live (Phase 2) /
- * Learn (Phase 4) / Outline (Phase 3) tabs. Threads-tab list polls on the
- * house 3s bump; anchor chips jump to lines, count badges optional via the
- * tree's fileBadge slot (CodeSpacePage wires that separately). Outline
- * (symbols/OutlineRail.tsx) is scoped to whatever file is currently open,
- * exactly like the Threads tab.
+ * Learn (Phase 4) / Outline (Phase 3) / Changes (working-tree, local run
+ * addendum) tabs. Threads-tab list polls on the house 3s bump; anchor chips
+ * jump to lines, count badges optional via the tree's fileBadge slot
+ * (CodeSpacePage wires that separately). Outline (symbols/OutlineRail.tsx)
+ * is scoped to whatever file is currently open, exactly like the Threads
+ * tab. Changes (ChangesTab.tsx) is repo-wide (not file-scoped) and owns its
+ * own ~5s poll independent of the house bump — see that component's doc
+ * comment.
  *
  * Item 3 — when no file is open, the Threads tab's list is replaced by a
  * repo-wide "Recent" section (newest threads across every path); when a file
@@ -18,6 +21,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent } from "../../types";
+import { ChangesTab } from "./ChangesTab";
 import { fetchRecentThreads, fetchThreads } from "./codespaceApi";
 import {
   anchorLabel,
@@ -34,7 +38,7 @@ import { OutlineRail } from "./symbols/OutlineRail";
 import { ThreadComposer } from "./ThreadComposer";
 import { ThreadView } from "./ThreadView";
 
-export type RailTab = "threads" | "live" | "learn" | "outline";
+export type RailTab = "threads" | "live" | "learn" | "outline" | "changes";
 
 export interface ThreadRailProps {
   cid: string;
@@ -70,6 +74,15 @@ export interface ThreadRailProps {
   // don't wire it still render (Recent rows simply no-op without it, matching
   // every other optional callback's convention in this file).
   onNavigateToThread?: (thread: CodeThreadSummary) => void;
+  // Changes tab (working-tree, local run addendum) — cid-scoped, not
+  // file-scoped, so it's wired independently of `path`/`gitRef`.
+  // selectedWorktreePath highlights the currently-open working-tree diff (if
+  // any) in the Changes list; onOpenWorktreeDiff/onDirtyCountChange are
+  // optional so existing mounts/tests that don't wire the Changes tab still
+  // render everything else unchanged.
+  selectedWorktreePath?: string | null;
+  onOpenWorktreeDiff?: (path: string) => void;
+  onDirtyCountChange?: (count: number) => void;
   // Panel improvements item 1 — resizable panes: CodeSpacePage owns the
   // persisted width (usePaneWidths.ts) and passes it straight through so
   // `.cs-rail` itself (not a wrapper) carries the inline width, matching
@@ -96,12 +109,16 @@ export function ThreadRail({
   onRaiseHandDone,
   onRaiseHandRequested,
   onNavigateToThread,
+  selectedWorktreePath,
+  onOpenWorktreeDiff,
+  onDirtyCountChange,
   width,
 }: ThreadRailProps) {
   const { bump } = useSnapshot();
   const [threads, setThreads] = useState<CodeThreadSummary[]>([]);
   const [recentThreads, setRecentThreads] = useState<CodeThreadSummary[]>([]);
   const [showRecent, setShowRecent] = useState(false);
+  const [dirtyCount, setDirtyCount] = useState(0);
   // Item 5 — optimistic seed for the thread ThreadView is about to open
   // (set right when a composer's POST resolves; cleared once the rail moves
   // on to a DIFFERENT thread id, a fresh open thread has no stale seed).
@@ -168,6 +185,10 @@ export function ThreadRail({
         <button type="button" role="tab" aria-selected={tab === "outline"} className={"cs-rail-tab" + (tab === "outline" ? " on" : "")} onClick={() => onTabChange("outline")}>
           Outline
         </button>
+        <button type="button" role="tab" aria-selected={tab === "changes"} className={"cs-rail-tab" + (tab === "changes" ? " on" : "")} onClick={() => onTabChange("changes")}>
+          Changes
+          {dirtyCount ? <span className="cs-rail-tab-badge">{dirtyCount}</span> : null}
+        </button>
       </div>
       <div className="cs-rail-body">
         {tab === "threads" ? (
@@ -225,6 +246,14 @@ export function ThreadRail({
         ) : null}
         {tab === "learn" ? <LearnTab cid={cid} agents={agents} /> : null}
         {tab === "outline" ? <OutlineRail cid={cid} gitRef={gitRef} path={path} onJumpToLine={onJumpToLine} /> : null}
+        {tab === "changes" ? (
+          <ChangesTab
+            cid={cid}
+            selectedPath={selectedWorktreePath}
+            onOpenChange={(p) => onOpenWorktreeDiff?.(p)}
+            onDirtyCountChange={(count) => { setDirtyCount(count); onDirtyCountChange?.(count); }}
+          />
+        ) : null}
       </div>
     </aside>
   );

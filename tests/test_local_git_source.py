@@ -540,3 +540,110 @@ async def test_browse_file_path_traversal_rejected(client, container, local_repo
     # escape the repo — local_git.file_bytes rejects the ".." segment outright, so
     # this reads as "not found", never a leaked file from outside the repo.
     assert r.json()["reason"] == "not_found"
+
+
+# ==================== BLAZING-fast local reads: snapshot-served file =================
+# docs/orcha-cloud-local-run.md addendum — `_local_file_response` tries the cached
+# repo snapshot FIRST (`_snapshot_bytes_for_path`) and only falls back to
+# `local_git.file_bytes` (a `git show` subprocess) when the snapshot has no entry for
+# the path. These tests assert the fast path is actually taken (no subprocess call)
+# when a snapshot is warm, and that the fallback still works correctly when it isn't.
+
+async def test_browse_file_served_from_warm_snapshot_no_subprocess(client, container, local_repo, monkeypatch):
+    cid = container["id"]
+    await _bind_local(client, cid)
+    sha = local_git.resolve_ref()
+    # Warm the snapshot the same way the background warmer does (same cache key).
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+    assert browse._repo_snapshot_cache_get(cid, sha) is not None
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("local_git.file_bytes must not be called when the snapshot is warm")
+    monkeypatch.setattr(local_git, "file_bytes", _boom)
+
+    r = await client.get(
+        f"/api/containers/{cid}/github/browse/file", params={"path": "src/main.py"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["binary"] is False
+    assert body["content"] == PY_SOURCE
+
+
+async def test_browse_file_falls_back_to_git_show_when_snapshot_cold(client, container, local_repo):
+    """README.md is a snapshot MISS (only source extensions the symbol indexer cares
+    about are kept — see LANGUAGE_BY_EXTENSION), so even with a warm snapshot the
+    fallback path must still serve it correctly."""
+    cid = container["id"]
+    await _bind_local(client, cid)
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+    r = await client.get(
+        f"/api/containers/{cid}/github/browse/file", params={"path": "README.md"})
+    assert r.status_code == 200, r.text
+    assert r.json()["content"] == "hello local\n"
+
+
+async def test_browse_file_snapshot_miss_before_any_snapshot_built(client, container, local_repo):
+    """No symbol search has ever run for this cid/ref — `_snapshot_bytes_for_path`
+    must return None (no cache entry at all) rather than error, and the route falls
+    back to git show cleanly."""
+    cid = container["id"]
+    await _bind_local(client, cid)
+    sha = local_git.resolve_ref()
+    assert browse._repo_snapshot_cache_get(cid, sha) is None
+    r = await client.get(
+        f"/api/containers/{cid}/github/browse/file", params={"path": "src/main.py"})
+    assert r.status_code == 200, r.text
+    assert r.json()["content"] == PY_SOURCE
+
+
+# ====================== BLAZING-fast local reads: in-memory search ====================
+# `browse_search(mode="contents")` tries `_in_memory_grep` over the warm snapshot first
+# and only shells out to `local_git.grep` when no snapshot is cached yet.
+
+async def test_browse_search_contents_served_in_memory_no_subprocess(client, container, local_repo, monkeypatch):
+    cid = container["id"]
+    await _bind_local(client, cid)
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("local_git.grep must not be called when the snapshot is warm")
+    monkeypatch.setattr(local_git, "grep", _boom)
+
+    r = await client.get(
+        f"/api/containers/{cid}/github/browse/search",
+        params={"q": "def foo", "mode": "contents"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert body["default_branch_only"] is False
+    assert body["results"] == [{"path": "src/main.py", "line": 1, "text": "def foo():"}]
+
+
+async def test_browse_search_contents_falls_back_to_git_grep_when_snapshot_cold(client, container, local_repo):
+    cid = container["id"]
+    await _bind_local(client, cid)
+    r = await client.get(
+        f"/api/containers/{cid}/github/browse/search",
+        params={"q": "def foo", "mode": "contents"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["results"] == [{"path": "src/main.py", "line": 1, "text": "def foo():"}]
+
+
+async def test_in_memory_grep_case_insensitive_and_capped(client, container, local_repo):
+    cid = container["id"]
+    await _bind_local(client, cid)
+    r = await client.get(f"/api/containers/{cid}/code/symbols")
+    assert r.status_code == 200, r.text
+    sha = local_git.resolve_ref()
+    results = browse._in_memory_grep(cid, sha, "CLASS WIDGET")
+    assert results == [{"path": "src/main.py", "line": 5, "text": "class Widget:"}]
+
+
+async def test_in_memory_grep_returns_none_when_no_snapshot_cached(container):
+    # No client call ever warmed the snapshot for this (cid, ref) — the caller's
+    # signal to fall back to local_git.grep.
+    assert browse._in_memory_grep(container["id"], "deadbeef" * 5, "anything") is None

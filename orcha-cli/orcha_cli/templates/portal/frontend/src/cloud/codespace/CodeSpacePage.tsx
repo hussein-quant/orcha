@@ -32,6 +32,7 @@ import { CodeSpaceLanding } from "./CodeSpaceLanding";
 import type { CodeThreadSummary } from "./codespaceTypes";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { isLineSelected, rangeFrom, singleLine, type LineSelection } from "./gutter";
+import { HistoryPanel } from "./HistoryPanel";
 import { MdRenderedPane } from "./MdRenderedPane";
 import { recordFileView } from "./recentFiles";
 import { RecentFilesDropdown } from "./RecentFilesDropdown";
@@ -39,6 +40,8 @@ import { IdentifierTokens } from "./symbols/IdentifierTokens";
 import { SymbolSearch } from "./symbols/SymbolSearch";
 import { ThreadRail, type RailTab } from "./ThreadRail";
 import { usePaneWidths } from "./usePaneWidths";
+import { fetchWorktreeChanges } from "./worktreeApi";
+import { WorktreeDiffPane } from "./WorktreeDiffPane";
 import "./codespace.css";
 
 // Item 1 — Markdown files render through the house Md component (esc-first,
@@ -115,6 +118,25 @@ export function CodeSpacePage() {
   const [symbolPrefill, setSymbolPrefill] = useState<string | undefined>(undefined);
   const [symbolPrefillToken, setSymbolPrefillToken] = useState(0);
 
+  // Working-tree changes (local run addendum) — `worktreePath` set means the
+  // center pane is showing THAT path's uncommitted diff (WorktreeDiffPane)
+  // instead of the normal committed-file viewer; null is the normal state.
+  // `worktreeAvailable` gates the file header's History button (local-
+  // binding only — a single cheap fetch per cid, not the Changes tab's own
+  // ~5s poll, since the page only needs a yes/no here, not a live count).
+  const [worktreePath, setWorktreePath] = useState<string | null>(null);
+  const [worktreeAvailable, setWorktreeAvailable] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  useEffect(() => {
+    if (!cid) return;
+    let cancelled = false;
+    fetchWorktreeChanges(cid).then((data) => {
+      if (cancelled) return;
+      setWorktreeAvailable(data.available);
+    });
+    return () => { cancelled = true; };
+  }, [cid]);
+
   // Item 1 — Raw|Rendered toggle: Rendered is the default ONLY for .md files;
   // every other extension only ever sees Raw (the toggle itself is hidden for
   // them). Re-derives per file so navigating from a .md file to a non-.md
@@ -164,7 +186,30 @@ export function CodeSpacePage() {
   const selectFile = useCallback((p: string) => {
     setSelection(null);
     setComposerOpen(false);
+    setWorktreePath(null);
+    setHistoryOpen(false);
     navigate({ path: p, line: null, thread: null });
+  }, [navigate]);
+
+  // Changes tab row click: open that path's UNCOMMITTED diff in the center
+  // pane (WorktreeDiffPane), alongside the normal committed-file viewer —
+  // navigates ?path= too (so the tree/breadcrumb/header stay in sync and a
+  // reload doesn't lose the file context) but leaves ?ref=/?line= alone,
+  // since a working-tree diff has no single "line" to deep-link to yet.
+  const openWorktreeDiff = useCallback((p: string) => {
+    setSelection(null);
+    setComposerOpen(false);
+    setHistoryOpen(false);
+    setWorktreePath(p);
+    navigate({ path: p, line: null, thread: null });
+  }, [navigate]);
+
+  // History row click: re-open the CURRENT file at the picked commit's sha —
+  // the committed-file viewer already supports an arbitrary ref via ?ref=.
+  const openFileAtHistorySha = useCallback((sha: string) => {
+    setWorktreePath(null);
+    setHistoryOpen(false);
+    navigate({ ref: sha, line: null }, false);
   }, [navigate]);
 
   const jumpToLine = useCallback((line: number) => {
@@ -272,6 +317,8 @@ export function CodeSpacePage() {
   const navigateToSymbol = useCallback((symbolPath: string, line: number) => {
     setSelection(null);
     setComposerOpen(false);
+    setWorktreePath(null);
+    setHistoryOpen(false);
     navigate({ path: symbolPath, line, thread: null }, false);
     scrollLineIntoView(line);
   }, [navigate]);
@@ -325,6 +372,8 @@ export function CodeSpacePage() {
   const navigateToThread = useCallback((t: CodeThreadSummary) => {
     setSelection(null);
     setComposerOpen(false);
+    setWorktreePath(null);
+    setHistoryOpen(false);
     setRailTab("threads");
     setOpenThreadId(t.id);
     navigate({ path: t.path, line: t.start_line, thread: t.id }, false);
@@ -442,7 +491,13 @@ export function CodeSpacePage() {
           <div className="cs-code-pane">
             <div className="cs-code-scroll">
               <ErrorBoundary label="content" key={path}>
-              {!path ? (
+              {worktreePath ? (
+                <WorktreeDiffPane
+                  cid={cid}
+                  path={worktreePath}
+                  onViewAtHead={() => setWorktreePath(null)}
+                />
+              ) : !path ? (
                 <CodeSpaceLanding
                   cid={cid}
                   onNavigateToThread={navigateToThread}
@@ -474,6 +529,28 @@ export function CodeSpacePage() {
                   headerExtra={
                     <>
                       <Breadcrumbs path={path} onOpenDir={openDirInTree} />
+                      {worktreeAvailable ? (
+                        <span className="cs-history-anchor">
+                          <button
+                            type="button"
+                            className="cs-history-btn"
+                            onClick={() => setHistoryOpen((v) => !v)}
+                            title="Show this file's commit history"
+                            aria-expanded={historyOpen}
+                          >
+                            History
+                          </button>
+                          {historyOpen ? (
+                            <HistoryPanel
+                              cid={cid}
+                              path={path}
+                              gitRef={gitRef}
+                              onSelectCommit={openFileAtHistorySha}
+                              onClose={() => setHistoryOpen(false)}
+                            />
+                          ) : null}
+                        </span>
+                      ) : null}
                       {isMd ? (
                         <>
                           {viewMode === "rendered" ? (
@@ -581,6 +658,8 @@ export function CodeSpacePage() {
               onRaiseHandDone={() => setRaiseHand(null)}
               onRaiseHandRequested={onRaiseHand}
               onNavigateToThread={navigateToThread}
+              selectedWorktreePath={worktreePath}
+              onOpenWorktreeDiff={openWorktreeDiff}
               width={widths.rail}
             />
           </ErrorBoundary>

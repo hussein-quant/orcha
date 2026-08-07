@@ -164,6 +164,12 @@ describe("ThreadRail — tabs", () => {
     expect(screen.getByRole("tab", { name: "Outline" })).toBeInTheDocument();
   });
 
+  it("renders a Changes tab button alongside Threads/Live/Learn/Outline", () => {
+    stubFetch();
+    mount();
+    expect(screen.getByRole("tab", { name: "Changes" })).toBeInTheDocument();
+  });
+
   it("renders the Outline tab's symbols for the open file", async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -180,6 +186,90 @@ describe("ThreadRail — tabs", () => {
     }) as unknown as typeof fetch;
     mount({ tab: "outline" });
     expect(await screen.findByText("helper")).toBeInTheDocument();
+  });
+});
+
+describe("ThreadRail — Changes tab (working-tree, local run addendum)", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("lists dirty files and shows the summary header", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/code/worktree/changes")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            available: true, dirty: true,
+            files: [{ path: "src/a.ts", status: "M", additions: 2, deletions: 1 }],
+            summary: { files: 1, additions: 2, deletions: 1 },
+          }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    mount({ tab: "changes" });
+    expect(await screen.findByText("src/a.ts")).toBeInTheDocument();
+    expect(screen.getByText("1 file changed")).toBeInTheDocument();
+  });
+
+  it("clicking a changed file calls onOpenWorktreeDiff with its path", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/code/worktree/changes")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            available: true, dirty: true,
+            files: [{ path: "src/a.ts", status: "M", additions: 2, deletions: 1 }],
+            summary: { files: 1, additions: 2, deletions: 1 },
+          }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    const onOpenWorktreeDiff = vi.fn();
+    mount({ tab: "changes", onOpenWorktreeDiff });
+    const row = await screen.findByText("src/a.ts");
+    fireEvent.click(row.closest(".cs-changes-row") as HTMLElement);
+    expect(onOpenWorktreeDiff).toHaveBeenCalledWith("src/a.ts");
+  });
+
+  it("shows the clean-tree empty state", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/code/worktree/changes")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({ available: true, dirty: false, files: [], summary: { files: 0, additions: 0, deletions: 0 } }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    mount({ tab: "changes" });
+    expect(await screen.findByText(/working tree clean/i)).toBeInTheDocument();
+  });
+
+  it("shows a tab-strip badge once the dirty count is known", async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/containers/c1/code/worktree/changes")) {
+        return {
+          ok: true, status: 200,
+          json: async () => ({
+            available: true, dirty: true,
+            files: [
+              { path: "a.ts", status: "M", additions: 1, deletions: 0 },
+              { path: "b.ts", status: "A", additions: 1, deletions: 0 },
+            ],
+            summary: { files: 2, additions: 2, deletions: 0 },
+          }),
+        } as unknown as Response;
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as unknown as Response;
+    }) as unknown as typeof fetch;
+    mount({ tab: "changes" });
+    await screen.findByText("a.ts");
+    expect(await screen.findByText("2")).toBeInTheDocument();
   });
 });
 

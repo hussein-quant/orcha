@@ -4,9 +4,12 @@ project's OWN working tree with zero GitHub setup — the sentinel repo binding 
 (see `docs/orcha-cloud-local-run.md` "Addendum 2").
 
 The compose template mounts the project root read-only at ORCHA_LOCAL_REPO_DIR
-(`../ -> /app/workspace:ro`) and the portal image carries the `git` binary. Every
-function here operates on COMMITTED state only (HEAD/branches/tags) — v1 deliberately
-does not diff the working tree; that stays the run-feed's job (see the design doc).
+(`../ -> /app/workspace:ro`) and the portal image carries the `git` binary. Most
+functions here operate on COMMITTED state only (HEAD/branches/tags) — `git status`/
+`git diff`/`--no-index` are read-only operations too, so the working-tree helpers below
+(status_porcelain/diff_numstat/diff_unified) work fine against the same read-only
+mount despite reading UNCOMMITTED state; nothing in this module ever writes to the
+repo.
 
 Contract mirrored from github_repo_browse_routes.py so callers can branch on
 `repo == "local"` at a handful of chokepoints and otherwise reuse the exact same
@@ -24,6 +27,15 @@ downstream shapes (tree entries, snapshot dict, symbol indexer, etc.):
                            does for a GitHub tarball — plain tar here, no gzip, so
                            callers open it with mode="r")
   - log1(ref)           -> {"sha","committed_at"} | None
+
+Working-tree helpers (portal_backend/code_workingtree_routes.py — "what have agents
+changed that isn't committed yet"), all local-only, no GitHub equivalent:
+  - status_porcelain()  -> [{"path","status":"M"|"A"|"D"|"R"|"??","orig_path"}, ...] | None
+  - diff_numstat()      -> [{"path","additions","deletions"}, ...] | None (tracked +
+                           untracked, whole tree)
+  - diff_unified(path)  -> unified diff text (str) | None (whole tree when path=None;
+                           untracked files get a synthesized whole-file-add diff)
+  - log_follow(path,ref,n) -> [{"sha","short","summary","author","committed_at"}, ...] | None
 
 SAFETY: every subprocess call is `subprocess.run([...], timeout=..., shell=False)` —
 argv lists only, never a shell string, so there is no shell-injection surface even
@@ -329,6 +341,304 @@ def log1(ref=None) -> "dict | None":
         return None
     commit_sha, committed_at = line.split("\x1f", 1)
     return {"sha": commit_sha, "committed_at": committed_at}
+
+
+def status_porcelain() -> "list | None":
+    """The working tree's dirty-state summary via `git status --porcelain=v1 -z`
+    (porcelain v1 — a stable machine-readable format across git versions; `-z` NUL-
+    terminates records and leaves paths UNQUOTED even when they contain spaces/unicode,
+    avoiding porcelain v1's default C-style quoting of "unusual" paths). Returns a list
+    of {"path", "status", "orig_path"} — `status` is ONE of "M" (modified — staged
+    and/or unstaged, collapsed to one letter since the working-tree-changes view treats
+    both the same way GitHub's own PR file list does), "A" (added/staged-new), "D"
+    (deleted), "R" (renamed — `orig_path` is the pre-rename name, else None), or "??"
+    (untracked). A path with conflicting index/worktree states (rare outside a mid-
+    merge repo) collapses to whichever single letter `_classify_status_code` picks —
+    see its own docstring for the precedence. None on any git failure (repo dir
+    missing, not a repo); an empty list is a genuinely CLEAN working tree, not a
+    failure — the route layer's `dirty` flag distinguishes the two by checking `is not
+    None` before checking truthiness."""
+    if not available():
+        return None
+    out = _run(["status", "--porcelain=v1", "-z"], binary=True)
+    if out is None:
+        return None
+    # Split on NUL; a rename record is TWO consecutive fields (new name, then old
+    # name) rather than one "old -> new" string the way the non -z format renders it.
+    fields = out.decode("utf-8", errors="ignore").split("\x00")
+    entries = []
+    i = 0
+    while i < len(fields):
+        record = fields[i]
+        i += 1
+        if not record:
+            continue
+        if len(record) < 4:
+            continue
+        code = record[:2]
+        path = record[3:]
+        status = _classify_status_code(code)
+        orig_path = None
+        if status == "R":
+            # The next NUL-delimited field is the rename's ORIGINAL path.
+            if i < len(fields):
+                orig_path = fields[i]
+                i += 1
+        entries.append({"path": path, "status": status, "orig_path": orig_path})
+    return entries
+
+
+def _classify_status_code(code: str) -> str:
+    """Collapse `git status --porcelain`'s two-character XY code (index-state,
+    worktree-state) into ONE status letter for the working-tree-changes view — the UI
+    wants "what changed", not git's full index-vs-worktree matrix. Precedence: `??`
+    (untracked) and `R`/`R.`/`.R` (rename, either side) are checked first since they're
+    unambiguous single concepts; otherwise ANY 'A' in either position wins (a newly
+    added file, whether staged, or added-then-further-modified-in-worktree, still
+    reads as "A" — GitHub's own PR file list makes the same call for a file that's new
+    to the diff regardless of intermediate edits); then ANY 'D' wins (deleted, staged
+    or not); everything else (a plain 'M', or any other combination git emits) falls
+    through to 'M' as the honest default for "this tracked file differs from HEAD"."""
+    if code == "??":
+        return "??"
+    if "R" in code:
+        return "R"
+    if "A" in code:
+        return "A"
+    if "D" in code:
+        return "D"
+    return "M"
+
+
+def diff_numstat() -> "list | None":
+    """Per-file added/deleted line counts across the WHOLE working tree (tracked
+    changes only — staged + unstaged combined against HEAD) via
+    `git diff HEAD --numstat -z`, PLUS untracked files (numstat has no concept of a
+    file git isn't tracking yet, so each untracked path from `status_porcelain` is
+    reported here too, with additions = its current line count and deletions = 0 — an
+    untracked file's "diff" is conceptually a whole-file add against `/dev/null`,
+    mirroring `diff_unified`'s own untracked-file handling below). Returns a list of
+    {"path", "additions", "deletions"}; `additions`/`deletions` are None for a binary
+    file (numstat prints "-" for both — never fabricate a byte-derived line count for a
+    file git itself says has none). None on any git failure or when the repo is
+    unavailable; `[]` is a genuinely clean tree (no tracked changes AND no untracked
+    files)."""
+    if not available():
+        return None
+    tracked = _diff_numstat_tracked()
+    if tracked is None:
+        return None
+    untracked = _untracked_numstat()
+    return tracked + untracked
+
+
+def _diff_numstat_tracked() -> "list | None":
+    out = _run(["diff", "HEAD", "--numstat", "-z"], binary=True)
+    if out is None:
+        # `git diff HEAD` fails on a genuinely empty repo (no commits yet, so HEAD
+        # itself doesn't resolve) — every other "no tracked changes" case (a clean
+        # tree, an existing HEAD with zero diffs) succeeds with empty stdout, so this
+        # narrow failure mode degrades to "no tracked changes" rather than propagating
+        # None (an empty repo has no tracked changes to report, by definition — the
+        # caller's overall None-vs-[] contract is about REPO availability, already
+        # checked one level up in `diff_numstat`/`status_porcelain`).
+        return []
+    text = out.decode("utf-8", errors="ignore")
+    fields = [f for f in text.split("\x00") if f]
+    entries = []
+    for field in fields:
+        # Format: "<added>\t<deleted>\t<path>" (a rename appears as delete+add of two
+        # separate paths under plain --numstat, no -M — acceptable here since the
+        # per-file counts, not rename detection, are the point of this call; rename
+        # IDENTITY is already covered by status_porcelain's own -M-equipped status
+        # parse).
+        parts = field.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        added_field, deleted_field, path = parts
+        additions = int(added_field) if added_field.isdigit() else None
+        deletions = int(deleted_field) if deleted_field.isdigit() else None
+        entries.append({"path": path, "additions": additions, "deletions": deletions})
+    return entries
+
+
+def _untracked_numstat() -> list:
+    """Untracked files as numstat-shaped {"path","additions","deletions":0} entries —
+    `additions` is the file's current line count (best-effort: `wc -l`-equivalent via a
+    newline count on the raw bytes; a binary untracked file gets `additions: None`,
+    matching numstat's own "-" convention for binaries, via the same `_is_probably_binary`
+    NUL-byte sniff `diff_unified` uses for its own untracked-file whole-file-add form)."""
+    entries = status_porcelain() or []
+    untracked_paths = [e["path"] for e in entries if e["status"] == "??"]
+    results = []
+    for path in untracked_paths:
+        raw = _read_worktree_file(path)
+        if raw is None:
+            continue
+        if _is_probably_binary(raw):
+            results.append({"path": path, "additions": None, "deletions": 0})
+            continue
+        # A trailing-newline-terminated file of N lines has N '\n' bytes; a file with
+        # no trailing newline has one more line than '\n' bytes — count() then adjust,
+        # matching how `git diff`'s own numstat counts an untracked file's line total.
+        line_count = raw.count(b"\n")
+        if raw and not raw.endswith(b"\n"):
+            line_count += 1
+        results.append({"path": path, "additions": line_count, "deletions": 0})
+    return results
+
+
+def _is_probably_binary(raw: bytes) -> bool:
+    return b"\x00" in raw
+
+
+def _read_worktree_file(rel_path: str) -> "bytes | None":
+    """Raw bytes of a file in the WORKING TREE (not a git object — a git object only
+    exists for committed/staged content, but an untracked file has neither) — the read-
+    only bind mount (`ORCHA_LOCAL_REPO_DIR`) makes a plain filesystem read safe (no
+    write path exists through this helper). `_safe_rel_path` gates traversal exactly
+    like every other path this module trusts; the read itself is a plain `open()`, not
+    a subprocess (there is no git plumbing command for "show me an untracked file's
+    bytes" — `git show :path` only resolves INDEX/committed content). None on a bad
+    path, missing dir, missing file, or any OSError (permission, race with a concurrent
+    delete, etc.) — the same 'unavailable, not an error' contract every other read in
+    this module keeps."""
+    if not _safe_rel_path(rel_path):
+        return None
+    repo_dir = _env_dir()
+    if not repo_dir:
+        return None
+    full_path = os.path.join(repo_dir, rel_path)
+    try:
+        with open(full_path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def diff_unified(path=None) -> "str | None":
+    """Unified diff text for the working tree — either the WHOLE tree (`path=None`,
+    tracked changes only — untracked files have no meaningful "whole tree" unified
+    diff form since git has nothing to diff them against as a group) or ONE file
+    (`path` given), via `git diff HEAD -- <path>`. For a path that `status_porcelain`
+    reports as untracked (`??`), synthesizes the "whole-file-add" diff form via
+    `git diff --no-index -- /dev/null <path>` — the standard trick for showing an
+    untracked file as an add-diff (git has no commit to diff an untracked file
+    against, so `--no-index` against `/dev/null` produces the same shape a real
+    "file added" diff would have). Returns None when: the repo is unavailable, `path`
+    fails `_safe_rel_path`, or git fails outright. An EMPTY STRING is a legitimate "no
+    diff" result (path given but unchanged) — distinct from None; callers check
+    `is None` for failure, not falsiness."""
+    if not available():
+        return None
+    if path is not None and not _safe_rel_path(path):
+        return None
+    if path is not None:
+        status = _status_for_path(path)
+        if status == "??":
+            return _untracked_diff(path)
+        args = ["diff", "HEAD", "--", path]
+    else:
+        args = ["diff", "HEAD"]
+    out = _run(args)
+    if out is None:
+        # `git diff HEAD` fails on a repo with no commits yet (HEAD doesn't resolve) —
+        # the honest answer there is "nothing to diff against", not a failure; treat it
+        # as an empty diff rather than propagating None, mirroring
+        # `_diff_numstat_tracked`'s identical empty-repo handling.
+        return ""
+    return out
+
+
+def _status_for_path(path: str) -> "str | None":
+    entries = status_porcelain() or []
+    for entry in entries:
+        if entry["path"] == path:
+            return entry["status"]
+    return None
+
+
+# Diffs are capped the same way file reads are — an oversized diff is truncated with
+# a marker rather than silently dropped or left to blow up a response.
+WORKTREE_DIFF_MAX_BYTES = 200_000
+
+
+def _untracked_diff(path: str) -> "str | None":
+    """The add-diff form for an untracked file: `git diff --no-index -- /dev/null
+    <path>` run FROM the repo dir (`_run` already prefixes `-C <repo_dir>`), so
+    `<path>` resolves relative to the working tree exactly like every other path this
+    module accepts. `--no-index` makes git compare two arbitrary paths without either
+    needing to be a tracked blob — the standard idiom for "diff a file that isn't in
+    git yet". `git diff --no-index` exits 1 (not 0) whenever the compared paths
+    differ (i.e. on EVERY real result, since /dev/null vs a real file always differs)
+    — `_run` would normally treat that nonzero exit as failure and return None, so
+    this call bypasses `_run` and shells out directly to read stdout regardless of
+    exit code, exactly like `local_git.grep`'s own git-grep-exit-1-is-not-an-error
+    handling one layer up."""
+    repo_dir = _env_dir()
+    if not repo_dir:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_dir, "diff", "--no-index", "--", "/dev/null", path],
+            capture_output=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+            shell=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("local_git: untracked diff for %s failed: %s", path, exc)
+        return None
+    # exit 0 only when the file happens to be byte-identical to /dev/null (i.e. truly
+    # empty) — still a valid, if boring, diff; exit 1 is the normal "they differ" case;
+    # anything else (2+) is a real git error.
+    if result.returncode not in (0, 1):
+        logger.debug(
+            "local_git: untracked diff for %s exited %s: %s",
+            path, result.returncode, (result.stderr or b"")[:500],
+        )
+        return None
+    return result.stdout.decode("utf-8", errors="ignore")
+
+
+def log_follow(path, ref=None, n: int = 20) -> "list | None":
+    """File history: up to `n` most recent commits that touched `path`, newest first,
+    via `git log --follow --format=... -n <n> <ref> -- <path>` (`--follow` tracks the
+    file across renames, matching GitHub's own file-history view). Each entry:
+    {"sha","short","summary","author","committed_at"} (committed_at ISO-8601 via
+    %cI). None when: `path` fails `_safe_rel_path`, `ref` doesn't resolve, or git
+    fails. An empty list is a genuine 'no history found for this path at this ref'
+    (e.g. a path that only exists in the working tree, never committed) — not a
+    failure."""
+    if not _safe_rel_path(path):
+        return None
+    sha = resolve_ref(ref)
+    if sha is None:
+        return None
+    # Field separator \x1f (unit separator) keeps a summary containing a literal tab
+    # or pipe from corrupting the parse; \x1e (record separator) delimits commits so a
+    # multi-line-safe split works even though summary (%s) itself never contains a
+    # newline.
+    out = _run([
+        "log", "--follow", f"-n{n}",
+        f"--format=%H%x1f%h%x1f%s%x1f%an%x1f%cI%x1e",
+        sha, "--", path,
+    ])
+    if out is None:
+        return []
+    entries = []
+    for record in out.split("\x1e"):
+        record = record.strip("\n")
+        if not record:
+            continue
+        parts = record.split("\x1f")
+        if len(parts) != 5:
+            continue
+        full_sha, short_sha, summary, author, committed_at = parts
+        entries.append({
+            "sha": full_sha, "short": short_sha, "summary": summary,
+            "author": author, "committed_at": committed_at,
+        })
+    return entries
 
 
 def workspace_name() -> "str | None":
