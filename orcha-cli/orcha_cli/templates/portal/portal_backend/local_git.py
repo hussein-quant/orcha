@@ -27,6 +27,9 @@ downstream shapes (tree entries, snapshot dict, symbol indexer, etc.):
                            does for a GitHub tarball — plain tar here, no gzip, so
                            callers open it with mode="r")
   - log1(ref)           -> {"sha","committed_at"} | None
+  - origin_repo()       -> "owner/name" | None (GitHub-only `origin` remote parse — the
+                           local-binding-with-GitHub-hub fall-through seam, see
+                           github_hub_routes' LOCAL_REPO dispatch)
 
 Working-tree helpers (portal_backend/code_workingtree_routes.py — "what have agents
 changed that isn't committed yet"), all local-only, no GitHub equivalent:
@@ -639,6 +642,50 @@ def log_follow(path, ref=None, n: int = 20) -> "list | None":
             "author": author, "committed_at": committed_at,
         })
     return entries
+
+
+_ORIGIN_HTTPS_RE = re.compile(
+    r"^https://github\.com/(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
+)
+_ORIGIN_SSH_RE = re.compile(
+    r"^git@github\.com:(?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$"
+)
+
+
+def origin_repo() -> "str | None":
+    """The local repo's `origin` remote, parsed into "owner/name" — the seam that lets
+    a LOCAL-bound container (browse/Code Space served from the working tree) also serve
+    the GitHub hub (issues/PRs/checks) when that working tree happens to be a clone
+    FROM GitHub (see github_hub_routes' LOCAL_REPO fall-through). GitHub-only, by
+    design: any other host, or a shape this doesn't recognize, returns None rather than
+    guess — an honest "not a GitHub-backed clone" rather than a wrong owner/name.
+
+    Supports exactly the two URL forms git itself would ever have written for a GitHub
+    remote: `https://github.com/owner/name(.git)` and `git@github.com:owner/name(.git)`
+    (a trailing slash is tolerated on the https form since some remotes carry one).
+    Anything else — a GitLab/Bitbucket/self-hosted URL, an `ssh://` form, a bare local
+    path, git://, or a URL git itself would reject — returns None; this module never
+    tries to be a general-purpose git-URL parser, only a GitHub-recognizer.
+
+    None (never raises) when: the local source is unavailable (`available()` is
+    False), the repo has no `origin` remote configured, or `git remote get-url origin`
+    itself fails for any reason. Uses the SAME `_run` subprocess leaf (argv-list,
+    bounded timeout, no shell) every other function in this module does."""
+    if not available():
+        return None
+    out = _run(["remote", "get-url", "origin"])
+    if out is None:
+        return None
+    url = out.strip()
+    if not url:
+        return None
+    match = _ORIGIN_HTTPS_RE.match(url) or _ORIGIN_SSH_RE.match(url)
+    if not match:
+        return None
+    owner, name = match.group("owner"), match.group("name")
+    if not owner or not name:
+        return None
+    return f"{owner}/{name}"
 
 
 def workspace_name() -> "str | None":

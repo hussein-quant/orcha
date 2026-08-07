@@ -379,3 +379,92 @@ describe("GitHubPage local-source degradation (Orcha Cloud local run, Addendum 2
     expect(await screen.findAllByText("Browsing the local repository. Connect a GitHub repo for issues, PRs, and checks.")).not.toHaveLength(0);
   });
 });
+
+/* ============================================================================
+   Local-binding + GitHub-origin fall-through (simultaneous local binding +
+   GitHub hub): two more shapes the "local_source" degrade can take
+   (origin_detected present vs. absent), plus the fully-available fall-through
+   case where the hub payload comes back real (never degraded) even though the
+   container is still LOCAL-bound.
+   ============================================================================ */
+const LOCAL_SOURCE_WITH_ORIGIN = {
+  available: false, reason: "local_source", detail: "issues/pulls are GitHub-only",
+  origin_detected: "acme/site",
+};
+const ISSUES_VIA_ORIGIN = {
+  available: true,
+  repo: "acme/site",
+  issues: [
+    {
+      number: 4, title: "From the origin repo", labels: [], assignee: null,
+      updated_at: "2026-08-01T00:00:00Z",
+      html_url: "https://github.com/acme/site/issues/4",
+      body_excerpt: "", tracked_task_id: null,
+    },
+  ],
+};
+
+function stubFetchLocalOrigin(opts: { withToken: boolean }): Call[] {
+  const calls: Call[] = [];
+  const json = (data: unknown, status = 200) =>
+    ({ ok: status < 400, status, json: async () => data }) as unknown as Response;
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+    if (url.startsWith("/api/containers/c1/github/issues")) {
+      return json(opts.withToken ? ISSUES_VIA_ORIGIN : LOCAL_SOURCE_WITH_ORIGIN);
+    }
+    if (url.startsWith("/api/containers/c1/github/pulls")) {
+      return json(opts.withToken ? { available: true, repo: "acme/site", pulls: [] } : LOCAL_SOURCE_WITH_ORIGIN);
+    }
+    if (url === "/api/containers/c1/github") return json({ repo: "local" });
+    if (url.startsWith("/api/github/repos")) return json({ available: false, repos: [] });
+    if (url.startsWith("/api/me")) return json({ identity: null, trusted: false });
+    if (url.startsWith("/api/containers/c1")) return json(rawSnap(AGENTS_WITH_HUMAN));
+    if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
+    return json({});
+  }) as unknown as typeof fetch;
+  return calls;
+}
+
+describe("GitHubPage local-binding + GitHub-origin fall-through", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("origin detected but no token: callout names the origin repo and links to Settings", async () => {
+    stubFetchLocalOrigin({ withToken: false });
+    mount();
+    expect(await screen.findByText(
+      "This clone comes from acme/site on GitHub — add GitHub access in Settings to see its issues & PRs.",
+    )).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /Add GitHub access/ });
+    expect(link.getAttribute("href")).toBe("/settings");
+    // the generic "Connect GitHub repo" wording/button is NOT shown for this variant
+    expect(screen.queryByRole("button", { name: /Connect GitHub repo/ })).not.toBeInTheDocument();
+  });
+
+  it("no origin at all: keeps the generic callout wording (unchanged behavior)", async () => {
+    stubFetchLocalSource();
+    mount();
+    expect(await screen.findByText(
+      "Browsing the local repository. Connect a GitHub repo for issues, PRs, and checks.",
+    )).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Add GitHub access/ })).not.toBeInTheDocument();
+  });
+
+  it("fall-through succeeded (token present): renders real issues, no callout at all", async () => {
+    stubFetchLocalOrigin({ withToken: true });
+    mount();
+    expect(await screen.findByText("From the origin repo")).toBeInTheDocument();
+    expect(screen.queryByText(/Browsing the local repository/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This clone comes from/)).not.toBeInTheDocument();
+  });
+
+  it("fall-through succeeded: header shows BOTH the Local chip and the muted origin suffix", async () => {
+    stubFetchLocalOrigin({ withToken: true });
+    mount();
+    await screen.findByText("From the origin repo");
+    expect(screen.getByText("Local")).toBeInTheDocument();
+    expect(screen.getByText("· acme/site")).toBeInTheDocument();
+  });
+});

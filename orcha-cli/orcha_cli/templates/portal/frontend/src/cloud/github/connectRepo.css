@@ -41,6 +41,9 @@
 .repo-badge-chip { flex: none; font-size: 10px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
   color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-line);
   border-radius: 999px; padding: 1px 7px; }
+/* local-binding + GitHub-origin fall-through: the detected origin repo, shown as a
+   subdued suffix on the Local badge — both truths visible, neither shouting. */
+.repo-badge-origin { flex: none; font-size: 11px; color: var(--faint); }
 
 /* ---- GitHub hub degradation callout (local_source) ------------------------ */
 .gh-local-callout .sc-acts { margin-top: 12px; }

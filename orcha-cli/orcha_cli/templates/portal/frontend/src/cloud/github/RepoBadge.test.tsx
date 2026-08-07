@@ -45,4 +45,25 @@ describe("RepoBadge", () => {
     render(<RepoBadge repo="local" workspaceName="quantal-ehr" link />);
     expect(document.querySelector("a")).toBeNull();
   });
+
+  // local-binding + GitHub-origin fall-through (simultaneous local binding +
+  // GitHub hub): the Local badge can ALSO show the detected origin repo as a
+  // muted suffix — both truths visible at once.
+  it("local binding + originRepo: shows the Local chip AND a muted origin suffix", () => {
+    render(<RepoBadge repo="local" workspaceName="quantal-ehr" originRepo="acme/site" />);
+    expect(screen.getByText("quantal-ehr")).toBeInTheDocument();
+    expect(screen.getByText("Local")).toBeInTheDocument();
+    expect(screen.getByText("· acme/site")).toBeInTheDocument();
+  });
+
+  it("local binding with no originRepo shows no suffix at all", () => {
+    render(<RepoBadge repo="local" workspaceName="quantal-ehr" />);
+    expect(document.querySelector(".repo-badge-origin")).toBeNull();
+  });
+
+  it("originRepo is ignored on a non-local (GitHub) binding", () => {
+    render(<RepoBadge repo="acme/app" originRepo="acme/site" />);
+    expect(document.querySelector(".repo-badge-origin")).toBeNull();
+    expect(screen.getByText("acme/app")).toBeInTheDocument();
+  });
 });

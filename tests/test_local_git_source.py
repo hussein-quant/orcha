@@ -203,6 +203,55 @@ def test_workspace_name_is_dir_basename(local_repo):
     assert local_git.workspace_name() == "repo"
 
 
+# ---------------------- origin_repo(): local-binding + GitHub-origin fall-through ----
+
+def test_origin_repo_none_when_no_origin_remote(local_repo):
+    # local_repo (the fixture) never configures an `origin` remote.
+    assert local_git.origin_repo() is None
+
+
+def test_origin_repo_parses_https_form(local_repo):
+    _git(local_repo, "remote", "add", "origin", "https://github.com/acme/site.git")
+    assert local_git.origin_repo() == "acme/site"
+
+
+def test_origin_repo_parses_https_form_without_dotgit_suffix(local_repo):
+    _git(local_repo, "remote", "add", "origin", "https://github.com/acme/site")
+    assert local_git.origin_repo() == "acme/site"
+
+
+def test_origin_repo_parses_ssh_form(local_repo):
+    _git(local_repo, "remote", "add", "origin", "git@github.com:acme/site.git")
+    assert local_git.origin_repo() == "acme/site"
+
+
+def test_origin_repo_parses_ssh_form_without_dotgit_suffix(local_repo):
+    _git(local_repo, "remote", "add", "origin", "git@github.com:acme/site")
+    assert local_git.origin_repo() == "acme/site"
+
+
+def test_origin_repo_none_for_non_github_https_host(local_repo):
+    _git(local_repo, "remote", "add", "origin", "https://gitlab.com/acme/site.git")
+    assert local_git.origin_repo() is None
+
+
+def test_origin_repo_none_for_non_github_ssh_host(local_repo):
+    _git(local_repo, "remote", "add", "origin", "git@gitlab.com:acme/site.git")
+    assert local_git.origin_repo() is None
+
+
+def test_origin_repo_none_for_local_filesystem_origin(local_repo, tmp_path):
+    other = tmp_path / "other-repo"
+    other.mkdir()
+    _git(local_repo, "remote", "add", "origin", str(other))
+    assert local_git.origin_repo() is None
+
+
+def test_origin_repo_none_when_local_source_unavailable(monkeypatch):
+    monkeypatch.delenv("ORCHA_LOCAL_REPO_DIR", raising=False)
+    assert local_git.origin_repo() is None
+
+
 def test_unavailable_functions_degrade_to_none(monkeypatch):
     monkeypatch.delenv("ORCHA_LOCAL_REPO_DIR", raising=False)
     assert local_git.resolve_ref() is None
@@ -211,6 +260,7 @@ def test_unavailable_functions_degrade_to_none(monkeypatch):
     assert local_git.file_bytes("HEAD", "a.py") is None
     assert local_git.archive_bytes() is None
     assert local_git.log1() is None
+    assert local_git.origin_repo() is None
 
 
 # ============================ binding: PUT/GET + repos list =======================
@@ -494,6 +544,8 @@ async def test_hub_issues_local_source_reason(client, container, local_repo):
     body = r.json()
     assert body["available"] is False
     assert body["reason"] == "local_source"
+    # no `origin` remote configured on the fixture repo -> no origin detected.
+    assert body["origin_detected"] is None
 
 
 async def test_hub_pulls_local_source_reason(client, container, local_repo):
@@ -501,7 +553,9 @@ async def test_hub_pulls_local_source_reason(client, container, local_repo):
     await _bind_local(client, cid)
     r = await client.get(f"/api/containers/{cid}/github/pulls")
     assert r.status_code == 200
-    assert r.json()["reason"] == "local_source"
+    body = r.json()
+    assert body["reason"] == "local_source"
+    assert body["origin_detected"] is None
 
 
 async def test_hub_checks_local_source_reason(client, container, local_repo):
@@ -509,7 +563,9 @@ async def test_hub_checks_local_source_reason(client, container, local_repo):
     await _bind_local(client, cid)
     r = await client.get(f"/api/containers/{cid}/github/checks", params={"numbers": "1,2"})
     assert r.status_code == 200
-    assert r.json()["reason"] == "local_source"
+    body = r.json()
+    assert body["reason"] == "local_source"
+    assert body["origin_detected"] is None
 
 
 async def test_hub_pull_detail_local_source_reason(client, container, local_repo):
@@ -517,7 +573,9 @@ async def test_hub_pull_detail_local_source_reason(client, container, local_repo
     await _bind_local(client, cid)
     r = await client.get(f"/api/containers/{cid}/github/pulls/1")
     assert r.status_code == 200
-    assert r.json()["reason"] == "local_source"
+    body = r.json()
+    assert body["reason"] == "local_source"
+    assert body["origin_detected"] is None
 
 
 async def test_hub_issue_detail_local_source_reason(client, container, local_repo):
@@ -525,7 +583,225 @@ async def test_hub_issue_detail_local_source_reason(client, container, local_rep
     await _bind_local(client, cid)
     r = await client.get(f"/api/containers/{cid}/github/issues/1")
     assert r.status_code == 200
-    assert r.json()["reason"] == "local_source"
+    body = r.json()
+    assert body["reason"] == "local_source"
+    assert body["origin_detected"] is None
+
+
+# ============ hub: local-binding + GitHub-origin fall-through (simultaneous local
+# binding + GitHub hub) — the working tree is LOCAL-bound but its `origin` remote
+# points at a GitHub repo; when a token is ALSO resolvable for that origin, the hub
+# routes serve GitHub data against the origin transparently. `_gh_get` is stubbed
+# (never real network), matching test_github_hub_routes.py's own convention. =========
+
+async def test_hub_issues_falls_through_to_origin_when_token_present(
+        client, container, local_repo, monkeypatch):
+    cid = container["id"]
+    _git(local_repo, "remote", "add", "origin", "https://github.com/acme/site.git")
+    await _bind_local(client, cid)
+
+    token_file_dir = local_repo.parent
+    token_file = token_file_dir / "github-token"
+    token_file.write_text("ghs_origintoken\n")
+    monkeypatch.setenv("ORCHA_GITHUB_TOKEN_FILE", str(token_file))
+    monkeypatch.delenv("ORCHA_GITHUB_TOKENS_FILE", raising=False)
+
+    def fake_get(path, token):
+        assert token == "ghs_origintoken"
+        assert path.startswith("/repos/acme/site/issues")
+        return [{"number": 5, "title": "from origin", "labels": [], "assignee": None,
+                  "updated_at": "2026-07-01T00:00:00Z",
+                  "html_url": "https://github.com/acme/site/issues/5", "body": ""}]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/issues")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    # served exactly as if the container had been bound to "acme/site" directly:
+    # available:true, `repo` echoes the ORIGIN (never the "local" sentinel), real data.
+    assert body["available"] is True
+    assert body["repo"] == "acme/site"
+    assert body["issues"][0]["title"] == "from origin"
+
+
+async def test_hub_pulls_falls_through_to_origin_when_token_present(
+        client, container, local_repo, monkeypatch):
+    cid = container["id"]
+    _git(local_repo, "remote", "add", "origin", "git@github.com:acme/site.git")
+    await _bind_local(client, cid)
+
+    token_file = local_repo.parent / "github-token"
+    token_file.write_text("ghs_origintoken\n")
+    monkeypatch.setenv("ORCHA_GITHUB_TOKEN_FILE", str(token_file))
+    monkeypatch.delenv("ORCHA_GITHUB_TOKENS_FILE", raising=False)
+
+    def fake_get(path, token):
+        assert path.startswith("/repos/acme/site/pulls")
+        return [{"number": 9, "title": "origin PR", "head": {"ref": "feat/x", "sha": "a" * 40},
+                  "draft": False, "updated_at": "2026-07-01T00:00:00Z",
+                  "html_url": "https://github.com/acme/site/pull/9",
+                  "requested_reviewers": [], "mergeable_state": "clean"}]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert body["repo"] == "acme/site"
+    assert body["pulls"][0]["title"] == "origin PR"
+
+
+async def test_hub_pull_detail_falls_through_to_origin_when_token_present(
+        client, container, local_repo, monkeypatch):
+    cid = container["id"]
+    _git(local_repo, "remote", "add", "origin", "https://github.com/acme/site.git")
+    await _bind_local(client, cid)
+
+    token_file = local_repo.parent / "github-token"
+    token_file.write_text("ghs_origintoken\n")
+    monkeypatch.setenv("ORCHA_GITHUB_TOKEN_FILE", str(token_file))
+    monkeypatch.delenv("ORCHA_GITHUB_TOKENS_FILE", raising=False)
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/9":
+            return {"number": 9, "title": "origin PR", "state": "open", "draft": False,
+                     "body": "", "user": {"login": "octocat"}, "base": {"ref": "main"},
+                     "head": {"ref": "feat/x", "sha": "a" * 40},
+                     "updated_at": "2026-07-01T00:00:00Z", "created_at": "2026-07-01T00:00:00Z",
+                     "html_url": "https://github.com/acme/site/pull/9",
+                     "mergeable_state": "clean", "assignees": [], "requested_reviewers": [],
+                     "comments": 0, "review_comments": 0, "changed_files": 0}
+        if "status" in path:
+            return {"statuses": []}
+        if "check-runs" in path:
+            return {"check_runs": []}
+        if "files" in path:
+            return []
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls/9")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert body["repo"] == "acme/site"
+    assert body["pull"]["title"] == "origin PR"
+
+
+async def test_hub_issue_detail_falls_through_to_origin_when_token_present(
+        client, container, local_repo, monkeypatch):
+    cid = container["id"]
+    _git(local_repo, "remote", "add", "origin", "https://github.com/acme/site.git")
+    await _bind_local(client, cid)
+
+    token_file = local_repo.parent / "github-token"
+    token_file.write_text("ghs_origintoken\n")
+    monkeypatch.setenv("ORCHA_GITHUB_TOKEN_FILE", str(token_file))
+    monkeypatch.delenv("ORCHA_GITHUB_TOKENS_FILE", raising=False)
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/issues/3":
+            return {"number": 3, "title": "origin issue", "state": "open", "body": "",
+                     "user": {"login": "octocat"}, "labels": [], "assignee": None,
+                     "assignees": [], "updated_at": "2026-07-01T00:00:00Z",
+                     "created_at": "2026-07-01T00:00:00Z",
+                     "html_url": "https://github.com/acme/site/issues/3", "comments": 0}
+        if "comments" in path:
+            return []
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/issues/3")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert body["repo"] == "acme/site"
+    assert body["issue"]["title"] == "origin issue"
+
+
+async def test_hub_checks_falls_through_to_origin_when_token_present(
+        client, container, local_repo, monkeypatch):
+    cid = container["id"]
+    _git(local_repo, "remote", "add", "origin", "https://github.com/acme/site.git")
+    await _bind_local(client, cid)
+
+    token_file = local_repo.parent / "github-token"
+    token_file.write_text("ghs_origintoken\n")
+    monkeypatch.setenv("ORCHA_GITHUB_TOKEN_FILE", str(token_file))
+    monkeypatch.delenv("ORCHA_GITHUB_TOKENS_FILE", raising=False)
+
+    def fake_get(path, token):
+        if path.startswith("/repos/acme/site/pulls?"):
+            return [{"number": 9, "title": "origin PR", "head": {"ref": "feat/x", "sha": "b" * 40},
+                      "draft": False, "updated_at": "2026-07-01T00:00:00Z",
+                      "html_url": "https://github.com/acme/site/pull/9",
+                      "requested_reviewers": [], "mergeable_state": "clean"}]
+        if "status" in path:
+            return {"statuses": []}
+        if "check-runs" in path:
+            return {"check_runs": []}
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/checks", params={"numbers": "9"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert "9" in body["checks"]
+
+
+async def test_hub_issues_degrades_with_origin_detected_when_origin_but_no_token(
+        client, container, local_repo, monkeypatch):
+    """An origin exists, but NOTHING resolves a token for it — degrades exactly like
+    the no-origin case, EXCEPT `origin_detected` names the repo so the frontend can
+    render the more specific "add GitHub access" wording."""
+    cid = container["id"]
+    _git(local_repo, "remote", "add", "origin", "https://github.com/acme/site.git")
+    await _bind_local(client, cid)
+    monkeypatch.delenv("ORCHA_GITHUB_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("ORCHA_GITHUB_TOKENS_FILE", raising=False)
+    monkeypatch.delenv("ORCHA_GITHUB_PAT", raising=False)
+
+    r = await client.get(f"/api/containers/{cid}/github/issues")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is False
+    assert body["reason"] == "local_source"
+    assert body["origin_detected"] == "acme/site"
+
+
+async def test_hub_issues_degrades_with_origin_detected_none_when_no_origin(
+        client, container, local_repo):
+    """No `origin` remote at all -> origin_detected stays None, distinguishing this
+    from the "origin but no token" case above."""
+    cid = container["id"]
+    await _bind_local(client, cid)
+    r = await client.get(f"/api/containers/{cid}/github/issues")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is False
+    assert body["reason"] == "local_source"
+    assert body["origin_detected"] is None
+
+
+async def test_hub_issues_no_fallthrough_for_non_github_https_origin(
+        client, container, local_repo, monkeypatch):
+    """A non-GitHub https origin (e.g. GitLab) never falls through — origin_repo()
+    itself returns None for it, so this degrades exactly like the no-origin case."""
+    cid = container["id"]
+    _git(local_repo, "remote", "add", "origin", "https://gitlab.com/acme/site.git")
+    await _bind_local(client, cid)
+    token_file = local_repo.parent / "github-token"
+    token_file.write_text("ghs_origintoken\n")
+    monkeypatch.setenv("ORCHA_GITHUB_TOKEN_FILE", str(token_file))
+    monkeypatch.delenv("ORCHA_GITHUB_TOKENS_FILE", raising=False)
+
+    r = await client.get(f"/api/containers/{cid}/github/issues")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is False
+    assert body["reason"] == "local_source"
+    assert body["origin_detected"] is None
 
 
 # =============================== path traversal at the route layer ====================

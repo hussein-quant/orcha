@@ -50,6 +50,7 @@ import urllib.request
 
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import local_git
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
@@ -227,17 +228,45 @@ def _not_connected():
             "detail": "no GitHub repo is connected to this project"}
 
 
-def _local_source_unavailable():
+def _local_source_unavailable(origin_detected: "str | None" = None):
     """The container is bound to the LOCAL_REPO sentinel (Addendum 2) — a real code
     source (browse/Code Space work fine against it), but the hub's issues/PRs/checks
     have no GitHub equivalent to show. Same {available:false,...} shape every other
     graceful hub off-state uses, with a DISTINCT `reason` ("local_source", never
     "repo_not_connected") so the frontend can render "connect GitHub for issues & PRs"
     instead of the generic "no repo connected" empty state — the project IS connected
-    to something, just not to GitHub."""
+    to something, just not to GitHub.
+
+    `origin_detected` (owner/name | None) — local-binding + GitHub-origin fall-through:
+    when the local working tree's `origin` remote points at GitHub
+    (`local_git.origin_repo()`) but no token is wired for it, this is that repo's
+    owner/name, so the frontend can render "this clone comes from <owner/name> — add
+    GitHub access" instead of the generic "no origin at all" wording. None when the
+    local repo has no GitHub origin (or origin detection itself isn't applicable),
+    distinguishing the two flavors of degrade from a single boolean-shaped reason."""
     return {"available": False, "reason": "local_source",
             "detail": "issues & PRs need a connected GitHub repo — this project is "
-                       "using its local working tree as the code source"}
+                       "using its local working tree as the code source",
+            "origin_detected": origin_detected}
+
+
+def _local_fallthrough_repo(cid: str) -> "str | None":
+    """Local-binding + GitHub-origin fall-through (simultaneous local binding + GitHub
+    hub): when a container is bound to LOCAL_REPO, resolve the working tree's `origin`
+    remote (`local_git.origin_repo()`) and, ONLY if a token can also be resolved for
+    it, return that `owner/name` so the caller can serve the hub route against the
+    ORIGIN exactly as if the container had been bound to it directly — same
+    `_resolve_repo_token`/`_gh_get` path downstream, no local-specific reshaping
+    needed anywhere past this point. Returns None when there's no GitHub origin, or
+    there is one but no token is wired for it — either case, the caller falls back to
+    the existing `_local_source_unavailable()` degrade (passing the origin along for
+    the UI's benefit even on a None-token miss; see call sites)."""
+    origin = local_git.origin_repo()
+    if not origin:
+        return None
+    if not _resolve_repo_token(origin, cid):
+        return None
+    return origin
 
 
 def _with_tracked_list(cid: str, items: list) -> list:
@@ -698,12 +727,20 @@ def list_github_issues(cid: str, request: Request):
     if not repo:
         return _not_connected()
     if repo == LOCAL_REPO:
-        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
-        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
-        # the frontend can render "connect GitHub for issues & PRs" rather than the
-        # generic not-connected empty state. Browse/Code Space stay fully functional
-        # against local; only this hub surface has nothing to serve.
-        return _local_source_unavailable()
+        # Addendum 2 + local-binding/GitHub-origin fall-through: a local-source
+        # binding has no GitHub issues/PRs/checks to show UNLESS the working tree's
+        # `origin` remote points at a GitHub repo we hold a token for — in that case
+        # serve this route against the ORIGIN exactly as if bound to it directly
+        # (reassign `repo` and fall through to the normal GitHub path below). Only
+        # when there's no such origin (or no token for it) does this degrade, with a
+        # DISTINCT reason (see _local_source_unavailable) so the frontend can render
+        # "connect GitHub for issues & PRs" rather than the generic not-connected
+        # empty state. Browse/Code Space stay fully functional against local either
+        # way; only this hub surface is affected.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     cached = _cache_get(cid, "issues")
     if cached is not None:
         return {**cached, "issues": _with_tracked_list(cid, cached["issues"])}
@@ -769,12 +806,12 @@ def list_github_pulls(cid: str, request: Request):
     if not repo:
         return _not_connected()
     if repo == LOCAL_REPO:
-        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
-        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
-        # the frontend can render "connect GitHub for issues & PRs" rather than the
-        # generic not-connected empty state. Browse/Code Space stay fully functional
-        # against local; only this hub surface has nothing to serve.
-        return _local_source_unavailable()
+        # Addendum 2 + local-binding/GitHub-origin fall-through — see the identical
+        # comment on list_github_issues above for the full rationale.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     cached = _cache_get(cid, "pulls")
     if cached is not None:
         return {**cached, "pulls": _with_tracked_list(cid, cached["pulls"])}
@@ -809,12 +846,12 @@ def list_github_checks(cid: str, request: Request, numbers: str = Query(...)):
     if not repo:
         return _not_connected()
     if repo == LOCAL_REPO:
-        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
-        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
-        # the frontend can render "connect GitHub for issues & PRs" rather than the
-        # generic not-connected empty state. Browse/Code Space stay fully functional
-        # against local; only this hub surface has nothing to serve.
-        return _local_source_unavailable()
+        # Addendum 2 + local-binding/GitHub-origin fall-through — see the identical
+        # comment on list_github_issues above for the full rationale.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     raw_numbers = [n for n in numbers.split(",") if n.strip()]
     if len(raw_numbers) > CHECKS_BATCH_MAX_NUMBERS:
         raise HTTPException(
@@ -885,12 +922,12 @@ def get_github_pull(cid: str, number: int, request: Request):
     if not repo:
         return _not_connected()
     if repo == LOCAL_REPO:
-        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
-        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
-        # the frontend can render "connect GitHub for issues & PRs" rather than the
-        # generic not-connected empty state. Browse/Code Space stay fully functional
-        # against local; only this hub surface has nothing to serve.
-        return _local_source_unavailable()
+        # Addendum 2 + local-binding/GitHub-origin fall-through — see the identical
+        # comment on list_github_issues above for the full rationale.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     cached = _cache_get(cid, "pull", number)
     if cached is not None:
         return {**cached, "pull": _with_tracked_one(cid, number, cached["pull"])}
@@ -924,12 +961,12 @@ def get_github_issue(cid: str, number: int, request: Request):
     if not repo:
         return _not_connected()
     if repo == LOCAL_REPO:
-        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
-        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
-        # the frontend can render "connect GitHub for issues & PRs" rather than the
-        # generic not-connected empty state. Browse/Code Space stay fully functional
-        # against local; only this hub surface has nothing to serve.
-        return _local_source_unavailable()
+        # Addendum 2 + local-binding/GitHub-origin fall-through — see the identical
+        # comment on list_github_issues above for the full rationale.
+        fallthrough_repo = _local_fallthrough_repo(cid)
+        if not fallthrough_repo:
+            return _local_source_unavailable(local_git.origin_repo())
+        repo = fallthrough_repo
     cached = _cache_get(cid, "issue", number)
     if cached is not None:
         return {**cached, "issue": _with_tracked_one(cid, number, cached["issue"])}
