@@ -97,9 +97,11 @@ describe("GitHubAccessSection", () => {
     stubFetch();
     mount();
     expect(await screen.findByText("No personal access token configured.")).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: "Create a token" });
+    const link = screen.getByRole("link", { name: "create a token" });
     expect(link).toHaveAttribute("href", "https://github.com/settings/tokens");
-    expect(document.querySelector(".sc-hint code")?.textContent).toBe("repo");
+    const codes = [...document.querySelectorAll(".sc-hint code")].map((c) => c.textContent);
+    expect(codes).toContain("repo");
+    expect(codes).toContain("gh auth token | pbcopy");
     expect(screen.getByPlaceholderText("Paste a GitHub personal access token…")).toBeInTheDocument();
     const save = screen.getByRole("button", { name: /Save token/ });
     const test = screen.getByRole("button", { name: /^Test$/ });

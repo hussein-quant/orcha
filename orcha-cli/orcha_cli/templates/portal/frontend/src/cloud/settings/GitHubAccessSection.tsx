@@ -293,7 +293,12 @@ export function GitHubAccessSection() {
           </button>
         </div>
         <div className="sc-hint">
-          <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer noopener">Create a token</a>
+          Already use the GitHub CLI? Run <code>gh auth token | pbcopy</code> in a terminal
+          and paste here — no new token needed. (Restarting with <code>orcha up</code> picks
+          your gh login up automatically, too.)
+        </div>
+        <div className="sc-hint">
+          Or <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer noopener">create a token</a>
           {" "}— a classic PAT with the <code>repo</code> scope, or a fine-grained token with{" "}
           <b>Contents</b> + <b>Metadata</b> read access on the repos you want to use.
         </div>
