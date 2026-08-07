@@ -63,6 +63,23 @@ export function ThreadComposer({
   const aiAgents = agents.filter((a) => a.kind === "ai");
   const raiseHand = !!preTaggedAgentId;
 
+  // Composer transparency: an untagged question-like thread (question | why |
+  // teach — NOT note) auto-routes server-side to the container's default AI
+  // agent (code_space_routes.create_code_thread / _default_ai_agent_id — the
+  // first live agent from the snapshot, same order as aiAgents[0] since the
+  // snapshot query is already `terminated_at IS NULL ORDER BY created_at`).
+  // Surface where an untagged question is actually headed BEFORE posting,
+  // instead of leaving it a silent surprise — or the honest opposite when
+  // there's no AI agent to catch it.
+  const questionLike = kind === "question" || kind === "why" || kind === "teach";
+  const willAutoRoute = !raiseHand && questionLike && !taggedAgentId;
+  const defaultAgent = aiAgents[0];
+  const routingHint = willAutoRoute
+    ? defaultAgent
+      ? `Will ask @${defaultAgent.alias}`
+      : "No agents yet — this will wait unanswered"
+    : null;
+
   // Usability sweep — Escape closes the composer (papercut: this was the
   // only transient panel in Code Space WITHOUT an Escape handler; matches
   // SymbolSearch's palette and RecentFilesDropdown's convention).
@@ -126,6 +143,7 @@ export function ThreadComposer({
       ) : (
         <div className="cs-raise-hand-caption">queued — the agent addresses this at its next checkpoint</div>
       )}
+      {routingHint ? <div className="cs-routing-hint">{routingHint}</div> : null}
       <textarea
         className="cs-composer-body"
         value={body}

@@ -123,6 +123,37 @@ VALID_KINDS = ("question", "why", "teach", "note")
 VALID_STATUSES = ("open", "answered", "resolved")
 
 
+QUESTION_LIKE_KINDS = ("question", "why", "teach")  # NOT note — see _default_ai_agent_id
+
+
+def _default_ai_agent_id(cur, cid: str):
+    """The container's default AI agent: the first live (`terminated_at IS NULL`)
+    `kind='ai'` agent by `created_at` — the lead/main convention (Atlas in
+    practice), same 'oldest live ai agent' shape as
+    `task_start_core.find_orchestrator_agent` and `slack_routes._live_ai_agents`,
+    minus the role-string filter (this wants ANY default, not specifically an
+    orchestrator-titled one).
+
+    Used by create_code_thread to auto-target a question-like thread
+    (question | why | teach) left untagged: an unowned question is a broken
+    promise — silence nobody notices until a human goes looking. `note` is
+    deliberately excluded, both here and by the caller — a note is not a
+    request for an answer, so it stays untargeted by design, exactly as if a
+    human had chosen not to @tag anyone.
+
+    Returns the agent id (str) or None (no live ai agent in the container —
+    caller keeps the untargeted, pre-existing behavior)."""
+    cur.execute(
+        """SELECT id FROM agents
+            WHERE container_id=%s AND kind='ai' AND terminated_at IS NULL
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1""",
+        (cid,),
+    )
+    row = cur.fetchone()
+    return str(row["id"]) if row else None
+
+
 def _require_actor_in_container(cur, cid: str, actor_agent_id: str):
     """The calling agent must be a real, non-retired member of THIS container —
     the agent-authored-write gate (mirrors request_creation_routes.create_request /
@@ -232,6 +263,18 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
         creator = _require_actor_in_container(cur, cid, body.actor_agent_id)
+
+        # An untagged question-like thread (question | why | teach — NOT note) is a
+        # broken promise: nobody owns it, so it sits unanswered until a human
+        # notices. Backfill tagged_agent_id to the container's default AI agent
+        # BEFORE the existing tagged branch below, so an auto-routed question is
+        # indistinguishable from one the user explicitly @tagged — same directed
+        # request, same wake nudge, no forked logic. `note` and containers with no
+        # live ai agent are untouched (both keep the pre-existing untargeted
+        # behavior).
+        if body.tagged_agent_id is None and body.kind in QUESTION_LIKE_KINDS:
+            body.tagged_agent_id = _default_ai_agent_id(cur, cid)
+
         tagged_agent = None
         if body.tagged_agent_id is not None:
             tagged_agent = _require_actor_in_container(cur, cid, body.tagged_agent_id)

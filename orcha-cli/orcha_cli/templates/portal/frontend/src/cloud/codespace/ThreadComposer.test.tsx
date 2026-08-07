@@ -125,6 +125,59 @@ describe("ThreadComposer", () => {
     expect(postCall.body).toMatchObject({ tagged_agent_id: "a1" });
   });
 
+  // Composer transparency (backend: code_space_routes._default_ai_agent_id auto-
+  // routes an untagged question-like thread to the container's first live AI
+  // agent). The hint must name the SAME agent the backend will pick, and go
+  // away the moment the choice stops being implicit (explicit @tag / note kind).
+  it("shows the routing hint naming the first AI agent for the default (untagged) question kind", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("Post");
+    expect(screen.getByText("Will ask @forge")).toBeInTheDocument();
+  });
+
+  it("shows the routing hint for why/teach kinds too", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("Post");
+    fireEvent.click(screen.getByText("Why this decision?"));
+    expect(screen.getByText("Will ask @forge")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Teach me this concept"));
+    expect(screen.getByText("Will ask @forge")).toBeInTheDocument();
+  });
+
+  it("hides the routing hint for note kind (stays untargeted by design)", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("Post");
+    fireEvent.click(screen.getByText("Note"));
+    expect(screen.queryByText(/will ask/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/wait unanswered/i)).not.toBeInTheDocument();
+  });
+
+  it("hides the routing hint once an agent is explicitly tagged", async () => {
+    stubFetch();
+    mount();
+    await screen.findByText("Post");
+    expect(screen.getByText("Will ask @forge")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/tag an agent/i), { target: { value: "a1" } });
+    expect(screen.queryByText(/will ask/i)).not.toBeInTheDocument();
+  });
+
+  it("hides the routing hint in raise-hand mode (already pre-tagged, has its own caption)", async () => {
+    stubFetch();
+    mount({ preTaggedAgentId: "a1" });
+    await screen.findByText(/queued/i);
+    expect(screen.queryByText(/will ask/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the honest no-agents state when the roster has no AI agents", async () => {
+    stubFetch();
+    mount({ agents: [{ id: "h1", alias: "kedar", kind: "human", status: "idle" } as Agent] });
+    await screen.findByText("Post");
+    expect(screen.getByText("No agents yet — this will wait unanswered")).toBeInTheDocument();
+  });
+
   it("raise-hand mode: pre-tags the agent, hides the template picker, shows the honesty caption", async () => {
     stubFetch();
     mount({ preTaggedAgentId: "a1" });
