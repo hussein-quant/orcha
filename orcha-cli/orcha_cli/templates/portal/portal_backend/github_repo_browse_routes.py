@@ -62,6 +62,7 @@ import urllib.request
 
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import local_git
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.github_hub_routes import (
@@ -72,6 +73,13 @@ from portal_backend.github_hub_routes import (
     _detail_error_payload,
     _error_payload,
 )
+
+# The repo-binding sentinel meaning "this project's own working tree" (Addendum 2) —
+# every dispatch point in this module checks `repo == LOCAL_REPO` and, when true,
+# serves the request from `portal_backend.local_git` instead of the GitHub API. Kept
+# as a named constant (not a repeated literal) since code_space_routes and
+# github_hub_routes also need to recognize the exact same sentinel.
+LOCAL_REPO = "local"
 
 GITHUB_API = "https://api.github.com"
 GITHUB_TIMEOUT_SECONDS = 10
@@ -176,15 +184,22 @@ def _resolve_default_branch(repo: str, token: str, cid: str) -> str:
 
 
 def _resolve_ref(repo: str, token: str, cid: str, ref) -> str:
-    """Turn the caller's `ref` query param into a GitHub-resolvable ref/sha.
+    """Turn the caller's `ref` query param into a resolvable ref/sha.
 
-    None/empty -> the repo's default branch (resolved + cached).
-    "pr/<number>" -> that PR's head sha, via the same `/pulls/{number}` fetch
-    github_hub_routes' PR-detail route uses (raises RuntimeError("github_status:404")
-    the same way if the PR doesn't exist — callers map that through
-    `_detail_error_payload` so a bad PR number reads as not_found, not a generic error).
-    Anything else -> passed straight through unchanged (branch name, tag, full/short sha).
+    Local source (repo == LOCAL_REPO): resolved via `local_git.resolve_ref` instead of
+    any GitHub call — `token` is unused/None on this path (a local repo needs none).
+    None/empty -> HEAD (local) or the repo's default branch (GitHub, resolved +
+    cached). "pr/<number>" is GitHub-only (a local repo has no PR concept) and raises
+    the same github_status:404 shape a nonexistent PR would, so callers don't need a
+    separate local-specific error branch. Anything else -> passed straight through
+    unchanged (branch name, tag, full/short sha) on the GitHub path; resolved via `git
+    rev-parse` on the local path.
     """
+    if repo == LOCAL_REPO:
+        sha = local_git.resolve_ref(ref or None)
+        if sha is None:
+            raise RuntimeError("github_status:404")
+        return sha
     if not ref:
         return _resolve_default_branch(repo, token, cid)
     if ref.startswith("pr/"):
@@ -242,9 +257,10 @@ def _download_tarball_bytes(repo: str, resolved_ref: str, token: str):
     return data
 
 
-def _safe_tar_members(tar: "tarfile.TarFile"):
+def _safe_tar_members(tar: "tarfile.TarFile", *, has_prefix: bool = True):
     """Yield only tar members safe to trust: regular files whose name, after stripping
-    the tarball's synthetic top-level directory, never escapes the extraction root.
+    the tarball's synthetic top-level directory (when `has_prefix`), never escapes the
+    extraction root.
 
     SECURITY (path traversal): a malicious or corrupt tarball could contain a member
     named e.g. `../../etc/passwd` or an absolute path; naively trusting `member.name`
@@ -257,20 +273,29 @@ def _safe_tar_members(tar: "tarfile.TarFile"):
     attacker-controlled and never followed). This is a `data`-filter-equivalent
     allowlist applied manually (rather than relying solely on `tarfile`'s built-in
     `filter="data"`) so the same check governs which members are even considered for
-    the top-level-prefix-stripping step below, not just the final extraction call."""
+    the top-level-prefix-stripping step below, not just the final extraction call.
+
+    `has_prefix=False` (the local `git archive` path — see `_fetch_local_repo_snapshot`)
+    skips the top-level-directory strip entirely: a local archive's member names are
+    ALREADY repo-relative (no synthetic `{owner}-{repo}-{sha}/` wrapper the way GitHub's
+    tarball has one), so a single-segment name is a real file here, not a shape to
+    discard. The traversal/absolute-path/symlink checks apply identically either way."""
     for member in tar.getmembers():
         if not member.isfile():
             continue
         name = member.name or ""
         if name.startswith("/") or name.startswith("\\"):
             continue
-        # Strip the tarball's own top-level dir here too (consistent with the stripping
-        # done on the accepted path) purely to normalize what we validate against —
-        # traversal is checked on the FULL original name, since a crafted top-level
-        # segment is itself part of the attack surface.
+        # Traversal is checked on the FULL original name (before any stripping), since
+        # a crafted top-level segment is itself part of the attack surface.
         normalized = name.replace("\\", "/")
         parts = normalized.split("/")
         if any(p == ".." for p in parts):
+            continue
+        if not has_prefix:
+            if not normalized:
+                continue
+            yield member, normalized
             continue
         if len(parts) < 2:
             # No top-level directory component to strip (a bare filename at the tar
@@ -280,19 +305,25 @@ def _safe_tar_members(tar: "tarfile.TarFile"):
         yield member, "/".join(parts[1:])
 
 
-def _extract_source_files(tarball_bytes: bytes, extensions, max_file_bytes: int) -> dict:
-    """Extract `tarball_bytes` (a GitHub repo tarball, gzip-compressed) IN MEMORY into
+def _extract_source_files(
+    tarball_bytes: bytes, extensions, max_file_bytes: int,
+    *, mode: str = "r:gz", has_prefix: bool = True,
+) -> dict:
+    """Extract `tarball_bytes` (a repo tarball — gzip-compressed for the GitHub
+    tarball path, plain for the local `git archive` path, see `mode`) IN MEMORY into
     `{repo_relative_path: bytes}`, keeping only members whose extension is in
     `extensions` and whose size is <= `max_file_bytes` — every other member (docs,
     images, lockfiles, oversized files, anything not on the source-extension allowlist)
     is skipped DURING iteration and its bytes are never read, so the full repo is never
     materialized in memory even though the whole tarball's member LIST is walked.
     Members are validated via `_safe_tar_members` (path traversal, symlinks) before
-    their path is trusted. Uses `tarfile.open(fileobj=io.BytesIO(...))` — extraction
-    stays fully in-process, no temp files on disk, no `extractall`."""
+    their path is trusted; `has_prefix` is forwarded unchanged (see that function's
+    docstring for the GitHub-tarball-vs-local-archive distinction). Uses
+    `tarfile.open(fileobj=io.BytesIO(...))` — extraction stays fully in-process, no
+    temp files on disk, no `extractall`."""
     files: dict = {}
-    with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz") as tar:
-        for member, rel_path in _safe_tar_members(tar):
+    with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode=mode) as tar:
+        for member, rel_path in _safe_tar_members(tar, has_prefix=has_prefix):
             if not rel_path:
                 continue
             if not any(rel_path.endswith(ext) for ext in extensions):
@@ -306,11 +337,42 @@ def _extract_source_files(tarball_bytes: bytes, extensions, max_file_bytes: int)
     return files
 
 
+def _fetch_local_repo_snapshot(resolved_ref: str, cid: str, extensions, max_file_bytes: int):
+    """Local-source equivalent of `_fetch_repo_snapshot` (Addendum 2): `git archive`
+    instead of a GitHub tarball download, feeding the SAME in-memory extraction
+    (`_extract_source_files`, plain-tar mode + no top-level-prefix stripping) and the
+    SAME cache (keyed (cid, resolved_ref) — a local ref and a GitHub ref never collide
+    since a container is bound to exactly one repo at a time). Returns None when the
+    archive can't be produced (bad ref, git failure) or extraction fails — same
+    "snapshot unavailable, fall back" contract `_fetch_repo_snapshot` has, except the
+    local path's fallback (a no-snapshot symbol-indexing pass) simply has nothing to
+    fall back TO other than an empty index, since there is no per-file Contents-API
+    equivalent here; callers already treat None uniformly either way."""
+    cached = _repo_snapshot_cache_get(cid, resolved_ref)
+    if cached is not None:
+        return cached
+    archive_bytes = local_git.archive_bytes(resolved_ref)
+    if archive_bytes is None:
+        return None
+    try:
+        files = _extract_source_files(
+            archive_bytes, extensions, max_file_bytes, mode="r", has_prefix=False)
+    except tarfile.TarError:
+        return None
+    _repo_snapshot_cache_put(cid, resolved_ref, files)
+    return files
+
+
 def _fetch_repo_snapshot(repo: str, resolved_ref: str, token: str, cid: str, extensions, max_file_bytes: int):
     """The whole repo's source files at `resolved_ref`, as `{path: bytes}` — ONE tarball
     fetch (`_download_tarball_bytes`) + one in-memory extraction
     (`_extract_source_files`), replacing an entire per-file Contents-API loop. Cached
     per (cid, resolved_ref) for REPO_SNAPSHOT_TTL_SECONDS (see module docstring).
+
+    Local source (repo == LOCAL_REPO): dispatches to `_fetch_local_repo_snapshot`
+    (git archive instead of a tarball download) — same cache, same {path: bytes}
+    shape, so every downstream consumer (the symbol indexer in code_space_routes)
+    needs no local-specific branch of its own.
 
     Returns None when no snapshot is available — either the tarball exceeded
     REPO_SNAPSHOT_MAX_BYTES (`_download_tarball_bytes` returned None) or the extraction
@@ -323,6 +385,8 @@ def _fetch_repo_snapshot(repo: str, resolved_ref: str, token: str, cid: str, ext
     on the download itself — the same contract every other fetch in this module uses,
     so callers can reuse `_error_payload`/`_detail_error_payload`.
     """
+    if repo == LOCAL_REPO:
+        return _fetch_local_repo_snapshot(resolved_ref, cid, extensions, max_file_bytes)
     cached = _repo_snapshot_cache_get(cid, resolved_ref)
     if cached is not None:
         return cached
@@ -337,6 +401,45 @@ def _fetch_repo_snapshot(repo: str, resolved_ref: str, token: str, cid: str, ext
     return files
 
 
+def _local_tree_level(repo: str, resolved_ref: str, cid: str, clean_path: str) -> list:
+    """One directory level of the local tree, filtered from the SAME cached full
+    recursive tree `_fetch_full_tree`/`_names_search` already use — a local `ls-tree`
+    is cheap enough (and already cached) that a second, non-recursive git call would
+    only add complexity for no real win. Mirrors browse_tree's GitHub-path shape
+    exactly: {name, path, type:"dir"|"file", size?}, dirs sorted before files."""
+    entries, _truncated = _fetch_full_tree(repo, resolved_ref, None, cid)
+    prefix = f"{clean_path}/" if clean_path else ""
+    seen_dirs = set()
+    out = []
+    for item in entries:
+        item_path = item.get("path") or ""
+        if not item_path.startswith(prefix):
+            continue
+        rest = item_path[len(prefix):]
+        if not rest:
+            continue
+        head, _sep, tail = rest.partition("/")
+        if tail:
+            # A deeper entry under a subdirectory of this level — represent the
+            # subdirectory itself once, not its own descendants.
+            if head in seen_dirs:
+                continue
+            seen_dirs.add(head)
+            out.append({"name": head, "path": f"{prefix}{head}", "type": "dir"})
+            continue
+        if item.get("type") == "tree":
+            if head in seen_dirs:
+                continue
+            seen_dirs.add(head)
+            out.append({"name": head, "path": f"{prefix}{head}", "type": "dir"})
+        else:
+            out.append({
+                "name": head, "path": f"{prefix}{head}", "type": "file",
+                "size": item.get("size"),
+            })
+    return out
+
+
 @app.get("/api/containers/{cid}/github/browse/tree")
 def browse_tree(cid: str, request: Request, ref: str = Query(default=""), path: str = Query(default="")):
     """One directory level (NOT recursive) of the container's bound repo.
@@ -349,11 +452,26 @@ def browse_tree(cid: str, request: Request, ref: str = Query(default=""), path: 
     `truncated` mirrors GitHub's own contents-API truncation flag for this directory
     (extremely rare at a single non-recursive level, but surfaced honestly rather than
     silently assumed false).
+
+    Local source (repo == LOCAL_REPO): served from `local_git` via the cached full
+    tree (`_local_tree_level`) instead of a GitHub contents-API call — no token needed.
     """
     with db_cursor() as (_, cur):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        try:
+            resolved_ref = _resolve_ref(repo, None, cid, ref)
+        except RuntimeError as exc:
+            return {**_detail_error_payload(exc), "repo": repo}
+        clean_path = (path or "").strip("/")
+        try:
+            entries = _local_tree_level(repo, resolved_ref, cid, clean_path)
+        except RuntimeError as exc:
+            return {**_detail_error_payload(exc), "repo": repo}
+        entries.sort(key=lambda e: (e["type"] != "dir", (e["name"] or "").lower()))
+        return {"ref": resolved_ref, "path": clean_path, "entries": entries, "truncated": False}
     token = _resolve_repo_token(repo)
     if not token:
         return _not_connected()
@@ -391,6 +509,42 @@ def browse_tree(cid: str, request: Request, ref: str = Query(default=""), path: 
     }
 
 
+def _local_file_response(repo: str, resolved_ref: str, cid: str, clean_path: str) -> dict:
+    """browse_file's local-source body: fetch bytes via `local_git.file_bytes`, apply
+    the SAME cap/binary-sniff rules the GitHub path uses (`_is_binary_content`,
+    FILE_CONTENT_CAP_BYTES), and return the identical response shape. Raises
+    HTTPException(400) when `clean_path` names a directory (mirrors the GitHub path's
+    `isinstance(raw, list)` check) — checked via the SAME cached full tree
+    `_local_tree_level`/blob-match already use, BEFORE trusting `file_bytes`: `git show
+    <sha>:<dir>` does NOT fail the way a missing path does (it succeeds with a
+    plain-text tree listing), so `file_bytes` alone can't tell "directory" apart from
+    "a real file whose content happens to look tree-ish" — the tree lookup is the only
+    reliable signal."""
+    entries, _truncated = _fetch_full_tree(repo, resolved_ref, None, cid)
+    is_dir = any(
+        (e.get("path") or "") == clean_path and e.get("type") == "tree"
+        for e in entries
+    )
+    if is_dir:
+        raise HTTPException(400, f"path {clean_path!r} is a directory, not a file")
+    raw_bytes = local_git.file_bytes(resolved_ref, clean_path)
+    if raw_bytes is None:
+        raise RuntimeError("github_status:404")
+    size = len(raw_bytes)
+    if _is_binary_content(raw_bytes):
+        return {
+            "ref": resolved_ref, "path": clean_path, "size": size,
+            "truncated": False, "binary": True, "encoding": "utf-8",
+        }
+    truncated = size > FILE_CONTENT_CAP_BYTES
+    capped_bytes = raw_bytes[:FILE_CONTENT_CAP_BYTES]
+    content = capped_bytes.decode("utf-8", errors="ignore")
+    return {
+        "ref": resolved_ref, "path": clean_path, "content": content, "size": size,
+        "truncated": truncated, "binary": False, "encoding": "utf-8",
+    }
+
+
 @app.get("/api/containers/{cid}/github/browse/file")
 def browse_file(cid: str, request: Request, ref: str = Query(default=""), path: str = Query(...)):
     """A single file's content from the container's bound repo.
@@ -402,6 +556,9 @@ def browse_file(cid: str, request: Request, ref: str = Query(default=""), path: 
     anything other than "base64" decodeable-as-text, or a NUL byte in the decoded
     bytes) return `binary:true` with `content` omitted entirely (never a best-effort
     garbled decode) — `size` is still the real GitHub-reported size in that case.
+
+    Local source (repo == LOCAL_REPO): served via `local_git.file_bytes` + the same
+    cap/binary rules (`_local_file_response`) — no token needed.
     """
     clean_path = (path or "").strip("/")
     if not clean_path:
@@ -410,6 +567,12 @@ def browse_file(cid: str, request: Request, ref: str = Query(default=""), path: 
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        try:
+            resolved_ref = _resolve_ref(repo, None, cid, ref)
+            return _local_file_response(repo, resolved_ref, cid, clean_path)
+        except RuntimeError as exc:
+            return {**_detail_error_payload(exc), "repo": repo}
     token = _resolve_repo_token(repo)
     if not token:
         return _not_connected()
@@ -469,7 +632,24 @@ def _fetch_full_tree(repo: str, resolved_ref: str, token: str, cid: str):
     search-as-you-type UI that would otherwise refire this (GitHub's heaviest single
     call here) on every keystroke. Returns (entries, truncated) where entries is
     GitHub's raw tree array (each {path, type:"blob"|"tree", ...}); `truncated` mirrors
-    GitHub's own `truncated` flag on the tree response (a very large repo)."""
+    GitHub's own `truncated` flag on the tree response (a very large repo).
+
+    Local source (repo == LOCAL_REPO): `local_git.tree()` already returns entries in
+    this EXACT shape ({path, type:"blob"|"tree", sha, size}) — GitHub's `git/trees`
+    shape was the template `local_git.tree` was written to match — so no reshaping is
+    needed here; `truncated` is always False (a local `ls-tree` never truncates the
+    way GitHub's API can for an enormous repo). `token` is unused on this path.
+    """
+    if repo == LOCAL_REPO:
+        cached = _tree_cache_get(cid, resolved_ref)
+        if cached is not None:
+            return cached
+        entries = local_git.tree(resolved_ref)
+        if entries is None:
+            raise RuntimeError("github_status:404")
+        result = (entries, False)
+        _tree_cache_put(cid, resolved_ref, result)
+        return result
     cached = _tree_cache_get(cid, resolved_ref)
     if cached is not None:
         return cached
@@ -558,6 +738,11 @@ def browse_search(
     GitHub limitation — see `_contents_search`'s docstring). Returns
     {results:[{path,matches:[{line,text}]}], default_branch_only:true}, capped at
     CONTENTS_SEARCH_MAX_RESULTS files.
+    Local source (repo == LOCAL_REPO): `names` filters the SAME cached local tree
+    (`_names_search`, unchanged — `_fetch_full_tree` already dispatches on
+    LOCAL_REPO); `contents` runs `local_git.grep` at the RESOLVED ref (not pinned to
+    a "default branch" — that GitHub limitation doesn't apply locally), returning
+    `default_branch_only: false` honestly.
     """
     if mode not in ("names", "contents"):
         raise HTTPException(400, "mode must be 'names' or 'contents'")
@@ -565,6 +750,24 @@ def browse_search(
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        try:
+            resolved_ref = _resolve_ref(repo, None, cid, ref)
+        except RuntimeError as exc:
+            return {**_detail_error_payload(exc), "repo": repo}
+        if mode == "contents":
+            results = local_git.grep(resolved_ref, q)
+            if results is None:
+                return {**_error_payload(RuntimeError("github_status:404")), "repo": repo}
+            return {
+                "available": True, "repo": repo, "ref": resolved_ref,
+                "results": results, "default_branch_only": False,
+            }
+        try:
+            payload = _names_search(repo, resolved_ref, None, cid, q)
+        except RuntimeError as exc:
+            return {**_error_payload(exc), "repo": repo}
+        return {"available": True, "repo": repo, "ref": resolved_ref, **payload}
     token = _resolve_repo_token(repo)
     if not token:
         return _not_connected()

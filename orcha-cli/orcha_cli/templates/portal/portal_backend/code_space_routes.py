@@ -87,12 +87,13 @@ import urllib.parse
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from portal_backend import request_creation_routes
+from portal_backend import local_git, request_creation_routes
 from portal_backend.agent_status import bump_agent, log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.github_hub_routes import _detail_error_payload, _error_payload
 from portal_backend.github_repo_browse_routes import (
+    LOCAL_REPO,
     _fetch_full_tree,
     _fetch_repo_snapshot,
     _gh_get,
@@ -154,6 +155,27 @@ def _thread_row_to_dict(row) -> dict:
 
 
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+# A local-source "token" placeholder — never sent anywhere (local_git needs no
+# credential), just a truthy value so the shared `token = ...; if not token: return
+# _not_connected()` gate below reads identically for both sources. Every downstream
+# call this token gets threaded into (_resolve_ref, _fetch_full_tree,
+# _fetch_repo_snapshot, _gh_get-based helpers) already branches on `repo == LOCAL_REPO`
+# BEFORE ever using the token value, so this placeholder is never actually consulted.
+_LOCAL_TOKEN_PLACEHOLDER = "local"
+
+
+def _resolve_token_for(repo: str, cid: str = None):
+    """The single chokepoint every code-space route uses to answer "do we have
+    something to read this repo with": LOCAL_REPO always yields the placeholder
+    (local_git needs no token — see `_LOCAL_TOKEN_PLACEHOLDER`); any other repo falls
+    through to the SAME `_resolve_repo_token` resolution every hub/browse route uses.
+    None means "not connected" either way, so every existing
+    `token = ...; if not token: return _not_connected()` call site needed only this
+    one-line swap to become local-aware."""
+    if repo == LOCAL_REPO:
+        return _LOCAL_TOKEN_PLACEHOLDER
+    return _resolve_repo_token(repo, cid)
 
 
 def _resolve_commit_sha(repo: str, token: str, cid: str, ref) -> str:
@@ -217,7 +239,7 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
         repo = cur.fetchone()["github_repo"]
         if not repo:
             return _not_connected()
-        token = _resolve_repo_token(repo)
+        token = _resolve_token_for(repo, cid)
         if not token:
             return _not_connected()
         try:
@@ -407,7 +429,7 @@ def list_code_threads(
         for t in threads:
             t["blob_match"] = None
         return {"threads": threads}
-    token = _resolve_repo_token(repo)
+    token = _resolve_token_for(repo, cid)
     if not token:
         for t in threads:
             t["blob_match"] = None
@@ -623,7 +645,25 @@ def _fetch_source_file(repo: str, resolved_ref: str, token: str, path: str):
     skipped (binary, non-decodeable, or >MAX_SOURCE_FILE_BYTES). Mirrors
     github_repo_browse_routes.browse_file's decode/binary-sniff logic directly (kept as
     a small local copy rather than calling the route function, since that route also
-    does its own ref-resolution/binding load we've already done here)."""
+    does its own ref-resolution/binding load we've already done here).
+
+    Local source (repo == LOCAL_REPO): reads via `local_git.file_bytes` instead of the
+    GitHub contents API — `token` is unused on this path. Used only as the FALLBACK
+    per-file fetch (both the symbol indexer and the outline route try the whole-repo
+    snapshot first — see `_fetch_repo_snapshot`/`_fetch_local_repo_snapshot` — so this
+    is rarely reached at all for a local repo; kept local-aware anyway so a snapshot
+    failure never silently reaches out to `_gh_get` for a repo that was never
+    GitHub-backed in the first place)."""
+    if repo == LOCAL_REPO:
+        raw_bytes = local_git.file_bytes(resolved_ref, path)
+        if raw_bytes is None:
+            return None
+        if len(raw_bytes) > MAX_SOURCE_FILE_BYTES:
+            return None
+        if _is_binary_content(raw_bytes):
+            return None
+        return raw_bytes.decode("utf-8", errors="ignore")
+
     import base64
 
     query = urllib.parse.urlencode({"ref": resolved_ref})
@@ -741,7 +781,7 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
-    token = _resolve_repo_token(repo)
+    token = _resolve_token_for(repo, cid)
     if not token:
         return _not_connected()
     try:
@@ -865,7 +905,7 @@ def get_code_outline(cid: str, request: Request, ref: str = Query(default=""), p
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
-    token = _resolve_repo_token(repo)
+    token = _resolve_token_for(repo, cid)
     if not token:
         return _not_connected()
     try:

@@ -62,6 +62,14 @@ from portal_backend.task_start_core import (
     start_task_from_github,
 )
 
+# The repo-binding sentinel meaning "this project's own working tree" (Addendum 2).
+# Duplicated here (rather than imported from github_repo_browse_routes) to avoid a
+# circular import: that module already imports several names FROM this one. Both
+# modules must agree on the literal string; a value drift would silently break the
+# local-source degrade below, so keep this in sync with
+# github_repo_browse_routes.LOCAL_REPO if either ever changes.
+LOCAL_REPO = "local"
+
 GITHUB_API = "https://api.github.com"
 GITHUB_TIMEOUT_SECONDS = 10
 BODY_EXCERPT_CHARS = 200
@@ -217,6 +225,19 @@ def _not_connected():
     """The container has no bound repo — a clean, renderable off state (not an error)."""
     return {"available": False, "reason": "repo_not_connected",
             "detail": "no GitHub repo is connected to this project"}
+
+
+def _local_source_unavailable():
+    """The container is bound to the LOCAL_REPO sentinel (Addendum 2) — a real code
+    source (browse/Code Space work fine against it), but the hub's issues/PRs/checks
+    have no GitHub equivalent to show. Same {available:false,...} shape every other
+    graceful hub off-state uses, with a DISTINCT `reason` ("local_source", never
+    "repo_not_connected") so the frontend can render "connect GitHub for issues & PRs"
+    instead of the generic "no repo connected" empty state — the project IS connected
+    to something, just not to GitHub."""
+    return {"available": False, "reason": "local_source",
+            "detail": "issues & PRs need a connected GitHub repo — this project is "
+                       "using its local working tree as the code source"}
 
 
 def _with_tracked_list(cid: str, items: list) -> list:
@@ -676,6 +697,13 @@ def list_github_issues(cid: str, request: Request):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
+        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
+        # the frontend can render "connect GitHub for issues & PRs" rather than the
+        # generic not-connected empty state. Browse/Code Space stay fully functional
+        # against local; only this hub surface has nothing to serve.
+        return _local_source_unavailable()
     cached = _cache_get(cid, "issues")
     if cached is not None:
         return {**cached, "issues": _with_tracked_list(cid, cached["issues"])}
@@ -740,6 +768,13 @@ def list_github_pulls(cid: str, request: Request):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
+        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
+        # the frontend can render "connect GitHub for issues & PRs" rather than the
+        # generic not-connected empty state. Browse/Code Space stay fully functional
+        # against local; only this hub surface has nothing to serve.
+        return _local_source_unavailable()
     cached = _cache_get(cid, "pulls")
     if cached is not None:
         return {**cached, "pulls": _with_tracked_list(cid, cached["pulls"])}
@@ -773,6 +808,13 @@ def list_github_checks(cid: str, request: Request, numbers: str = Query(...)):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
+        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
+        # the frontend can render "connect GitHub for issues & PRs" rather than the
+        # generic not-connected empty state. Browse/Code Space stay fully functional
+        # against local; only this hub surface has nothing to serve.
+        return _local_source_unavailable()
     raw_numbers = [n for n in numbers.split(",") if n.strip()]
     if len(raw_numbers) > CHECKS_BATCH_MAX_NUMBERS:
         raise HTTPException(
@@ -842,6 +884,13 @@ def get_github_pull(cid: str, number: int, request: Request):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
+        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
+        # the frontend can render "connect GitHub for issues & PRs" rather than the
+        # generic not-connected empty state. Browse/Code Space stay fully functional
+        # against local; only this hub surface has nothing to serve.
+        return _local_source_unavailable()
     cached = _cache_get(cid, "pull", number)
     if cached is not None:
         return {**cached, "pull": _with_tracked_one(cid, number, cached["pull"])}
@@ -874,6 +923,13 @@ def get_github_issue(cid: str, number: int, request: Request):
         repo = _load_binding(cur, cid, request)
     if not repo:
         return _not_connected()
+    if repo == LOCAL_REPO:
+        # Addendum 2: a local-source binding has no GitHub issues/PRs/checks to show —
+        # graceful degrade with a DISTINCT reason (see _local_source_unavailable) so
+        # the frontend can render "connect GitHub for issues & PRs" rather than the
+        # generic not-connected empty state. Browse/Code Space stay fully functional
+        # against local; only this hub surface has nothing to serve.
+        return _local_source_unavailable()
     cached = _cache_get(cid, "issue", number)
     if cached is not None:
         return {**cached, "issue": _with_tracked_one(cid, number, cached["issue"])}

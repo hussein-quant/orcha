@@ -37,17 +37,22 @@ class ContainerReset(BaseModel):
 
 
 class ContainerGithubBinding(BaseModel):
-    """PUT /api/containers/{cid}/github — bind the container to a GitHub repo.
+    """PUT /api/containers/{cid}/github — bind the container to a code source.
 
-    `repo` is the plain owner/name of a repository the GitHub App is installed on
-    (the portal's Connect-repo modal offers exactly that list); null unbinds. The
-    pattern rejects anything that is not one owner segment + one name segment."""
+    `repo` is either the plain owner/name of a repository the GitHub App/PAT can
+    reach (the portal's Connect-repo modal offers exactly that list), OR the literal
+    sentinel `"local"` — Addendum 2's "this project's own working tree" binding,
+    served by `portal_backend.local_git` instead of the GitHub API (the route layer
+    additionally requires `local_git.available()` before accepting it — this schema
+    only enforces SHAPE, not availability). null unbinds. The pattern accepts
+    exactly one owner segment + one name segment, or the bare word "local".
+    """
 
     repo: Optional[str] = Field(
         default=None,
-        pattern=r"^[\w.-]+/[\w.-]+$",
+        pattern=r"^(local|[\w.-]+/[\w.-]+)$",
         max_length=MAX_NAME_LEN,
-        description="GitHub repo as owner/name; null = unbind",
+        description="GitHub repo as owner/name, or the sentinel 'local'; null = unbind",
     )
 
 

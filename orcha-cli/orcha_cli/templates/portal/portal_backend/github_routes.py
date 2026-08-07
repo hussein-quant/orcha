@@ -8,6 +8,7 @@ from typing import Optional
 
 from fastapi import HTTPException, Request
 
+from portal_backend import local_git
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -164,6 +165,25 @@ def _repo_entry(repo: dict) -> dict:
     }
 
 
+def _local_repo_entry() -> Optional[dict]:
+    """The Connect-repo modal's local-source entry (Addendum 2) — `full_name: "local"`
+    is the SAME sentinel `PUT .../github` accepts as `repo`, so the frontend needs no
+    special-case wiring beyond rendering this row first. None when local_git isn't
+    available (env unset, dir/`.git` missing, or no `git` binary) — the caller only
+    prepends when this returns something real."""
+    if not local_git.available():
+        return None
+    name = local_git.workspace_name() or "local"
+    return {
+        "full_name": "local",
+        "name": name,
+        "source_kind": "local",
+        "private": False,
+        "description": None,
+        "html_url": None,
+    }
+
+
 @app.get("/api/github/repos")
 def list_github_repos(cid: Optional[str] = None):
     """List repos reachable for the Connect-repo modal, App installs first.
@@ -185,7 +205,18 @@ def list_github_repos(cid: Optional[str] = None):
     No token at all (self-hosters without the App or a PAT) → 200 {"available": false,
     "repos": []} — a graceful off state, deliberately NOT an error. A GitHub-side
     failure is likewise available:false plus a short `detail` string.
+
+    Local source (Addendum 2): whenever `local_git.available()` (the project's own
+    working tree is mounted + has a `.git`), a `{full_name:"local", source_kind:
+    "local", ...}` entry is PREPENDED to `repos` in every branch below — including the
+    otherwise-fully-off "no token at all" case, where `available` flips to `true` on
+    the strength of the local entry alone (the Connect-repo modal then always has
+    SOMETHING to offer, even with zero GitHub setup). The `source` field keeps meaning
+    "which GitHub path fed the GitHub half of the list" unchanged; it says nothing
+    about the prepended local entry.
     """
+    local_entry = _local_repo_entry()
+
     token_map = _read_token_map()
     if token_map:
         merged: dict = {}
@@ -198,9 +229,10 @@ def list_github_repos(cid: Optional[str] = None):
                 continue
             for repo in raw:
                 merged.setdefault(repo.get("full_name"), _repo_entry(repo))
+        repos = [merged[name] for name in sorted(merged, key=lambda n: n or "")]
         result = {
             "available": len(failures) < len(token_map),
-            "repos": [merged[name] for name in sorted(merged, key=lambda n: n or "")],
+            "repos": ([local_entry] if local_entry else []) + repos,
             "source": "app",
         }
         if failures:
@@ -212,23 +244,34 @@ def list_github_repos(cid: Optional[str] = None):
         try:
             raw = _fetch_installation_repos(token)
         except RuntimeError as exc:
-            return {"available": False, "repos": [], "detail": str(exc), "source": "app"}
+            return {
+                "available": bool(local_entry),
+                "repos": [local_entry] if local_entry else [],
+                "detail": str(exc), "source": "app",
+            }
         return {
             "available": True,
-            "repos": [_repo_entry(repo) for repo in raw],
+            "repos": ([local_entry] if local_entry else []) + [_repo_entry(repo) for repo in raw],
             "source": "app",
         }
 
     pat = _read_pat(cid)
     if not pat:
-        return {"available": False, "repos": []}
+        return {
+            "available": bool(local_entry),
+            "repos": [local_entry] if local_entry else [],
+        }
     try:
         raw = _fetch_user_repos(pat)
     except RuntimeError as exc:
-        return {"available": False, "repos": [], "detail": str(exc), "source": "pat"}
+        return {
+            "available": bool(local_entry),
+            "repos": [local_entry] if local_entry else [],
+            "detail": str(exc), "source": "pat",
+        }
     return {
         "available": True,
-        "repos": [_repo_entry(repo) for repo in raw],
+        "repos": ([local_entry] if local_entry else []) + [_repo_entry(repo) for repo in raw],
         "source": "pat",
     }
 
@@ -248,14 +291,25 @@ def get_container_github(cid: str, request: Request):
 
 @app.put("/api/containers/{cid}/github")
 def put_container_github(cid: str, body: ContainerGithubBinding, request: Request):
-    """Bind (or with repo=null, unbind) a container's GitHub repo.
+    """Bind (or with repo=null, unbind) a container's code source.
 
-    The owner/name shape is enforced by the ContainerGithubBinding schema (422 on
-    anything else). Returns the persisted binding in the same shape as GET. Audited
-    to the container event log like other container-setting writes.
+    The owner/name-or-"local" shape is enforced by the ContainerGithubBinding schema
+    (422 on anything else). The sentinel `repo="local"` (Addendum 2) additionally
+    requires `local_git.available()` — a 400 with an honest message when the project's
+    own working tree isn't actually mounted/git-initialized here, rather than silently
+    accepting a binding nothing can serve. Returns the persisted binding in the same
+    shape as GET. Audited to the container event log like other container-setting
+    writes.
     """
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
+    if body.repo == "local" and not local_git.available():
+        raise HTTPException(
+            400,
+            "local repository source is not available here — "
+            "ORCHA_LOCAL_REPO_DIR is unset, the mounted directory is missing, "
+            "it has no .git, or the git binary is unavailable in this container",
+        )
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
         # Per-project identity + access model: binding a repo is owner-or-manage_repo
