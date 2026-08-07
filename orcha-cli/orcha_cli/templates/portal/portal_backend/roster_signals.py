@@ -232,6 +232,43 @@ def detect_signals(scan: dict) -> "tuple[set, dict]":
     if "README.md" in names_at_root or "README" in names_at_root:
         fire("readme", "README.md")
 
+    # --- extension-tally fallback (manifest-less trees) ---
+    # A bare source tree (no package.json/pyproject at root — think a repo subdir, a
+    # fresh extraction, or a monorepo piece) still deserves specialists. Count source
+    # extensions across the scan and fire the language signals the manifests would
+    # have; manifest evidence stays preferred, so these only ADD where nothing fired.
+    ext_counts: dict[str, int] = {}
+    for e in scan["entries"]:
+        if e["is_dir"]:
+            continue
+        name = e["name"]
+        dot = name.rfind(".")
+        if dot > 0:
+            ext = name[dot:].lower()
+            ext_counts[ext] = ext_counts.get(ext, 0) + 1
+
+    def _tally(exts: "tuple[str, ...]") -> int:
+        return sum(ext_counts.get(x, 0) for x in exts)
+
+    ts_n = _tally((".ts", ".tsx", ".jsx"))
+    py_n = _tally((".py",))
+    swift_n = _tally((".swift",))
+    kt_n = _tally((".kt", ".kts"))
+    go_n = _tally((".go",))
+    rs_n = _tally((".rs",))
+    if ts_n >= 5 and not (signals & {"react", "vue", "tsconfig", "package_json"}):
+        fire("ts_sources", f"{ts_n} .ts/.tsx files")
+    if py_n >= 5 and not (signals & {"pyproject", "requirements", "fastapi", "django", "flask"}):
+        fire("py_sources", f"{py_n} .py files")
+    if swift_n >= 3 and not (signals & {"xcodeproj", "swift_package", "ios_dir"}):
+        fire("swift_sources", f"{swift_n} .swift files")
+    if kt_n >= 3 and not (signals & {"android_dir", "gradle"}):
+        fire("kotlin_sources", f"{kt_n} .kt files")
+    if go_n >= 5 and "go" not in signals:
+        fire("go", f"{go_n} .go files")
+    if rs_n >= 5 and "rust" not in signals:
+        fire("rust", f"{rs_n} .rs files")
+
     # --- tests ---
     if "tests" in dirnames:
         fire("tests_dir", "tests/")
@@ -299,22 +336,22 @@ def build_roster(signals: set, evidence: dict) -> "tuple[str, list]":
     suggestions = [dict(ATLAS, rationale="always leads the fleet")]
     kinds: list[str] = []
 
-    frontend = signals & {"react", "vue", "tsconfig", "electron", "package_json"}
-    backend = signals & {"fastapi", "django", "flask", "go", "rust", "pyproject", "requirements"}
-    ios = signals & {"xcodeproj", "swift_package", "ios_dir"}
-    android = signals & {"android_dir", "gradle"}
+    frontend = signals & {"react", "vue", "tsconfig", "electron", "package_json", "ts_sources"}
+    backend = signals & {"fastapi", "django", "flask", "go", "rust", "pyproject", "requirements", "py_sources"}
+    ios = signals & {"xcodeproj", "swift_package", "ios_dir", "swift_sources"}
+    android = signals & {"android_dir", "gradle", "kotlin_sources"}
     infra = signals & {"dockerfile", "docker_compose", "k8s_dir", "terraform", "github_actions"}
     data = signals & {"migrations_dir", "sql_files", "prisma"}
     docs = signals & {"docs_heavy"}
     tests = signals & {"tests_dir"}
 
-    if frontend & {"react", "vue", "electron"} or (frontend and "package_json" in frontend):
+    if frontend & {"react", "vue", "electron", "ts_sources"} or (frontend and "package_json" in frontend):
         label = "React" if "react" in signals else ("Vue" if "vue" in signals else "frontend")
         suggestions.append(
             _specialist(
                 "nova", "Frontend engineer",
                 f"Builds and maintains the {label} UI",
-                _cite(evidence, "react", "vue", "electron", "tsconfig", "package_json"),
+                _cite(evidence, "react", "vue", "electron", "tsconfig", "package_json", "ts_sources"),
             )
         )
         kinds.append("frontend")
