@@ -52,7 +52,9 @@ beforeEach(() => {
     openOnboardingPortal: vi.fn().mockResolvedValue(undefined),
     openExternal: vi.fn().mockResolvedValue(undefined),
     onProvisionProgress: vi.fn().mockReturnValue(() => {}),
-    onNavigate: vi.fn().mockReturnValue(() => {})
+    onNavigate: vi.fn().mockReturnValue(() => {}),
+    portalGet: vi.fn(),
+    portalPost: vi.fn()
   }
 })
 

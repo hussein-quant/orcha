@@ -36,6 +36,9 @@ export type BridgeError =
   | { code: 'INVALID_REPO_URL'; reason: string }
   | { code: 'DEST_NOT_EMPTY' }
   | { code: 'CLONE_FAILED'; stderr: string }
+  // ---- fleet suggestion ----
+  | { code: 'PORTAL_REQUEST_FAILED'; status: number }
+  | { code: 'INVALID_PORTAL_REQUEST' }
 
 /** Discriminated IPC result — structured errors survive the IPC boundary
  *  (thrown Errors get flattened to message strings by ipcMain.handle). */
@@ -255,6 +258,38 @@ export interface OrchaDesktopApi {
    *  distinguishes the provisioning wizard's framing when target is 'onboarding'; absent
    *  for plain 'manager' navigation. */
   onNavigate(cb: (nav: { target: 'onboarding' | 'manager'; variant?: WizardVariant }) => void): () => void
+  // fleet (post-provision):
+  /** GET a JSON path on a stack's own localhost portal (port + path validated in main —
+   *  the renderer can't reach localhost directly under sandbox:true). Rejects with
+   *  {code:'PORTAL_REQUEST_FAILED', status} on a non-2xx response (the Fleet step treats
+   *  404 — and any other non-200 — as "this portal predates the endpoint" and auto-skips). */
+  portalGet(apiPort: number, path: string): Promise<unknown>
+  /** POST a JSON body to a path on a stack's own localhost portal. Same port/path
+   *  validation and error shape as portalGet. */
+  portalPost(apiPort: number, path: string, body: unknown): Promise<unknown>
+}
+
+// ---- Fleet suggestion (post-provision "Meet your suggested fleet" step) -----------------
+// GET .../roster/suggest is a newer portal endpoint — older/open CLI portals may 404 (or any
+// other non-200), in which case the Fleet step auto-skips itself entirely and silently.
+
+export interface RosterSuggestion {
+  alias: string
+  role: string
+  focus: string
+  is_main: boolean
+  rationale: string
+}
+
+export interface RosterSuggestResponse {
+  available: boolean
+  project_kind: string
+  signals: string[]
+  suggestions: RosterSuggestion[]
+}
+
+export interface RosterAcceptResult {
+  created: string[]
 }
 
 /** One thing waiting on the human, surfaced in tray/popover/notifications/cards. */

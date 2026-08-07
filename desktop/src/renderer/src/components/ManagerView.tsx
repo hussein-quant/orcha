@@ -55,7 +55,7 @@ export default function ManagerView({ onCreate }: { onCreate: () => void }) {
   return (
     <main className="mx-auto flex h-full max-w-3xl flex-col gap-4 p-6 animate-fade-in">
       <header className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Orcha stacks</h1>
+        <h1 className="onb-title text-2xl">Orcha stacks</h1>
         <div className="flex items-center gap-2">
           <ViewToggle view={viewMode} onChange={changeViewMode} />
           {view.kind === 'ready' && view.stacks.length > 0 && (

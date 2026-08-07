@@ -87,7 +87,10 @@ export default function GithubSourceStep({
   if (!checkingAuth && !gitInstalled) {
     return (
       <div className="flex flex-col gap-4 animate-slide-in">
-        <h2 className="text-lg font-semibold">Clone from GitHub</h2>
+        <div className="flex flex-col gap-1">
+          <span className="onb-eyebrow">Source</span>
+          <h2 className="onb-title text-2xl">Clone from GitHub</h2>
+        </div>
         <Card className="flex items-start gap-2 border-danger/40 text-sm text-danger">
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
@@ -104,7 +107,10 @@ export default function GithubSourceStep({
 
   return (
     <div className="flex flex-col gap-4 animate-slide-in">
-      <h2 className="text-lg font-semibold">Clone from GitHub</h2>
+      <div className="flex flex-col gap-1">
+        <span className="onb-eyebrow">Source</span>
+        <h2 className="onb-title text-2xl">Clone from GitHub</h2>
+      </div>
 
       {checkingAuth ? (
         <p className="flex items-center gap-2 text-sm text-text/60">
@@ -126,18 +132,22 @@ export default function GithubSourceStep({
             </p>
           ) : (
             <ul className="flex max-h-48 flex-col gap-1 overflow-auto">
-              {filteredRepos.map((r) => (
-                <li key={r.nameWithOwner}>
-                  <button
-                    type="button"
-                    onClick={() => pickRepo(r.nameWithOwner)}
-                    className="flex w-full flex-col items-start rounded-lg px-2 py-1.5 text-left text-sm hover:bg-bg"
-                  >
-                    <span className="font-medium">{r.nameWithOwner}</span>
-                    {r.description && <span className="text-xs text-text/50">{r.description}</span>}
-                  </button>
-                </li>
-              ))}
+              {filteredRepos.map((r) => {
+                const selected = url === `https://github.com/${r.nameWithOwner}`
+                return (
+                  <li key={r.nameWithOwner}>
+                    <button
+                      type="button"
+                      onClick={() => pickRepo(r.nameWithOwner)}
+                      data-selected={selected}
+                      className="onb-select-card flex w-full flex-col items-start px-2 py-1.5 text-left text-sm"
+                    >
+                      <span className="font-medium text-text">{r.nameWithOwner}</span>
+                      {r.description && <span className="text-xs text-text/50">{r.description}</span>}
+                    </button>
+                  </li>
+                )
+              })}
               {filteredRepos.length === 0 && (
                 <li className="px-2 py-1.5 text-sm text-text/50">No repos match “{query}”.</li>
               )}
@@ -183,6 +193,7 @@ export default function GithubSourceStep({
           Back
         </Button>
         <Button
+          data-onb-primary="true"
           disabled={!validation?.ok || !dest}
           onClick={() => validation?.ok && dest && onNext(validation.url, dest)}
         >

@@ -33,14 +33,40 @@ beforeEach(() => {
     openOnboardingPortal: vi.fn().mockResolvedValue(undefined),
     openExternal: vi.fn().mockResolvedValue(undefined),
     onProvisionProgress: vi.fn().mockReturnValue(() => {}),
-    onNavigate: vi.fn().mockReturnValue(() => {})
+    onNavigate: vi.fn().mockReturnValue(() => {}),
+    portalGet: vi.fn().mockRejectedValue({ code: 'PORTAL_REQUEST_FAILED', status: 404 }),
+    portalPost: vi.fn().mockRejectedValue({ code: 'PORTAL_REQUEST_FAILED', status: 404 })
   }
 })
 
+/** Skips past the Welcome screen when present (only 'first-run' shows it — add-project
+ *  starts straight on Setup). Welcome's feature-card stagger gates the CTA behind the
+ *  typewriter effect finishing, so wait for it rather than racing the timer. */
+async function skipWelcomeIfPresent(user: ReturnType<typeof userEvent.setup>) {
+  // Welcome only shows for first-run; its CTA appears once the tagline typewriter
+  // (~55ms/char) finishes — give it more than the default 1000ms waitFor budget. add-project
+  // never renders "Orcha" as an h2-less glyph screen, so this resolves to a no-op there.
+  if (!screen.queryByText('Orcha')) return
+  await waitFor(() => expect(screen.getByRole('button', { name: /get started/i })).toBeInTheDocument(), {
+    timeout: 3000
+  })
+  await user.click(screen.getByRole('button', { name: /get started/i }))
+}
+
 async function continueToSource(user: ReturnType<typeof userEvent.setup>) {
-  await waitFor(() => expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled())
-  await user.click(screen.getByRole('button', { name: /continue/i }))
+  await skipWelcomeIfPresent(user)
+  await waitFor(() => expect(screen.getByRole('button', { name: /^continue$/i })).toBeEnabled())
+  await user.click(screen.getByRole('button', { name: /^continue$/i }))
   await waitFor(() => expect(screen.getByText(/where's the project/i)).toBeInTheDocument())
+}
+
+/** After a successful provision with no warnings/git-tip pause, the wizard auto-advances
+ *  straight through Fleet (portalGet stubbed to 404 by default → auto-skip) to Finish,
+ *  whose CTA is what actually opens the portal + calls onDone. */
+async function finishFromPortal(user: ReturnType<typeof userEvent.setup>, project: string) {
+  await waitFor(() => expect(screen.getByRole('button', { name: /open your portal/i })).toBeInTheDocument())
+  await user.click(screen.getByRole('button', { name: /open your portal/i }))
+  await waitFor(() => expect(window.orchaDesktop.openOnboardingPortal).toHaveBeenCalledWith(project))
 }
 
 describe('OnboardingWizard — local folder source', () => {
@@ -64,8 +90,9 @@ describe('OnboardingWizard — local folder source', () => {
     expect(window.orchaDesktop.provision).toHaveBeenCalledWith(
       expect.objectContaining({ folder: '/tmp/demo', mode: 'init', name: 'demo' })
     )
-    // Success → portal handoff + onDone (isGitRepo: true → no pause on the git tip)
-    await waitFor(() => expect(window.orchaDesktop.openOnboardingPortal).toHaveBeenCalledWith('orcha-demo'))
+    // Success (isGitRepo: true → no pause on the git tip) → Fleet auto-skips (404 stub) →
+    // Finish → portal handoff + onDone.
+    await finishFromPortal(user, 'orcha-demo')
     await waitFor(() => expect(onDone).toHaveBeenCalled())
   })
 
@@ -92,6 +119,7 @@ describe('OnboardingWizard — local folder source', () => {
         expect.objectContaining({ folder: '/tmp/demo', mode: 'upgrade' })
       )
     )
+    await finishFromPortal(user, 'orcha-demo')
     await waitFor(() => expect(onDone).toHaveBeenCalled())
   })
 
@@ -115,10 +143,10 @@ describe('OnboardingWizard — local folder source', () => {
     await user.click(screen.getByRole('button', { name: /create project/i }))
 
     expect(await screen.findByText(/git init.*unlocks the local code-source features/i)).toBeInTheDocument()
-    // Paused — portal handoff waits on the explicit Continue click.
+    // Paused — the Fleet/Finish handoff waits on the explicit Continue click.
     expect(window.orchaDesktop.openOnboardingPortal).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: /continue to portal/i }))
-    await waitFor(() => expect(window.orchaDesktop.openOnboardingPortal).toHaveBeenCalledWith('orcha-demo'))
+    await user.click(screen.getByRole('button', { name: /^continue$/i }))
+    await finishFromPortal(user, 'orcha-demo')
     await waitFor(() => expect(onDone).toHaveBeenCalled())
   })
 
@@ -167,7 +195,7 @@ describe('OnboardingWizard — From GitHub source', () => {
       repoUrl: 'https://github.com/open-orcha/orcha',
       dest: '/tmp/orcha-projects/demo'
     })
-    await waitFor(() => expect(window.orchaDesktop.openOnboardingPortal).toHaveBeenCalledWith('orcha-demo'))
+    await finishFromPortal(user, 'orcha-demo')
     await waitFor(() => expect(onDone).toHaveBeenCalled())
   })
 
@@ -235,6 +263,16 @@ describe('OnboardingWizard — From GitHub source', () => {
         return () => {}
       }
     )
+    // Hold cloneAndProvision open so the test can inject a progress event and assert it
+    // renders WHILE still on the Provision screen, before the mock resolves and the wizard
+    // auto-advances into Fleet/Finish.
+    type CloneResult = { project: string; apiPort: number; warnings: string[] }
+    const cloneResolver: { current: ((res: CloneResult) => void) | null } = { current: null }
+    ;(window.orchaDesktop.cloneAndProvision as ReturnType<typeof vi.fn>).mockReturnValue(
+      new Promise<CloneResult>((resolve) => {
+        cloneResolver.current = resolve
+      })
+    )
     const user = userEvent.setup()
     render(<OnboardingWizard onDone={vi.fn()} />)
 
@@ -249,5 +287,60 @@ describe('OnboardingWizard — From GitHub source', () => {
 
     holder.cb?.({ runId: 'r1', step: 'clone-repo', status: 'log', line: 'Receiving objects: 42%' })
     expect(await screen.findByText(/receiving objects: 42%/i)).toBeInTheDocument()
+
+    cloneResolver.current?.({ project: 'orcha-demo', apiPort: 8001, warnings: [] })
+  })
+})
+
+describe('OnboardingWizard — walker: welcome / fleet / finish', () => {
+  it('first-run shows the cinematic Welcome screen first', async () => {
+    render(<OnboardingWizard onDone={vi.fn()} variant="first-run" />)
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /get started/i })).toBeInTheDocument(),
+      { timeout: 3000 }
+    )
+  })
+
+  it('add-project skips straight to Setup — no Welcome screen', async () => {
+    render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText(/what orcha needs/i)).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /get started/i })).not.toBeInTheDocument()
+  })
+
+  it('shows the Fleet step with suggestions when the portal supports roster/suggest, then Finish', async () => {
+    const suggestPayload = {
+      available: true,
+      project_kind: 'ios',
+      signals: ['ios/'],
+      suggestions: [
+        { alias: 'Atlas', role: 'Lead', focus: 'Coordination', is_main: true, rationale: 'found ios/' }
+      ]
+    }
+    ;(window.orchaDesktop.portalGet as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ containers: [{ id: 'c1' }] })
+      .mockResolvedValueOnce(suggestPayload)
+      .mockResolvedValueOnce({ agents: [{ id: 'h1', kind: 'human' }] })
+    ;(window.orchaDesktop.portalPost as ReturnType<typeof vi.fn>).mockResolvedValue({ created: ['Atlas'] })
+
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} />)
+
+    await continueToSource(user)
+    await user.click(screen.getByRole('button', { name: /local folder/i }))
+    await user.click(screen.getByRole('button', { name: /choose existing folder/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /next/i })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: /next/i }))
+    await waitFor(() => expect(screen.getByDisplayValue('demo')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /create project/i }))
+
+    await waitFor(() => expect(screen.getByText(/meet your suggested fleet/i)).toBeInTheDocument())
+    expect(screen.getByText('Atlas')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /create fleet/i }))
+    await waitFor(() => expect(screen.getByText(/fleet created/i)).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: /^continue$/i }))
+
+    await waitFor(() => expect(screen.getByText(/is ready/i)).toBeInTheDocument())
+    expect(screen.getByText('Created')).toBeInTheDocument()
   })
 })

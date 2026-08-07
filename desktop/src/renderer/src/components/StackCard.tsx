@@ -29,7 +29,7 @@ export default function StackCard({ stack, attentionCount = 0, onChanged }: Prop
           )}
           aria-hidden="true"
         />
-        <span className="font-medium">{stack.projectShort}</span>
+        <span className="font-medium tracking-tight text-text">{stack.projectShort}</span>
         <Badge className={stack.running ? 'bg-ok/15 text-ok' : 'bg-text/10 text-text/60'}>
           {stack.running ? 'running' : 'stopped'}
         </Badge>

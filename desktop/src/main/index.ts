@@ -479,6 +479,38 @@ async function requireKnownStack(project: string): Promise<Stack> {
   return stack
 }
 
+/** GET/POST JSON to a specific stack's own localhost portal, on behalf of the sandboxed
+ *  renderer (the Fleet step's roster/suggest + roster/suggest/accept calls). The port must
+ *  match a currently-running stack from discovery, and the path must be a plain `/api/...`
+ *  route (single leading slash, no protocol-relative `//`, no backslash) — this is a narrow,
+ *  validated pass-through, not an open proxy. A non-2xx response rejects with
+ *  PORTAL_REQUEST_FAILED{status}, which the Fleet step reads to auto-skip on 404. */
+async function portalRequest(
+  apiPortRaw: unknown,
+  pathRaw: unknown,
+  method: 'GET' | 'POST',
+  body?: unknown
+): Promise<unknown> {
+  const apiPort = typeof apiPortRaw === 'number' ? apiPortRaw : NaN
+  const path = typeof pathRaw === 'string' ? pathRaw : ''
+  if (!Number.isInteger(apiPort) || !/^\/api\/(?![/\\])[\w/-]*$/.test(path)) {
+    throw { code: 'INVALID_PORTAL_REQUEST' } as const
+  }
+  const stacks = await listStacks()
+  const known = stacks.some((s) => s.running && s.apiPort === apiPort)
+  if (!known) throw { code: 'INVALID_PORTAL_REQUEST' } as const
+
+  const res = await fetch(`http://localhost:${apiPort}${path}`, {
+    method,
+    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(8000)
+  })
+  if (!res.ok) throw { code: 'PORTAL_REQUEST_FAILED', status: res.status } as const
+  const ct = res.headers.get('content-type') ?? ''
+  return ct.includes('application/json') ? res.json() : undefined
+}
+
 app.whenReady().then(() => {
   // Make a saved API key visible to any worker we spawn this session.
   loadApiKeyIntoEnv()
@@ -646,6 +678,19 @@ app.whenReady().then(() => {
       // Allowlist https only — the renderer can't be tricked into opening file:// or app schemes.
       if (typeof url === 'string' && /^https:\/\//.test(url)) await shell.openExternal(url)
     })
+  )
+
+  // ---- fleet suggestion: localhost-only portal pass-through ----
+  // The renderer runs sandboxed (no direct network to localhost portals), so the Fleet step's
+  // GET/POST to a just-provisioned stack's own API goes through main. Both the port AND path
+  // are validated against the live discovery snapshot — this is NOT a general proxy.
+
+  ipcMain.handle('orcha:portalGet', (_event, apiPort: unknown, path: unknown) =>
+    asResult(async () => portalRequest(apiPort, path, 'GET'))
+  )
+
+  ipcMain.handle('orcha:portalPost', (_event, apiPort: unknown, path: unknown, body: unknown) =>
+    asResult(async () => portalRequest(apiPort, path, 'POST', body))
   )
 
   // App menu with File → Add Project. The provisioning wizard lives inside the manager

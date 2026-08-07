@@ -41,7 +41,9 @@ function stub(stacks: unknown[]) {
     onNavigate: vi.fn().mockImplementation((cb) => {
       navigateListener = cb
       return () => {}
-    })
+    }),
+    portalGet: vi.fn().mockRejectedValue({ code: 'PORTAL_REQUEST_FAILED', status: 404 }),
+    portalPost: vi.fn().mockRejectedValue({ code: 'PORTAL_REQUEST_FAILED', status: 404 })
   } as never
 }
 

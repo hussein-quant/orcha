@@ -73,7 +73,11 @@ const api: OrchaDesktopApi = {
     ): void => cb(nav)
     ipcRenderer.on('orcha:navigate', listener)
     return () => ipcRenderer.removeListener('orcha:navigate', listener)
-  }
+  },
+  // fleet:
+  portalGet: (apiPort: number, path: string) => invoke<unknown>('orcha:portalGet', apiPort, path),
+  portalPost: (apiPort: number, path: string, body: unknown) =>
+    invoke<unknown>('orcha:portalPost', apiPort, path, body)
 }
 
 contextBridge.exposeInMainWorld('orchaDesktop', api)
