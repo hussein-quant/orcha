@@ -312,3 +312,70 @@ describe("GitHubPage Files sub-view integration (?browse=1&ref=&path=)", () => {
     expect(await screen.findByText("Fix login bug")).toBeInTheDocument();
   });
 });
+
+/* ============================================================================
+   Orcha Cloud local run, Addendum 2 — local-or-GitHub code source: the header
+   repo badge for a local binding, and the hub's honest degradation when the
+   bound repo answers with reason:"local_source" (browse/Code Space stay
+   fully enabled — this page only covers the issues/pulls hub itself).
+   ============================================================================ */
+const LOCAL_SOURCE_LIST = { available: false, reason: "local_source", detail: "issues/pulls are GitHub-only" };
+
+function stubFetchLocalSource(binding = "local"): Call[] {
+  const calls: Call[] = [];
+  const json = (data: unknown, status = 200) =>
+    ({ ok: status < 400, status, json: async () => data }) as unknown as Response;
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+    if (url.startsWith("/api/containers/c1/github/issues")) return json(LOCAL_SOURCE_LIST);
+    if (url.startsWith("/api/containers/c1/github/pulls")) return json(LOCAL_SOURCE_LIST);
+    if (url === "/api/containers/c1/github") return json({ repo: binding });
+    if (url.startsWith("/api/github/repos")) return json({ available: false, repos: [] });
+    if (url.startsWith("/api/me")) return json({ identity: null, trusted: false });
+    if (url.startsWith("/api/containers/c1")) return json(rawSnap(AGENTS_WITH_HUMAN));
+    if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
+    return json({});
+  }) as unknown as typeof fetch;
+  return calls;
+}
+
+describe("GitHubPage local-source degradation (Orcha Cloud local run, Addendum 2)", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("reason:local_source renders the honest callout instead of the generic empty state", async () => {
+    stubFetchLocalSource();
+    mount();
+    expect(await screen.findByText(
+      "Browsing the local repository. Connect a GitHub repo for issues, PRs, and checks.",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("No repo connected")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Connect GitHub repo/ })).toBeInTheDocument();
+  });
+
+  it("the callout's button opens the Connect-repo picker", async () => {
+    stubFetchLocalSource();
+    mount();
+    await screen.findByText("Browsing the local repository. Connect a GitHub repo for issues, PRs, and checks.");
+    fireEvent.click(screen.getByRole("button", { name: /Connect GitHub repo/ }));
+    expect(await screen.findByText("Connect a repository")).toBeInTheDocument();
+    expect(screen.getByText("This machine")).toBeInTheDocument();
+  });
+
+  it("the header shows the Local badge for a local binding, never a github.com link", async () => {
+    stubFetchLocalSource();
+    mount();
+    await screen.findByText("Browsing the local repository. Connect a GitHub repo for issues, PRs, and checks.");
+    expect(screen.getByText("Local")).toBeInTheDocument();
+    expect(document.querySelector(".repo-badge a")).toBeNull();
+  });
+
+  it("pulls tab degrades the same way", async () => {
+    stubFetchLocalSource();
+    mount();
+    await screen.findByText("Browsing the local repository. Connect a GitHub repo for issues, PRs, and checks.");
+    fireEvent.click(screen.getByText("Pull requests"));
+    expect(await screen.findAllByText("Browsing the local repository. Connect a GitHub repo for issues, PRs, and checks.")).not.toHaveLength(0);
+  });
+});

@@ -103,3 +103,29 @@ describe("ProjectsPage (access-model landing)", () => {
     expect(document.querySelectorAll("[data-def-cid]").length).toBe(0);
   });
 });
+
+describe("ProjectsPage local repo badge (Orcha Cloud local run, Addendum 2)", () => {
+  beforeEach(() => { localStorage.clear(); prefs._resetForTests(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("a local binding renders the workspace name + Local chip, not a github.com link", async () => {
+    const localContainers = [
+      { id: "c3", name: "quantal-local", description: "Local dev", status: "active",
+        github_repo: "local", agents: 1, tasks: 0, needs_you: 0, member_count: 1, members: null },
+    ];
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const json = (data: unknown) => ({ ok: true, status: 200, json: async () => data }) as unknown as Response;
+      if (url === "/api/prefs") return json({ prefs: null });
+      if (url === "/api/containers") return json({ containers: localContainers });
+      if (url.startsWith("/api/me")) return json({ identity: null, trusted: false });
+      return json({});
+    }) as unknown as typeof fetch;
+    mount();
+    // the card title AND the badge's own local label both read "quantal-local"
+    expect(await screen.findAllByText("quantal-local")).toHaveLength(2);
+    expect(screen.getByText("Local")).toBeInTheDocument();
+    const badge = document.querySelector(".prepo")!;
+    expect(badge.querySelector("a")).toBeNull();
+  });
+});
