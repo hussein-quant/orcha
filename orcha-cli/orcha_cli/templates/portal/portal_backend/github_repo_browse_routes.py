@@ -326,6 +326,8 @@ def _extract_source_files(
         for member, rel_path in _safe_tar_members(tar, has_prefix=has_prefix):
             if not rel_path:
                 continue
+            if is_vendored_path(rel_path):
+                continue
             if not any(rel_path.endswith(ext) for ext in extensions):
                 continue
             if member.size > max_file_bytes:
@@ -335,6 +337,23 @@ def _extract_source_files(
                 continue
             files[rel_path] = extracted.read()
     return files
+
+
+# Directory names whose contents are vendored/generated, not authored source. Symbol
+# indexing and code search skip them: definitions inside a bundled dist/ or a vendored
+# lib pollute go-to-symbol with unclickable noise AND dominate cold-index time (a
+# minified bundle is one enormous "file" of regex fodder). Matched as whole path
+# segments anywhere in the path — "src/distance/" is NOT "dist/".
+VENDORED_DIR_SEGMENTS = frozenset({
+    "node_modules", "vendor", "dist", "build", "out", ".venv", "venv",
+    "__pycache__", "Pods", "DerivedData", ".next", ".nuxt", "coverage",
+    "target", ".gradle",
+})
+
+
+def is_vendored_path(rel_path: str) -> bool:
+    """True when any path segment names a vendored/generated directory."""
+    return any(seg in VENDORED_DIR_SEGMENTS for seg in rel_path.split("/")[:-1])
 
 
 def _fetch_local_repo_snapshot(resolved_ref: str, cid: str, extensions, max_file_bytes: int):

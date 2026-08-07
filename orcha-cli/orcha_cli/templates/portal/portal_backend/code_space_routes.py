@@ -100,6 +100,7 @@ from portal_backend.github_repo_browse_routes import (
     _is_binary_content,
     _load_binding,
     _not_connected,
+    is_vendored_path,
     _resolve_ref,
     _resolve_repo_token,
 )
@@ -766,6 +767,80 @@ def _extract_definitions(text: str, language: str) -> list:
     return results
 
 
+def _index_from_snapshot(indexable, snapshot) -> list:
+    """Regex-extract every definition from the snapshot's bytes for `indexable` paths —
+    the whole-repo one-pass indexing body, shared by the symbols route (cold path) and
+    the local background warmer (`warm_local_symbol_index`)."""
+    symbols = []
+    for path in indexable:
+        raw_bytes = snapshot.get(path)
+        if raw_bytes is None:
+            continue
+        if _is_binary_content(raw_bytes):
+            continue
+        text = raw_bytes.decode("utf-8", errors="ignore")
+        language = _language_for_path(path)
+        for definition in _extract_definitions(text, language):
+            symbols.append({**definition, "path": path})
+    return symbols
+
+
+def warm_local_symbol_index() -> bool:
+    """Pre-build the snapshot + symbol index for every container bound to the LOCAL
+    repo, so the first go-to-symbol/outline click is warm instead of paying the cold
+    cost (a bind-mounted `git archive` + whole-repo regex pass — ~10s+ on Docker for
+    Mac). Called from a background thread (startup + periodic re-warm inside the cache
+    TTL, see application_lifecycle) — NEVER from a request path. Returns whether any
+    index was (re)built; all failures are swallowed (warming is an optimization, the
+    request-path cold build remains the source of truth)."""
+    try:
+        from portal_backend import local_git
+        if not local_git.available():
+            return False
+        with db_cursor() as (_, cur):
+            cur.execute(
+                "SELECT id FROM containers WHERE github_repo=%s", (LOCAL_REPO,)
+            )
+            cids = [str(r["id"]) for r in cur.fetchall()]
+        if not cids:
+            return False
+        sha = local_git.resolve_ref("HEAD")
+        if not sha:
+            return False
+        built = False
+        for cid in cids:
+            if _symbol_state_get(cid, sha) is not None:
+                continue
+            entries, _tr = _fetch_full_tree(LOCAL_REPO, sha, None, cid)
+            indexable = []
+            for entry in entries:
+                if entry.get("type") != "blob":
+                    continue
+                path = entry.get("path") or ""
+                if is_vendored_path(path):
+                    continue
+                if _language_for_path(path) is None:
+                    continue
+                size = entry.get("size")
+                if size is not None and size > MAX_SOURCE_FILE_BYTES:
+                    continue
+                indexable.append(path)
+            snapshot = _fetch_repo_snapshot(
+                LOCAL_REPO, sha, None, cid,
+                tuple(LANGUAGE_BY_EXTENSION), MAX_SOURCE_FILE_BYTES,
+            )
+            if snapshot is None:
+                continue
+            _symbol_state_put(cid, sha, {
+                "symbols": _index_from_snapshot(indexable, snapshot),
+                "pending": [], "total": len(indexable),
+            })
+            built = True
+        return built
+    except Exception:
+        return False
+
+
 @app.get("/api/containers/{cid}/code/symbols")
 def search_code_symbols(cid: str, request: Request, ref: str = Query(default=""), q: str = Query(default="")):
     """Workspace symbol search: every definition across every indexable source file at
@@ -805,6 +880,8 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
             if entry.get("type") != "blob":
                 continue
             path = entry.get("path") or ""
+            if is_vendored_path(path):
+                continue
             language = _language_for_path(path)
             if language is None:
                 continue
@@ -833,18 +910,10 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
             # skew, e.g. a submodule/symlink entry — skipped honestly rather than
             # guessed). `pending` stays empty: indexing:false immediately below, no
             # polling required for a snapshot-backed repo.
-            symbols = []
-            for path in indexable:
-                raw_bytes = snapshot.get(path)
-                if raw_bytes is None:
-                    continue
-                if _is_binary_content(raw_bytes):
-                    continue
-                text = raw_bytes.decode("utf-8", errors="ignore")
-                language = _language_for_path(path)
-                for definition in _extract_definitions(text, language):
-                    symbols.append({**definition, "path": path})
-            state = {"symbols": symbols, "pending": [], "total": len(indexable)}
+            state = {
+                "symbols": _index_from_snapshot(indexable, snapshot),
+                "pending": [], "total": len(indexable),
+            }
         else:
             # Fallback: budgeted incremental indexing exactly as before snapshot
             # support existed. A cold index would otherwise fetch EVERY source file
