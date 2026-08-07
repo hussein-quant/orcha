@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Plus } from 'lucide-react'
 import type { AttentionItem, Stack } from '../../../shared/types'
 import StackList from './StackList'
 import DockerDownBanner from './DockerDownBanner'
 import EmptyState from './EmptyState'
 import ViewToggle, { type ViewMode } from './ViewToggle'
+import { Button } from '../ui/Button'
 
 const POLL_MS = 5000
 const VIEW_MODE_KEY = 'orcha.viewMode'
@@ -54,7 +56,14 @@ export default function ManagerView({ onCreate }: { onCreate: () => void }) {
     <main className="mx-auto flex h-full max-w-3xl flex-col gap-4 p-6 animate-fade-in">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Orcha stacks</h1>
-        <ViewToggle view={viewMode} onChange={changeViewMode} />
+        <div className="flex items-center gap-2">
+          <ViewToggle view={viewMode} onChange={changeViewMode} />
+          {view.kind === 'ready' && view.stacks.length > 0 && (
+            <Button size="sm" onClick={onCreate}>
+              <Plus className="h-4 w-4" /> Add project…
+            </Button>
+          )}
+        </div>
       </header>
       {view.kind === 'loading' && (
         <div className="rounded-xl border border-border bg-card p-4 text-sm text-text/60">Loading…</div>

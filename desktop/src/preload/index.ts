@@ -1,9 +1,13 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type {
   AttentionItem,
+  CloneAndProvisionOptions,
+  CloneDestSuggestion,
   FolderChoice,
   FolderMode,
   FolderState,
+  GhRepo,
+  GithubStatus,
   InstallProgress,
   InstallResult,
   IpcResult,
@@ -13,7 +17,8 @@ import type {
   ProgressEvent,
   ProvisionOptions,
   ProvisionResult,
-  Stack
+  Stack,
+  WizardVariant
 } from '../shared/types'
 
 /** Unwrap IpcResult: ok:false becomes a typed rejection (the BridgeError object). */
@@ -47,6 +52,13 @@ const api: OrchaDesktopApi = {
   pickFolder: (mode: FolderMode) => invoke<FolderChoice | null>('orcha:pickFolder', mode),
   inspectFolder: (folder: string) => invoke<FolderState>('orcha:inspectFolder', folder),
   provision: (opts: ProvisionOptions) => invoke<ProvisionResult>('orcha:provision', opts),
+  // add project / from GitHub:
+  githubStatus: () => invoke<GithubStatus>('orcha:githubStatus'),
+  githubRepos: () => invoke<GhRepo[]>('orcha:githubRepos'),
+  suggestCloneDest: (repoUrl: string) => invoke<CloneDestSuggestion>('orcha:suggestCloneDest', repoUrl),
+  pickCloneDest: (repoName: string) => invoke<string | null>('orcha:pickCloneDest', repoName),
+  cloneAndProvision: (opts: CloneAndProvisionOptions) =>
+    invoke<ProvisionResult>('orcha:cloneAndProvision', opts),
   openOnboardingPortal: (project: string) => invoke<void>('orcha:openOnboardingPortal', project),
   openExternal: (url: string) => invoke<void>('orcha:openExternal', url),
   onProvisionProgress: (cb) => {
@@ -55,7 +67,10 @@ const api: OrchaDesktopApi = {
     return () => ipcRenderer.removeListener('orcha:provision:progress', listener)
   },
   onNavigate: (cb) => {
-    const listener = (_e: IpcRendererEvent, target: 'onboarding' | 'manager'): void => cb(target)
+    const listener = (
+      _e: IpcRendererEvent,
+      nav: { target: 'onboarding' | 'manager'; variant?: WizardVariant }
+    ): void => cb(nav)
     ipcRenderer.on('orcha:navigate', listener)
     return () => ipcRenderer.removeListener('orcha:navigate', listener)
   }

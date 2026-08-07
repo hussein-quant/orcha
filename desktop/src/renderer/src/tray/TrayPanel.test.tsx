@@ -38,8 +38,13 @@ beforeEach(() => {
     pickFolder: vi.fn().mockResolvedValue(null),
     inspectFolder: vi
       .fn()
-      .mockResolvedValue({ initialized: false, writable: true, suggestedName: 'x' }),
+      .mockResolvedValue({ initialized: false, writable: true, suggestedName: 'x', isGitRepo: true }),
     provision: vi.fn().mockResolvedValue({ project: 'orcha-x', apiPort: 8000, warnings: [] }),
+    githubStatus: vi.fn().mockResolvedValue({ authenticated: false, gitInstalled: true }),
+    githubRepos: vi.fn().mockResolvedValue([]),
+    suggestCloneDest: vi.fn().mockResolvedValue({ parent: '/tmp/orcha-projects', repoName: 'repo' }),
+    pickCloneDest: vi.fn().mockResolvedValue(null),
+    cloneAndProvision: vi.fn().mockResolvedValue({ project: 'orcha-repo', apiPort: 8000, warnings: [] }),
     openOnboardingPortal: vi.fn().mockResolvedValue(undefined),
     openExternal: vi.fn().mockResolvedValue(undefined),
     onProvisionProgress: vi.fn().mockReturnValue(() => {}),

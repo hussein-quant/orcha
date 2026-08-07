@@ -21,15 +21,22 @@ import { startHostWorker, nodeHostWorkerDeps, hostToolPath } from './hostWorker'
 import { resetStack } from './resetEngine'
 import { buildAppMenuTemplate } from './appMenu'
 import { adminOsascriptArgs, planInstall, runInstall } from './installers'
+import { ghIsAuthenticated, ghListRepos, defaultClonesParent, resolveCloneDest } from './githubSource'
+import { validateRepoUrl } from '../shared/repoUrl'
 import type {
   AttentionItem,
   BridgeError,
+  CloneAndProvisionOptions,
+  CloneDestSuggestion,
   FolderMode,
+  GhRepo,
+  GithubStatus,
   InstallResult,
   IpcResult,
   PrereqProbe,
   ProgressEvent,
   ProvisionOptions,
+  ProvisionResult,
   Stack
 } from '../shared/types'
 
@@ -206,6 +213,98 @@ async function persistApiKey(key: string): Promise<void> {
   mkdirSync(path.dirname(f), { recursive: true })
   writeFileSync(f, key, { mode: 0o600 })
   process.env.ANTHROPIC_API_KEY = key
+}
+
+// ---- Add project / From GitHub -----------------------------------------------------------
+// gh/git run on the host-tool PATH (same augmented PATH as the installers above); credentials
+// for private repos flow through the host's own git credential helper / gh auth — Orcha never
+// sees or stores a token, and never puts one in a URL.
+
+/** `git clone <url> <dest>`, streaming stdout+stderr lines (git's own progress goes to
+ *  stderr) to onLine — mirrors runUserInstall's spawn/stream shape. `dest`'s PARENT must
+ *  already exist; dest itself must not (git clone creates it). */
+function cloneGitRepo(url: string, dest: string, onLine: (line: string) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('git', ['clone', '--progress', url, dest], {
+      env: { ...process.env, PATH: hostToolPath(), GIT_TERMINAL_PROMPT: '0' }
+    })
+    let tail = ''
+    const onData = (buf: Buffer): void => {
+      const text = buf.toString()
+      tail = (tail + text).slice(-2000)
+      // git's --progress writes carriage-return-updated lines; split on both so the log
+      // shows each intermediate "Receiving objects: NN%" tick rather than one giant blob.
+      for (const line of text.split(/\r|\n/)) {
+        const t = line.trim()
+        if (t) onLine(t)
+      }
+    }
+    child.stdout.on('data', onData)
+    child.stderr.on('data', onData)
+    child.on('error', (err) => reject(Object.assign(err, { stderr: tail.trim() })))
+    child.on('close', (code) =>
+      code === 0 ? resolve() : reject(Object.assign(new Error(`git clone exited ${code}`), { stderr: tail.trim() }))
+    )
+  })
+}
+
+/** Reserve three DISTINCT free host ports the engine reads via a sync lookup keyed by the
+ *  CLI's scan-start constants (5432/8000/8765), and wire them into a fresh EngineDeps. We
+ *  must exclude ports Docker has already published: a host listen on 0.0.0.0:<p> can
+ *  succeed while docker-proxy owns it, so the host probe alone misses the collision
+ *  (#port-collision). We also feed each chosen port back into the exclusion set so
+ *  db/api/bridge never pick the same port. Shared by orcha:provision and cloneAndProvision
+ *  so both provisioning entry points reserve ports identically. */
+async function reservedEngineDeps(): Promise<EngineDeps> {
+  const taken = await dockerPublishedPorts()
+  const db = await pickFreePort(5432, { dockerPorts: taken })
+  taken.add(db)
+  const api = await pickFreePort(8000, { dockerPorts: taken })
+  taken.add(api)
+  const bridge = await pickFreePort(8765, { dockerPorts: taken })
+  const reserved: Record<number, number> = { 5432: db, 8000: api, 8765: bridge }
+  return { ...engineDeps(), findFreePort: (start: number) => reserved[start] ?? start }
+}
+
+/** Clone opts.repoUrl into opts.dest (streaming 'clone-repo' progress on the same channel
+ *  as provisioning), then run the ordinary init provision pipeline on the clone. A cloned
+ *  repo is always fresh (mode 'init' — a repo we just cloned can't already be .orcha-
+ *  initialized) and is always a git repo (no git-init tip needed on this path). */
+async function cloneAndProvision(
+  opts: CloneAndProvisionOptions,
+  onProgress: (e: ProgressEvent) => void
+): Promise<ProvisionResult> {
+  const runId = `clone:${opts.dest}:${Date.now()}`
+  const emit = (status: ProgressEvent['status'], extra?: Partial<ProgressEvent>): void =>
+    onProgress({ runId, step: 'clone-repo', status, ...(extra as object) } as ProgressEvent)
+
+  const check = validateRepoUrl(opts.repoUrl)
+  if (!check.ok) {
+    emit('fail', { code: 'INVALID_REPO_URL', detail: check.reason })
+    throw { code: 'INVALID_REPO_URL', reason: check.reason } as const
+  }
+  // resolveCloneDest already guarded emptiness when the destination was suggested; guard
+  // again here in case the caller passed a path we didn't vet (defense in depth).
+  try {
+    resolveCloneDest(path.dirname(opts.dest), path.basename(opts.dest))
+  } catch {
+    emit('fail', { code: 'DEST_NOT_EMPTY', detail: `${opts.dest} is not empty` })
+    throw { code: 'DEST_NOT_EMPTY' } as const
+  }
+  mkdirSync(path.dirname(opts.dest), { recursive: true })
+
+  emit('start')
+  try {
+    await cloneGitRepo(check.url, opts.dest, (line) => emit('log', { line }))
+    emit('ok')
+  } catch (err) {
+    const stderr = String((err as { stderr?: string }).stderr ?? (err as Error).message)
+    emit('fail', { code: 'CLONE_FAILED', detail: stderr })
+    throw { code: 'CLONE_FAILED', stderr } as const
+  }
+
+  const deps = await reservedEngineDeps()
+  return provision({ folder: opts.dest, mode: 'init' }, onProgress, deps)
 }
 
 // Runtime name for everything Electron derives it from (userData path, dialogs).
@@ -472,28 +571,65 @@ app.whenReady().then(() => {
 
   ipcMain.handle('orcha:provision', (_event, opts: ProvisionOptions) =>
     asResult(async () => {
-      // Reserve three DISTINCT free host ports the engine reads via a sync lookup keyed by
-      // the CLI's scan-start constants (5432/8000/8765). We must exclude ports Docker has
-      // already published: a host listen on 0.0.0.0:<p> can succeed while docker-proxy owns
-      // it, so the host probe alone misses the collision (#port-collision). We also feed each
-      // chosen port back into the exclusion set so db/api/bridge never pick the same port.
-      const taken = await dockerPublishedPorts()
-      const db = await pickFreePort(5432, { dockerPorts: taken })
-      taken.add(db)
-      const api = await pickFreePort(8000, { dockerPorts: taken })
-      taken.add(api)
-      const bridge = await pickFreePort(8765, { dockerPorts: taken })
-      const reserved: Record<number, number> = { 5432: db, 8000: api, 8765: bridge }
-      const deps: EngineDeps = {
-        ...engineDeps(),
-        findFreePort: (start: number) => reserved[start] ?? start
-      }
+      const deps = await reservedEngineDeps()
       return provision(
         opts,
         (e: ProgressEvent) => sendToManager('orcha:provision:progress', e),
         deps
       )
     })
+  )
+
+  // ---- add project / from GitHub ----
+
+  ipcMain.handle('orcha:githubStatus', () =>
+    asResult(async (): Promise<GithubStatus> => {
+      // git presence is this path's own preflight — a fresh Mac may have Homebrew/Docker/an
+      // AI agent (the global hard prereqs) but no git yet (Xcode CLT installs it lazily).
+      const [gitPath, authenticated] = await Promise.all([whichHostTool('git'), ghIsAuthenticated(dockerExec)])
+      return { authenticated, gitInstalled: !!gitPath }
+    })
+  )
+
+  ipcMain.handle('orcha:githubRepos', () => asResult(async (): Promise<GhRepo[]> => ghListRepos(dockerExec)))
+
+  ipcMain.handle('orcha:suggestCloneDest', (_event, repoUrl: unknown) =>
+    asResult(async (): Promise<CloneDestSuggestion> => {
+      const check = typeof repoUrl === 'string' ? validateRepoUrl(repoUrl) : { ok: false as const, reason: '' }
+      const repoName = check.ok ? check.repoName : 'repo'
+      const stacks = await listStacks().catch(() => [])
+      const parent = defaultClonesParent(
+        stacks.map((s) => s.folder),
+        os.homedir()
+      )
+      return { parent, repoName }
+    })
+  )
+
+  ipcMain.handle('orcha:pickCloneDest', (_event, repoName: unknown) =>
+    asResult(async (): Promise<string | null> => {
+      // Default the picker to the same suggested parent suggestCloneDest computed, so the
+      // common case (accept the suggestion) is a single click. mkdirp it first — Finder's
+      // panel silently ignores a defaultPath that doesn't exist yet (e.g. a fresh ~/orcha-
+      // projects on a machine with no stacks yet).
+      const stacks = await listStacks().catch(() => [])
+      const defaultParent = defaultClonesParent(
+        stacks.map((s) => s.folder),
+        os.homedir()
+      )
+      mkdirSync(defaultParent, { recursive: true })
+      const result = await dialog.showOpenDialog({
+        defaultPath: defaultParent,
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (result.canceled || result.filePaths.length === 0) return null
+      const name = typeof repoName === 'string' && repoName ? repoName : 'repo'
+      return resolveCloneDest(result.filePaths[0], name)
+    })
+  )
+
+  ipcMain.handle('orcha:cloneAndProvision', (_event, opts: CloneAndProvisionOptions) =>
+    asResult(async () => cloneAndProvision(opts, (e: ProgressEvent) => sendToManager('orcha:provision:progress', e)))
   )
 
   ipcMain.handle('orcha:openOnboardingPortal', (_event, project: string) =>
@@ -512,14 +648,15 @@ app.whenReady().then(() => {
     })
   )
 
-  // App menu with File → New Project. Onboarding lives inside the manager window now,
-  // so New Project focuses it and asks the renderer to switch to onboarding mode.
+  // App menu with File → Add Project. The provisioning wizard lives inside the manager
+  // window (no second window) — Add Project focuses it and asks the renderer to switch
+  // into the wizard, in "add-project" variant (same steps as first-run onboarding).
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildAppMenuTemplate({
-        onNewProject: () => {
+        onAddProject: () => {
           showManagerWindow()
-          sendToManager('orcha:navigate', 'onboarding')
+          sendToManager('orcha:navigate', { target: 'onboarding', variant: 'add-project' })
         }
       })
     )

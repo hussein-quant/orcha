@@ -31,6 +31,11 @@ export type BridgeError =
   | { code: 'PORTAL_TIMEOUT' }
   | { code: 'CONTAINER_EXISTS' }
   | { code: 'PROVISION_FAILED'; step: ProvisionStep; stderr: string }
+  // ---- add project / from GitHub ----
+  | { code: 'GIT_NOT_INSTALLED' }
+  | { code: 'INVALID_REPO_URL'; reason: string }
+  | { code: 'DEST_NOT_EMPTY' }
+  | { code: 'CLONE_FAILED'; stderr: string }
 
 /** Discriminated IPC result — structured errors survive the IPC boundary
  *  (thrown Errors get flattened to message strings by ipcMain.handle). */
@@ -38,10 +43,16 @@ export type IpcResult<T> = { ok: true; data: T } | ({ ok: false } & BridgeError)
 
 // ---- Onboarding / provisioning ----
 
+/** Which framing the provisioning wizard shows: 'first-run' is the zero-stack onboarding
+ *  path, 'add-project' is launched from an existing manager (button or File→Add Project).
+ *  Same steps, same components — only copy (and step 0's "welcome" framing) differs. */
+export type WizardVariant = 'first-run' | 'add-project'
+
 export type ProvisionMode = 'init' | 'upgrade' | 'reset'
 
 export type ProvisionStep =
   | 'preflight'
+  | 'clone-repo'
   | 'render-compose'
   | 'copy-templates'
   | 'compose-up'
@@ -150,12 +161,46 @@ export interface FolderState {
   writable: boolean
   /** Sanitized project name derived from the folder basename. */
   suggestedName: string
+  /** True when the folder already contains a .git dir. Drives the "git init" tip shown
+   *  after a successful provision — Orcha never runs git itself. */
+  isGitRepo: boolean
 }
 
 export interface FolderChoice {
   /** Absolute canonical path of the chosen (or to-be-created) folder. */
   folder: string
   mode: FolderMode
+}
+
+// ---- Add project / From GitHub ----
+
+/** One repo from `gh repo list`, offered when the host's gh CLI is authenticated. */
+export interface GhRepo {
+  nameWithOwner: string
+  description: string | null
+}
+
+/** Whether the host's `gh` CLI is installed AND logged in (checked fresh each time —
+ *  never assumed). false means the GitHub source falls back to the URL-only field.
+ *  `gitInstalled` gates the whole source — cloning needs `git` regardless of gh. */
+export interface GithubStatus {
+  authenticated: boolean
+  gitInstalled: boolean
+}
+
+/** Suggested clone destination for a repo: the folder containing the user's existing
+ *  stacks (or ~/orcha-projects) plus the repo's sanitized name. Purely a suggestion — the
+ *  folder picker lets the user override the parent. */
+export interface CloneDestSuggestion {
+  parent: string
+  repoName: string
+}
+
+export interface CloneAndProvisionOptions {
+  /** https:// repo URL, already validated client-side (server re-validates). */
+  repoUrl: string
+  /** Absolute destination directory; must not exist or must be empty. */
+  dest: string
 }
 
 /** The full surface the preload bridge exposes as window.orchaDesktop.
@@ -185,13 +230,31 @@ export interface OrchaDesktopApi {
   pickFolder(mode: FolderMode): Promise<FolderChoice | null>
   inspectFolder(folder: string): Promise<FolderState>
   provision(opts: ProvisionOptions): Promise<ProvisionResult>
+  // add project / from GitHub:
+  /** Whether the host's gh CLI is installed and authenticated. */
+  githubStatus(): Promise<GithubStatus>
+  /** The user's repos via `gh repo list` (only meaningful when githubStatus().authenticated). */
+  githubRepos(): Promise<GhRepo[]>
+  /** Suggested <parent>/<repoName> destination for a repo, before the user picks/overrides
+   *  the parent via pickFolder('new-blank'). */
+  suggestCloneDest(repoUrl: string): Promise<CloneDestSuggestion>
+  /** Pick the destination's parent directory (reuses the folder picker with "New Folder"
+   *  enabled), returning the resolved <parent>/<repoName>, or null if the dest is non-empty
+   *  or the user cancelled. */
+  pickCloneDest(repoName: string): Promise<string | null>
+  /** Clone the repo, then run the same provision pipeline on it (mode 'init' — a freshly
+   *  cloned repo is never already .orcha-initialized). Streams BOTH clone and provision
+   *  progress on onProvisionProgress, as 'clone-repo' then the usual provision steps. */
+  cloneAndProvision(opts: CloneAndProvisionOptions): Promise<ProvisionResult>
   openOnboardingPortal(project: string): Promise<void>
   /** Open an https URL in the user's default browser (e.g. the Docker download page). */
   openExternal(url: string): Promise<void>
   /** Subscribe to provision progress; returns an unsubscribe fn. */
   onProvisionProgress(cb: (e: ProgressEvent) => void): () => void
-  /** Subscribe to main→renderer navigation requests (e.g. File→New Project). */
-  onNavigate(cb: (target: 'onboarding' | 'manager') => void): () => void
+  /** Subscribe to main→renderer navigation requests (e.g. File→Add Project). `variant`
+   *  distinguishes the provisioning wizard's framing when target is 'onboarding'; absent
+   *  for plain 'manager' navigation. */
+  onNavigate(cb: (nav: { target: 'onboarding' | 'manager'; variant?: WizardVariant }) => void): () => void
 }
 
 /** One thing waiting on the human, surfaced in tray/popover/notifications/cards. */
