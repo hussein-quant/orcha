@@ -1,8 +1,8 @@
 /* GitHub hub page styles: Conductor-style issue/PR list — tabs, filter chips,
    search, rows (number/title/repo/reviewers/checks/merge/updated/Start), the
    assignee dropdown, and the connect/error empty states. Token-driven only
-   (var(--surface-2/-3/--border/...)) so classic, swiss, and minimal all read
-   correctly — no hex literals anywhere in this file. */
+   (var(--surface-2/-3/--border/...)) so classic, swiss, minimal, and gold all
+   read correctly — no hex literals anywhere in this file. */
 .gh-wrap { display: flex; flex-direction: column; gap: 14px; max-width: 1180px; margin: 0 auto; }
 
 .gh-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

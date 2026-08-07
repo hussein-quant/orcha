@@ -1,6 +1,6 @@
 /* Code Space (/code) — full-page three-pane surface: directory tree + search
    | code viewer | thread rail. Token-driven only (var(--surface-2/-3/--border/
-   ...)) so classic/swiss/minimal all read correctly. Reuses browse.css's
+   ...)) so classic/swiss/minimal/gold all read correctly. Reuses browse.css's
    .rb-* tree/content idioms via the shared BrowseTree/CodeViewer pieces
    refactored out of RepoBrowser.tsx — this file only adds Code-Space-specific
    chrome: the full-bleed page shell, the gutter affordances, the thread rail,
