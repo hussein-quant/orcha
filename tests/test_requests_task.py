@@ -6,13 +6,14 @@ def _task_payload(title="do work", dod="done"):
     return {"title": title, "definition_of_done": dod, "priority": 100}
 
 
-async def test_accept_task_spawns_and_assigns(client, make_agent, make_request, db):
+async def test_accept_task_spawns_and_assigns(client, make_agent, make_request, db, work_headers):
     a = await make_agent("a", "eng")
     b = await make_agent("b", "eng")
     req = await make_request(a["agent_id"], "please build X", target_alias="b",
                              type="task", task=_task_payload())
     r = await client.post(f"/api/requests/{req['request_id']}/accept-task",
-                          json={"responder_agent_id": b["agent_id"], "note": "on it"})
+                          json={"responder_agent_id": b["agent_id"], "note": "on it"},
+                          headers=await work_headers(b["agent_id"]))
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["status"] == "accepted" and body["spawned_task_id"]
@@ -22,7 +23,105 @@ async def test_accept_task_spawns_and_assigns(client, make_agent, make_request, 
     assert rows, "accepted task should be assigned to the responder"
 
 
-async def test_accept_task_idempotent_no_duplicate_task(client, make_agent, make_request, db):
+async def test_accept_task_carries_protocol_into_spawned_task(client, make_agent, make_request, db, work_headers):
+    """GH #55: a task request may carry a `protocol` block (rides in the request's `detail`
+    JSONB). On accept, the spawned task's protocol is populated from it — so the accepter reads
+    the loop rules on the very wake this accept triggers, with NO follow-up PATCH.
+
+    GH #56 (Point 4.4): the carried fields ride verbatim, EXCEPT `notes`, onto which accept now
+    PREPENDS a report-back instruction (so the accepter learns to report back from the protocol it
+    reads every wake). Report-back leads; the carried notes follow — review P2: prepending keeps
+    the report-back line from being tail-truncated away when carried notes are near the field cap."""
+    a = await make_agent("a", "eng")
+    b = await make_agent("b", "eng")
+    task = _task_payload()
+    task["protocol"] = {"review_chain": "b -> a -> human", "handoff_to": "a",
+                        "autonomy": "ship small fixes", "notes": "loop until clean"}
+    req = await make_request(a["agent_id"], "build X with loop rules", target_alias="b",
+                             type="task", task=task)
+    r = await client.post(f"/api/requests/{req['request_id']}/accept-task",
+                          json={"responder_agent_id": b["agent_id"], "note": "on it"},
+                          headers=await work_headers(b["agent_id"]))
+    assert r.status_code == 200, r.text
+    tid = r.json()["spawned_task_id"]
+    rows = db.execute("SELECT protocol FROM tasks WHERE id=%s", (tid,))
+    proto = rows[0]["protocol"]
+    assert proto, "spawned task should carry the request's protocol"
+    assert proto["review_chain"] == "b -> a -> human"
+    assert proto["handoff_to"] == "a"
+    assert proto["autonomy"] == "ship small fixes"
+    # GH #56 Point 4.4 (review P2): report-back leads, carried notes preserved as the suffix.
+    assert proto["notes"].startswith("REPORT BACK")
+    assert proto["notes"].rstrip().endswith("loop until clean")
+    assert req["request_id"] in proto["notes"]
+
+
+async def test_accept_task_without_protocol_injects_report_back(client, make_agent, make_request, db, work_headers):
+    """GH #56 (Point 4.4): a task request with no protocol still spawns a task whose protocol
+    carries the auto-injected report-back instruction in `notes` (so the accepter learns to report
+    back). No other fields are set — only `notes` is populated. The report-back is decoupled from
+    /orcha-done and names the request to post back to."""
+    a = await make_agent("a", "eng")
+    b = await make_agent("b", "eng")
+    req = await make_request(a["agent_id"], "build X", target_alias="b",
+                             type="task", task=_task_payload())
+    r = await client.post(f"/api/requests/{req['request_id']}/accept-task",
+                          json={"responder_agent_id": b["agent_id"], "note": "on it"},
+                          headers=await work_headers(b["agent_id"]))
+    assert r.status_code == 200, r.text
+    rows = db.execute("SELECT protocol FROM tasks WHERE id=%s", (r.json()["spawned_task_id"],))
+    proto = rows[0]["protocol"]
+    assert proto is not None and "REPORT BACK" in proto["notes"]
+    assert req["request_id"] in proto["notes"]
+    assert "orcha-done" in proto["notes"].lower()  # explicitly decoupled from /orcha-done
+    # only notes is populated — the other SPEC-4 fields stay unset
+    assert not proto.get("review_chain") and not proto.get("handoff_to")
+
+
+async def test_accept_task_response_echoes_report_back(client, make_agent, make_request, db, work_headers):
+    """GH #56 review P1: the SAME worker session that accepts a task-request keeps working it
+    without reloading the spawned task's protocol, so the report-back note in protocol.notes is
+    invisible on that wake. The accept RESPONSE must echo the report-back instruction (and the
+    request id to post it back to) so /orcha-accept-task can surface it in-session."""
+    a = await make_agent("a", "eng")
+    b = await make_agent("b", "eng")
+    req = await make_request(a["agent_id"], "build X", target_alias="b",
+                             type="task", task=_task_payload())
+    r = await client.post(f"/api/requests/{req['request_id']}/accept-task",
+                          json={"responder_agent_id": b["agent_id"], "note": "on it"},
+                          headers=await work_headers(b["agent_id"]))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "REPORT BACK" in body["report_back"]
+    assert req["request_id"] in body["report_back"]
+    assert body["report_back_request_id"] == req["request_id"]
+
+
+async def test_accept_task_report_back_survives_max_length_notes(client, make_agent, make_request, db, work_headers):
+    """GH #56 review P2: a carried `notes` near the 4 KB per-field cap must NOT tail-truncate the
+    report-back instruction away — it's the mechanism that tells the accepter to answer the request.
+    With max-length notes, the spawned protocol must still LEAD with REPORT BACK and stay within the
+    field cap, keeping (a prefix of) the carried notes after it."""
+    from orcha_cli.templates.portal.main import MAX_PROTOCOL_FIELD_LEN
+    a = await make_agent("a", "eng")
+    b = await make_agent("b", "eng")
+    task = _task_payload()
+    huge = "X" * MAX_PROTOCOL_FIELD_LEN  # exactly fills the field on its own
+    task["protocol"] = {"notes": huge}
+    req = await make_request(a["agent_id"], "build X", target_alias="b",
+                             type="task", task=task)
+    r = await client.post(f"/api/requests/{req['request_id']}/accept-task",
+                          json={"responder_agent_id": b["agent_id"], "note": "on it"},
+                          headers=await work_headers(b["agent_id"]))
+    assert r.status_code == 200, r.text
+    rows = db.execute("SELECT protocol FROM tasks WHERE id=%s", (r.json()["spawned_task_id"],))
+    notes = rows[0]["protocol"]["notes"]
+    assert notes.startswith("REPORT BACK")            # never dropped
+    assert req["request_id"] in notes                 # the post-back target survives intact
+    assert len(notes) <= MAX_PROTOCOL_FIELD_LEN       # still within the cap
+
+
+async def test_accept_task_idempotent_no_duplicate_task(client, make_agent, make_request, db, work_headers):
     """R2.3: re-accepting an already-accepted task request returns the SAME spawned
     task_id (200) and does NOT create a second task — safe under at-least-once replay."""
     a = await make_agent("a", "eng")
@@ -31,26 +130,36 @@ async def test_accept_task_idempotent_no_duplicate_task(client, make_agent, make
                              type="task", task=_task_payload())
     rid = req["request_id"]
     r1 = await client.post(f"/api/requests/{rid}/accept-task",
-                           json={"responder_agent_id": b["agent_id"], "note": "on it"})
+                           json={"responder_agent_id": b["agent_id"], "note": "on it"},
+                           headers=await work_headers(b["agent_id"]))
     assert r1.status_code == 200 and r1.json()["status"] == "accepted"
     tid = r1.json()["spawned_task_id"]
     r2 = await client.post(f"/api/requests/{rid}/accept-task",
-                           json={"responder_agent_id": b["agent_id"], "note": "retry"})
+                           json={"responder_agent_id": b["agent_id"], "note": "retry"},
+                           headers=await work_headers(b["agent_id"]))
     assert r2.status_code == 200, r2.text
     assert r2.json()["status"] == "accepted"
     assert r2.json()["spawned_task_id"] == tid          # same task, not a new one
     assert r2.json().get("already_accepted") is True
+    # GH #56 review P-retry: a retry (first accept response lost) is the ONLY thing the same
+    # worker session sees, so it MUST also carry the report-back instruction — identical to
+    # the fresh accept's — or the worker misses it and falls through to the Point 5 backstop.
+    assert "REPORT BACK" in r2.json()["report_back"]
+    assert rid in r2.json()["report_back"]
+    assert r2.json()["report_back_request_id"] == rid
+    assert r2.json()["report_back"] == r1.json()["report_back"]   # fresh and retry agree exactly
     # exactly ONE task was spawned from this request
     rows = db.execute("SELECT count(*) AS n FROM tasks WHERE title=%s", ("do work",))
     assert rows[0]["n"] == 1, "retry must not spawn a duplicate task"
     # a non-target accepting is still a genuine 403
     intruder = await make_agent("c", "eng")
     bad = await client.post(f"/api/requests/{rid}/accept-task",
-                            json={"responder_agent_id": intruder["agent_id"], "note": "x"})
+                            json={"responder_agent_id": intruder["agent_id"], "note": "x"},
+                            headers=await work_headers(intruder["agent_id"]))
     assert bad.status_code == 403, bad.text
 
 
-async def test_accept_task_concurrent_retries_spawn_one_task(client, make_agent, make_request, db):
+async def test_accept_task_concurrent_retries_spawn_one_task(client, make_agent, make_request, db, work_headers):
     """R2.3 under OVERLAP (not just sequential): N concurrent accept-task retries must
     spawn EXACTLY ONE task. The read-then-write was racy — two callers could both read
     status='open' and both spawn — so `_require_request(for_update=True)` now locks the
@@ -60,10 +169,12 @@ async def test_accept_task_concurrent_retries_spawn_one_task(client, make_agent,
     req = await make_request(a["agent_id"], "build", target_alias="b",
                              type="task", task=_task_payload(title="raceX"))
     rid = req["request_id"]
+    hdrs = await work_headers(b["agent_id"])
 
     async def accept():
         return await client.post(f"/api/requests/{rid}/accept-task",
-                                 json={"responder_agent_id": b["agent_id"], "note": "go"})
+                                 json={"responder_agent_id": b["agent_id"], "note": "go"},
+                                 headers=hdrs)
 
     results = await asyncio.gather(*[accept() for _ in range(5)])
     assert all(r.status_code == 200 for r in results), [r.status_code for r in results]
@@ -97,7 +208,7 @@ async def test_respond_concurrent_retries_one_winner(client, make_agent, make_re
             assert r.json()["response"] == stored
 
 
-async def test_accept_vs_reject_concurrent_one_wins_consistent_state(client, make_agent, make_request, db):
+async def test_accept_vs_reject_concurrent_one_wins_consistent_state(client, make_agent, make_request, db, work_headers):
     """Competing mutations on the SAME request must also serialize: a concurrent
     accept-task and reject-task can't BOTH win. Before the lock, reject (unlocked) could
     overwrite a locked accept -> status='rejected' WITH spawned_task_id set and a live
@@ -108,10 +219,12 @@ async def test_accept_vs_reject_concurrent_one_wins_consistent_state(client, mak
     req = await make_request(a["agent_id"], "build", target_alias="b",
                              type="task", task=_task_payload(title="raceAR"))
     rid = req["request_id"]
+    hdrs = await work_headers(b["agent_id"])
 
     async def accept():
         return await client.post(f"/api/requests/{rid}/accept-task",
-                                 json={"responder_agent_id": b["agent_id"], "note": "go"})
+                                 json={"responder_agent_id": b["agent_id"], "note": "go"},
+                                 headers=hdrs)
 
     async def reject():
         return await client.post(f"/api/requests/{rid}/reject-task",

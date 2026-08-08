@@ -2,6 +2,9 @@
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20753153.svg)](https://doi.org/10.5281/zenodo.20753153)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20740087.svg)](https://doi.org/10.5281/zenodo.20740087)
+[![build](https://img.shields.io/github/actions/workflow/status/open-orcha/orcha/test.yml?branch=main&label=build)](https://github.com/open-orcha/orcha/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/github/license/open-orcha/orcha)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/open-orcha/orcha)](https://github.com/open-orcha/orcha/releases/latest)
 
 **Human-authoritative multi-agent orchestration as Claude Code slash commands.**
 Multiple Claude Code sessions collaborate on a high-level objective through a
@@ -351,6 +354,15 @@ left agents idle while requests piled up. Now:
 
 ```bash
 # inside the agent's Claude Code session, after /orcha-register-agent <alias>:
+/loop /orcha-listen --alias <alias>                # recommended — long-poll, ~zero LLM cost while idle
+```
+
+`/orcha-listen` is the default loop primitive — see the "Server-sent events"
+section below. `/orcha-checkpoint` (fixed-interval polling) is a **legacy
+fallback** for when the server doesn't support `/wait`, or for an explicit
+one-shot status check:
+
+```bash
 /loop /orcha-checkpoint --alias <alias>            # self-paced
 # or fixed cadence:
 /loop 30 /orcha-checkpoint --alias <alias> --auto-close
@@ -371,7 +383,7 @@ polling avoids interrupting tasks.
 
 #### Background watcher + PostToolUse drain (Orcha#33)
 
-The `/loop /orcha-checkpoint` and `/orcha-listen` patterns work great when the
+The `/loop /orcha-listen` and `/loop /orcha-checkpoint` patterns work great when the
 agent has yielded back to Claude Code, but a deeply working agent (mid-`/orcha-next`
 → code → `/orcha-done`) can go minutes without checking the inbox — and
 `/loop` itself sometimes drifts. To close that gap, `orcha init` and
@@ -777,7 +789,6 @@ the smoking gun.
 | `/orcha-next` / `/orcha-done` says "tab isn't bound to an agent" | no `.claude/orcha-tabs/<tty>.json` in this terminal | re-run `/orcha-register-agent` in this tab |
 | `/orcha-done` returns 409 "task is 'ready', not 'in_progress'" | task hasn't been claimed yet | `/orcha-next` first, or only `done` your own claimed task |
 | `/orcha-verify` returns 409 "task is 'in_progress', not 'needs_verification'" | task hasn't been marked done yet | wait for `/orcha-done` from the assignee |
-| `/orcha-next` returns 429 "turn budget exhausted" | agent has hit its `turn_budget` (default 50) | `UPDATE agents SET turns_used=0 WHERE id=...` in psql, or re-register the agent |
 | Portal returns 404 on a UUID | DB was reset, container id is stale | `/orcha-container` to make a new one |
 | Edited `001_init.sql` template, schema didn't change in a live project | `initdb.d` only runs on first boot | `orcha down -v && orcha up` |
 | Templates edited in source repo not picked up by `orcha init` | **uv caches the built wheel by version** — `--force` alone doesn't rebuild | See [CONTRIBUTING.md](./CONTRIBUTING.md) ("uv wheel-cache footgun"), then `rm -rf .orcha .claude && orcha init` in the target project. |

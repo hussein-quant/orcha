@@ -16,9 +16,11 @@ import shutil
 import subprocess
 
 import pytest
+from portal_source import page_source
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 STATIC = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal" / "static"
+SKILLS = REPO / "orcha-cli" / "orcha_cli" / "templates" / "skills"
 
 
 # ---------- protoEmpty: real JS execution ----------
@@ -28,7 +30,7 @@ def test_proto_empty_truth_table():
     """protoEmpty(p) is the empty-state predicate: true when there's no protocol or all four
     free-text keys are blank/absent; false the moment ANY key carries text (a partial protocol
     still renders the panel, not the 'No protocol set' note)."""
-    html = (STATIC / "tasks.html").read_text()
+    html = page_source("tasks.html")
     m = re.search(r"function protoEmpty\(p\)\s*\{.*?\}", html, re.S)
     assert m, "protoEmpty() not found in tasks.html"
     harness = m.group(0) + r"""
@@ -53,7 +55,7 @@ console.log(JSON.stringify({
 
 def test_protocol_panel_placed_between_gate_and_assignment():
     """SPEC-4: the panel renders directly UNDER the gate / ABOVE Assignment."""
-    html = (STATIC / "tasks.html").read_text()
+    html = page_source("tasks.html")
     body = html[html.index("function renderDetail"):]
     body = body[: body.index("function gateSurface")]
     i_gate = body.index("html += gateSurface(t)")
@@ -64,7 +66,7 @@ def test_protocol_panel_placed_between_gate_and_assignment():
 
 
 def test_protocol_panel_rows_and_markdown_notes():
-    html = (STATIC / "tasks.html").read_text()
+    html = page_source("tasks.html")
     surf = html[html.index("function protocolSurface"):]
     surf = surf[: surf.index("function ", 10)]
     # the four structured rows
@@ -84,7 +86,7 @@ def test_protocol_panel_rows_and_markdown_notes():
 
 def test_protocol_edit_patches_human_gated():
     """[Edit] is human-authority only -> PATCH /api/tasks/{tid}/protocol with actor_agent_id."""
-    html = (STATIC / "tasks.html").read_text()
+    html = page_source("tasks.html")
     # a real PATCH helper exists and is used against the protocol route
     assert 'method: "PATCH"' in html, "no PATCH helper"
     assert "/protocol" in html, "protocol route not called"
@@ -96,7 +98,7 @@ def test_protocol_edit_patches_human_gated():
     # Edit/Set buttons only render for the acting human (canEdit gate)
     surf = html[html.index("function protocolSurface"):]
     surf = surf[: surf.index("function ", 10)]
-    assert "const canEdit = !!O.actingHuman()" in surf, "Edit affordance not gated on acting human"
+    assert "const canEdit = !!TasO.actingHuman()" in surf, "Edit affordance not gated on acting human"
     assert 'canEdit ?' in surf, "Edit/Set buttons not behind the canEdit gate"
 
 
@@ -112,7 +114,7 @@ def test_data_adapter_maps_protocol():
 # ---------- Part A: create-task form ----------
 
 def test_new_task_form_human_gated_posts_to_real_route():
-    html = (STATIC / "tasks.html").read_text()
+    html = page_source("tasks.html")
     # a New-Task affordance exists in the list, wired to open the modal
     assert "data-newtask" in html, "no New-Task button"
     assert "openNewTaskModal" in html, "New-Task button not wired to a modal"
@@ -129,3 +131,18 @@ def test_new_task_form_human_gated_posts_to_real_route():
     openf = html[html.index("function openNewTaskModal"):]
     openf = openf[: openf.index("function ", 10)]
     assert "actorOrWarn()" in openf, "New-Task modal not gated on an acting human"
+
+
+def test_orcha_task_new_skill_preserves_self_referential_context_before_post():
+    """Conversation-lane self-handoff must be checked before the create call can wake a worker."""
+    skill = (SKILLS / "orcha-task-new.md").read_text()
+    check = skill[skill.index("Conversation-lane self-handoff check before POST"):]
+    post_idx = skill.index("**POST** the task")
+    post = skill[post_idx:]
+    assert skill.index("Conversation-lane self-handoff check before POST") < post_idx
+    assert "ORCHA_CONVERSATION_WORKER=1" in check
+    assert "self-referential/overlap case" in check
+    assert "initial `description` or `protocol.notes`" in check
+    assert "create the task unassigned first, post the note, then assign it" in check
+    assert "normal fresh handoff path" in check
+    assert 'curl -sS -w \'\\n%{http_code}\' -X POST' in post

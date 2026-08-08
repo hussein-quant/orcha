@@ -206,6 +206,71 @@ async def test_prompt_event_wakes_agent_and_carries_message(client, container, m
     assert evt["event"] == "prompt" and evt["message"] == "re-check the failing test"
 
 
+# ---------- GH #138: conversation_turn as a safety-net directed message ----------
+
+@pytest.mark.asyncio
+async def test_conversation_turn_surfaces_alongside_a_work_wake(client, container, make_agent, db):
+    """GH #138 safety net: a lingering unanswered chat message must not go unseen forever if the
+    resident's own retry never fires — when this agent wakes on the WORK lane for an unrelated
+    reason (here, a `prompt`), the chat content rides along in prompt_messages too."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    _emit_event(db, container_id=container["id"], agent_id=aid, event_name="conversation_turn",
+                ts=1000.0, payload={"conversation_id": "c1", "content": "are you still there?"})
+    r = await client.post(f"/api/agents/{aid}/prompt", json={"message": "re-check the failing test"})
+    assert r.status_code == 201, r.text
+
+    _, cand = await _scan(client, container["id"], aid)
+    assert cand["should_wake"] is True
+    assert "re-check the failing test" in cand["prompt_messages"]
+    chat = next((m for m in cand["prompt_messages"] if "are you still there?" in m), None)
+    assert chat is not None, f"conversation_turn content missing from {cand['prompt_messages']}"
+    assert "still waiting on a reply" in chat
+
+
+@pytest.mark.asyncio
+async def test_conversation_turn_alone_does_not_wake_work_lane(client, container, make_agent, db):
+    """GH #91/#90 (unchanged by #138): a bare, unanswered chat message is the CONVERSATION lane's
+    own surface — it must NOT by itself wake a WORK embodiment. The safety net only rides along
+    when the agent wakes for some OTHER reason; it never becomes a spurious wake source itself."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    _emit_event(db, container_id=container["id"], agent_id=aid, event_name="conversation_turn",
+                ts=1000.0, payload={"conversation_id": "c1", "content": "hello?"})
+
+    _, cand = await _scan(client, container["id"], aid)
+    assert cand["should_wake"] is False
+    assert cand["pending_events"] == 0
+    assert cand["prompt_messages"] == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_turn_consumed_by_conv_lane_never_rides_a_work_wake(
+        client, container, make_agent, db):
+    """A chat turn the CONVERSATION lane already serviced (conv_delivered_ts >= its ts) must NOT
+    be re-injected into a later work wake as "unanswered" — the GH #138 safety net is only for
+    turns the conversation lane never consumed. Regression: an answered chat question rode along
+    a request_answered work wake and the worker re-answered it instead of the wake's real work."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    _emit_event(db, container_id=container["id"], agent_id=aid, event_name="conversation_turn",
+                ts=1000.0, payload={"conversation_id": "c1", "content": "already answered chat"})
+    # the conversation lane consumed the turn: its ack advanced conv_delivered_ts to the turn's ts
+    r = await client.post(f"/api/agents/{aid}/wake-ack",
+                          json={"kind": "ephemeral", "event": "conversation_turn",
+                                "lane": "conversation", "delivered_ts": 1000.0})
+    assert r.status_code == 200, r.text
+    # an unrelated WORK wake fires later
+    r = await client.post(f"/api/agents/{aid}/prompt", json={"message": "re-check the failing test"})
+    assert r.status_code == 201, r.text
+
+    _, cand = await _scan(client, container["id"], aid)
+    assert cand["should_wake"] is True
+    assert "re-check the failing test" in cand["prompt_messages"]
+    assert not any("already answered chat" in m for m in cand["prompt_messages"]), \
+        f"consumed conversation_turn re-injected into a work wake: {cand['prompt_messages']}"
+
+
 @pytest.mark.asyncio
 async def test_prompt_records_sender_and_validates(client, container, make_agent):
     a = await make_agent("A")
@@ -398,6 +463,122 @@ async def test_task_assigned_for_finished_task_not_surfaced(client, container, m
     assert cand["ack_through_ts"] == cand["max_event_ts"]          # but acked (advances past it)
 
 
+# ---------- GH #126: task-boundary guard for live-worker task switching ----------
+
+@pytest.mark.asyncio
+async def test_task_assigned_guarded_when_agent_has_live_run_on_different_task(
+        client, container, make_agent, make_task, db):
+    """GH #126 repro: a live worker with a running work-lane run on Task A must NOT have a newly
+    assigned Task B's `task_assigned` event framed as "begin the work directly", nor win
+    wake_task_id -- either would silently attribute Task B's work to Task A's run (the live
+    incident this issue traces to). The event must NOT be surfaced-and-acked either (an acked event
+    is gone for good with no inbox to recover it) -- the ack cursor stops BEFORE it, so it stays
+    pending and is re-evaluated on every subsequent wake until the live run ends."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    task_a = await make_task("Task A — in flight", "n/a", assignee_alias="B")
+    db.execute(
+        "INSERT INTO worker_runs (agent_id, task_id, status, lane) VALUES (%s, %s, 'running', 'work')",
+        (aid, task_a["id"]))
+    db.execute(
+        """INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind)
+           VALUES (%s, now() + interval '1 hour', 'ephemeral')
+           ON CONFLICT (agent_id) DO UPDATE SET wake_lease_until = EXCLUDED.wake_lease_until""",
+        (aid,))
+    task_b = await make_task("Task B — newly assigned mid-run", "n/a", assignee_alias="B")
+
+    _, cand = await _scan(client, container["id"], aid, min_idle=0)
+    msgs = cand["prompt_messages"]
+    surfaced_a = next(m for m in msgs if task_a["id"] in m)
+    assert "begin the work directly" in surfaced_a
+    # Task B's assignment must not be surfaced AT ALL this wake -- fully deferred, not delivered
+    # with a "come back later" framing.
+    assert not any(task_b["id"] in m for m in msgs)
+    # Task B must NOT win run attribution — Task A's own (unguarded) task_assigned event does.
+    assert cand["wake_task_id"] == task_a["id"]
+    # The ack cursor stops BEFORE Task B's event so it's never acked away un-surfaced.
+    assert cand["ack_through_ts"] < cand["max_event_ts"]
+
+    # While the live run continues, re-scanning (even after acking through the safe cursor) keeps
+    # deferring Task B — it never gets silently dropped.
+    await client.post(f"/api/agents/{aid}/wake-ack",
+                      json={"kind": "ephemeral", "delivered_ts": cand["ack_through_ts"]})
+    _, cand2 = await _scan(client, container["id"], aid, min_idle=0)
+    assert not any(task_b["id"] in m for m in cand2["prompt_messages"])
+
+    # Once the live run ends, Task B flows through normally on the next wake.
+    db.execute("UPDATE worker_runs SET status='exited' WHERE agent_id=%s AND task_id=%s",
+               (aid, task_a["id"]))
+    _, cand3 = await _scan(client, container["id"], aid, min_idle=0)
+    surfaced_b = next(m for m in cand3["prompt_messages"] if task_b["id"] in m)
+    assert "begin the work directly" in surfaced_b
+    assert cand3["wake_task_id"] == task_b["id"]
+
+
+@pytest.mark.asyncio
+async def test_task_assigned_not_guarded_when_no_live_run(client, container, make_agent, make_task):
+    """Regression/specificity: with NO live worker_runs row for this agent, a task_assigned still
+    surfaces as "begin the work directly" and wins wake_task_id — the GH #126 guard only fires when
+    there is an actual conflicting live run, never as a blanket suppression."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    t = await make_task("no live run here", "n/a", assignee_alias="B")
+    _, cand = await _scan(client, container["id"], aid, min_idle=0)
+    msgs = cand["prompt_messages"]
+    surfaced = next(m for m in msgs if t["id"] in m)
+    assert "begin the work directly" in surfaced
+    assert cand["wake_task_id"] == t["id"]
+
+
+@pytest.mark.asyncio
+async def test_task_assigned_not_guarded_when_live_run_is_same_task(
+        client, container, make_agent, make_task, db):
+    """Specificity: a live run already bound to THIS SAME task must not trip the guard (re-surfacing
+    a task_assigned for the task the agent is already legitimately working)."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    t = await make_task("same task as the live run", "n/a", assignee_alias="B")
+    db.execute(
+        "INSERT INTO worker_runs (agent_id, task_id, status, lane) VALUES (%s, %s, 'running', 'work')",
+        (aid, t["id"]))
+    db.execute(
+        """INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind)
+           VALUES (%s, now() + interval '1 hour', 'ephemeral')
+           ON CONFLICT (agent_id) DO UPDATE SET wake_lease_until = EXCLUDED.wake_lease_until""",
+        (aid,))
+    _, cand = await _scan(client, container["id"], aid, min_idle=0)
+    msgs = cand["prompt_messages"]
+    surfaced = next(m for m in msgs if t["id"] in m)
+    assert "begin the work directly" in surfaced
+    assert "already have a live run on a different task" not in surfaced
+    assert cand["wake_task_id"] == t["id"]
+
+
+@pytest.mark.asyncio
+async def test_task_assigned_not_guarded_by_stale_orphan_run_row(
+        client, container, make_agent, make_task, db):
+    """Specificity: a `worker_runs` row stuck at status='running' with NO live wake lease (e.g. the
+    daemon crashed mid-run and never flipped it to exited/killed) is a stale orphan, not a live
+    run -- it must not trip the guard and strand a fresh worker's assignment forever. Gated on the
+    same live-lease predicate as `active_run` (main.py), not raw status='running'."""
+    b = await make_agent("B")
+    aid = b["agent_id"]
+    task_a = await make_task("Task A — orphaned run row", "n/a", assignee_alias="B")
+    db.execute(
+        "INSERT INTO worker_runs (agent_id, task_id, status, lane) VALUES (%s, %s, 'running', 'work')",
+        (aid, task_a["id"]))
+    # No agent_wake_state lease inserted -- the row is a stale orphan, nothing is actually live.
+    task_b = await make_task("Task B — assigned while orphan row lingers", "n/a", assignee_alias="B")
+
+    _, cand = await _scan(client, container["id"], aid, min_idle=0)
+    msgs = cand["prompt_messages"]
+    surfaced_b = next(m for m in msgs if task_b["id"] in m)
+    assert "begin the work directly" in surfaced_b
+    assert "already have a live run on a different task" not in surfaced_b
+    assert cand["wake_task_id"] == task_b["id"]
+    assert cand["ack_through_ts"] == cand["max_event_ts"]
+
+
 @pytest.mark.asyncio
 async def test_paused_container_suppresses_wakes(client, container, make_agent, make_request):
     human = await make_agent("H", kind="human")
@@ -424,13 +605,19 @@ async def test_wake_disabled_opt_out(client, container, make_agent, make_request
 
 
 @pytest.mark.asyncio
-async def test_active_agent_not_woken_until_idle(client, container, make_agent, make_request):
+async def test_active_agent_not_woken_until_idle(client, container, make_agent, make_request, db):
     a = await make_agent("A")
-    # B registers WITH an initial task → heartbeat bumped now → looks active.
+    # B registers WITH an initial task → looks active. GH #91/#90: the WORK-idle gate now keys on
+    # work_last_heartbeat_at (not the agent-wide heartbeat), so seed a fresh work-lane heartbeat to
+    # represent an active work embodiment (register only bumps agents.last_heartbeat_at).
     b = await make_agent("B", initial_task={"title": "t", "definition_of_done": "d"})
+    db.execute(
+        """INSERT INTO agent_wake_state (agent_id, work_last_heartbeat_at) VALUES (%s, now())
+           ON CONFLICT (agent_id) DO UPDATE SET work_last_heartbeat_at = now()""",
+        (b["agent_id"],))
     await make_request(a["agent_id"], "need input", target_alias="B")
     _, cand = await _scan(client, container["id"], b["agent_id"], min_idle=30)
-    assert cand["should_wake"] is False        # recent heartbeat → cooperative, don't barge in
+    assert cand["should_wake"] is False        # recent work heartbeat → cooperative, don't barge in
     assert "active" in cand["reason"]
     # With min_idle=0 the idle gate is off → it should wake.
     _, cand = await _scan(client, container["id"], b["agent_id"], min_idle=0)
@@ -499,7 +686,7 @@ async def test_assigned_ready_task_is_autostart_target(client, container, make_a
 
 
 @pytest.mark.asyncio
-async def test_targeted_task_ready_wakes_owner_on_unblock(client, container, make_agent, make_task, db):
+async def test_targeted_task_ready_wakes_owner_on_unblock(client, container, make_agent, make_task, db, work_headers):
     human = await make_agent("H", kind="human")
     a = await make_agent("A")
     b = await make_agent("B")
@@ -511,7 +698,8 @@ async def test_targeted_task_ready_wakes_owner_on_unblock(client, container, mak
     assert t["id"] not in cand["auto_start_task_ids"]
     # A finishes D; human verifies → D completed, T unblocks to 'ready'.
     await client.post(f"/api/tasks/{d['id']}/done",
-                      json={"agent_id": a["agent_id"], "result": "ok"})
+                      json={"agent_id": a["agent_id"], "result": "ok"},
+                      headers=await work_headers(a["agent_id"]))
     r = await client.post(f"/api/tasks/{d['id']}/verify",
                           json={"approve": True, "actor_agent_id": human["agent_id"]})
     assert r.status_code == 200, r.text
@@ -546,6 +734,10 @@ def test_build_wake_prompt_is_safe_and_directive():
     # R2.2: drain the FULL backlog (all items, until empty), not just the first.
     assert "FULL inbox" in p
     assert "EMPTY" in p
+    # GH #33: after claiming, the worker is told to read the full task body (description +
+    # definition_of_done) and honor loops — not work off the title alone.
+    assert "definition_of_done" in p
+    assert "loop" in p
 
 
 def test_build_wake_prompt_surfaces_directed_message():
@@ -557,6 +749,22 @@ def test_build_wake_prompt_surfaces_directed_message():
     assert '"re-check the failing test and report back"' in p
     # still a one-shot drain-then-exit worker
     assert "ONE-SHOT" in p and "EXIT" in p
+
+
+def test_build_wake_prompt_directed_message_on_task_steers_to_full_body():
+    """GH #33: when a directed-message wake resolves a task (wake_task_id set — the task-thread
+    message path), the worker is told to read the FULL task body (description + definition_of_done)
+    riding in its 'Your task' section, not act on the message preview / title alone."""
+    p = notifier.build_wake_prompt(
+        {"alias": "Forge", "pending_events": 1, "wake_task_id": "t-42",
+         "prompt_messages": ["see my note on the thread"]})
+    assert "DIRECTED MESSAGE FOR YOU" in p
+    assert "definition_of_done" in p
+    assert "Your task" in p and "title alone" in p
+    # no task resolved → no body directive (a plain inbox-only directed message)
+    p2 = notifier.build_wake_prompt(
+        {"alias": "Forge", "pending_events": 1, "prompt_messages": ["ping"]})
+    assert "Your task" not in p2
 
 
 def test_build_wake_prompt_renders_ranked_manifest():
@@ -625,6 +833,29 @@ def test_build_wake_prompt_handles_multiple_directed_messages():
         {"alias": "Forge", "pending_events": 2, "prompt_messages": ["first ask", "second ask"]})
     assert "DIRECTED MESSAGES FOR YOU" in p          # plural
     assert '(prompt 1) "first ask"' in p and '(prompt 2) "second ask"' in p
+
+
+def test_build_wake_prompt_stable_instructions_form_consistent_prefix():
+    """GH #34: the fixed operating instructions (steps 1-3) are the same text every wake for a
+    given agent/branch — only the trailing '[orcha wake] ...' summary (count/manifest/directed
+    message) is unique per wake. The instructions must render FIRST so two consecutive wakes
+    share a real string prefix, instead of the always-different manifest breaking it at byte 0."""
+    p1 = notifier.build_wake_prompt(
+        {"alias": "Forge", "pending_events": 1,
+         "notifications": [{"rank": 1, "rank_label": "request_in", "surface": "request:R-1",
+                             "actor_alias": "Kedar", "preview": "first wake's ask"}]})
+    p2 = notifier.build_wake_prompt(
+        {"alias": "Forge", "pending_events": 3,
+         "notifications": [{"rank": 1, "rank_label": "task", "surface": "task:T-9",
+                             "actor_alias": "Helm", "preview": "second wake's completely different ask"}]})
+    assert p1 != p2   # the manifests really do differ...
+    assert p1.startswith("You are a ONE-SHOT headless worker")
+    assert p2.startswith("You are a ONE-SHOT headless worker")
+    volatile_marker = "[orcha wake] Forge:"
+    stable_end = p1.index(volatile_marker)
+    assert p2.index(volatile_marker) == stable_end       # ...at the identical offset
+    assert p1[:stable_end] == p2[:stable_end]             # ...and everything before it matches
+    assert "ONE-SHOT" in p1[:stable_end] and "needs_verification" in p1[:stable_end]
 
 
 def test_sidecar_drain_prompt_surfaces_directed_messages():
@@ -756,6 +987,46 @@ def test_format_persona_omits_audience_section_when_absent():
     assert "Current focus: wake epic" in out
 
 
+# ---------- GH #34 (scoped): stable-prefix ordering ----------
+
+def test_format_persona_stable_sections_form_consistent_prefix():
+    """GH #34: persona/guardrail/task-body/protocol never change between two wakes of the same
+    agent on the same task — only the digest does. So the text UP THROUGH the protocol section
+    must come out byte-identical regardless of what the digest says, i.e. it is a real shared
+    string prefix of both renders (a provider-side cache hits on a stable prefix, not the whole
+    string)."""
+    persona = {"system_prompt": "You are Tim."}
+    protocol = {"task_id": "t-1", "title": "Ship the thing", "description": "Do the work",
+                "definition_of_done": "Tests green",
+                "protocol": {"notes": "Report back when done"}}
+    out1 = notifier.format_persona(persona, {"digest": {"current_focus": "wake N"}}, protocol)
+    out2 = notifier.format_persona(persona, {"digest": {"current_focus": "wake N+1",
+                                                          "decisions": ["a brand-new decision"]}},
+                                   protocol)
+    assert out1 != out2   # the digests really do differ...
+    stable_end = out1.index("## Where you left off")
+    assert out2.index("## Where you left off") == stable_end   # ...at the identical offset
+    assert out1[:stable_end] == out2[:stable_end]               # ...and everything before it matches
+    # sanity: the shared prefix actually carries the stable sections, not just whitespace
+    assert "You are Tim." in out1[:stable_end]
+    assert "## Your task" in out1[:stable_end]
+    assert "## Standing protocol" in out1[:stable_end]
+
+
+def test_format_persona_resume_context_renders_after_protocol_grouped_with_digest():
+    """GH #34: the self-wake resume context (GH #122) is at least as volatile as the digest — a
+    fresh wait-point most times it fires — so it must render AFTER the protocol section, grouped
+    with the digest at the volatile tail, not spliced between the task body and the protocol."""
+    persona = {"system_prompt": "You are Tim."}
+    protocol = {"task_id": "t-1", "title": "Ship the thing", "description": "Do the work",
+                "protocol": {"notes": "Report back"}, "resume_context": "waiting on CI"}
+    out = notifier.format_persona(persona, {"digest": {"current_focus": "wake epic"}},
+                                  protocol, render_resume=True)
+    assert out.index("## Your task") < out.index("## Standing protocol")
+    assert out.index("## Standing protocol") < out.index("Resuming — you scheduled this wake")
+    assert out.index("Resuming — you scheduled this wake") < out.index("## Where you left off")
+
+
 def test_spawn_headless_injects_persona_and_alias(monkeypatch, tmp_path):
     captured = {}
 
@@ -817,6 +1088,84 @@ def test_spawn_headless_includes_partial_messages(monkeypatch, tmp_path):
     assert "--include-partial-messages" in argv
     # it must accompany stream-json output (the flag is only meaningful there)
     assert "--output-format" in argv and argv[argv.index("--output-format") + 1] == "stream-json"
+
+
+def test_spawn_headless_scrubs_leaked_conversation_flag(monkeypatch, tmp_path):
+    """A work-lane spawn must not inherit ORCHA_CONVERSATION_WORKER from the daemon's own
+    (possibly contaminated) environment, or the conv-guard hook wrongly blocks its Edit/Write."""
+    captured = {}
+
+    class FakePopen:
+        def __init__(self, argv, cwd=None, env=None, **kw):
+            captured["env"] = env
+            self.pid = 1
+
+    monkeypatch.setenv("ORCHA_CONVERSATION_WORKER", "1")
+    monkeypatch.setattr(notifier.shutil, "which", lambda x: "/usr/bin/claude")
+    monkeypatch.setattr(notifier.subprocess, "Popen", FakePopen)
+    notifier.spawn_headless(str(tmp_path), "wake!", None, dry_run=False, alias="Tim",
+                            conversation=False)
+    assert "ORCHA_CONVERSATION_WORKER" not in captured["env"]
+
+
+def test_spawn_headless_conversation_still_sets_flag(monkeypatch, tmp_path):
+    """Genuine conversation embodiments must still get the flag set to '1'."""
+    captured = {}
+
+    class FakePopen:
+        def __init__(self, argv, cwd=None, env=None, **kw):
+            captured["env"] = env
+            self.pid = 1
+
+    monkeypatch.delenv("ORCHA_CONVERSATION_WORKER", raising=False)
+    monkeypatch.setattr(notifier.shutil, "which", lambda x: "/usr/bin/claude")
+    monkeypatch.setattr(notifier.subprocess, "Popen", FakePopen)
+    notifier.spawn_headless(str(tmp_path), "wake!", None, dry_run=False, alias="Tim",
+                            conversation=True)
+    assert captured["env"].get("ORCHA_CONVERSATION_WORKER") == "1"
+
+
+def test_spawn_resident_scrubs_leaked_conversation_flag(monkeypatch, tmp_path):
+    """Same env-leak guard for spawn_resident: a work-lane resident must not inherit the
+    daemon's own contaminated ORCHA_CONVERSATION_WORKER."""
+    captured = {}
+
+    class FakePopen:
+        def __init__(self, argv, cwd=None, env=None, **kw):
+            captured["env"] = env
+            self.pid = 1
+            self.stdin = None
+            self.stdout = None
+
+        def poll(self):
+            return None
+
+    monkeypatch.setenv("ORCHA_CONVERSATION_WORKER", "1")
+    monkeypatch.setattr(notifier.shutil, "which", lambda x: "/usr/bin/claude")
+    monkeypatch.setattr(notifier.subprocess, "Popen", FakePopen)
+    notifier.spawn_resident(str(tmp_path), alias="Tim", conversation=False)
+    assert "ORCHA_CONVERSATION_WORKER" not in captured["env"]
+
+
+def test_spawn_resident_conversation_still_sets_flag(monkeypatch, tmp_path):
+    """Genuine conversation-lane residents must still get the flag set to '1'."""
+    captured = {}
+
+    class FakePopen:
+        def __init__(self, argv, cwd=None, env=None, **kw):
+            captured["env"] = env
+            self.pid = 1
+            self.stdin = None
+            self.stdout = None
+
+        def poll(self):
+            return None
+
+    monkeypatch.delenv("ORCHA_CONVERSATION_WORKER", raising=False)
+    monkeypatch.setattr(notifier.shutil, "which", lambda x: "/usr/bin/claude")
+    monkeypatch.setattr(notifier.subprocess, "Popen", FakePopen)
+    notifier.spawn_resident(str(tmp_path), alias="Tim", conversation=True)
+    assert captured["env"].get("ORCHA_CONVERSATION_WORKER") == "1"
 
 
 def test_spawn_headless_codex_runtime(monkeypatch, tmp_path):

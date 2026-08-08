@@ -42,6 +42,13 @@ function stubDesktop(overrides: Partial<typeof window.orchaDesktop> = {}) {
     stopStack: vi.fn(),
     resetStack: vi.fn(),
     listAttention: vi.fn().mockResolvedValue([]),
+    // HelperMissingBanner (mounted unconditionally in the ready view) probes on mount —
+    // stub it present/healthy so it self-hides and existing assertions are unaffected.
+    probePrereqs: vi
+      .fn()
+      .mockResolvedValue({ homebrew: true, dockerEngine: true, orcha: true, claude: true, codex: true, apiKey: true }),
+    installPrereqs: vi.fn().mockResolvedValue({ ok: true, completed: [] }),
+    onInstallProgress: vi.fn().mockReturnValue(() => {}),
     ...overrides
   } as never
 }

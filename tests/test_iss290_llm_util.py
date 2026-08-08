@@ -148,6 +148,17 @@ def test_triage_wake_success_passthrough():
     assert L.triage_wake("k thx", provider=prov) == {"wake": False, "reason": "pure ack"}
 
 
+def test_triage_wake_prompt_treats_review_verdicts_as_actionable():
+    prov = FakeProvider(complete_result=_tool_response(
+        "emit_result", {"wake": True, "reason": "review verdict"}))
+    L.triage_wake("CLEAN - plan approved", provider=prov)
+    system = prov.calls[0]["system"]
+    assert "review verdict" in system
+    assert "workflow commands, not acknowledgements" in system
+    assert "return wake=true" in system
+    assert "CLEAN" in system and "NEEDS CHANGES" in system and "LGTM" in system
+
+
 def test_triage_wake_fails_open_on_error():
     prov = FakeProvider(raise_exc=RuntimeError("boom"))
     out = L.triage_wake("anything", provider=prov)
@@ -190,6 +201,16 @@ def test_triage_wake_fails_open_on_nonbool_wake():
         assert L.triage_wake("x", provider=prov)["wake"] is True, f"non-bool {bad!r} must fail open"
 
 
+def test_handoff_ack_prompt_never_auto_closes_review_verdicts():
+    prov = FakeProvider(complete_result=_tool_response(
+        "emit_result", {"ack": False, "text": ""}))
+    L.handoff_ack("LGTM - PR approved", provider=prov)
+    system = prov.calls[0]["system"]
+    assert "Never auto-ack and close a review verdict" in system
+    assert "return ack=false" in system
+    assert "CLEAN" in system and "NEEDS CHANGES" in system and "LGTM" in system
+
+
 # ------------------------------------------------------------- providers
 
 
@@ -207,6 +228,87 @@ def test_get_provider_unknown_raises():
 
 def test_get_provider_anthropic_is_live_class():
     assert isinstance(L.get_provider("anthropic"), L.AnthropicProvider)
+
+
+# ------------------------------------------------------------- xAI / Grok provider
+
+
+def test_get_provider_xai_is_live_class():
+    assert isinstance(L.get_provider("xai"), L.GrokProvider)
+
+
+def test_resolve_api_key_xai_fallback(monkeypatch):
+    # No Orcha-managed key -> the provider's conventional env var (XAI_API_KEY) is used.
+    monkeypatch.delenv("ORCHA_LLM_API_KEY", raising=False)
+    monkeypatch.setenv("XAI_API_KEY", "xai-secret")
+    assert L.resolve_api_key("xai") == "xai-secret"
+
+
+def test_grok_request_translates_to_openai_framing(monkeypatch):
+    # Forced tool call: Anthropic-shaped tools/tool_choice must become OpenAI function framing,
+    # and the system prompt must lead the messages as a {"role":"system"} turn.
+    captured = {}
+
+    def fake_post(url, headers, body, *, timeout_s):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["body"] = body
+        return {"choices": [{"message": {"content": "", "tool_calls": [
+            {"function": {"name": "emit_result",
+                          "arguments": json.dumps({"label": "spam"})}}]},
+            "finish_reason": "tool_calls"}],
+            "usage": {"prompt_tokens": 11, "completion_tokens": 7}}
+
+    monkeypatch.setattr(L, "_http_post_json", fake_post)
+    prov = L.GrokProvider()
+    resp = prov.complete(
+        spec=L.resolve_spec("triage"), system="sys",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"name": "emit_result", "description": "d", "input_schema": {"type": "object"}}],
+        tool_choice={"type": "tool", "name": "emit_result"}, api_key="k")
+    assert captured["url"].endswith("/chat/completions")
+    assert captured["headers"]["authorization"] == "Bearer k"
+    assert captured["body"]["messages"][0] == {"role": "system", "content": "sys"}
+    assert captured["body"]["tools"][0]["type"] == "function"
+    assert captured["body"]["tools"][0]["function"]["name"] == "emit_result"
+    assert captured["body"]["tool_choice"] == {"type": "function",
+                                               "function": {"name": "emit_result"}}
+    # OpenAI response normalises to the module's shape (text/tool_calls/usage).
+    assert resp["tool_calls"] == [{"name": "emit_result", "input": {"label": "spam"}}]
+    assert resp["usage"] == {"input_tokens": 11, "output_tokens": 7}
+
+
+def test_grok_classify_end_to_end_via_live_provider(monkeypatch):
+    # classify() over the real GrokProvider transport (HTTP faked) returns the tool input dict.
+    monkeypatch.setattr(L, "_http_post_json", lambda *a, **k: {
+        "choices": [{"message": {"tool_calls": [
+            {"function": {"name": "emit_result", "arguments": '{"wake": true, "reason": "q"}'}}]},
+            "finish_reason": "tool_calls"}],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 3}})
+    out = L.classify("triage", system="s", user="u", schema=L.TRIAGE_SCHEMA,
+                     provider=L.GrokProvider(), api_key="k")
+    assert out == {"wake": True, "reason": "q"}
+
+
+def test_grok_stream_normalises_openai_tool_deltas(monkeypatch):
+    # OpenAI streams the tool name once, arguments as fragments, and closes via finish_reason.
+    # The normalised events must reassemble via collect_tool_call.
+    chunks = [
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "c1", "function": {"name": "propose", "arguments": '{"a":'}}]}}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"index": 0, "function": {"arguments": '1}'}}]}}]},
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+        {"choices": [], "usage": {"completion_tokens": 4}},
+    ]
+    monkeypatch.setattr(L, "_http_post_sse", lambda *a, **k: iter(chunks))
+    events = list(L.GrokProvider().stream(
+        spec=L.resolve_spec("onboarding"), system=None,
+        messages=[{"role": "user", "content": "x"}],
+        tools=[{"name": "propose", "input_schema": {}}],
+        tool_choice={"type": "tool", "name": "propose"}, api_key="k"))
+    assert L.collect_tool_call(events, "propose") == {"name": "propose", "input": {"a": 1}}
+    assert any(e["type"] == "usage" and e.get("output_tokens") == 4 for e in events)
 
 
 # --------------------------------------------- call shape (b) stream + tool-use

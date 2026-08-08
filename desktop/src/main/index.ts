@@ -485,7 +485,12 @@ function getOrCreatePortalView(stack: Stack): WebContentsView {
   view.webContents.setWindowOpenHandler(({ url }) => {
     if (!url.startsWith(`${portalOrigin}/`)) {
       void shell.openExternal(url)
+      return { action: 'deny' }
     }
+    // Same-origin "new window" requests (e.g. a task link's window.open()) should navigate
+    // this project's existing embedded view in place, not spawn a second WebContentsView —
+    // mirrors upstream's fix for the old one-window-per-portal model (GH #140).
+    void view.webContents.loadURL(url)
     return { action: 'deny' }
   })
   view.webContents.on('dom-ready', () => void syncAppearanceOnDomReady(view, stack.project))

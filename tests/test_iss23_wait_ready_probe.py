@@ -77,7 +77,7 @@ async def test_no_work_returns_timeout(client, container, make_agent):
 
 
 async def test_in_progress_task_yields_no_synthetic(
-        client, container, make_agent, make_task, db):
+        client, container, make_agent, make_task, db, work_headers):
     """Tooth 4 (self-clearing / no-spin): once the assigned-ready task is CLAIMED via /orcha-next
     its status flips to in_progress, so the next probe finds nothing ready and /wait blocks/timeouts
     normally — the synthetic cannot spin a tight loop."""
@@ -86,7 +86,8 @@ async def test_in_progress_task_yields_no_synthetic(
     t = await make_task("ready work", "dod")
     await _assign_ready(db, aid, t["id"])
 
-    claim = await client.post(f"/api/agents/{aid}/next")
+    claim = await client.post(f"/api/agents/{aid}/next",
+                              headers=await work_headers(aid))
     assert claim.status_code == 200 and claim.json()["task"]["id"] == t["id"]   # claimed → in_progress
 
     r = await client.get(f"/api/agents/{aid}/wait", params={"since_ts": 0, "timeout": 1})
@@ -159,27 +160,29 @@ async def test_paused_container_suppresses_synthetic(
     assert r2.json()["task_id"] == t["id"]
 
 
-async def test_exhausted_budget_suppresses_synthetic(
-        client, container, make_agent, make_task, db):
-    """Tooth 9 (Gate PR#274): an agent whose turn budget is exhausted must NOT get a synthetic — a
-    /orcha-next claim would 429 (turns_used >= turn_budget). Surfacing task_ready anyway is a false
-    signal that spins. timeout path exercised too: re-check honors the same gate."""
+async def test_exhausted_budget_does_not_suppress_synthetic(
+        client, container, make_agent, make_task, db, work_headers):
+    """GH#39: the turn-budget gate is removed, so an exhausted budget no longer suppresses the
+    synthetic — the assigned-ready task still surfaces and /orcha-next claims it (200), not 429."""
     a = await make_agent("A")
     aid = a["agent_id"]
     t = await make_task("ready work", "dod")
     await _assign_ready(db, aid, t["id"])
     db.execute("UPDATE agents SET turns_used = turn_budget WHERE id=%s", (aid,))
 
-    r = await client.get(f"/api/agents/{aid}/wait", params={"since_ts": 0, "timeout": 1})
-    assert r.json()["event"] == "timeout"                    # gated: budget exhausted → no synthetic
+    r = await client.get(f"/api/agents/{aid}/wait", params={"since_ts": 0, "timeout": 2})
+    body = r.json()
+    assert body["event"] == "task_ready"                     # budget no longer gates the synthetic
+    assert body["task_id"] == t["id"]
 
-    # confirm /orcha-next genuinely refuses too (the condition the gate mirrors)
-    claim = await client.post(f"/api/agents/{aid}/next")
-    assert claim.status_code == 429
+    # and /orcha-next genuinely claims it now (no 429)
+    claim = await client.post(f"/api/agents/{aid}/next",
+                              headers=await work_headers(aid))
+    assert claim.status_code == 200, claim.text
 
 
 async def test_retired_agent_suppresses_synthetic(
-        client, container, make_agent, make_task, db):
+        client, container, make_agent, make_task, db, work_headers):
     """Tooth 10 (Gate/Helm PR#274): a RETIRED agent (terminated_at set) must NOT get a synthetic —
     /orcha-next would 409 (_reject_if_retired). Surfacing task_ready is a false claimable signal."""
     a = await make_agent("A")
@@ -192,7 +195,8 @@ async def test_retired_agent_suppresses_synthetic(
     assert r.json()["event"] == "timeout"                    # gated: retired → no synthetic
 
     # and /orcha-next genuinely refuses (the mirrored condition)
-    claim = await client.post(f"/api/agents/{aid}/next")
+    claim = await client.post(f"/api/agents/{aid}/next",
+                              headers=await work_headers(aid))
     assert claim.status_code == 409
 
 

@@ -43,9 +43,9 @@ TEST_URL = os.environ.get(
 APP_TABLES = [
     "conversation_turns", "conversations",
     "agent_wake_state", "agent_reachability", "agent_memory_digests",
-    "agent_notification_state",
+    "agent_notification_state", "agent_self_wake", "agent_event_acks",
     "decisions", "agent_events", "events", "task_messages", "agent_tasks",
-    "task_dependencies", "requests", "tasks", "agents", "containers",
+    "task_dependencies", "requests", "tasks", "container_provider_keys", "agents", "containers",
 ]
 
 
@@ -185,13 +185,15 @@ async def make_task(client, container):
 @pytest_asyncio.fixture
 async def make_request(client, container):
     async def _make(requester_id, payload, *, target_alias=None, type="info", task=None,
-                    priority=100, expires_minutes=60, parent_request_id=None, container_id=None):
+                    priority=100, expires_minutes=60, parent_request_id=None, container_id=None,
+                    originating_task_id=None):
         cid = container_id or container["id"]
         body = {
             "requester_agent_id": requester_id, "payload": payload, "type": type,
             "priority": priority, "expires_minutes": expires_minutes,
             "target_alias": target_alias, "task": task,
             "parent_request_id": parent_request_id,
+            "originating_task_id": originating_task_id,  # GH #56 (Point 3)
         }
         r = await client.post(f"/api/containers/{cid}/requests", json=body)
         assert r.status_code == 201, r.text
@@ -199,6 +201,21 @@ async def make_request(client, container):
         d.setdefault("id", d.get("request_id"))  # accept both d["id"] and d["request_id"]
         return d
     return _make
+
+
+@pytest_asyncio.fixture
+def work_headers(client):
+    """GH #91/#90: mint a WORK-lane embodiment token for an agent and return the header dict
+    ({"X-Orcha-Run-Token": tok}) that the four work-lane-gated task endpoints (/next,
+    accept-task->working, /tasks/{id}/done) now require. A worker process holds such a token in
+    production; tests that claim/work/complete a task must present one or the server returns 403.
+    Usage:  headers=await work_headers(agent_id)"""
+    async def _mint(agent_id, *, kind="headless"):
+        r = await client.post(f"/api/agents/{agent_id}/embodiment-tokens",
+                              json={"lane": "work", "kind": kind})
+        assert r.status_code == 201, r.text
+        return {"X-Orcha-Run-Token": r.json()["run_token"]}
+    return _mint
 
 
 async def next_event(client, agent_id, *, since_ts=0.0, timeout=2):

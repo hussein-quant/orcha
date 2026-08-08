@@ -1,7 +1,7 @@
 """#266 — clock-driven AUTO-WAKE.
 
-Covers the wake-scan `auto_wake_due` truth table (due / not-due / over-budget / lease /
-kill-switch / opt-in-NULL), the real-event-bypasses-budget invariant, the human-gated
+Covers the wake-scan `auto_wake_due` truth table (due / not-due / lease /
+kill-switch / opt-in-NULL; GH#39: budget no longer gates the clock wake), the human-gated
 PATCH /api/agents/{aid}/auto-wake (floor / null-disable / human-gating / 404 / human-target),
 the snapshot surfacing, and the notifier's pure scheduled-wake prompt + event label.
 
@@ -95,11 +95,11 @@ async def test_auto_wake_disabled_when_interval_null(client, container, make_age
 
 
 @pytest.mark.asyncio
-async def test_auto_wake_suppressed_over_budget_but_real_event_still_wakes(
+async def test_auto_wake_not_gated_by_budget(
         client, container, make_agent, make_request, db):
-    """The clock wake is gated on turns_used<turn_budget (the half-wired cost gate finally bites the
-    one runaway-spend path). But a REAL event (a teammate's request) is NOT autonomous spend, so it
-    still wakes the over-budget agent — proving budget gates ONLY the pure-clock term."""
+    """GH#39: the turns_used<turn_budget cost ceiling is removed, so an over-budget agent's clock
+    wake is NO LONGER suppressed — an interval-due agent fires the clock wake regardless of budget.
+    A real event still wakes it too (unchanged)."""
     a = await make_agent("A")
     b = await make_agent("B")
     aid = b["agent_id"]
@@ -107,15 +107,38 @@ async def test_auto_wake_suppressed_over_budget_but_real_event_still_wakes(
     db.execute("UPDATE agents SET turns_used=50, turn_budget=50 WHERE id=%s", (aid,))
 
     _, cand = await _scan(client, container["id"], aid)
-    assert cand["auto_wake_due"] is False          # over budget → clock wake suppressed
-    assert cand["should_wake"] is False
+    assert cand["auto_wake_due"] is True           # GH#39: budget no longer gates the clock wake
+    assert cand["should_wake"] is True
 
-    # A real pending event lands (A asks B). has_work is now true via the event, NOT the clock.
+    # A real pending event lands (A asks B) — still wakes, via the event.
     await make_request(a["agent_id"], "need input", target_alias="B")
     _, cand = await _scan(client, container["id"], aid)
-    assert cand["auto_wake_due"] is False          # still over budget → clock term stays off
     assert cand["pending_events"] >= 1
-    assert cand["should_wake"] is True             # but the real event wakes regardless of budget
+    assert cand["should_wake"] is True
+
+
+@pytest.mark.asyncio
+async def test_recurring_clock_keeps_firing_past_budget_iss25(
+        client, container, make_agent, db):
+    """GH #25: a fixed-interval clock wake must keep firing for as long as it is scheduled. It
+    previously stopped 'after a few cycles' because every wake bumps turns_used and the clock was
+    gated on turns_used<turn_budget — so once the budget (default 50) was spent, auto_wake_due went
+    permanently False and the recurring series silently died. GH #39 removed that gate.
+
+    This proves the RECURRING property across many cycles AND past budget exhaustion: the clock is
+    stateless (due = secs_since_woken >= interval), so it re-arms automatically every cycle off
+    last_woken_at — a missed/late tick or a spent budget can't cancel the series. TEETH: restore the
+    `turns_used < turn_budget` term in wake-scan and this fails at the first over-budget cycle."""
+    a = await make_agent("Looper")
+    aid = a["agent_id"]
+    _set_interval(db, aid, 300)                        # every 5 minutes
+    db.execute("UPDATE agents SET turns_used=0, turn_budget=3 WHERE id=%s", (aid,))  # tiny budget
+    for cycle in range(10):                            # far more cycles than the budget allows
+        _set_last_woken(db, aid, seconds_ago=301)      # cadence elapsed → this cycle is due
+        db.execute("UPDATE agents SET turns_used = turns_used + 5 WHERE id=%s", (aid,))  # wake spends turns
+        _, cand = await _scan(client, container["id"], aid)
+        assert cand["auto_wake_due"] is True, f"clock wake stopped firing at cycle {cycle}"
+        assert cand["should_wake"] is True, f"agent not woken at cycle {cycle}"
 
 
 @pytest.mark.asyncio
@@ -238,8 +261,8 @@ async def _active_cand(client, cid, conv_id):
 @pytest.mark.asyncio
 async def test_active_conversations_auto_wake_due_truth_table(client, container, make_agent, db):
     """FIRING fix: the resident-discovery scan now reports auto_wake_due so a warm-but-idle resident
-    can be yielded for a clock wake. Identical interlocks to wake_scan: opt-in interval, the cadence
-    elapsed off last_woken_at, and under the turns_used<turn_budget cost ceiling."""
+    can be yielded for a clock wake. Identical interlocks to wake_scan: opt-in interval and the
+    cadence elapsed off last_woken_at. GH#39: no turn-budget cost ceiling."""
     human = await make_agent("KedarAW", "human", kind="human")
     ai = await make_agent("VoxAW", "eng")
     aid = ai["agent_id"]
@@ -261,9 +284,9 @@ async def test_active_conversations_auto_wake_due_truth_table(client, container,
     _set_last_woken(db, aid, seconds_ago=120)
     assert (await _active_cand(client, container["id"], conv_id))["auto_wake_due"] is True
 
-    # over the cost ceiling → the clock wake is suppressed here too (mutation guard on the budget gate)
+    # GH#39: over the old cost ceiling → still due; turns_used no longer gates the clock wake
     db.execute("UPDATE agents SET turns_used=turn_budget WHERE id=%s", (aid,))
-    assert (await _active_cand(client, container["id"], conv_id))["auto_wake_due"] is False
+    assert (await _active_cand(client, container["id"], conv_id))["auto_wake_due"] is True
 
 
 # ---------- FIRING fix: wake-ack stamp_woken preserves the cadence clock ----------

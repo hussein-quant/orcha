@@ -6,6 +6,7 @@ import ProjectCard from './ProjectCard'
 import NewProjectCard from './NewProjectCard'
 import StoppedStackRow from './StoppedStackRow'
 import DockerDownBanner from '../components/DockerDownBanner'
+import HelperMissingBanner from '../components/HelperMissingBanner'
 
 const POLL_MS = 5000
 
@@ -94,6 +95,11 @@ export default function ProjectsHome({ onCreate }: { onCreate: () => void }) {
         <h1 className="text-xl font-semibold text-text">Projects</h1>
         <p className="text-sm text-text/40">Everything on this machine.</p>
       </div>
+
+      {/* A reinstall (or a first install on a Mac that already had stacks) can leave the helper
+          missing while a workspace exists — onboarding is skipped in that case, so surface it
+          here with a one-click reinstall. Self-hides when the helper is present. */}
+      <HelperMissingBanner />
 
       {favs.length > 0 && (
         <>

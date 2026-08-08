@@ -143,7 +143,7 @@ def test_boot_prefix_none_without_api_or_agent():
 
 def test_boot_prefix_composes_persona_digest_then_history(monkeypatch):
     from orcha_cli import notifier
-    monkeypatch.setattr(notifier, "_build_persona", lambda api, aid: "PERSONA+DIGEST")
+    monkeypatch.setattr(notifier, "_build_persona", lambda api, aid, **k: "PERSONA+DIGEST")
     # _get_json returns the conversation read; format_conversation_history renders the turns
     monkeypatch.setattr(cli, "_get_json",
                         lambda url, timeout=4.0: {"turns": [{"role": "human", "content": "hi"}]})
@@ -155,7 +155,7 @@ def test_boot_prefix_composes_persona_digest_then_history(monkeypatch):
 
 def test_boot_prefix_survives_history_fetch_failure(monkeypatch):
     from orcha_cli import notifier
-    monkeypatch.setattr(notifier, "_build_persona", lambda api, aid: "PERSONA+DIGEST")
+    monkeypatch.setattr(notifier, "_build_persona", lambda api, aid, **k: "PERSONA+DIGEST")
     def _boom(url, timeout=4.0):
         raise RuntimeError("API down")
     monkeypatch.setattr(cli, "_get_json", _boom)
@@ -185,7 +185,7 @@ def test_cmd_use_live_cold_execs_claude_as_agent(tmp_path, monkeypatch):
     _bind(tmp_path)
     monkeypatch.setattr(cli.shutil, "which", lambda x: "/usr/bin/claude")
     monkeypatch.setattr(cli, "_live_boot_prefix", lambda api, aid: "BOOT")
-    monkeypatch.setattr(cli, "_live_agent_launch", lambda api, aid: ("claude-sonnet-4-6", "claude"))
+    monkeypatch.setattr(cli, "_live_agent_launch", lambda api, aid: ("claude-sonnet-5", "claude"))
     captured = {}
     def _fake_exec(file, argv, env):
         captured.update(file=file, argv=argv, env=env)
@@ -194,7 +194,7 @@ def test_cmd_use_live_cold_execs_claude_as_agent(tmp_path, monkeypatch):
     assert captured["file"] == "claude"
     # GAP A: a cold live boot now also pins the agent's selected model
     assert captured["argv"] == ["claude", "--append-system-prompt", "BOOT",
-                                "--model", "claude-sonnet-4-6"]
+                                "--model", "claude-sonnet-5"]
     assert captured["env"]["ORCHA_ALIAS"] == "Vault"
     assert captured["env"]["ORCHA_AGENT_RUNTIME"] == "claude"
 
@@ -250,7 +250,7 @@ def test_cmd_use_live_warm_resumes(tmp_path, monkeypatch):
     # a cold prefix must NOT be built on a warm boot
     monkeypatch.setattr(cli, "_live_boot_prefix",
                         lambda api, aid: (_ for _ in ()).throw(AssertionError("must not build prefix when warm")))
-    monkeypatch.setattr(cli, "_live_agent_launch", lambda api, aid: ("claude-sonnet-4-6", "claude"))
+    monkeypatch.setattr(cli, "_live_agent_launch", lambda api, aid: ("claude-sonnet-5", "claude"))
     captured = {}
     monkeypatch.setattr(cli.os, "execvpe", lambda f, a, e: captured.update(argv=a))
     cli.cmd_use(argparse.Namespace(alias="Vault"))
@@ -353,12 +353,12 @@ def test_cmd_use_live_no_env_falls_back_to_persona(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_live_boot_prefix", lambda api, aid: "BOOT")
     fetched = []
     monkeypatch.setattr(cli, "_live_agent_launch",
-                        lambda api, aid: fetched.append((api, aid)) or ("claude-sonnet-4-6", "claude"))
+                        lambda api, aid: fetched.append((api, aid)) or ("claude-sonnet-5", "claude"))
     captured = {}
     monkeypatch.setattr(cli.os, "execvpe", lambda f, a, e: captured.update(argv=a))
     cli.cmd_use(argparse.Namespace(alias="Vault"))
     assert fetched == [("http://test:8000", AID)]      # resolved from /persona, the no-bridge path
-    assert captured["argv"][-2:] == ["--model", "claude-sonnet-4-6"]
+    assert captured["argv"][-2:] == ["--model", "claude-sonnet-5"]
 
 
 def test_cmd_use_live_warns_on_persona_degrade(tmp_path, monkeypatch, capsys):
