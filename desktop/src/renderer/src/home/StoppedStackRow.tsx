@@ -55,15 +55,17 @@ export default function StoppedStackRow({ stack, onChanged }: { stack: Stack; on
           </div>
         )}
       </div>
-      {error && <span className="shrink-0 text-xs text-danger">{error}</span>}
+      {error && !confirming && <span className="shrink-0 text-xs text-danger">{error}</span>}
       {confirming && (
         <ConfirmResetModal
           project={stack.project}
           busy={busy}
+          error={error}
           onCancel={() => setConfirming(false)}
           onConfirm={() => {
-            setConfirming(false)
-            resetStack()
+            void resetStack().then((ok) => {
+              if (ok) setConfirming(false)
+            })
           }}
         />
       )}

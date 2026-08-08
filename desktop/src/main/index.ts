@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, WebContentsView } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
-import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { parseDeepLink } from './deepLink'
@@ -17,7 +17,7 @@ import { preflight } from './preflight'
 import { inspectFolder } from './folderModes'
 import { templatesRoot } from './templates'
 import { provision, type EngineDeps, type EngineFs } from './initEngine'
-import { startHostWorker, nodeHostWorkerDeps, hostToolPath } from './hostWorker'
+import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv } from './hostWorker'
 import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } from './analyzeProject'
 import { resetStack } from './resetEngine'
 import { buildAppMenuTemplate } from './appMenu'
@@ -695,7 +695,29 @@ app.whenReady().then(() => {
       await resetStack(stack.project, stack.folder, {
         exec: dockerExec,
         rmrf: (p) => rmSync(p, { recursive: true, force: true }),
-        rmFile: (p) => rmSync(p, { force: true })
+        rmFile: (p) => rmSync(p, { force: true }),
+        execHost: (cmd, args, opts) =>
+          new Promise((resolve, reject) => {
+            execFile(cmd, args, { cwd: opts.cwd, env: opts.env, encoding: 'utf8' }, (err, stdout, stderr) =>
+              err ? reject(Object.assign(err, { stderr })) : resolve({ stdout })
+            )
+          }),
+        pathEnv: nodeHostWorkerDeps.pathEnv ?? hostToolPath(),
+        hostEnv: scrubWorkerEnv(process.env),
+        readFile: (p) => {
+          try {
+            return readFileSync(p, 'utf8')
+          } catch {
+            return null
+          }
+        },
+        listDir: (p) => {
+          try {
+            return readdirSync(p)
+          } catch {
+            return null
+          }
+        }
       })
     })
   )

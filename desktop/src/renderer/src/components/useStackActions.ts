@@ -14,23 +14,28 @@ export interface StackActions {
   toggleLabel: string
   openPortal: () => void
   toggleStack: () => void
-  /** Destructively delete the stack (down -v + image + on-disk files). Gated by the caller's modal. */
-  resetStack: () => void
+  /** Destructively delete the stack (down -v + image + on-disk files). Gated by the caller's
+   *  modal, which stays open (progress state) for the duration and only closes on success —
+   *  resolves true iff the delete succeeded, so the caller knows whether to dismiss the dialog
+   *  or leave it open with `error` showing for a retry. */
+  resetStack: () => Promise<boolean>
 }
 
 export default function useStackActions(stack: Stack, onChanged: () => void): StackActions {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function run(action: () => Promise<void>): Promise<void> {
+  async function run(action: () => Promise<void>): Promise<boolean> {
     setBusy(true)
     setError(null)
     try {
       await action()
       onChanged()
+      return true
     } catch (err) {
       const bridgeError = err as BridgeError
       setError('stderr' in bridgeError ? bridgeError.stderr : bridgeError.code)
+      return false
     } finally {
       setBusy(false)
     }
@@ -51,6 +56,6 @@ export default function useStackActions(stack: Stack, onChanged: () => void): St
     openPortal: () => void run(() => api.portalShow(stack.project)),
     toggleStack: () =>
       void run(() => (stack.running ? api.stopStack(stack.project) : api.startStack(stack.project))),
-    resetStack: () => void run(() => api.resetStack(stack.project))
+    resetStack: () => run(() => api.resetStack(stack.project))
   }
 }

@@ -1,4 +1,5 @@
-import { Folder, Phone, Star } from 'lucide-react'
+import { useState } from 'react'
+import { Folder, MoreHorizontal, Phone, Star, Trash2 } from 'lucide-react'
 import type { ProjectContainer } from '../../../shared/types'
 import { Card } from '../ui/Card'
 import { Button } from '../ui/Button'
@@ -7,22 +8,28 @@ import { cn } from '../ui/cn'
 /** One project card — mirrors the cloud hub's ProjectsPage anatomy (status dot + name +
  *  star, description, repo/folder chip, agent/task counts, Open + quiet Pair-phone) rendered
  *  with the desktop's own gold-minimal tokens. Gold is reserved for the star-when-favorited
- *  and the Open action; everything else stays quiet. */
+ *  and the Open action; everything else stays quiet. The overflow menu (quiet, bottom-right)
+ *  carries Delete project — same destructive weight and placement pattern as StoppedStackRow's
+ *  Remove, so a running project and a stopped stack delete through visually consistent UI. */
 export default function ProjectCard({
   container,
   favorited,
   onToggleFavorite,
   onOpen,
-  onPair
+  onPair,
+  onDelete
 }: {
   container: ProjectContainer
   favorited: boolean
   onToggleFavorite: () => void
   onOpen: () => void
   onPair: () => void
+  /** Opens the shared type-to-confirm delete dialog for this project's stack. */
+  onDelete: () => void
 }) {
   const local = container.github_repo === 'local'
   const repoLabel = local ? container.name : container.github_repo
+  const [menuOpen, setMenuOpen] = useState(false)
 
   return (
     <Card className="flex flex-col gap-2.5" data-testid="project-card" data-cid={container.id}>
@@ -86,6 +93,37 @@ export default function ProjectCard({
           <Phone className="h-3.5 w-3.5" />
           Pair phone
         </Button>
+        <div className="relative ml-auto shrink-0">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-text/40"
+            aria-label={`More actions for ${container.name}`}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+          {menuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 top-full z-10 mt-1 w-44 rounded-lg border border-border bg-card p-1 shadow-lg"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-danger hover:bg-danger/10"
+                onClick={() => {
+                  setMenuOpen(false)
+                  onDelete()
+                }}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete project…
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </Card>
   )

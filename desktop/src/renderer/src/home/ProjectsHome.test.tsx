@@ -164,4 +164,80 @@ describe('ProjectsHome', () => {
     await user.click(screen.getByText(/new project/i))
     expect(onCreate).toHaveBeenCalledTimes(1)
   })
+
+  describe('delete a running project (ProjectCard overflow menu)', () => {
+    async function openDeleteDialog(user: ReturnType<typeof userEvent.setup>) {
+      await waitFor(() => expect(screen.getByText('Demo project')).toBeInTheDocument())
+      await user.click(screen.getByRole('button', { name: /more actions for demo project/i }))
+      await user.click(screen.getByRole('menuitem', { name: /delete project/i }))
+    }
+
+    it('opens the shared type-to-confirm dialog naming the stack project', async () => {
+      stubDesktop({
+        listStacks: vi.fn().mockResolvedValue([stack()]),
+        portalGet: vi.fn().mockResolvedValue({ containers: [container()] })
+      })
+      const user = userEvent.setup()
+      render(<ProjectsHome onCreate={vi.fn()} />)
+      await openDeleteDialog(user)
+
+      expect(screen.getByRole('dialog', { name: /delete.*orcha-a/i })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: /delete everything/i })).toBeDisabled()
+    })
+
+    it('confirming calls resetStack with the stack project and refreshes on success', async () => {
+      const listStacks = vi.fn().mockResolvedValue([stack()])
+      const resetStack = vi.fn().mockResolvedValue(undefined)
+      stubDesktop({
+        listStacks,
+        portalGet: vi.fn().mockResolvedValue({ containers: [container()] }),
+        resetStack
+      })
+      const user = userEvent.setup()
+      render(<ProjectsHome onCreate={vi.fn()} />)
+      await openDeleteDialog(user)
+
+      await user.type(screen.getByLabelText(/confirm project name/i), 'orcha-a')
+      await user.click(screen.getByRole('button', { name: /delete everything/i }))
+
+      await waitFor(() => expect(resetStack).toHaveBeenCalledWith('orcha-a'))
+      // Refresh (listStacks) ran again after a successful delete.
+      await waitFor(() => expect(listStacks.mock.calls.length).toBeGreaterThanOrEqual(2))
+      // Dialog closes on success.
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    })
+
+    it('a failed delete keeps the dialog open and shows the error', async () => {
+      stubDesktop({
+        listStacks: vi.fn().mockResolvedValue([stack()]),
+        portalGet: vi.fn().mockResolvedValue({ containers: [container()] }),
+        resetStack: vi.fn().mockRejectedValue({ code: 'COMPOSE_FAILED', stderr: 'boom' })
+      })
+      const user = userEvent.setup()
+      render(<ProjectsHome onCreate={vi.fn()} />)
+      await openDeleteDialog(user)
+
+      await user.type(screen.getByLabelText(/confirm project name/i), 'orcha-a')
+      await user.click(screen.getByRole('button', { name: /delete everything/i }))
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/boom/i))
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+    })
+
+    it('Cancel closes the dialog without calling resetStack', async () => {
+      const resetStack = vi.fn()
+      stubDesktop({
+        listStacks: vi.fn().mockResolvedValue([stack()]),
+        portalGet: vi.fn().mockResolvedValue({ containers: [container()] }),
+        resetStack
+      })
+      const user = userEvent.setup()
+      render(<ProjectsHome onCreate={vi.fn()} />)
+      await openDeleteDialog(user)
+
+      await user.click(screen.getByRole('button', { name: /cancel/i }))
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(resetStack).not.toHaveBeenCalled()
+    })
+  })
 })

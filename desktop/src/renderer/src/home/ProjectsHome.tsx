@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { Stack } from '../../../shared/types'
+import type { BridgeError, Stack } from '../../../shared/types'
 import { loadProjectCards, type ProjectCardData } from './loadProjectCards'
 import { loadFavorites, toggleFavorite } from './favorites'
 import ProjectCard from './ProjectCard'
@@ -7,6 +7,7 @@ import NewProjectCard from './NewProjectCard'
 import StoppedStackRow from './StoppedStackRow'
 import DockerDownBanner from '../components/DockerDownBanner'
 import HelperMissingBanner from '../components/HelperMissingBanner'
+import ConfirmResetModal from '../components/ConfirmResetModal'
 
 const POLL_MS = 5000
 
@@ -25,6 +26,12 @@ type ViewState =
 export default function ProjectsHome({ onCreate }: { onCreate: () => void }) {
   const [view, setView] = useState<ViewState>({ kind: 'loading' })
   const [favorites, setFavorites] = useState<Set<string>>(() => loadFavorites(window.localStorage))
+  // Delete, from a running project's card: one shared dialog (same component StoppedStackRow
+  // uses), keyed on which stack is being deleted so only ever one card's overflow menu can
+  // have an open confirm at a time.
+  const [deleting, setDeleting] = useState<Stack | null>(null)
+  const [deleteBusy, setDeleteBusy] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -57,6 +64,22 @@ export default function ProjectsHome({ onCreate }: { onCreate: () => void }) {
     )
   }
 
+  async function confirmDelete(): Promise<void> {
+    if (!deleting) return
+    setDeleteBusy(true)
+    setDeleteError(null)
+    try {
+      await window.orchaDesktop.resetStack(deleting.project)
+      setDeleting(null)
+      await refresh()
+    } catch (err) {
+      const bridgeError = err as BridgeError
+      setDeleteError('stderr' in bridgeError ? bridgeError.stderr : bridgeError.code)
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
+
   if (view.kind === 'loading') {
     return (
       <main className="mx-auto flex h-full max-w-5xl flex-col gap-4 p-8 animate-fade-in">
@@ -86,6 +109,10 @@ export default function ProjectsHome({ onCreate }: { onCreate: () => void }) {
       onToggleFavorite={() => onToggleFavorite(c.container.id)}
       onOpen={() => openProject(c)}
       onPair={() => pairProject(c)}
+      onDelete={() => {
+        setDeleteError(null)
+        setDeleting(c.stack)
+      }}
     />
   )
 
@@ -123,6 +150,16 @@ export default function ProjectsHome({ onCreate }: { onCreate: () => void }) {
             <StoppedStackRow key={s.project} stack={s} onChanged={() => void refresh()} />
           ))}
         </div>
+      )}
+
+      {deleting && (
+        <ConfirmResetModal
+          project={deleting.project}
+          busy={deleteBusy}
+          error={deleteError}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => void confirmDelete()}
+        />
       )}
     </main>
   )
