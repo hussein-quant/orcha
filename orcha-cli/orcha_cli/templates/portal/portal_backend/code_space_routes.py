@@ -656,6 +656,7 @@ def _symbol_state_put(cid: str, ref: str, state) -> None:
 # TS/JS, Python, Go).
 LANGUAGE_BY_EXTENSION = {
     ".kt": "kotlin", ".kts": "kotlin",
+    ".java": "java",
     ".swift": "swift",
     ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".jsx": "javascript",
     ".py": "python",
@@ -747,6 +748,17 @@ _LANGUAGE_PATTERNS = {
         (re.compile(rf"^\s*{_MODIFIERS}interface\s+(\w+)", re.MULTILINE), "interface"),
         (re.compile(rf"^\s*{_MODIFIERS}val\s+(\w+)\s*[:=]", re.MULTILINE), "const"),
         (re.compile(rf"^\s*{_MODIFIERS}var\s+(\w+)\s*[:=]", re.MULTILINE), "var"),
+    ],
+    "java": [
+        # Types first — Android's Java surface is class/interface/enum-heavy.
+        (re.compile(rf"^\s*{_MODIFIERS}(?:class)\s+(\w+)", re.MULTILINE), "class"),
+        (re.compile(rf"^\s*{_MODIFIERS}(?:interface)\s+(\w+)", re.MULTILINE), "interface"),
+        (re.compile(rf"^\s*{_MODIFIERS}(?:enum|record)\s+(\w+)", re.MULTILINE), "class"),
+        # Methods: modifier(s) + return type + name( — requires at least one explicit
+        # modifier so local calls/constructors-in-bodies don't flood the index.
+        (re.compile(r"^\s*(?:(?:public|private|protected|static|final|abstract|synchronized|native)\s+)+[\w<>\[\],.\s]*?\b(\w+)\s*\(", re.MULTILINE), "function"),
+        # Constants: static final FIELD = ...
+        (re.compile(r"^\s*(?:(?:public|private|protected)\s+)?static\s+final\s+[\w<>\[\]]+\s+(\w+)\s*=", re.MULTILINE), "const"),
     ],
     "swift": [
         (re.compile(rf"^\s*{_MODIFIERS}func\s+(\w+)\s*[\(<]", re.MULTILINE), "function"),
