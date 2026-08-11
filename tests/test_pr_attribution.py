@@ -34,7 +34,7 @@ def test_migration_042_exists_and_is_next_sequential():
     # storage seam (Orcha Cloud local run gap #1, docs/orcha-cloud-local-run.md §1); 048 added by
     # the host-side roster analysis storage seam (docs/orcha-cloud-local-run.md). Keep this pin
     # moving with the chain tip so gaps/dupes still fail loudly.
-    assert numbers[-1] == 47, f"048 must be the latest migration, saw {numbers[-1]:03d}"
+    assert numbers[-1] == 48, f"048 must be the latest migration, saw {numbers[-1]:03d}"
 
 
 def test_agents_git_email_column_applied(db):
