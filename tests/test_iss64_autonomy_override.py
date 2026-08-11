@@ -469,6 +469,17 @@ async def test_full_override_audit_records_resolved_level(
 import pathlib
 import re
 
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _team_plan(monkeypatch):
+    """Autonomy-override writes ride member-mutation-adjacent gates — a Team-plan
+    surface under the plan-gating addendum; this suite tests overrides, not the
+    gate (tests/test_plan_gating.py owns that)."""
+    monkeypatch.setenv("ORCHA_PLAN", "team")
+
 _FRONTEND = (pathlib.Path(__file__).resolve().parent.parent / "orcha-cli" / "orcha_cli"
              / "templates" / "portal" / "frontend" / "src")
 
