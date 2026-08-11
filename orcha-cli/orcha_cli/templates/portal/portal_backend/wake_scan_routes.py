@@ -7,6 +7,7 @@ from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
 from portal_backend.model_setting_routes import _resolve_use_case_model
 from portal_backend.provider_keys import effective_use_case_provider, provider_key_enc
+from portal_backend.wake_backoff import apply_wake_backoff
 from portal_backend.wake_candidate_builder import build_wake_candidate
 from portal_backend.wake_scan_queries import list_wake_agents
 
@@ -96,6 +97,14 @@ def wake_scan(
             )
             for agent in list_wake_agents(cur, cid, cooldown)
         ]
+        # No-progress wake circuit breaker (server-side, DB-backed — see wake_backoff.py):
+        # strike-account each should_wake candidate against its agent's own recent completed
+        # runs, suppress a candidate whose trigger keeps firing with no progress, and surface it
+        # to the human once suppression gets serious. NEVER cancels work or touches task state —
+        # only paces the wake cadence. Runs on this same cursor so its writes land in the same
+        # commit as the scan's own bookkeeping below.
+        candidates = apply_wake_backoff(cur, cid, candidates)
+        conn.commit()
     return {
         "container_id": cid,
         "container_status": container["status"],

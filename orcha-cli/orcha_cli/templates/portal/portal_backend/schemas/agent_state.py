@@ -170,6 +170,17 @@ class DecisionCreate(BaseModel):
     )
 
 
+class WakeBackoffRelease(BaseModel):
+    """Human release valve for the wake circuit breaker (DELETE .../wake-backoff/{wake_key}).
+    Optional body — trust-off self-host convention (permissive body actor + require_kind),
+    mirroring AutoWakeUpdate/MemberRemove. A trusted-proxy caller's identity overrides this."""
+
+    actor_agent_id: Optional[str] = Field(
+        default=None,
+        description="acting human's UUID when no trusted proxy identity is present",
+    )
+
+
 class NotificationsRead(BaseModel):
     through_ts: Optional[float] = Field(
         None,
