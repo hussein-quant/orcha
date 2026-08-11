@@ -235,6 +235,7 @@ def metrics_insights(
     insights.extend(_rule_heavy_model_small_talk(rows))
     insights.extend(_rule_concentration(rows))
     insights.extend(_rule_cache_write_churn(rows))
+    insights.extend(_rule_subscription_loop(rows))
 
     order = {"high": 0, "medium": 1, "info": 2}
     insights.sort(key=lambda i: order.get(i["severity"], 3))
@@ -452,3 +453,43 @@ def _rule_cache_write_churn(rows):
         },
         "action": "Tighten session cadence so wakes land within the cache TTL instead of letting it expire between wakes.",
     }]
+
+
+# Wake circuit-breaker incident (see wake_backoff.py): a subscription-billed daemon
+# (Claude Code / claude -p on the user's own login, not an API key) can wake hundreds of times
+# for a trigger nobody is consuming while total_cost_usd stays near-zero, because subscription
+# billing never surfaces in worker_runs.total_cost_usd — the token/run counters are the ONLY
+# signal such a loop leaves behind. High run count + near-zero recorded cost is exactly that
+# shape; this rule flags it independent of MIN_RUNS_FOR_RULE's 5-run floor (that floor exists to
+# avoid noisy ratios on a quiet container — a >200-run population is never noise).
+_SUBSCRIPTION_LOOP_MIN_RUNS = 200
+_SUBSCRIPTION_LOOP_MAX_COST_USD = 1.0
+
+
+def _rule_subscription_loop(rows):
+    """Per agent: window run count > 200 AND recorded total_cost_usd < $1 -> likely
+    subscription-billed wakes invisible to the dollar meter (see the wake circuit breaker)."""
+    out = []
+    for aid, info in _by_agent(rows).items():
+        rs = info["rows"]
+        if len(rs) <= _SUBSCRIPTION_LOOP_MIN_RUNS:
+            continue
+        total_cost = sum(float(r["cost"]) for r in rs)
+        if total_cost >= _SUBSCRIPTION_LOOP_MAX_COST_USD:
+            continue
+        out.append({
+            "id": f"subscription-loop:{aid}",
+            "severity": "high",
+            "title": f"{info['alias'] or 'Agent'} has {len(rs)} runs with almost no recorded cost",
+            "detail": (
+                f"{len(rs)} runs with almost no recorded cost — subscription-billed wakes, "
+                "invisible to the dollar meter."
+            ),
+            "evidence": {
+                "agent_alias": info["alias"],
+                "runs": len(rs),
+                "total_cost_usd": round(total_cost, 6),
+            },
+            "action": "Check this agent's wake backoff (GET .../wake-backoff) or triage its wake triggers — a trigger it can't act on may be looping.",
+        })
+    return out
