@@ -1442,6 +1442,154 @@ def test_fix_description_always_names_the_head_branch_and_never_merge_footer():
         assert "Never merge; stop for human review." in desc
 
 
+# ------------------ PR "Fix" dispatch: Orcha's OWN comments are not feedback -----------
+#
+# Production defect, fixed here: every dispatch posts a "🤖 Orcha started task ..."
+# comment back on the PR (task_start_core._post_start_comment), and GitHub counts it in
+# the PR object's `comments`. _pull_fix_context read that count raw, so a SECOND Fix
+# click on the same PR handed the agent "1 review comment to address" — Orcha's own
+# note, read back as human feedback. The fix nets Orcha-authored comments out of the
+# count; the status comment itself stays (humans watching the PR want it).
+
+def _orcha_comment(task_id="8dca38b5", assignee="Atlas"):
+    """A comment shaped exactly as task_start_core._compose_start_comment writes it —
+    built through the real composer, so this fixture can never drift from production."""
+    return {"body": core._compose_start_comment(task_id, assignee),
+            "user": {"login": "orcha-cloud[bot]", "type": "Bot"}}
+
+
+def test_orcha_authored_comment_recognises_the_real_composed_body():
+    """The recogniser is pinned against the ACTUAL composer output (both the assigned
+    and the unassigned wording), not a hand-copied string."""
+    assert hub._orcha_authored_comment(_orcha_comment()) is True
+    assert hub._orcha_authored_comment(
+        {"body": core._compose_start_comment("abc12345", None)}) is True
+
+
+def test_orcha_authored_comment_leaves_human_feedback_alone():
+    """Human comments — including one that MENTIONS Orcha, and one that quotes the
+    marker after a '>' quote marker — are feedback and must still count."""
+    for body in ("please add a test for the 429 path",
+                 "Orcha started task on this? looks stale",
+                 "> 🤖 Orcha started task `abc12345`\n\nthis never finished, please redo",
+                 ""):
+        assert hub._orcha_authored_comment({"body": body}) is False
+    assert hub._orcha_authored_comment({}) is False   # no body key at all
+
+
+def test_orcha_comment_count_nets_only_orcha_notes(monkeypatch):
+    """Two Orcha notes + one human comment on a 3-comment PR -> 2 netted out."""
+    def fake_get(path, token):
+        assert path == "/repos/acme/site/issues/5/comments?per_page=100&page=1"
+        return [_orcha_comment("aaaaaaaa"), {"body": "nit: rename this"},
+                _orcha_comment("bbbbbbbb")]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    assert hub._orcha_comment_count("acme/site", 5, "tok", 3) == 2
+
+
+def test_orcha_comment_count_pages_and_stops_at_the_cap(monkeypatch):
+    """A pathological thread is walked at 100/page and STOPS at _FIX_COMMENT_PAGE_CAP —
+    one Fix click can never fan out into unbounded GitHub calls."""
+    seen = []
+
+    def fake_get(path, token):
+        seen.append(path)
+        return [_orcha_comment()] * 100   # always a full page -> keep asking
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    counted = hub._orcha_comment_count("acme/site", 5, "tok", 10_000)
+    assert len(seen) == hub._FIX_COMMENT_PAGE_CAP
+    assert seen[-1].endswith(f"page={hub._FIX_COMMENT_PAGE_CAP}")
+    assert counted == 100 * hub._FIX_COMMENT_PAGE_CAP
+
+
+def test_orcha_comment_count_stops_early_on_a_short_page(monkeypatch):
+    """A page shorter than 100 is the last one — no speculative page-2 call."""
+    seen = []
+
+    def fake_get(path, token):
+        seen.append(path)
+        return [_orcha_comment()]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    assert hub._orcha_comment_count("acme/site", 5, "tok", 400) == 1
+    assert len(seen) == 1
+
+
+def test_orcha_comment_count_degrades_to_zero_when_the_fetch_fails(monkeypatch):
+    """A rate-limited/unreachable comment fetch must NOT fail the Fix dispatch — it
+    under-counts (exactly the pre-fix behaviour), never raises."""
+    def fake_get(path, token):
+        raise RuntimeError("github_status:403")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    assert hub._orcha_comment_count("acme/site", 5, "tok", 3) == 0
+
+
+def _fix_context_get(*, comments: int, review_comments: int, comment_bodies):
+    """A _gh_get stub for _pull_fix_context on acme/site#77: an all-clean PR carrying
+    the given comment counts, plus the conversation-comment page behind them."""
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/77":
+            return {"number": 77, "title": "Add retry", "draft": False,
+                    "mergeable_state": "clean", "head": {"ref": "feat/retry", "sha": "abc123"},
+                    "review_comments": review_comments, "comments": comments}
+        if path == "/repos/acme/site/commits/abc123/status":
+            return {"statuses": []}
+        if path == "/repos/acme/site/commits/abc123/check-runs":
+            return {"check_runs": []}
+        if path == "/repos/acme/site/issues/77/comments?per_page=100&page=1":
+            return comment_bodies
+        raise AssertionError(f"unexpected path {path}")
+    return fake_get
+
+
+def test_pull_fix_context_nets_orchas_own_comment_out_of_the_count(monkeypatch):
+    """THE regression: a PR whose only conversation comment is Orcha's own start note
+    reports comments_count 0 — so the second Fix click's DoD has no phantom feedback."""
+    monkeypatch.setattr(hub, "_gh_get", _fix_context_get(
+        comments=1, review_comments=0, comment_bodies=[_orcha_comment()]))
+    ctx = hub._pull_fix_context("acme/site", 77, "tok")
+    assert ctx["comments_count"] == 0
+    assert "review comment" not in hub._fix_description(**ctx)
+
+
+def test_pull_fix_context_keeps_real_feedback_when_orcha_also_commented(monkeypatch):
+    """Mixed thread: Orcha's note is netted out, the two human comments survive — the
+    fix must not swing the other way and swallow genuine feedback."""
+    monkeypatch.setattr(hub, "_gh_get", _fix_context_get(
+        comments=3, review_comments=1, comment_bodies=[
+            {"body": "nit: rename this"}, _orcha_comment(), {"body": "needs a test"}]))
+    ctx = hub._pull_fix_context("acme/site", 77, "tok")
+    assert ctx["comments_count"] == 2
+    # 2 surviving conversation comments + 1 inline review comment
+    assert "3 review comments to address" in hub._fix_description(**ctx)
+
+
+def test_pull_fix_context_skips_the_comment_fetch_when_the_pr_has_none(monkeypatch):
+    """comments == 0 -> nothing to net out -> ZERO extra GitHub calls. Pins that the
+    fix costs nothing on the common case (the vast majority of Fix clicks)."""
+    def fake_get(path, token):
+        if "/issues/77/comments" in path:
+            raise AssertionError("must not fetch comments for a PR with comments:0")
+        return _fix_context_get(comments=0, review_comments=0, comment_bodies=[])(path, token)
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    assert hub._pull_fix_context("acme/site", 77, "tok")["comments_count"] == 0
+
+
+def test_pull_fix_context_leaves_inline_review_comments_unfiltered(monkeypatch):
+    """review_comments (inline code-review, /pulls/{n}/comments) is passed through
+    untouched — Orcha only ever posts to the conversation endpoint, so netting there
+    could only ever drop a real reviewer's comment."""
+    monkeypatch.setattr(hub, "_gh_get", _fix_context_get(
+        comments=1, review_comments=4, comment_bodies=[_orcha_comment()]))
+    ctx = hub._pull_fix_context("acme/site", 77, "tok")
+    assert ctx["review_comments_count"] == 4
+    assert "4 review comments to address" in hub._fix_description(**ctx)
+
+
 # ------------------------- PR "Fix" dispatch: full route integration ------------------
 
 async def test_start_pull_uses_context_aware_dod_from_live_state(
@@ -1464,6 +1612,12 @@ async def test_start_pull_uses_context_aware_dod_from_live_state(
                 {"name": "lint", "status": "completed", "conclusion": "failure",
                  "html_url": "http://x"},
             ]}
+        # The PR reports comments:1, so the dispatch nets Orcha's own round-trip
+        # comments out of that count — here the one comment is a real human's, so
+        # the netting is a no-op and all 3 still land in the DoD.
+        if path == "/repos/acme/site/issues/77/comments?per_page=100&page=1":
+            return [{"body": "please add a test for the 429 path",
+                     "user": {"login": "kedar1607"}}]
         raise AssertionError(f"unexpected path {path}")
 
     monkeypatch.setattr(hub, "_gh_get", fake_get)
@@ -1480,6 +1634,72 @@ async def test_start_pull_uses_context_aware_dod_from_live_state(
     assert "fix/retry-backoff" not in dod   # NOT the frontend-supplied stale field
     assert "feat/retry" in dod              # the LIVE re-fetched head branch
     assert "Resolve CI failures / review feedback on PR #77" not in dod   # not the generic template
+
+
+async def test_start_pull_does_not_report_orchas_own_comment_as_feedback(
+        client, container, token_env, monkeypatch):
+    """End-to-end shape of the reported defect: the PR's only conversation comment is
+    the "🤖 Orcha started task ..." note a PREVIOUS Fix dispatch posted. The DoD this
+    dispatch writes must not contain a review-comment clause at all — the agent must
+    not be sent to address Orcha's own status note."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        if path == "/repos/acme/site/pulls/103":
+            return {"number": 103, "title": "Add retry", "draft": False,
+                    "mergeable_state": "clean", "head": {"ref": "feat/retry", "sha": "abc123"},
+                    "review_comments": 0, "comments": 1}
+        if path == "/repos/acme/site/commits/abc123/status":
+            return {"statuses": []}
+        if path == "/repos/acme/site/commits/abc123/check-runs":
+            return {"check_runs": []}
+        if path == "/repos/acme/site/issues/103/comments?per_page=100&page=1":
+            return [_orcha_comment()]
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "pull", "number": 103})
+    assert r.status_code == 201, r.text
+    tid = r.json()["task_id"]
+    listed = (await client.get(f"/api/containers/{cid}/tasks")).json()["tasks"]
+    dod = [x for x in listed if x["id"] == tid][0]["definition_of_done"]
+    assert "review comment" not in dod
+    assert "Outstanding:" not in dod   # nothing else was wrong with this PR either
+    assert "Fix PR #103: Add retry." in dod
+
+
+async def test_start_pull_survives_a_failing_comment_fetch(
+        client, container, token_env, monkeypatch):
+    """If the netting fetch itself fails (rate limit), the dispatch still succeeds and
+    still gets its context-aware DoD — it just falls back to the raw, un-netted count
+    rather than losing the whole enrichment over a nicety."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        if "/issues/103/comments" in path:
+            raise RuntimeError("github_status:403")
+        if path == "/repos/acme/site/pulls/103":
+            return {"number": 103, "title": "Add retry", "draft": False,
+                    "mergeable_state": "clean", "head": {"ref": "feat/retry", "sha": "abc123"},
+                    "review_comments": 0, "comments": 2}
+        if path == "/repos/acme/site/commits/abc123/status":
+            return {"statuses": []}
+        if path == "/repos/acme/site/commits/abc123/check-runs":
+            return {"check_runs": []}
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.post(f"/api/containers/{cid}/github/start",
+                          json={"kind": "pull", "number": 103})
+    assert r.status_code == 201, r.text
+    tid = r.json()["task_id"]
+    listed = (await client.get(f"/api/containers/{cid}/tasks")).json()["tasks"]
+    dod = [x for x in listed if x["id"] == tid][0]["definition_of_done"]
+    assert "2 review comments to address" in dod   # un-netted, but the dispatch lived
+    assert "feat/retry" in dod
 
 
 async def test_start_pull_idempotent_skips_live_refetch(

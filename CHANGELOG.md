@@ -11,6 +11,15 @@ missing.
 ## [Unreleased]
 
 ### Fixed
+- GitHub hub "Fix" dispatch no longer counts Orcha's own status comment as PR
+  review feedback. Every dispatch posts a "🤖 Orcha started task ..." comment
+  back on the PR, and GitHub counts it in the PR's conversation-comment total —
+  so a second Fix click on the same PR handed the dispatched agent
+  "1 review comment to address" that was really Orcha's own note. The Fix
+  dispatch now nets Orcha-authored comments out of that count before composing
+  the task's definition of done. The status comment itself is unchanged (it is
+  useful to humans watching the PR), and inline code-review comments were never
+  affected.
 - Sandbox session continuity + path-identical mounts: each sandboxed wake's
   `~/.claude` (session transcripts, hook state) now persists on the host at
   `<workspace-root>/.orcha/agent-home`, so a resident conversation's pinned

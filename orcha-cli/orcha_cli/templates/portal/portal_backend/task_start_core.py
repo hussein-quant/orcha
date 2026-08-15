@@ -54,6 +54,18 @@ GITHUB_COMMENT_TIMEOUT_SECONDS = 10
 # also the idempotency key (a LIKE 'GH #N: %' probe over the container's open tasks).
 GH_TITLE_PREFIX = "GH #"
 
+# The opening literal of every round-trip comment `_compose_start_comment` writes, and
+# therefore the signature that identifies a comment on an issue/PR as ORCHA'S OWN.
+# It is a shared constant (not an inlined f-string) because a second reader depends on
+# it: github_hub_routes._orcha_authored_comment subtracts Orcha's own comments from the
+# "review feedback to address" count a Fix dispatch puts in the task's DoD. Without that
+# subtraction the start comment posted by Fix click #1 is counted back as outstanding
+# human feedback by Fix click #2 (GH: "a Fix dispatch's own bot comment gets counted as
+# PR review feedback"). If this literal ever changes, comments already on GitHub carrying
+# the OLD literal stop being recognised — so prefer appending to the message over editing
+# this prefix.
+ORCHA_START_COMMENT_MARKER = "🤖 Orcha started task"
+
 # Non-terminal statuses that count as "already tracked" for idempotency. A task in any
 # of these is live work for this issue/PR; a completed/cancelled one does NOT block a
 # fresh start (you can re-trigger an issue after its first task closed).
@@ -169,7 +181,7 @@ def _compose_start_comment(task_id: str, assignee_alias) -> str:
         else "unassigned — the orchestrator routes it"
     short_id = str(task_id)[:8]
     return (
-        f"🤖 Orcha started task `{short_id}` for this — {who}.\n"
+        f"{ORCHA_START_COMMENT_MARKER} `{short_id}` for this — {who}.\n"
         "Work arrives as a PR; a human verifies before anything merges."
     )
 
