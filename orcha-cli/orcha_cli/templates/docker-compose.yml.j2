@@ -5,6 +5,7 @@ name: orcha-{{ project_name }}
 services:
   db:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: orcha
       POSTGRES_PASSWORD: orcha
@@ -22,6 +23,7 @@ services:
       retries: 10
   portal:
     build: ./portal
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://orcha:orcha@db:5432/orcha   # 'db' = service name, inside the network
       MIGRATIONS_DIR: /app/migrations                        # R1: runner applies these on startup
