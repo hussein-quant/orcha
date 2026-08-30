@@ -39,7 +39,12 @@ for (const mod of REQUIRED_SHARED) {
 }
 await rm(dst, { recursive: true, force: true })
 await mkdir(path.dirname(dst), { recursive: true })
-await cp(src, dst, { recursive: true })
+// node_modules can appear under templates on a dev machine (the portal frontend's
+// vitest deps) — never part of the template payload.
+await cp(src, dst, {
+  recursive: true,
+  filter: (s) => !s.split(path.sep).includes('node_modules')
+})
 const sharedDst = path.join(dst, 'portal-shared')
 await mkdir(sharedDst, { recursive: true })
 for (const mod of PORTAL_SHARED_MODULES) {
