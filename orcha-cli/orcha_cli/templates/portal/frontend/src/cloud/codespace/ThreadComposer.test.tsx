@@ -171,11 +171,25 @@ describe("ThreadComposer", () => {
     expect(screen.queryByText(/will ask/i)).not.toBeInTheDocument();
   });
 
-  it("shows the honest no-agents state when the roster has no AI agents", async () => {
+  it("blocks a question when the roster has no AI agents: warning + disabled Post", async () => {
+    const calls = stubFetch();
+    mount({ agents: [{ id: "h1", alias: "kedar", kind: "human", status: "idle" } as Agent] });
+    await screen.findByText("Post");
+    // The honest gate: nobody can answer, so say it loudly and refuse the post.
+    expect(screen.getByRole("alert")).toHaveTextContent(/No AI agent in this workspace/);
+    expect(screen.getByText("Register an agent")).toBeInTheDocument();
+    expect(screen.getByText("Post")).toBeDisabled();
+    fireEvent.click(screen.getByText("Post"));
+    expect(calls.filter((c) => c.method === "POST").length).toBe(0);
+  });
+
+  it("no-AI roster still allows a note (untargeted by design)", async () => {
     stubFetch();
     mount({ agents: [{ id: "h1", alias: "kedar", kind: "human", status: "idle" } as Agent] });
     await screen.findByText("Post");
-    expect(screen.getByText("No agents yet — this will wait unanswered")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Note"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Post")).not.toBeDisabled();
   });
 
   it("raise-hand mode: pre-tags the agent, hides the template picker, shows the honesty caption", async () => {

@@ -11,6 +11,7 @@
  */
 import { useEffect, useState } from "react";
 import { useToast } from "../../components/ui";
+import { navigateScoped } from "../../lib/scope";
 import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent } from "../../types";
 import { createThread } from "./codespaceApi";
@@ -74,11 +75,14 @@ export function ThreadComposer({
   const questionLike = kind === "question" || kind === "why" || kind === "teach";
   const willAutoRoute = !raiseHand && questionLike && !taggedAgentId;
   const defaultAgent = aiAgents[0];
-  const routingHint = willAutoRoute
-    ? defaultAgent
-      ? `Will ask @${defaultAgent.alias}`
-      : "No agents yet — this will wait unanswered"
-    : null;
+  // No live AI agent = nobody can EVER answer a question-like thread (the
+  // server-side auto-route comes up empty and the thread sits orphaned — the
+  // exact silent-surprise this composer exists to prevent). Block posting
+  // question|why|teach until an agent exists; `note` stays allowed, it is
+  // untargeted by design.
+  const questionBlocked = !raiseHand && questionLike && aiAgents.length === 0;
+  const routingHint =
+    willAutoRoute && defaultAgent ? `Will ask @${defaultAgent.alias}` : null;
 
   // Usability sweep — Escape closes the composer (papercut: this was the
   // only transient panel in Code Space WITHOUT an Escape handler; matches
@@ -101,6 +105,7 @@ export function ThreadComposer({
     const who = actingHuman(snap);
     if (!who) { toast("Pick an acting human first", "warn"); return; }
     if (!body.trim()) { toast("Write something first", "warn"); return; }
+    if (questionBlocked) { toast("Register an AI agent first — nobody can answer yet", "warn"); return; }
     setBusy(true);
     createThread(cid, {
       ref: gitRef,
@@ -144,6 +149,17 @@ export function ThreadComposer({
         <div className="cs-raise-hand-caption">queued — the agent addresses this at its next checkpoint</div>
       )}
       {routingHint ? <div className="cs-routing-hint">{routingHint}</div> : null}
+      {questionBlocked ? (
+        <div className="cs-no-agent-warn" role="alert">
+          <span>
+            <b>No AI agent in this workspace</b> — nobody can answer a question yet.
+            Register an agent first, then come back and ask.
+          </span>
+          <button type="button" className="btn sm" onClick={() => navigateScoped("/agents")}>
+            Register an agent
+          </button>
+        </div>
+      ) : null}
       <textarea
         className="cs-composer-body"
         value={body}
@@ -172,7 +188,7 @@ export function ThreadComposer({
         {onCancel ? (
           <button type="button" className="btn ghost sm" onClick={onCancel}>Cancel</button>
         ) : null}
-        <button type="button" className="btn approve sm" disabled={busy} onClick={submit}>
+        <button type="button" className="btn approve sm" disabled={busy || questionBlocked} onClick={submit}>
           {busy ? "Posting…" : "Post"}
         </button>
       </div>
