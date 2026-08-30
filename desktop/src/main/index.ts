@@ -51,7 +51,14 @@ const nodeEngineFs: EngineFs = {
   copyTree: (src, dst) => cpSync(src, dst, { recursive: true }),
   mkdirp: (p) => void mkdirSync(p, { recursive: true }),
   chmod: (p, mode) => chmodSync(p, mode),
-  exists: (p) => existsSync(p)
+  exists: (p) => existsSync(p),
+  readDir: (p) => {
+    try {
+      return readdirSync(p)
+    } catch {
+      return []
+    }
+  }
 }
 
 

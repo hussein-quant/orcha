@@ -105,6 +105,10 @@ def _copy_tree(src, dst: pathlib.Path) -> None:
     cli_project_setup.copy_tree(src, dst)
 
 
+def _migration_tip(source) -> int:
+    return cli_project_setup.migration_tip(source)
+
+
 def _install_orcha_skill_templates(root: pathlib.Path):
     return cli_project_setup.install_skill_templates(
         root, PKG_TEMPLATES, _codex_skill_body

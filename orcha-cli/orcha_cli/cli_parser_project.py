@@ -120,6 +120,13 @@ def register_project_commands(
         "CLI reinstall so an existing project gets new portal code + compose (e.g. the R1 "
         "migration runner); then `orcha up`/startup migrates the live volume.",
     )
+    upgrade.add_argument(
+        "--allow-downgrade",
+        action="store_true",
+        help="override the downgrade guard: re-copy templates even when this CLI is OLDER "
+        "than the project (project's migration tip above the CLI's). Without this flag, "
+        "an outdated CLI refuses rather than silently downgrading the portal.",
+    )
     upgrade.set_defaults(func=handlers["upgrade"])
 
     update = sub.add_parser(

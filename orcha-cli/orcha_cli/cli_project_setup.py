@@ -65,6 +65,27 @@ def find_free_port(start: int, span: int = 100) -> int:
     raise SystemExit(f"error: no free port in range {start}..{start + span}")
 
 
+def migration_tip(source) -> int:
+    """Highest NNN_*.sql migration number in a migrations dir (Traversable or Path).
+
+    The migration chain is the one monotonic version stamp that exists on BOTH
+    sides of an upgrade — the CLI's packaged templates AND every stack's
+    .orcha/migrations copy — so comparing tips detects an older CLI about to
+    overwrite a newer stack (the silent-downgrade incident: an outdated
+    `orcha upgrade` re-copied pre-React templates over an upgraded portal).
+    Returns 0 for a missing/empty dir (unknown = oldest, never blocks)."""
+    tip = 0
+    try:
+        names = [item.name for item in source.iterdir()]
+    except (FileNotFoundError, OSError):
+        return 0
+    for name in names:
+        m = re.match(r"^(\d+)_.*\.sql$", name)
+        if m:
+            tip = max(tip, int(m.group(1)))
+    return tip
+
+
 def copy_tree(src, dst: pathlib.Path) -> None:
     """Recursively copy an importlib Traversable into a filesystem directory."""
     dst.mkdir(parents=True, exist_ok=True)

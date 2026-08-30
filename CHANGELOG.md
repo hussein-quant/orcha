@@ -11,6 +11,12 @@ missing.
 ## [Unreleased]
 
 ### Added
+- Downgrade guard on `orcha upgrade` (CLI and desktop app): the migration-chain
+  tip is compared between the installed templates and the project's
+  `.orcha/migrations` copy — an older CLI/app now refuses with "update the CLI
+  first" instead of silently re-copying older templates over a newer portal
+  (vanilla shell at `/`, 404 feature routes). `--allow-downgrade` overrides for
+  deliberate rollbacks.
 - PR human-attribution CLI capture: `orcha init --as` / `orcha connect --as`
   accept optional `--github <handle>` and `--git-email <email>`, stored on the
   human's agents row (mig 036/042) so agent-opened PRs credit the triggering

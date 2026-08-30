@@ -2,8 +2,9 @@ import { afterEach, describe, it, expect, vi } from 'vitest'
 import { provision, type EngineDeps } from './initEngine'
 import type { ProgressEvent, ProvisionStep } from '../shared/types'
 
-/** A fake fs that records writes and lets us seed reads. */
-function fakeFs(seed: Record<string, string> = {}) {
+/** A fake fs that records writes and lets us seed reads. `dirs` seeds readDir
+ *  listings (e.g. migration dirs for the downgrade guard). */
+function fakeFs(seed: Record<string, string> = {}, dirs: Record<string, string[]> = {}) {
   const files = new Map<string, string>(Object.entries(seed))
   return {
     files,
@@ -16,7 +17,8 @@ function fakeFs(seed: Record<string, string> = {}) {
     copyTree: vi.fn(),
     mkdirp: vi.fn(),
     chmod: vi.fn(),
-    exists: vi.fn((p: string) => files.has(p))
+    exists: vi.fn((p: string) => files.has(p)),
+    readDir: vi.fn((p: string) => dirs[p] ?? [])
   }
 }
 
@@ -150,6 +152,49 @@ describe('provision — upgrade mode', () => {
     const skipped = events.filter((e) => e.status === 'skip').map((e) => e.step)
     expect(skipped).toEqual(expect.arrayContaining(['create-container', 'register-human']))
     expect((d.findFreePort as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled() // ports preserved
+  })
+
+  it('refuses to downgrade: stack migration tip above the bundled templates aborts before any write', async () => {
+    const fs = fakeFs(
+      {
+        '/proj/.claude/orcha.json': JSON.stringify({
+          project_name: 'demo',
+          api_port: 8001,
+          db_port: 5433,
+          bridge_port: 8766
+        })
+      },
+      {
+        '/tpl/migrations': ['001_init.sql', '026_old_tip.sql'],
+        '/proj/.orcha/migrations': ['001_init.sql', '048_wake_backoff.sql']
+      }
+    )
+    const d = deps({ fs })
+    await expect(
+      provision({ folder: '/proj', mode: 'upgrade' }, () => {}, d)
+    ).rejects.toMatchObject({ code: 'PROVISION_FAILED' })
+    expect(fs.writeFile).not.toHaveBeenCalled() // refused BEFORE rendering compose
+    expect(fs.copyTree).not.toHaveBeenCalled()
+  })
+
+  it('equal or newer bundled templates pass the guard (upgrade proceeds)', async () => {
+    const fs = fakeFs(
+      {
+        '/proj/.claude/orcha.json': JSON.stringify({
+          project_name: 'demo',
+          api_port: 8001,
+          db_port: 5433,
+          bridge_port: 8766
+        })
+      },
+      {
+        '/tpl/migrations': ['048_wake_backoff.sql'],
+        '/proj/.orcha/migrations': ['048_wake_backoff.sql']
+      }
+    )
+    const d = deps({ fs })
+    await provision({ folder: '/proj', mode: 'upgrade' }, () => {}, d)
+    expect(fs.copyTree).toHaveBeenCalled()
   })
 })
 

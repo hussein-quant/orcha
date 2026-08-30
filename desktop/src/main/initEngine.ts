@@ -17,6 +17,8 @@ export interface EngineFs {
   mkdirp(p: string): void
   chmod(p: string, mode: number): void
   exists(p: string): boolean
+  /** Names in a directory; [] when the dir is missing/unreadable. */
+  readDir(p: string): string[]
 }
 
 export type FetchJson = (url: string, init?: { method?: string; body?: unknown }) => Promise<unknown>
@@ -104,6 +106,28 @@ export async function provision(
       await compose(deps.exec, orchaDir, ['down', '-v'])
     } catch {
       // a not-yet-existing stack down -v is fine; continue.
+    }
+  }
+
+  // Downgrade guard (parity with the CLI's `orcha upgrade`): the migration chain is a
+  // monotonic stamp on BOTH sides — the app's bundled templates and the stack's
+  // .orcha/migrations copy. An older app whose tip is below the stack's would re-copy
+  // older templates over a newer portal (silent downgrade). Refuse before any writes.
+  if (opts.mode === 'upgrade') {
+    const tip = (dir: string): number =>
+      deps.fs
+        .readDir(dir)
+        .reduce((t, n) => Math.max(t, Number(/^(\d+)_.*\.sql$/.exec(n)?.[1] ?? 0)), 0)
+    const cliTip = tip(path.join(deps.templatesRoot(), 'migrations'))
+    const stackTip = tip(path.join(orchaDir, 'migrations'))
+    if (cliTip < stackTip) {
+      fail(
+        'render-compose',
+        'PROVISION_FAILED',
+        `This project is on a NEWER Orcha than this app (project migrations reach ` +
+          `${String(stackTip).padStart(3, '0')}, the app ships ${String(cliTip).padStart(3, '0')}). ` +
+          `Upgrading now would downgrade the portal — update the Orcha app first, then retry.`
+      )
     }
   }
 
