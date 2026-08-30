@@ -96,13 +96,16 @@ export function GitHubAccessSection() {
   }, [cid]);
 
   // App-installation probe: reuse the existing repo-listing endpoint rather
-  // than inventing a route. available:true + source !== "pat" means an App
-  // token answered the call — the App wins precedence over a PAT.
+  // than inventing a route. Only a definitive source === "app" means an App
+  // token answered the call. A token-less stack with a mounted local tree
+  // still returns available:true (the prepended "local" entry) with source
+  // null — inferring "app" from that hid the PAT input on exactly the stacks
+  // that needed it (the desktop-provisioned / stale-.env case).
   const probeApp = useCallback(async () => {
     const res = await gaApi("GET", "/api/github/repos");
     if (res.ok && res.body) {
       const body = res.body as ReposProbe;
-      setAppManaged(!!body.available && body.source !== "pat");
+      setAppManaged(!!body.available && body.source === "app");
     } else {
       setAppManaged(false);
     }

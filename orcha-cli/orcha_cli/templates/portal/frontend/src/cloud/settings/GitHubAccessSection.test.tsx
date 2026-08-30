@@ -70,6 +70,17 @@ describe("GitHubAccessSection", () => {
     await waitFor(() => expect(screen.queryByText("GitHub App installation (managed)")).not.toBeInTheDocument());
   });
 
+  it("local-only availability (source null, no token) is NOT app-managed — the PAT input stays visible", async () => {
+    // A token-less stack with a mounted local tree returns available:true via the
+    // prepended "local" repo entry and source:null. That must not paint the managed
+    // banner or collapse the PAT section — it's exactly the stack that needs a token.
+    stubFetch({ repos: { available: true, source: null, repos: [{ full_name: "local" }] } });
+    mount();
+    await waitFor(() => expect(screen.queryByText("GitHub App installation (managed)")).not.toBeInTheDocument());
+    expect(document.querySelector("#ga-pat-details")).toBeNull();
+    expect(await screen.findByPlaceholderText(/Paste a GitHub personal access token/)).toBeInTheDocument();
+  });
+
   it("PAT configured (db): masked value, set_at, Test/Replace/Remove", async () => {
     stubFetch({
       pat: { configured: true, source: "db", masked: "ghp_...abcd", set_at: new Date().toISOString() },
