@@ -31,8 +31,10 @@ def test_linkify_is_applied_to_authored_text_surfaces():
     assert "<Linkified text={m.body}" in tasks, "task thread message not linkified"
     assert "<Linkified text={isPlan" in tasks, "plan body / result not linkified (verification gate)"
     # BOTH task-result surfaces must linkify: the verification-gate result AND the normal
-    # task-detail Result block — and neither may regress back to bare esc().
-    assert "<Linkified text={t.result}" in tasks, "normal task-detail Result not linkified"
+    # task-detail Result block — and neither may regress back to bare esc(). Since #66 the
+    # result passes through resultText() first (JSONB results are normalized to text so
+    # structured results never render as [object Object]) — the pin follows the wrap.
+    assert "<Linkified text={resultText(t.result)}" in tasks, "normal task-detail Result not linkified"
     assert "esc(t.result)" not in tasks, "a task-result surface regressed to bare esc()"
     conv = (SRC / "pages" / "agents" / "Conversation.tsx").read_text()
     # conversation turns render via mdText (rich markdown), which still linkifies URLs —
