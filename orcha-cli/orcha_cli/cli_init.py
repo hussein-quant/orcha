@@ -189,14 +189,23 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     # 8. Orcha#30: register the first human agent (kind='human').
     if container_id is not None:
         try:
+            # PR attribution: carry the optional GitHub identity so agent-opened PRs
+            # credit this human (docs/agent-prs.md). Omit keys when absent (NULL).
+            _human_body = {
+                "alias": human_alias,
+                "role": "operator",
+                "kind": "human",
+                # prompt intentionally omitted — humans don't carry a system prompt
+            }
+            _gh = (getattr(args, "github_login", None) or "").lstrip("@").strip()
+            _ge = (getattr(args, "git_email", None) or "").strip()
+            if _gh:
+                _human_body["github_login"] = _gh
+            if _ge:
+                _human_body["git_email"] = _ge
             data = _post_json(
                 f"{api_base}/api/containers/{container_id}/agents",
-                {
-                    "alias": human_alias,
-                    "role": "operator",
-                    "kind": "human",
-                    # prompt intentionally omitted — humans don't carry a system prompt
-                },
+                _human_body,
             )
             human_agent_id = data["agent_id"]
             tabs_dir.mkdir(parents=True, exist_ok=True)

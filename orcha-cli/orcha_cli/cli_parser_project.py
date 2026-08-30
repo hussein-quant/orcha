@@ -57,6 +57,21 @@ def register_project_commands(
         default=None,
         help="alias for the first human agent (default: $USER or 'operator')",
     )
+    # PR attribution (docs/agent-prs.md): optional GitHub identity for the first human,
+    # so agent-opened PRs on tasks they trigger @mention them and carry a
+    # Co-authored-by trailer. Nullable/back-compat — omit and PRs attribute by alias.
+    init.add_argument(
+        "--github",
+        dest="github_login",
+        default=None,
+        help="the first human's GitHub username (for attributing agent-opened PRs)",
+    )
+    init.add_argument(
+        "--git-email",
+        dest="git_email",
+        default=None,
+        help="the first human's git commit email (for the Co-authored-by trailer)",
+    )
     init.add_argument(
         "--no-github",
         action="store_true",
@@ -149,5 +164,18 @@ def register_project_commands(
         dest="as_user",
         default=None,
         help="register an additional human (kind='human') with this alias in one step",
+    )
+    # PR attribution: optional GitHub identity carried alongside --as (see init --github).
+    connect.add_argument(
+        "--github",
+        dest="github_login",
+        default=None,
+        help="the human's GitHub username (for attributing agent-opened PRs)",
+    )
+    connect.add_argument(
+        "--git-email",
+        dest="git_email",
+        default=None,
+        help="the human's git commit email (for the Co-authored-by trailer)",
     )
     connect.set_defaults(func=handlers["connect"])

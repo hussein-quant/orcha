@@ -10,6 +10,13 @@ missing.
 
 ## [Unreleased]
 
+### Added
+- PR human-attribution CLI capture: `orcha init --as` / `orcha connect --as`
+  accept optional `--github <handle>` and `--git-email <email>`, stored on the
+  human's agents row (mig 036/042) so agent-opened PRs credit the triggering
+  human (`> 🧑 Triggered by @<handle>` blockquote + `Co-authored-by:` trailer;
+  docs/agent-prs.md). Back-compatible: omitted → NULL → alias-only attribution.
+
 ### Changed
 - Portal frontend rewritten in React 18 + TypeScript + Vite (all six pages,
   live terminal included) at full parity with the vanilla portal — same clean
