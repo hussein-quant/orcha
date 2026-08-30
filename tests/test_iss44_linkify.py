@@ -31,7 +31,9 @@ def test_linkify_is_applied_to_authored_text_surfaces():
     assert "<Linkified text={m.body}" in tasks, "task thread message not linkified"
     assert "<Linkified text={isPlan" in tasks, "plan body / result not linkified (verification gate)"
     # BOTH task-result surfaces must linkify: the verification-gate result AND the normal
-    # task-detail Result block — and neither may regress back to bare esc().
+    # task-detail Result block — and neither may regress back to bare esc(). Since #66 the
+    # result passes through resultText() first (JSONB results are normalized to text so
+    # structured results never render as [object Object]) — the pin follows the wrap.
     assert "<Linkified text={resultText(t.result)}" in tasks, "normal task-detail Result not linkified"
     assert "esc(t.result)" not in tasks, "a task-result surface regressed to bare esc()"
     conv = (SRC / "pages" / "agents" / "Conversation.tsx").read_text()
@@ -47,8 +49,11 @@ def test_linkify_is_applied_to_authored_text_surfaces():
     # React port the row text renders as plain JSX (auto-escaped), never <Linkified>.
     assert 'className="act"' in home, "activity-feed row anchor missing"
     assert "<Linkified text={e.text}" not in home, "activity-feed text must stay plain (it's inside a row anchor)"
-    css = (PORTAL / "static" / "styles" / "components.css").read_text()  # modular split (#191)
-    assert ".lnk" in css, "no link styling"
+    # cloud: styles.css is an @import entrypoint; .lnk lives in the styles/ modules
+    css_dir = PORTAL / "static"
+    blobs = [(css_dir / "styles.css").read_text()]
+    blobs += [f.read_text() for f in (css_dir / "styles").glob("*.css")]
+    assert any(".lnk" in b for b in blobs), "no link styling"
 
 
 def test_linkify_behavior_is_safe_and_correct():

@@ -5,7 +5,9 @@ from __future__ import annotations
 import ipaddress
 import os
 import pathlib
+import re
 import secrets
+import shutil
 import socket
 import subprocess
 from typing import Callable, Optional
@@ -13,6 +15,42 @@ from typing import Callable, Optional
 
 MASTER_KEY_ENV = "ORCHA_SECRET_KEY"
 PAIRING_HOST_ENV = "ORCHA_PAIRING_HOST"
+
+# GitHub auto-bind (project-runtime epic): recognise origin remotes that point at
+# github.com in every shape git writes them — https (with optional creds/`.git`),
+# scp-style ssh (git@github.com:o/r.git), and ssh://git@github.com/o/r. The captured
+# owner/name must satisfy the portal's ContainerGithubBinding pattern
+# (^[\w.-]+/[\w.-]+$), so the segments here use the same character class.
+_GITHUB_ORIGIN_RE = re.compile(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?/?$")
+
+
+def parse_github_origin(url: str) -> Optional[str]:
+    """Return ``owner/name`` when a git remote URL points at github.com, else None."""
+    match = _GITHUB_ORIGIN_RE.search((url or "").strip())
+    if not match:
+        return None
+    owner, name = match.group(1), match.group(2)
+    return f"{owner}/{name}" if owner and name else None
+
+
+def detect_github_repo(project_root: pathlib.Path) -> Optional[str]:
+    """Read the checkout's ``origin`` remote and map it to owner/name (None if not GitHub).
+
+    Any failure — not a git repo, no origin remote, git missing — resolves to None:
+    auto-bind is best-effort sugar, never a reason for `orcha init` to fail.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_github_origin(result.stdout)
 
 
 def find_free_port(start: int, span: int = 100) -> int:
@@ -153,6 +191,31 @@ def export_pairing_host(discover: Callable[[], Optional[str]]) -> None:
         os.environ[PAIRING_HOST_ENV] = host
 
 
+def export_gh_token() -> None:
+    """Local run: ride the developer's existing `gh` login for GitHub features.
+
+    The portal runs in a container and can't reach the host keyring, but the
+    host CLI can — mint the token gh already holds and pass it through the
+    compose env as ORCHA_GITHUB_PAT (lowest-precedence token source; App
+    installation tokens still win). An explicit ORCHA_GITHUB_PAT, a missing
+    gh, or a logged-out gh all leave the env untouched — the Settings →
+    GitHub access card remains the fallback. Never raises."""
+    if (os.environ.get("ORCHA_GITHUB_PAT") or "").strip():
+        return
+    if not shutil.which("gh"):
+        return
+    try:
+        probe = subprocess.run(
+            ["gh", "auth", "token"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    token = (probe.stdout or "").strip()
+    if probe.returncode == 0 and token:
+        os.environ["ORCHA_GITHUB_PAT"] = token
+        print("[orcha] GitHub: using your `gh` CLI login for the portal's GitHub features")
+
+
 def compose(
     orcha_dir: pathlib.Path,
     *args: str,
@@ -170,5 +233,6 @@ def compose(
                 pass
         ensure_key(orcha_dir)
         export_host()
+        export_gh_token()
     command = ["docker", "compose", "-f", str(orcha_dir / "docker-compose.yml"), *args]
     return subprocess.run(command, check=check, capture_output=capture, text=capture)
