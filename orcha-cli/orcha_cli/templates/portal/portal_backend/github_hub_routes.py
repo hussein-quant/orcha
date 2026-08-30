@@ -58,6 +58,7 @@ from portal_backend.github_routes import _read_pat, _read_token, _read_token_map
 from portal_backend.identity_routes import require_member_read, trusted_actor
 from portal_backend.schemas.github_hub import GithubStartBody
 from portal_backend.task_start_core import (
+    ORCHA_START_COMMENT_MARKER,
     find_open_gh_task,
     find_open_gh_tasks,
     start_task_from_github,
@@ -81,6 +82,12 @@ CACHE_TTL_SECONDS = 60
 # -first for display).
 PR_FILES_PER_PAGE = 100
 ISSUE_COMMENTS_LIMIT = 20
+# How many 100-comment pages a Fix dispatch will walk to net Orcha's OWN round-trip
+# comments out of the PR's conversation-comment count (_orcha_comment_count). Five pages
+# = 500 comments, far past any real PR thread, and it bounds one Fix click's worst case
+# at five extra GitHub calls. Past the cap the netting simply under-counts, which is the
+# pre-fix behaviour — never a wrong-direction over-count.
+_FIX_COMMENT_PAGE_CAP = 5
 # Per-file `patch` text budget for the Files-changed diff view: files are walked IN ORDER
 # (the order GitHub's files-page returns them) and each file's patch is included until the
 # running total of patch bytes would exceed this budget; every file from that point on gets
@@ -635,6 +642,52 @@ def _fix_description(*, number: int, title: str, head: str, draft: bool,
             f"Never merge; stop for human review.")
 
 
+def _orcha_authored_comment(comment: dict) -> bool:
+    """Is this issue/PR comment one ORCHA ITSELF posted (task_start_core's round-trip
+    "🤖 Orcha started task ..." note), rather than real feedback from a human?
+
+    Matched on the body's opening literal (ORCHA_START_COMMENT_MARKER), NOT on the
+    author's login or `user.type == "Bot"`, because the author identity is not stable:
+    the same comment is posted by the App's `<slug>[bot]` when a container runs on an
+    installation token, but by a REAL human login when it falls through to a stored PAT
+    (_resolve_repo_token's fallback). The body literal is the one thing Orcha controls
+    in both cases. Cost of the tradeoff: a human who opens a comment by quoting that
+    exact line verbatim (no `>` quote marker, no preamble) is misread as Orcha and their
+    comment goes uncounted — a deliberately narrower failure than the one being fixed,
+    where EVERY Orcha dispatch inflated the count for every PR.
+    """
+    body = comment.get("body") or ""
+    return body.lstrip().startswith(ORCHA_START_COMMENT_MARKER)
+
+
+def _orcha_comment_count(repo: str, number: int, token: str, total: int) -> int:
+    """How many of this issue/PR's `total` conversation comments Orcha posted itself.
+
+    Paged at 100/request and capped at _FIX_COMMENT_PAGE_CAP pages, so a PR with a
+    pathological comment thread can't turn one Fix click into dozens of GitHub calls.
+    Every failure mode here UNDER-counts (a fetch error, or an unexpected non-array
+    payload, stops the walk; comments past the cap are never scanned), which degrades to
+    exactly the pre-fix behaviour — an over-count would be worse, since it could hide
+    real review feedback from the DoD. Nothing in here raises: this is an enrichment
+    nicety and must never be what fails a Fix click.
+    """
+    pages = min(-(-total // 100), _FIX_COMMENT_PAGE_CAP)   # ceil-div, then cap
+    found = 0
+    for page in range(1, pages + 1):
+        try:
+            raw = _gh_get(
+                f"/repos/{repo}/issues/{number}/comments?per_page=100&page={page}",
+                token)
+        except RuntimeError:
+            break   # degrade to what we've counted so far — never fail the dispatch
+        if not isinstance(raw, list) or not raw:
+            break   # empty page, or a shape that isn't a comment array — stop, don't raise
+        found += sum(1 for c in raw if isinstance(c, dict) and _orcha_authored_comment(c))
+        if len(raw) < 100:
+            break
+    return found
+
+
 def _pull_fix_context(repo: str, number: int, token: str) -> dict:
     """The minimal live-state fetch a Fix dispatch needs to compose _fix_description:
     one PR object + one checks rollup (WITH per-run names) — deliberately NOT the full
@@ -642,12 +695,29 @@ def _pull_fix_context(repo: str, number: int, token: str) -> dict:
     files, so skipping that fetch keeps the dispatch click itself fast). Returns the
     kwargs _fix_description expects, straight off the raw GitHub shapes. A 404 for the
     number propagates as RuntimeError (github_status:404) exactly like every other
-    _gh_get caller here — the route's existing _detail_error_payload handles it."""
+    _gh_get caller here — the route's existing _detail_error_payload handles it.
+
+    ONE exception to "straight off the raw shapes": `comments_count`. Every dispatch
+    posts a "🤖 Orcha started task ..." comment back on the PR
+    (task_start_core._post_start_comment), and GitHub counts that in the PR object's
+    `comments` — so a SECOND Fix click on the same PR read Orcha's own note back as
+    "1 review comment to address" and told the agent to go address a phantom. The raw
+    count is therefore netted against _orcha_comment_count. This costs at most one
+    extra GitHub call, and only when the PR actually has conversation comments (a PR
+    with `comments == 0` has nothing to net out, so the call is skipped entirely).
+
+    `review_comments` needs NO such netting: those are INLINE code-review comments on
+    the `/pulls/{n}/comments` endpoint, and Orcha only ever posts to the conversation
+    endpoint (`/issues/{n}/comments`) — so nothing Orcha writes can land in that count.
+    """
     pull = _gh_get(f"/repos/{repo}/pulls/{number}", token)
     head = pull.get("head") or {}
     sha = head.get("sha")
     checks = _checks_rollup(repo, sha, token, include_runs=True) if sha else {
         "passed": 0, "failing": 0, "pending": 0, "total": 0, "runs": []}
+    comments = pull.get("comments") or 0
+    if comments > 0:
+        comments = max(0, comments - _orcha_comment_count(repo, number, token, comments))
     return {
         "number": pull.get("number"),
         "title": pull.get("title") or "",
@@ -656,7 +726,7 @@ def _pull_fix_context(repo: str, number: int, token: str) -> dict:
         "mergeable_state": pull.get("mergeable_state"),
         "checks": checks,
         "review_comments_count": pull.get("review_comments"),
-        "comments_count": pull.get("comments"),
+        "comments_count": comments,
     }
 
 
