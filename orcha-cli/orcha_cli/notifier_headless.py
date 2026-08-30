@@ -145,6 +145,20 @@ def spawn_headless(
         if reason is not None:
             # Spec §3.2 hard rule: fail loudly; NEVER fall back to a host process.
             return False, f"(sandbox unavailable: {reason})", None
+        # Issue #75 (OOM incident F1): the LAST-MOMENT box-wide budget check. Counting
+        # ground-truth live managed containers HERE — after preflight, right before we
+        # commit a container name and Popen — is what stops racing daemons from
+        # double-booking the box between ticks (six-in-11s → global OOM). A deferral is
+        # NOT a failure: stamp spawn_info['deferred'] so the caller keeps the candidate
+        # eligible for a later tick (no worktree teardown, no "could not wake" noise)
+        # and logs the cap ONCE per tick per deferral. NOT applied in dry-run (no real
+        # container is created, so nothing is spent against the budget).
+        if not dry_run:
+            defer_reason = _sandbox.cap_defers_spawn(sandbox_cfg)
+            if defer_reason is not None:
+                if spawn_info is not None:
+                    spawn_info["deferred"] = True
+                return False, f"(deferred: {defer_reason})", None
         sbx_name = _sandbox.new_container_name()
         if spawn_info is not None:
             spawn_info["sandbox_container_id"] = sbx_name

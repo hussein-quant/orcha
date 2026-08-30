@@ -21,7 +21,12 @@ def get_container(
     full thread is lazy-fetched on expand via GET /api/tasks/{tid}/messages. Tasks/requests
     are priority-ordered and capped at task_limit/request_limit (the portal passes the count
     it has loaded so the poll refreshes that window; `task_total`/`request_total` gate
-    'load more'). Defaults are generous so non-portal callers still get the full set."""
+    'load more'). `task_open_total`/`request_open_total` (additive) are the non-terminal /
+    'open'-status counts — the ONE authoritative source for both the sidebar nav badges and
+    the page-header counts, so the two can never read differently again (GH sidebar/iOS count
+    mismatch: the header said '62 tasks' while the sidebar badge said '0' — different
+    semantics, same-looking number). Defaults are generous so non-portal callers still get
+    the full set."""
     if not _valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
     task_limit = max(1, min(task_limit, 1000))
@@ -203,10 +208,19 @@ def get_container(
 
         # ISS-68: TRIMMED, priority-ordered, capped task rows (same shape as GET
         # /api/containers/{cid}/tasks — message_summary + plan_message, NO full thread).
+        # GH #(sidebar/iOS count mismatch): task_open_total rides the SAME count(*) pass
+        # (one extra FILTER column, not a second query) — non-terminal statuses (everything
+        # but completed/cancelled). This is the one authoritative "open tasks" number; the
+        # sidebar badge AND the page header both read it so they can never diverge again.
         cur.execute(
-            "SELECT count(*) AS n FROM tasks t WHERE t.container_id = %s", (cid,)
+            """SELECT count(*) AS n,
+                      count(*) FILTER (WHERE t.status NOT IN ('completed', 'cancelled')) AS open_n
+               FROM tasks t WHERE t.container_id = %s""",
+            (cid,),
         )
-        task_total = cur.fetchone()["n"]
+        _task_counts = cur.fetchone()
+        task_total = _task_counts["n"]
+        task_open_total = _task_counts["open_n"]
         task_order = (
             "ORDER BY CASE t.status WHEN 'needs_verification' THEN 0 "
             "WHEN 'in_progress' THEN 1 ELSE 2 END, t.priority, t.created_at"
@@ -217,10 +231,17 @@ def get_container(
         tasks = cur.fetchall()
 
         # ISS-68: priority-ordered (open→answered→closed), capped request rows.
+        # request_open_total mirrors task_open_total above: same query, one extra FILTER
+        # column, the single authoritative "open requests" number for badge + header.
         cur.execute(
-            "SELECT count(*) AS n FROM requests WHERE container_id = %s", (cid,)
+            """SELECT count(*) AS n,
+                      count(*) FILTER (WHERE status = 'open') AS open_n
+               FROM requests WHERE container_id = %s""",
+            (cid,),
         )
-        request_total = cur.fetchone()["n"]
+        _request_counts = cur.fetchone()
+        request_total = _request_counts["n"]
+        request_open_total = _request_counts["open_n"]
         cur.execute(
             """SELECT id, type, status, priority, requester_id, target_id,
                       payload, response, rejection_reason, spawned_task_id,
@@ -252,4 +273,9 @@ def get_container(
         "requests": requests,
         "task_total": task_total,
         "request_total": request_total,
+        # Additive (GH sidebar/iOS count mismatch): non-terminal task count / open request
+        # count. Older cached snapshots (or callers that predate this field) simply lack
+        # the key — every consumer treats absence as "fall back to prior behavior".
+        "task_open_total": task_open_total,
+        "request_open_total": request_open_total,
     }

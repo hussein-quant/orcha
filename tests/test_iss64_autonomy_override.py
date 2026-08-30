@@ -455,33 +455,67 @@ async def test_full_override_audit_records_resolved_level(
 
 
 # ---------------------------------------------------------------- portal source contracts (UI teeth)
+#
+# MIGRATED (portal React migration): the vanilla agents.html override seg (autOvrSeg /
+# canEditAutOvr / ovrBadge) and the app-autonomy.js enforce chip (data-enforce) are retired
+# with the static files. The React port's autonomy surface is the shell's AutonomySwitch
+# (frontend/src/shell/Shell.tsx): the 3-level container slider POSTing the SAME /autonomy
+# endpoint, human-gated. The per-agent override chips, the roster override/lock badge, and
+# the enforce chip have NOT yet been ported to the React frontend — that UI is a tracked
+# fast-follow of the React adoption. The #64 CONTRACT itself stays fully covered above at
+# the API layer (PATCH gates, mig-039 grants, the exposure fields the future UI will render
+# from: autonomy_override / effective_autonomy / autonomy_enforced on every surface).
 
-def test_agents_page_wires_override_control_and_roster_badge():
-    """The agents page carries the per-agent autonomy control (Inherit/plan/pr/full chips PATCHing
-    autonomy_override with an explicit null for Inherit) and the roster override badge (lock
-    glyph while the container enforces). Cloud twist: the selector's enabled state routes through
-    canEditAutOvr(), which keys off actingGrant('manage_autonomy') + actingReadOnly() — owners /
-    grant holders edit, viewers see the badge read-only. Source-contract teeth."""
-    from portal_source import page_source
-    src = page_source("agents.html")
-    assert "autOvrSeg" in src, "agent Controls card lost the autonomy override seg"
-    assert 'data-ovr="null"' in src or "o.id==null?'null'" in src, \
-        "the Inherit chip must PATCH an explicit null (clear-to-inherit)"
-    assert "autonomy_override: ovr" in src, "the control no longer PATCHes autonomy_override"
-    assert "effective_autonomy" in src, "the control no longer surfaces the EFFECTIVE level"
-    assert "ovrBadge" in src and "rovr" in src, "roster lost the override badge"
-    assert "🔒" in src, "the enforced state lost its lock glyph"
-    assert "canEditAutOvr" in src, "the selector lost its access-model affordance gate"
-    assert 'actingGrant("manage_autonomy")' in src, \
-        "the selector must key off the manage_autonomy grant (owners implicit)"
-    assert "actingReadOnly" in src, "viewers must see the control read-only"
+import pathlib
+import re
 
 
-def test_topbar_slider_wires_enforce_switch():
-    """The shared topbar autonomy module carries the 'Enforce for all agents' chip beside the
-    3-level slider, POSTing autonomy_enforced through the SAME /autonomy endpoint."""
-    from portal_source import script_source
-    src = script_source("app.js")
-    assert "data-enforce" in src, "the enforce chip is gone from the level slider host"
-    assert "autonomy_enforced" in src, "the module no longer reads/writes autonomy_enforced"
-    assert src.count("autonomy_enforced:") >= 1, "no POST body carries autonomy_enforced"
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _team_plan(monkeypatch):
+    """Autonomy-override writes ride member-mutation-adjacent gates — a Team-plan
+    surface under the plan-gating addendum; this suite tests overrides, not the
+    gate (tests/test_plan_gating.py owns that)."""
+    monkeypatch.setenv("ORCHA_PLAN", "team")
+
+_FRONTEND = (pathlib.Path(__file__).resolve().parent.parent / "orcha-cli" / "orcha_cli"
+             / "templates" / "portal" / "frontend" / "src")
+
+
+def test_shell_autonomy_switch_posts_levels_to_the_same_endpoint():
+    """The React shell's AutonomySwitch is the surviving autonomy UI: the plan/pr/full rungs
+    POST the SAME /api/containers/{cid}/autonomy endpoint the enforce switch and this suite's
+    API teeth exercise (one endpoint, one contract), and the control is human-gated (an
+    acting human must be picked before any write fires)."""
+    src = (_FRONTEND / "shell" / "Shell.tsx").read_text()
+    assert "function AutonomySwitch" in src, "the shell lost the AutonomySwitch"
+    assert "/autonomy" in src and 'sendJSON("POST"' in src, \
+        "the level slider no longer POSTs the /autonomy endpoint"
+    for level in ('level: "plan"', 'level: "pr"', 'level: "full"'):
+        assert level in src, f"the slider lost the {level} rung"
+    assert "actor_agent_id" in src, "the autonomy write no longer names its acting human"
+    assert "Pick an acting human to change autonomy" in src, \
+        "the slider lost its human-gate affordance"
+
+
+def test_react_override_control_ships_with_all_mig039_teeth():
+    """The #64 override UI landed in the React frontend (AgentsPage) — the former
+    tripwire now pins its four mandatory teeth so a refactor can't shed them:
+    (1) mig-039 affordance gates, (2) explicit-null Inherit chip, (3) the
+    effective_autonomy badge, (4) the enforced lock glyph. Behavior coverage:
+    frontend AgentsPage.autonomy.test.tsx (8 tests)."""
+    src = (_FRONTEND / "pages" / "agents" / "AgentsPage.tsx").read_text()
+    # (1) gates: grant + viewer read-only + owner path
+    assert "canEditAutOvr" in src and "manage_autonomy" in src, "affordance gates missing"
+    assert '"viewer"' in src, "viewer read-only gate missing"
+    # (2) Inherit sends an explicit null (clear-vs-omit contract)
+    assert "autonomy_override" in src and "Inherit" in src, "Inherit chip missing"
+    assert re.search(r"autonomy_override[\"']?\s*:\s*", src), "override not sent in the PATCH body"
+    # (3) effective badge from the server-computed field
+    assert "effective_autonomy" in src and "Effective:" in src, "effective badge missing"
+    # (4) enforced lock glyph parks the chips
+    assert "autonomy_enforced" in src, "enforce gate missing"
+    # graceful absence on open backends
+    assert "showAutOvr" in src, "absence gate missing"

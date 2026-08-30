@@ -17,9 +17,12 @@ def _worktree_for(candidate, auto_tasks, live_workers, dry_run, services):
     code_wake = (
         bool(auto_tasks)
         or bool(candidate.get("wake_task_id"))
+        or bool(candidate.get("context_task_id"))
         or not single_noncode
     )
-    task_id = auto_tasks[0] if auto_tasks else candidate.get("wake_task_id")
+    task_id = candidate.get("context_task_id") or (
+        auto_tasks[0] if auto_tasks else candidate.get("wake_task_id")
+    )
     worktree = branch = None
     task_worktree = False
     if code_wake and headless_cwd and not dry_run and live_workers is not None:
@@ -53,7 +56,7 @@ def _worker_state(
 ):
     """Build the daemon-owned state used by progress and completion reapers."""
     now = time.time()
-    auto_tasks = candidate.get("auto_start_task_ids") or []
+    task_bound = run_task_id is not None
     handled = candidate.get("handled_event_ids") or []
     wake_ack_ts = candidate.get("ack_through_ts")
     if wake_ack_ts is None:
@@ -66,6 +69,7 @@ def _worker_state(
         "reasoning_effort": candidate.get("reasoning_effort"),
         "model_runtime": candidate.get("model_runtime"),
         "task_id": run_task_id,
+        "task_bound": task_bound,
         "task_worktree": task_worktree,
         "handled_event_ids": handled,
         "event": event,
@@ -83,6 +87,10 @@ def _worker_state(
         "worktree": worktree,
         "branch": branch,
         "base_cwd": candidate.get("headless_cwd"),
+        # Task failure/retry semantics must not depend on whether durable
+        # task-worktree provisioning succeeded. A generic fallback is still a
+        # task-bound run and must never acknowledge directives after failure.
+        "task_bound": task_bound,
         "task_worktree": task_worktree,
         "started_ts": now,
         "agent_id": candidate["agent_id"],
@@ -92,9 +100,10 @@ def _worker_state(
         "cap": cap,
         "respawns": 0,
         "wake_event": event,
-        "wake_task_id": (
-            auto_tasks[0] if auto_tasks else candidate.get("wake_task_id")
-        ),
+        # The server may ground a sole assignment/rework directive through
+        # context_task_id even when wake_task_id is empty. Preserve that task
+        # identity so every failure path withholds the directive for retry.
+        "wake_task_id": run_task_id,
         "wake_ack_ts": wake_ack_ts,
         "handled_event_ids": handled,
         "respawn_ctx": respawn,
@@ -201,6 +210,22 @@ def spawn(
         conversation=False,
         spawn_info=_spawn_info,
     )
+    # Issue #75: the box-wide concurrency cap deferred this spawn (ground-truth count
+    # ≥ budget at decision time). NOT a failure — release everything we speculatively
+    # claimed (lease, worktree) so the candidate re-competes cleanly on a later tick in
+    # the SAME server-side ORDER BY created_at order (oldest agent first = fairness, no
+    # starvation), and log the cap ONCE for this deferral (per tick, not per second).
+    if _spawn_info.get("deferred"):
+        if worktree:
+            services._teardown_worktree(headless_cwd, worktree, branch)
+        if not dry_run:
+            services._revoke_or_defer(api_base, token)
+        if not quiet:
+            print(
+                f"[notifier] cap-deferred wake for {candidate.get('alias')}: "
+                f"{command} — stays eligible next tick"
+            )
+        return None
     if sent and process is not None and live_workers is not None:
         _run_payload = {
             "wake_kind": "ephemeral",

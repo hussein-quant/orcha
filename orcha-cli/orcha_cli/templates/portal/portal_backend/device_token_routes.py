@@ -199,4 +199,4 @@ def device_auth_page():
     """The pairing page the iOS app opens in its authenticated browser sheet. Only
     reachable through the OAuth-proxied browser lane (no bearer header → forward_auth
     to oauth2-proxy), so the fetch it fires carries the trusted identity."""
-    return serve_page("device.html")
+    return serve_page("dist/index.html")  # React SPA shell (open-orcha base; cloud pages via src/extensions.ts)

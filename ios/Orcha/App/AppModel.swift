@@ -5,6 +5,10 @@ import Observation
 struct ContainerHealth: Equatable {
     var state: String            // live | polling | unreachable | probing
     var agents: Int = 0
+    /// GH sidebar/iOS count mismatch: open (non-terminal) task count — was
+    /// `snap.tasks.count`, the length of the capped/priority-ordered snapshot array
+    /// (the "counting a fetched page's length instead of a server total" bug); now
+    /// `ContainerSnapshot.taskOpenTotal` (additive server field, graceful fallback).
     var tasks: Int = 0
     var needsYou: Int = 0
     /// The bound GitHub repo ("owner/name"), shown on the card's secondary line.
@@ -40,7 +44,9 @@ enum MembersState: Equatable {
 @Observable
 final class AppModel {
     private let store = ContainerStore()
-    private let api = OrchaApiClient()
+    // `internal` (not `private`): the per-feature `AppModel+*` extensions live in their
+    // own files and drive their loads through this same client (github hub).
+    let api = OrchaApiClient()
     private let webAuth = WebAuthSession()
     private var pollTask: Task<Void, Never>?
     /// Issue 3 — the live run-log collector; cancelled on leaving RunDetailScreen.
@@ -87,6 +93,10 @@ final class AppModel {
     private var identityContainerId: String?
     /// Collab v1 — the Settings members roster (view-only on iOS v1).
     var membersState: MembersState = .idle
+    /// GitHub hub — the issues / pull-requests list phase state (see `AppModel+GitHubHub`).
+    /// The same `.loading / .unavailable / .loaded / .failed` machine `membersState` uses.
+    var githubIssuesPhase: GitHubIssuesPhase = .idle
+    var githubPullsPhase: GitHubPullsPhase = .idle
     var containerHealth: [String: ContainerHealth] = [:]
     var taskMessages: [TaskMessageDto] = []
     var taskRuns: [RunDto] = []
@@ -538,7 +548,7 @@ final class AppModel {
                 let verifs = snap.tasks.filter { $0.status == "needs_verification" }
                 let reqs = snap.requests.filter { $0.status == "open" && ($0.targetId == stored.humanAgentId || $0.targetId == nil) }
                 containerHealth[stored.id] = ContainerHealth(
-                    state: "polling", agents: snap.agents.count, tasks: snap.tasks.count,
+                    state: "polling", agents: snap.agents.count, tasks: snap.taskOpenTotal,
                     needsYou: plans.count + verifs.count + reqs.count,
                     githubRepo: snap.container.githubRepo
                 )
@@ -1186,7 +1196,9 @@ final class AppModel {
         return rows
     }
 
-    private func friendly(_ error: Error) -> String {
+    // `internal` (not `private`): the `AppModel+*` extension files map their own load
+    // failures through the same error copy.
+    func friendly(_ error: Error) -> String {
         if let e = error as? OrchaServerAddress.AddressError {
             return e.localizedDescription
         }

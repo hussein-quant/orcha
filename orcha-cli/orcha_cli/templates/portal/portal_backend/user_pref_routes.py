@@ -28,7 +28,27 @@ from pydantic import BaseModel
 
 from portal_backend.application import app
 from portal_backend.database import db_cursor
-from portal_backend.identity_routes import proxy_login
+from portal_backend.identity_routes import _proxy_trusted, proxy_login
+
+# Local run (no OAuth proxy): the portal is a single-operator surface, so per-user
+# prefs collapse to per-STACK prefs under one sentinel row. This is what lets
+# appearance survive browser switches / app reinstalls on a laptop stack, where
+# the pre-040 "localStorage only" fallback silently loses them per-origin.
+LOCAL_OPERATOR_LOGIN = "__local__"
+
+
+def _effective_login(request: Request):
+    """proxy-verified login, else the local-operator sentinel — but ONLY when
+    proxy trust is off entirely (the self-host/laptop default). On a TRUSTED
+    deployment a headerless call is the break-glass service lane, not a person:
+    it must never read or write the shared sentinel row, so it keeps the
+    pre-existing null/403 contract. Returns (login, is_local_sentinel)."""
+    login = proxy_login(request)
+    if login:
+        return login, False
+    if not _proxy_trusted():
+        return LOCAL_OPERATOR_LOGIN, True
+    return None, False
 
 # STRICT whitelist — no tolerant passthrough bucket. A new preference is a
 # deliberate one-line addition here (and in the frontend mirror), never a
@@ -95,9 +115,9 @@ def get_prefs(request: Request):
     pre-040 behavior). A mapped login with no row yet gets {} — server prefs
     are ACTIVE but empty, so the client mirrors its local picks up on the
     first write-through."""
-    login = proxy_login(request)
+    login, is_local = _effective_login(request)
     with db_cursor() as (conn, cur):
-        if not login or not _login_mapped_anywhere(cur, login):
+        if not is_local and (not login or not _login_mapped_anywhere(cur, login)):
             return {"prefs": None}
         cur.execute(
             "SELECT prefs FROM user_prefs WHERE github_login=%s", (login.lower(),)
@@ -113,8 +133,8 @@ def put_prefs(request: Request, body: PrefsBody):
     Whole-bag replace, not a merge: the client always mirrors the complete
     cosmetic set, so replace keeps unsetting honest (drop the key, PUT). The
     write is cosmetic-only by construction — see the module docstring."""
-    login = proxy_login(request)
-    if not login:
+    login, is_local = _effective_login(request)
+    if not is_local and not login:
         raise HTTPException(
             403,
             "per-user preferences need a proxy-verified GitHub identity — "
@@ -122,7 +142,7 @@ def put_prefs(request: Request, body: PrefsBody):
         )
     _validate_prefs(body.prefs)
     with db_cursor() as (conn, cur):
-        if not _login_mapped_anywhere(cur, login):
+        if not is_local and not _login_mapped_anywhere(cur, login):
             raise HTTPException(
                 403,
                 f"your GitHub account ('{login}') is not a member of any project "

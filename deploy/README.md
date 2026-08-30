@@ -4,6 +4,10 @@ Turn any Ubuntu-ish VM (Hetzner CX32, or a customer VPC box) into an
 auth-fronted Orcha with sandboxed agent wakes. This is the manual v1 of what
 the control plane will automate.
 
+> **Just want to run Orcha Cloud on your own laptop, no box?** See
+> [`deploy/local/README.md`](local/README.md) — same portal, `orcha init &&
+> orcha up`, `localhost` only, with an optional real-login overlay.
+
 ## 0. Prerequisites
 
 - DNS A record: `orcha.<yourdomain>` → the box's IP
@@ -31,6 +35,17 @@ ssh <box> 'sh /tmp/bootstrap-clone.sh'     # clones → /opt/orcha-cloud, instal
 
 Re-run `bootstrap-clone.sh` anytime to pull + reinstall (tokens are minted
 fresh, used once, and scrubbed from git config).
+
+**Swap** (recommended, not automatic — run it once yourself): a box with no
+swap thrashes instead of degrading gracefully under an agent burst. Provision
+a 4GB swapfile (override with `SIZE_GB`):
+
+```bash
+ssh <box> 'sh /opt/orcha-cloud/deploy/provision-swap.sh'
+```
+
+Idempotent — safe to re-run; it no-ops if swap is already active. See
+`docs/byoc-guide.md` for sizing guidance.
 
 ## 2. Project + sandbox mode
 
@@ -172,16 +187,57 @@ Each tick, for every container the portal lists that has no workspace yet, it:
    `$ORCHA_WORKSPACES` env var on its unit remains as fallback for boxes that
    pre-date the registry), so freshly provisioned projects join the token
    refresh automatically.
-4. starts a notifier for the workspace (`orcha notifier --ensure`, env sourced
-   from `/root/.orcha-daemon-env` — override with `ORCHA_DAEMON_ENV`). The
-   ensure is a per-container idempotent singleton (workspace pidfile + an
-   atomic `~/.orcha/notifier-<cid>.pid` claim), and it re-runs for every
-   registered workspace each tick, so notifiers also self-heal after a reboot.
+4. starts a notifier for the workspace. Two supervision paths (issue #77),
+   chosen automatically each tick:
+   - **systemd installed** (the `orcha-notifier@.service` template unit is
+     present — see below): `systemctl enable --now orcha-notifier@<slug>`.
+     The unit supervises restarts itself (`Restart=on-failure`,
+     `RestartSec=10`) and comes back on reboot without waiting on this timer
+     at all; the provisioner's role is just to enable+start the instance for
+     newly-provisioned workspaces.
+   - **no systemd unit installed** (local self-host, or a box mid-migration):
+     the legacy path, `orcha notifier --ensure`, env sourced from
+     `/root/.orcha-daemon-env` (override with `ORCHA_DAEMON_ENV`).
+
+   Both paths converge on the same per-container idempotent singleton
+   (workspace pidfile `<ws>/.claude/.orcha-notifier.pid` + an atomic
+   `~/.orcha/notifier-<cid>.pid` claim, written by the daemon itself
+   regardless of who launched it) — so a systemd-started daemon reads as
+   healthy to `--ensure` and the two paths never fight or double-spawn. This
+   pass re-runs for every registered workspace each tick either way, so
+   notifiers self-heal after a reboot even before systemd is installed.
 
 Idempotent throughout: registered containers are skipped, existing workspaces
 are never touched (a hand-built pre-registry workspace like `dogfood` is
 *adopted* into the list on the first run), and a failed clone/mint is retried
 on the next tick rather than leaving a half-provisioned workspace behind.
+
+### Notifier daemons under systemd supervision
+
+Install the `orcha-notifier@.service` template unit once, and every current
+and future workspace the provisioner manages gets a supervised, reboot- and
+crash-resilient notifier — no per-workspace unit files to write by hand:
+
+```bash
+scp deploy/orcha-notifier@.service <box>:/opt/orcha-cloud/deploy/
+ssh <box> 'cp /opt/orcha-cloud/deploy/orcha-notifier@.service /etc/systemd/system/ \
+  && systemctl daemon-reload'
+```
+
+That's it — no `enable --now` here; the provisioner does that per instance
+(`%i` = workspace dir name, e.g. `orcha-notifier@my-site.service`) on its next
+tick, and re-affirms it every tick after (self-healing, same as the nohup
+path). To manage one workspace's daemon directly:
+
+```bash
+systemctl status orcha-notifier@my-site.service
+journalctl -u orcha-notifier@my-site.service -n 50
+systemctl restart orcha-notifier@my-site.service
+```
+
+`kill -9` the daemon's pid and systemd restarts it within `RestartSec=10`; a
+full box reboot brings every enabled instance back without the 2-min
+provisioner timer needing to fire first.
 
 ## Notes
 

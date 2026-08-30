@@ -14,7 +14,7 @@ from portal_backend.model_policy import resolve_reasoning_effort
 from portal_backend.self_wake_selection import select_due_self_wake
 from portal_backend.wake_context import (
     filter_context_content,
-    handled_event_ids as collect_handled_event_ids,
+    handled_event_id_sets as collect_handled_event_id_sets,
     resolve_context_task_id,
 )
 from portal_backend.wake_decision import decide_wake, triage_eligible
@@ -99,7 +99,7 @@ def build_wake_candidate(
         context_task_id,
         is_cross_task=_is_cross_task_drain_row,
     )
-    handled_event_ids = collect_handled_event_ids(
+    handled_event_ids, delivery_handled_event_ids = collect_handled_event_id_sets(
         cur,
         aid,
         delivered_ts,
@@ -110,6 +110,7 @@ def build_wake_candidate(
         drain_class=_drain_class,
         run_ackable_buckets=_DRAIN_RUN_ACKABLE,
         task_bound_bucket=_DRAIN_TASK_BOUND,
+        directive_bucket=_DRAIN_DIRECTIVE,
     )
 
     auto_interval = agent["auto_wake_interval_secs"]
@@ -169,6 +170,7 @@ def build_wake_candidate(
         "max_event_ts": max_ts,
         "ack_through_ts": ack_through_ts,
         "handled_event_ids": handled_event_ids,
+        "delivery_handled_event_ids": delivery_handled_event_ids,
         "context_task_id": context_task_id,
         "auto_start_task_ids": auto_tasks,
         "auto_wake_due": auto_wake_due,

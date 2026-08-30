@@ -52,6 +52,19 @@
         }
     }
 
+    # ── Slack lane: unauthenticated-but-signed inbound webhooks ────────────
+    # Slack's servers POST here with NO Authorization header and NO browser session —
+    # they can't complete OAuth or carry a bearer token. The app-level Slack v0 HMAC
+    # signature check (slack_routes.verify_slack_signature) is the ONLY gate; this
+    # bypass just gets the request there instead of bouncing it into the oauth2-proxy
+    # sign-in redirect below, which would 401/redirect every Slack command and
+    # interaction. slack_routes itself still 401s a bad/missing/stale signature and
+    # 503s the whole surface unless SLACK_SIGNING_SECRET + SLACK_BOT_TOKEN are set, so
+    # this prefix is not an open door — it just lets the app's own gate run at all.
+    handle /api/slack/* {
+        reverse_proxy portal:8000
+    }
+
     # ── Everything else: browser traffic behind forward_auth ──────────────
     handle {
         forward_auth oauth2-proxy:4180 {

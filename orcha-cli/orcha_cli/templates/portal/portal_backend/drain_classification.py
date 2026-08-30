@@ -28,21 +28,25 @@ from portal_backend.guards import valid_uuid as _valid_uuid
 #                         the sole wake for "proceed/revise").
 #   NEW_WORK            - claiming/accepting it STARTS the work, so a drain NEVER acks it; it is consumed at
 #                         the /next CLAIM (or accept/reject seam): a task_assigned/task_ready on a `ready`
-#                         task; a request_created of type 'task'.
+#                         task; a request_created of type 'task'; a task_created_unassigned on a live task
+#                         (consumed only when the orchestrator actually ROUTES it via assignment — see
+#                         task_start_core's automatic-triage doorbell).
 #   DIRECTIVE           - a STATUS-SENSITIVE start/rework directive on an in_progress task: surfaced as the
-#                         assignee's wake reason but NOT acked by any drain — only at that worker's
-#                         clean-completion / terminal seam (/done, cancel, unassign): a task_assigned on an
-#                         in_progress task; a task_verified{approved:false} (a rejected verify is a rework
-#                         directive, never an FYI — FYI-acking it would clear the rework wake before the
-#                         restored assignee sees it).
+#                         assignee's wake reason and acked only by a CLEAN run bound to that same task (or a
+#                         terminal seam such as /done, cancel or unassign). A failed run leaves it pending for
+#                         retry, while a successful run consumes it once so an idle in_progress task cannot
+#                         re-trigger the same directive forever: task_assigned on an in_progress task;
+#                         task_verified{approved:false} (a rejected verify is a rework directive, never an FYI
+#                         that an unrelated task run may ack).
 _DRAIN_NON_WAKING = "non_waking"
 _DRAIN_FYI = "fyi"
 _DRAIN_TASKLESS_ACTIONABLE = "taskless_actionable"
 _DRAIN_TASK_BOUND = "task_bound"
 _DRAIN_NEW_WORK = "new_work"
 _DRAIN_DIRECTIVE = "directive"
-# the run MAY ack these buckets in a single drain pass (FYI + taskless any run; task_bound only when its
-# task == the run context, decided in wake_scan). NEW_WORK/DIRECTIVE are acked at their own seams, never here.
+# the run MAY ack these buckets regardless of task context. TASK_BOUND and DIRECTIVE are separately ackable
+# only when their task == the run context, decided in wake_context.handled_event_ids. NEW_WORK is consumed at
+# its claim/accept seam, never by a drain.
 _DRAIN_RUN_ACKABLE = (_DRAIN_FYI, _DRAIN_TASKLESS_ACTIONABLE)
 # the buckets whose actioning is bound to a SPECIFIC task — a run may surface/handle one only when that
 # task IS the run context; otherwise it belongs to a different (or fresh) ephemeral and stays pending.
@@ -113,6 +117,16 @@ def _drain_class(cur, event_name: str, payload: Optional[dict], target_id=None) 
             "bucket": _DRAIN_FYI,
             "task_id": None,
         }  # pending/terminal/gone → informational
+    if event_name == "task_created_unassigned":
+        # Same NEW_WORK contract as task_assigned's own 'ready' branch — this is unclaimed work
+        # (routing, not implementing) and must NEVER be ack'd away by an unrelated awake run
+        # generically; it stays pending until actually consumed at the routing action (the
+        # orchestrator assigning it), the same seam task_assigned/task_ready use for claims.
+        tid = payload.get("task_id")
+        st = _drain_task_status(cur, tid)
+        if st in (None, "completed", "cancelled"):
+            return {"bucket": _DRAIN_FYI, "task_id": None}
+        return {"bucket": _DRAIN_NEW_WORK, "task_id": str(tid)}
     if event_name == "task_ready":
         if target_id is None:
             return {

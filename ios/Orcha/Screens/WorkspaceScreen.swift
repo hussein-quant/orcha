@@ -8,6 +8,10 @@ enum WorkspaceRoute: Hashable {
     case agent(String)
     case run(RunDto)
     case converse(String)
+    /// GitHub hub — the issues/PRs list and the two detail screens (by number).
+    case githubHub
+    case githubPull(Int)
+    case githubIssue(Int)
 }
 
 extension RunDto: Hashable {
@@ -201,6 +205,9 @@ struct WorkspaceScreen: View {
                     case let .agent(id): AgentDetailScreen(agentId: id)
                     case let .run(run): RunDetailScreen(run: run)
                     case let .converse(id): ConversationScreen(agentId: id)
+                    case .githubHub: GitHubHubScreen()
+                    case let .githubPull(number): GitHubPullDetailScreen(number: number)
+                    case let .githubIssue(number): GitHubIssueDetailScreen(number: number)
                     }
                 }
             }

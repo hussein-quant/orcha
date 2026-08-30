@@ -19,15 +19,26 @@
 #      (default /opt/orcha-work/workspaces.list) — the box-wide source of truth
 #      the other timers (github-token-refresh.sh) read instead of the legacy
 #      $ORCHA_WORKSPACES env var;
-#   4. a notifier daemon for the workspace (env sourced from $ORCHA_DAEMON_ENV,
-#      then `cd <ws> && orcha notifier --ensure` — an idempotent singleton per
-#      container: pidfile <ws>/.claude/.orcha-notifier.pid plus an atomic
-#      per-container claim in ~/.orcha/notifier-<cid>.pid).
+#   4. a notifier daemon for the workspace. Two supervision paths, chosen per
+#      tick (deploy/orcha-notifier@.service, issue #77):
+#        - systemd present (orcha-notifier@.service installed in
+#          $ORCHA_SYSTEMD_UNIT_DIR): `systemctl enable --now
+#          orcha-notifier@<slug>` — the unit supervises restarts
+#          (Restart=on-failure) and survives reboot on its own, so this pass
+#          just makes sure the instance is enabled+active.
+#        - otherwise (local self-host, no systemd, or the unit isn't
+#          installed): the legacy path — env sourced from $ORCHA_DAEMON_ENV,
+#          then `cd <ws> && orcha notifier --ensure`.
+#      Both paths converge on the SAME idempotent-singleton daemon: pidfile
+#      <ws>/.claude/.orcha-notifier.pid plus an atomic per-container claim in
+#      ~/.orcha/notifier-<cid>.pid, written by the daemon itself regardless of
+#      who launched it — so a systemd-started daemon reads as healthy to
+#      `--ensure` (and vice versa), and the two paths never fight each other.
 #
 # Idempotent: re-runs skip registered containers, never touch existing
 # workspaces, adopt pre-registry workspaces (e.g. the hand-built dogfood one)
-# into the list, and re-ensure a notifier for every registered workspace each
-# tick (self-healing after a reboot). One log line per action.
+# into the list, and re-ensure/re-enable a notifier for every registered
+# workspace each tick (self-healing after a reboot). One log line per action.
 #
 # Env (all optional):
 #   ORCHA_PORTAL_URL       portal base            (default http://127.0.0.1:8001)
@@ -38,6 +49,7 @@
 #   ORCHA_MINT             token minter script    (default <this dir>/github-app-token.py)
 #   PROVISION_MEMORY       sandbox memory cap     (default 1536m)
 #   PROVISION_CPUS         sandbox cpu cap        (default 1)
+#   ORCHA_SYSTEMD_UNIT_DIR systemd unit dir       (default /etc/systemd/system)
 set -eu
 
 PORTAL="${ORCHA_PORTAL_URL:-http://127.0.0.1:8001}"
@@ -48,6 +60,7 @@ DAEMON_ENV="${ORCHA_DAEMON_ENV:-/root/.orcha-daemon-env}"
 MINT="${ORCHA_MINT:-$(dirname "$0")/github-app-token.py}"
 MEMORY="${PROVISION_MEMORY:-1536m}"
 CPUS="${PROVISION_CPUS:-1}"
+UNIT_DIR="${ORCHA_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 # The stack network sandboxes must join. A cloned repo can carry its OWN
 # .orcha/docker-compose.yml, making network derivation target a nonexistent
 # network (wakes die 125) — so pin it explicitly. Auto-detect from the running
@@ -207,13 +220,40 @@ printf '%s\n' "$CONTAINERS" | while IFS="$(printf '\t')" read -r CID SLUG REPO; 
 done
 
 # ---- notifier pass: one idempotent-singleton daemon per registered workspace ----
-# `orcha notifier --ensure` no-ops when that container's daemon is alive (local
-# pidfile + per-container claim in ~/.orcha), so this doubles as reboot recovery.
+# issue #77: prefer systemd supervision (Restart=on-failure + reboot-persistent)
+# when the template unit is installed; fall back to the nohup `--ensure` path
+# otherwise (local self-host boxes, or a systemd box mid-migration that hasn't
+# installed the unit yet). Both paths write the SAME pidfile/heartbeat/claim
+# (orcha_cli/notifier_daemon_registry.py), so they never fight: a
+# systemd-started daemon reads as healthy to `--ensure`, and `--ensure`'s
+# nohup daemon is just as supervisable as any other process to a human who
+# later installs the unit — the only thing systemd adds is who's watching.
+SYSTEMD_UNIT="$UNIT_DIR/orcha-notifier@.service"
+have_systemd() {
+    command -v systemctl >/dev/null 2>&1 && [ -f "$SYSTEMD_UNIT" ]
+}
+
 while read -r CID WS; do
     [ -n "${WS:-}" ] && [ -d "$WS" ] || continue
-    (
-        # shellcheck disable=SC1090
-        [ -f "$DAEMON_ENV" ] && . "$DAEMON_ENV" || true
-        cd "$WS" && orcha notifier --ensure --quiet
-    ) || echo "warn: notifier --ensure failed for $WS" >&2
+    INSTANCE=$(basename "$WS")
+    if have_systemd; then
+        UNIT="orcha-notifier@${INSTANCE}.service"
+        # is-enabled/is-active both no-op fast when already true — cheap to
+        # call every tick, and it's how the unit self-heals after a reboot
+        # (systemd itself restarts a crashed instance; this just makes sure
+        # the instance exists and is enabled for NEW workspaces this tick).
+        if systemctl is-active --quiet "$UNIT" 2>/dev/null; then
+            :  # already supervised — nothing to do this tick
+        elif systemctl enable --now "$UNIT" >/dev/null 2>&1; then
+            echo "notifier: enabled+started $UNIT"
+        else
+            echo "warn: systemctl enable --now $UNIT failed for $WS" >&2
+        fi
+    else
+        (
+            # shellcheck disable=SC1090
+            [ -f "$DAEMON_ENV" ] && . "$DAEMON_ENV" || true
+            cd "$WS" && orcha notifier --ensure --quiet
+        ) || echo "warn: notifier --ensure failed for $WS" >&2
+    fi
 done < "$REGISTRY"

@@ -46,7 +46,9 @@ APP_TABLES = [
     "agent_notification_state", "agent_self_wake", "agent_event_acks",
     "decisions", "agent_events", "events", "task_messages", "agent_tasks",
     "task_dependencies", "requests", "tasks", "container_provider_keys",
+    "container_github_pat",
     "device_tokens", "user_prefs", "push_devices", "push_outbox",
+    "wake_backoff",
     "agents", "containers",
 ]
 

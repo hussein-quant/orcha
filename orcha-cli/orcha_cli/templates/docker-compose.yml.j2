@@ -5,6 +5,7 @@ name: orcha-{{ project_name }}
 services:
   db:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: orcha
       POSTGRES_PASSWORD: orcha
@@ -22,6 +23,7 @@ services:
       retries: 10
   portal:
     build: ./portal
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://orcha:orcha@db:5432/orcha   # 'db' = service name, inside the network
       MIGRATIONS_DIR: /app/migrations                        # R1: runner applies these on startup
@@ -65,6 +67,24 @@ services:
       # proxy). Unset/empty for self-hosters → the header is ignored entirely. Passed
       # through from the host env like ORCHA_LLM_API_KEY above.
       ORCHA_TRUST_PROXY_USER: ${ORCHA_TRUST_PROXY_USER:-}
+      # Local run (deploy/local): a GitHub personal access token used only when
+      # neither App token source above resolves — lets a laptop stack reach the
+      # GitHub features with zero App registration. Also settable per-container
+      # from Settings → GitHub access (this env shadows the stored one).
+      ORCHA_GITHUB_PAT: ${ORCHA_GITHUB_PAT:-}
+      # Plan gating: "solo" (default — local/free tier; team surfaces render the
+      # upgrade card and member mutations 402) or "team" (hosted/paid). The
+      # upgrade URL is where solo's paywall entry points send people.
+      ORCHA_PLAN: ${ORCHA_PLAN:-}
+      ORCHA_UPGRADE_URL: ${ORCHA_UPGRADE_URL:-}
+      # Local-or-GitHub code source (Addendum 2): where the read-only project-root
+      # mount below lands inside the container. The repo binding sentinel "local"
+      # tells the browse/Code Space routes to read this tree via `git` instead of the
+      # GitHub API — zero setup, works even with no GitHub token at all.
+      ORCHA_LOCAL_REPO_DIR: /app/workspace
+      # ...and the project's real name for display (the mount path's basename is
+      # always just "workspace" inside the container).
+      ORCHA_LOCAL_REPO_NAME: {{ project_name }}
     ports: ["{{ api_port }}:8000"]
     volumes:
       - ./migrations:/app/migrations:ro   # R1: portal reads migrations to apply pending ones (no wipe)
@@ -89,6 +109,11 @@ services:
       # inode so the container would never see a refreshed token. Mounting the parent dir
       # read-only avoids both: no file → the portal serves the graceful off state.
       - ./:/app/stack-dir:ro
+      # Local-or-GitHub code source (Addendum 2): the project root itself, read-only,
+      # ONE level up from this .orcha/ compose dir — the repo binding sentinel "local"
+      # lets the browse/Code Space surfaces run `git -C $ORCHA_LOCAL_REPO_DIR` against
+      # this mount, no GitHub App/PAT required.
+      - ..:/app/workspace:ro
     depends_on:
       db: { condition: service_healthy }
 

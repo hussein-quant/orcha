@@ -95,7 +95,9 @@ same tree.
                  ┌──────────────▼──────────────┐
                  │  notifier daemon            │  one per project workspace
                  │  (host process, env from    │  /opt/orcha-work/<slug>
-                 │   /root/.orcha-daemon-env)  │
+                 │   /root/.orcha-daemon-env)  │  supervised by orcha-notifier@<slug>
+                 │                             │  .service when installed (#77),
+                 │                             │  else nohup + `--ensure` self-heal
                  └──────┬───────┬───────┬──────┘
                      ┌──▼─┐  ┌──▼─┐  ┌──▼─┐      one docker container per
                      │ s1 │  │ s2 │  │ s3 │      agent run: non-root, capped,
@@ -105,6 +107,9 @@ same tree.
      provision-projects (2 min)  portal projects → workspace + clone + notifier
      sync-members       (2 min)  portal roster → OAuth allowlist
      github-token-refresh (40 m) App PEM → 1-hour repo tokens in each workspace
+
+   box-side systemd template unit (optional, root):
+     orcha-notifier@<slug>.service   Restart=on-failure, one instance/workspace
 ```
 
 ### Components, each one's job and trust level
@@ -259,10 +264,16 @@ the stack network **pinned** (auto-detected from the running portal
 container — a cloned repo carrying its own `.orcha/docker-compose.yml` would
 otherwise derive a nonexistent network and wakes die with exit 125), a chown
 to uid 1000, a line in the box-wide registry
-`/opt/orcha-work/workspaces.list` (`<cid> <dir>`), and a notifier
-(`orcha notifier --ensure`, env from `/root/.orcha-daemon-env`). Idempotent
-throughout; pre-registry hand-built workspaces are *adopted*; the ensure
-re-runs every tick, so notifiers self-heal after a reboot.
+`/opt/orcha-work/workspaces.list` (`<cid> <dir>`), and a notifier. When the
+`orcha-notifier@.service` template unit is installed (issue #77), the
+provisioner enables+starts a per-workspace systemd instance
+(`orcha-notifier@<slug>`, `Restart=on-failure`) instead; otherwise it falls
+back to `orcha notifier --ensure` (env from `/root/.orcha-daemon-env`). Both
+paths write the same pidfile/heartbeat/claim, so they compose safely and
+never double-spawn. Idempotent throughout; pre-registry hand-built workspaces
+are *adopted*; the notifier pass re-runs/re-affirms every tick either way, so
+daemons self-heal after a reboot (systemd instances also restart on crash
+without waiting for the timer).
 
 **Members → allowlist sync (`deploy/sync-members.sh`, 2-min timer)** — the
 portal roster is the source of truth for *who is a member* (owners invite in
@@ -311,12 +322,14 @@ plane (§7) exists to eat that column.
 | 13 | Auth stack (shared box, host Caddy) | compose command **+ manual Caddy edit** | `-f oauth2-proxy-host.yml up -d oauth2-proxy` (loopback :4180) + hand-add the site block to `/etc/caddy/Caddyfile` (§4 step 9 has the reference block) — **manual today** |
 | 14 | Branded sign-in landing (`/welcome`) | **manual today** (optional) | `deploy/auth/welcome/index.html` exists in the repo but nothing wires it; the reference box hand-serves it from host Caddy |
 | 15 | systemd timers (×3) | scp + two commands each | `deploy/{github-token-refresh,sync-members,provision-projects}.{service,timer}` → `/etc/systemd/system/` → `systemctl enable --now <name>.timer` |
+| 15b | Notifier template unit (issue #77, recommended) | scp + two commands | `deploy/orcha-notifier@.service` → `/etc/systemd/system/` → `systemctl daemon-reload`; the provisioner then enables+starts one instance per workspace on its next tick — no per-workspace unit files by hand |
 | 16 | Timer → portal port alignment | **manual check** | the timer scripts default `ORCHA_PORTAL_URL=http://127.0.0.1:8001` (the reference box); if your portal is on another loopback port, set `Environment=ORCHA_PORTAL_URL=…` on the units |
 | 17 | New projects after setup | **automatic** | portal "New project" → `provision-projects` timer gives it workspace + clone + notifier within 2 min |
 | 18 | Team invites | **portal UI** (owner) | Settings → Members; `sync-members` opens the OAuth door within 2 min |
 | 19 | Phone pairing | **portal UI** (QR) | pairing modal → `/auth/device` → GitHub OAuth → device token via `orcha://` callback |
 | 20 | iOS app on the phone | **manual build/install today** | `ios/` in this repo (no TestFlight yet) |
 | 21 | Upgrades | **manual today** | re-run `bootstrap-clone.sh`, then `orcha update` per workspace (§5); auth stack: `docker compose up -d`. Control plane later |
+| 22 | Swap provisioning (recommended) | **manual-ssh, one script, run once** | `deploy/provision-swap.sh` — 4GB swapfile (`SIZE_GB` to override), fstab-persisted, idempotent; a swapless box thrashes instead of degrading under an agent burst (§5 Known failure modes) |
 
 ---
 
@@ -390,6 +403,14 @@ scp deploy/auth/.env <box>:/opt/orcha-cloud/deploy/auth/.env
 
 The mint token is used once for the clone and scrubbed from git config.
 Verify: `ssh <box> orcha --version`.
+
+Recommended here, not automatic — provision swap while you're already on the
+box (a swapless box thrashes instead of degrading under an agent burst; §5
+Known failure modes has the sizing rationale):
+
+```bash
+ssh <box> 'sh /opt/orcha-cloud/deploy/provision-swap.sh'    # 4GB default, SIZE_GB to override
+```
 
 **6. First project + sandbox mode** (on the box; use `/opt/orcha-work/` so
 the provisioner's registry adopts it):
@@ -504,6 +525,15 @@ orcha.example.com {
         }
     }
 
+    # Slack lane: unauthenticated-but-signed inbound webhooks (Slack commands +
+    # interactivity). Slack can't complete OAuth or send a bearer token, so this
+    # bypasses forward_auth entirely — the app-level Slack v0 HMAC signature check
+    # (slack_routes.verify_slack_signature) is the real gate, and the whole surface
+    # stays 503 unless SLACK_SIGNING_SECRET + SLACK_BOT_TOKEN are configured.
+    handle /api/slack/* {
+        reverse_proxy 127.0.0.1:8001
+    }
+
     # Everything else: browsers behind forward_auth.
     handle {
         forward_auth 127.0.0.1:4180 {
@@ -540,9 +570,18 @@ curl -sI http://<box-ip>:8001                            # → connection refuse
 cd /opt/orcha-cloud/deploy
 cp github-token-refresh.{service,timer} sync-members.{service,timer} \
    provision-projects.{service,timer} /etc/systemd/system/
+cp orcha-notifier@.service /etc/systemd/system/    # issue #77: notifier supervision
 systemctl daemon-reload
 systemctl enable --now github-token-refresh.timer sync-members.timer provision-projects.timer
 ```
+
+Installing `orcha-notifier@.service` needs no `enable --now` of its own — it's
+a template unit (`orcha-notifier@<workspace>.service` per instance), and the
+`provision-projects` timer enables+starts the right instances for you on its
+next tick (existing and future workspaces alike). Without this unit
+installed, notifiers still run — the provisioner falls back to its nohup
+`orcha notifier --ensure` path — just without systemd restart-on-crash or
+reboot persistence ahead of the 2-min timer.
 
 **Port alignment**: the three scripts default to
 `ORCHA_PORTAL_URL=http://127.0.0.1:8001`. If your portal loopback port
@@ -550,7 +589,8 @@ differs, add `Environment=ORCHA_PORTAL_URL=http://127.0.0.1:<port>` to each
 `.service` (systemd override or edit) before enabling. Verify:
 `systemctl start provision-projects.service && journalctl -u provision-projects.service -n 20`
 shows the adopt/provision pass, and `/opt/orcha-work/workspaces.list` lists
-your project.
+your project. With the notifier unit installed, also verify
+`systemctl status 'orcha-notifier@*'` shows an active instance per workspace.
 
 **11. First agent reply.** In the portal (signed in via GitHub): your first
 arrival binds you as the project's owner (the `orcha init` human takes your
@@ -606,6 +646,22 @@ daemon re-adopts them by container name). Rebuild the runner image when the
 CLI release notes say so: `orcha sandbox build-image`. Auth stack upgrades:
 edit/pull under `/opt/orcha-cloud/deploy/auth`, then
 `docker compose --env-file .env -f docker-compose.auth.yml up -d`.
+
+### Boot resilience (restart policies)
+
+Every long-running container in both stacks — the Orcha stack's `portal` and
+`db` (`docker-compose.yml.j2`), and the auth stack's `caddy` and
+`oauth2-proxy` (`deploy/auth/docker-compose.auth.yml`) — runs with
+`restart: unless-stopped`. After a host reboot or a Docker-daemon restart,
+all four come back with zero manual commands: `docker compose up -d` is not
+needed. `unless-stopped` is chosen over the bare `always` specifically so an
+operator's deliberate `docker compose stop <service>` (or `down`, without
+`-v`) stays sticky — Docker will not silently resurrect a service you
+intentionally took offline on the next daemon restart. `restart: "no"`
+(compose's implicit default when the key is absent) was the original gap on
+the Orcha stack: `portal` and `db` had no policy at all, so only the auth
+stack's `caddy`/`oauth2-proxy` (which already carried `restart:
+unless-stopped`) came back after a power cycle.
 
 If you rsync a working tree to the box instead of pulling, **always** exclude
 the live secrets — a `--delete` rsync has wiped a box's `.env` before:
@@ -676,8 +732,10 @@ tar of the three paths above.
 | Wake fails instantly, "sandbox unavailable" | Docker down / runner image missing / disk < 5 GiB — the fail-loud contract, never a silent host fallback | portal run detail (the reason is stamped on the run); `docker info`; `orcha sandbox status` |
 | Run killed, "out of memory" | container hit its memory cap | raise `sandbox.memory` in `<ws>/.claude/orcha.json` |
 | Agent can't push / PR fails | stale or missing workspace token (timer stopped, or App not installed on that org) | `journalctl -u github-token-refresh.service`; `<ws>/.orcha/github-token` mtime |
-| Notifier dead for one project | crashed; the provisioner re-ensures it within 2 min — check why | `<ws>/.claude/.orcha-notifier.log` (pidfile beside it) |
+| Notifier dead for one project | crashed; with `orcha-notifier@.service` installed, systemd restarts it (`RestartSec=10`) — without it, the provisioner re-ensures within 2 min — check why either way | systemd path: `journalctl -u orcha-notifier@<slug>.service`; nohup path: `<ws>/.claude/.orcha-notifier.log` (pidfile beside it) |
 | Wakes die with exit 125 | sandbox network pinned wrong (cloned repo shipped its own compose file) | `sandbox.network` in `<ws>/.claude/orcha.json`; `PROVISION_NETWORK` on the provisioner unit |
+| Box hangs / thrashes instead of degrading under an agent burst | no swap — the OOM path becomes disk-thrash-to-death rather than a graceful kill; provision it once (§3 step 22): `sh deploy/provision-swap.sh` (4GB default, `SIZE_GB` to override — sized against the sandbox concurrency cap's per-wake memory math, §2 Components: runner default 4g/2cpu, provisioner-set 1536m/1cpu per project) | `free -h` (swap row); `swapon --show` |
+| GitHub sign-in 500s at `/oauth2/callback` right after a reboot | a stale OAuth `state` minted before the reboot (oauth2-proxy's session store reset) — cosmetic, just retry | start sign-in fresh from the domain root (`https://orcha.<yourdomain>`), not the old callback URL/tab |
 
 ### Soak / verification checks (run these after any upgrade)
 
