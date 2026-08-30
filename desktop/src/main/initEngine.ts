@@ -39,6 +39,10 @@ export interface EngineDeps {
   startWorker?: StartWorker
   waitPortalTimeoutMs?: number
   waitPortalPollMs?: number
+  /** Host GitHub token (from `gh auth token`) to hand the compose-up call, one-shot — NEVER
+   *  persisted to .env or any file, NEVER logged. Parity with the CLI's `orcha up`, which
+   *  does the same host-side lookup. Optional so unit tests can omit it. */
+  ghAuthToken?: () => Promise<string | null>
 }
 
 const STDERR_TAIL = 500
@@ -51,10 +55,11 @@ function fail(step: ProvisionStep, code: BridgeError['code'], detail: string): n
   throw { code, detail } as unknown as BridgeError
 }
 
-/** docker compose -f <composeFile> <args...> from the project's .orcha dir. */
-async function compose(exec: Exec, orchaDir: string, args: string[]): Promise<string> {
+/** docker compose -f <composeFile> <args...> from the project's .orcha dir. `extraEnv`
+ *  (e.g. a one-shot ORCHA_GITHUB_PAT) flows straight to the exec, never touching a file. */
+async function compose(exec: Exec, orchaDir: string, args: string[], extraEnv?: NodeJS.ProcessEnv): Promise<string> {
   const file = path.join(orchaDir, 'docker-compose.yml')
-  const res = await exec('docker', ['compose', '-f', file, ...args])
+  const res = await exec('docker', ['compose', '-f', file, ...args], extraEnv)
   return res.stdout
 }
 
@@ -145,10 +150,18 @@ export async function provision(
   fs.writeFile(configPath, JSON.stringify(config, null, 2) + '\n')
   emit('copy-templates', 'ok')
 
-  // 3. compose up -d --build (stream stdout lines)
+  // 3. compose up -d --build (stream stdout lines). Parity with the CLI's `orcha up`: when
+  //    the host hasn't set ORCHA_GITHUB_PAT itself, pull one from `gh auth token` (host-side,
+  //    already-logged-in gh CLI) and pass it to JUST this compose invocation — never written
+  //    to .orcha/.env or any other file, never logged (only the resolved boolean matters here).
   emit('compose-up', 'start')
+  let composeEnv: NodeJS.ProcessEnv | undefined
+  if (!process.env.ORCHA_GITHUB_PAT && deps.ghAuthToken) {
+    const token = await deps.ghAuthToken().catch(() => null)
+    if (token) composeEnv = { ORCHA_GITHUB_PAT: token }
+  }
   try {
-    const out = await compose(deps.exec, orchaDir, ['up', '-d', '--build'])
+    const out = await compose(deps.exec, orchaDir, ['up', '-d', '--build'], composeEnv)
     for (const line of out.split('\n').filter(Boolean)) emit('compose-up', 'log', { line })
     emit('compose-up', 'ok')
   } catch (err) {
