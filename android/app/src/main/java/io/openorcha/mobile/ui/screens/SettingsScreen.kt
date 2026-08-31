@@ -65,6 +65,7 @@ import io.openorcha.mobile.ui.components.StateLayout
 import io.openorcha.mobile.ui.components.NeutralButton
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.Orcha
+import io.openorcha.mobile.ui.theme.SkinMode
 import io.openorcha.mobile.ui.theme.ThemeMode
 
 /* =============================================================================
@@ -76,6 +77,7 @@ fun SettingsScreen(
     state: OrchaUiState,
     onBack: () -> Unit,
     onTheme: (ThemeMode) -> Unit,
+    onSkin: (SkinMode) -> Unit,
     onOpen: (String) -> Unit,
     onForget: (String) -> Unit,
     onAdd: () -> Unit,
@@ -104,6 +106,17 @@ fun SettingsScreen(
                         onSelect = { onTheme(ThemeMode.entries[it]) },
                     )
                     Text("Auto follows the system setting. Changes apply instantly.", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.muted)
+                }
+            }
+            item { SectionH("Design") }
+            item {
+                OrchaCard {
+                    SegControl(
+                        options = SkinMode.entries.map { it.label },
+                        selected = state.skinMode.ordinal,
+                        onSelect = { onSkin(SkinMode.entries[it]) },
+                    )
+                    Text(state.skinMode.blurb, style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.muted)
                 }
             }
             item { SectionH("Containers", "${state.containers.size}") }

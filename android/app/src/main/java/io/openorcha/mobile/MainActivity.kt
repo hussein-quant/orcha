@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val state by viewModel.uiState.collectAsState()
-            OrchaTheme(mode = state.themeMode) {
+            OrchaTheme(mode = state.themeMode, skin = state.skinMode) {
                 // Snackbar feedback for every VM toast ("Task verified", "Answer sent", …)
                 val snackbarHost = remember { SnackbarHostState() }
                 LaunchedEffect(state.toast) {
@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         onBack = viewModel::showContainers,
                         onTheme = viewModel::setThemeMode,
+                        onSkin = viewModel::setSkinMode,
                         onOpen = viewModel::openContainer,
                         onForget = viewModel::forgetContainer,
                         onAdd = viewModel::showAddContainer,

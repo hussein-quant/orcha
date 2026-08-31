@@ -19,6 +19,13 @@ import io.openorcha.mobile.data.StoredContainer
 import io.openorcha.mobile.data.TaskDto
 import io.openorcha.mobile.data.TaskMessageDto
 import io.openorcha.mobile.data.TurnDto
+import io.openorcha.mobile.data.GitHubStartResponse
+import io.openorcha.mobile.domain.GitHubHubFilter
+import io.openorcha.mobile.domain.GitHubHubKind
+import io.openorcha.mobile.domain.GitHubIssueDetailPhase
+import io.openorcha.mobile.domain.GitHubIssuesPhase
+import io.openorcha.mobile.domain.GitHubPullDetailPhase
+import io.openorcha.mobile.domain.GitHubPullsPhase
 import io.openorcha.mobile.domain.Paging
 import io.openorcha.mobile.domain.RunFeed
 import io.openorcha.mobile.domain.RunFeedRow
@@ -48,6 +55,9 @@ enum class AppRoute {
     Conversation,
     CreateTask,
     Settings,
+    GitHubHub,
+    GitHubIssueDetail,
+    GitHubPullDetail,
 }
 
 enum class WorkspaceTab { Home, Tasks, Requests, Agents }
@@ -73,6 +83,7 @@ data class AgentExtras(
 data class OrchaUiState(
     val route: AppRoute = AppRoute.Containers,
     val themeMode: io.openorcha.mobile.ui.theme.ThemeMode = io.openorcha.mobile.ui.theme.ThemeMode.Auto,
+    val skinMode: io.openorcha.mobile.ui.theme.SkinMode = io.openorcha.mobile.ui.theme.SkinMode.Classic,
     val containerHealth: Map<String, ContainerHealth> = emptyMap(),
     val agentExtras: AgentExtras = AgentExtras(),
     val closeImplications: List<String>? = null,
@@ -103,4 +114,14 @@ data class OrchaUiState(
     val connecting: Boolean = false,
     val error: String? = null,
     val toast: String? = null,
+    // GitHub hub (Android parity of iOS AppModel+GitHubHub.swift)
+    val githubHubKind: GitHubHubKind = GitHubHubKind.Pulls,
+    val githubHubFilter: GitHubHubFilter = GitHubHubFilter.Open,
+    val githubIssuesPhase: GitHubIssuesPhase = GitHubIssuesPhase.Idle,
+    val githubPullsPhase: GitHubPullsPhase = GitHubPullsPhase.Idle,
+    val githubIssueNumber: Int? = null,
+    val githubIssueDetailPhase: GitHubIssueDetailPhase = GitHubIssueDetailPhase.Loading,
+    val githubPullNumber: Int? = null,
+    val githubPullDetailPhase: GitHubPullDetailPhase = GitHubPullDetailPhase.Loading,
+    val githubStarted: GitHubStartResponse? = null,
 )

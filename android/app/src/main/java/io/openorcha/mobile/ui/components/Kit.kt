@@ -63,10 +63,11 @@ fun OrchaCard(
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val cardShape = RoundedCornerShape(Orcha.palette.radiusCard.dp)
     val base = modifier
         .fillMaxWidth()
-        .background(container, RoundedCornerShape(12.dp))
-        .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(12.dp))
+        .background(container, cardShape)
+        .border(BorderStroke(1.dp, borderColor), cardShape)
         .let { if (onClick != null) it.clickable(onClick = onClick) else it }
     Column(base.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
 }
@@ -92,7 +93,7 @@ fun MetaTag(text: String, mono: Boolean = false, tint: Color? = null, modifier: 
     Text(
         text,
         modifier = modifier
-            .border(BorderStroke(1.dp, tint?.copy(alpha = 0.4f) ?: Orcha.palette.border2), RoundedCornerShape(5.dp))
+            .border(BorderStroke(1.dp, tint?.copy(alpha = 0.4f) ?: Orcha.palette.border2), RoundedCornerShape(Orcha.palette.radiusTag.dp))
             .padding(horizontal = 6.dp, vertical = 1.dp),
         style = if (mono) MonoSmStyle else MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.W500, letterSpacing = 0.sp),
         color = tint ?: Orcha.palette.muted,
@@ -182,7 +183,7 @@ fun OrchaField(
         maxLines = maxLines,
         isError = isError,
         supportingText = supporting?.let { { Text(it, color = if (isError) Orcha.palette.danger else Orcha.palette.muted) } },
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(Orcha.palette.radiusButton.dp),
         colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = Orcha.palette.surface2,
             unfocusedContainerColor = Orcha.palette.surface2,

@@ -59,8 +59,20 @@ class ContainerStore(context: Context) {
         prefs.edit().putString(THEME_KEY, mode).apply()
     }
 
+    /**
+     * Design/skin setting, portal + iOS parity (Settings → Appearance §3): classic
+     * (default) / swiss / minimal, applied instantly. Stores the same literal scalar
+     * the web's localStorage "orcha:skin" and iOS's `SkinMode` raw value use.
+     */
+    fun loadSkinMode(): String = prefs.getString(SKIN_KEY, "classic") ?: "classic"
+
+    fun saveSkinMode(skin: String) {
+        prefs.edit().putString(SKIN_KEY, skin).apply()
+    }
+
     private companion object {
         const val KEY = "containers"
         const val THEME_KEY = "theme_mode"
+        const val SKIN_KEY = "skin_mode"
     }
 }

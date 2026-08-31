@@ -52,6 +52,12 @@ fun setThemeMode(mode: io.openorcha.mobile.ui.theme.ThemeMode) {
     _uiState.update { it.copy(themeMode = mode) }
 }
 
+/** Design/skin setting (Settings → Appearance §3): Classic/Swiss/Minimalist, applied instantly. */
+fun setSkinMode(skin: io.openorcha.mobile.ui.theme.SkinMode) {
+    store.saveSkinMode(skin.storageValue)
+    _uiState.update { it.copy(skinMode = skin) }
+}
+
 fun renameContainer(id: String, name: String) {
     if (name.isBlank()) return
     val containers = store.rename(id, name.trim())

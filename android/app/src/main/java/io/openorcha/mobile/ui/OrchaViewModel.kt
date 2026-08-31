@@ -41,6 +41,7 @@ internal class OrchaViewModel(application: Application) : AndroidViewModel(appli
     RunAndConversationActions,
     TaskAndRequestHumanActions,
     AgentAndWorkspaceHumanActions,
+    GitHubHubActions,
     OrchaViewModelSupport {
     override val store = ContainerStore(application)
     override val api = OrchaApiClient()
@@ -56,6 +57,7 @@ internal class OrchaViewModel(application: Application) : AndroidViewModel(appli
                     store.loadThemeMode().replaceFirstChar { it.uppercase() },
                 )
             }.getOrDefault(io.openorcha.mobile.ui.theme.ThemeMode.Auto),
+            skinMode = io.openorcha.mobile.ui.theme.SkinMode.fromStorageValue(store.loadSkinMode()),
         ),
     )
     val uiState: StateFlow<OrchaUiState> = _uiState
