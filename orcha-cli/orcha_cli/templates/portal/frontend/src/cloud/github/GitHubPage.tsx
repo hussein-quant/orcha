@@ -29,18 +29,23 @@ import { actingHuman, useSnapshot } from "../../state/SnapshotProvider";
 import { Shell } from "../../shell/Shell";
 import type { Agent, Task } from "../../types";
 import { CloudIcon } from "../projects/icons";
+import { useDebouncedValue } from "./browse/useDebounce";
 import { RepoBrowser } from "./browse/RepoBrowser";
 import { ConnectRepoModal } from "./ConnectRepoModal";
 import { isLocalRepo } from "./connectRepo";
 import "./connectRepo.css";
 import { RepoBadge } from "./RepoBadge";
 import {
+  authorsFromRows,
+  buildPullsQuery,
   CHECKS_BATCH_CAP,
   CLEAN_STATES,
   classifyDetailError,
   classifyError,
   dispatchLabel,
+  EMPTY_PULLS_FILTER,
   fixOutstandingItems,
+  hasActivePullsFilter,
   isLocalSourcePayload,
   labelColors,
   matchesFilter,
@@ -60,6 +65,8 @@ import {
   type GhPullDetail,
   type GhPullRow,
   type GhRun,
+  type Involvement,
+  type PullsFilter,
   type TaskState,
 } from "./ghlib";
 import "./github.css";
@@ -627,6 +634,23 @@ export function GitHubPage() {
   const [query, setQuery] = useState("");
   const [detailSubTab, setDetailSubTab] = useState("conversation");
 
+  // ---- PR-list server-backed filter bar (monorepo-scale repos): author input +
+  // Assigned-to-me/My-reviews chips + free-text search. Only meaningful on the
+  // pulls tab; the issues tab keeps its plain client-side "Mine"/free-text-title
+  // behavior untouched. `query` above still drives client-side title filtering for
+  // the NO-filter path (matchesSearch); pullsFilter.q takes over as the server
+  // -backed search text once any filter is active (see the input's onChange below).
+  const [pullsFilter, setPullsFilter] = useState<PullsFilter>(EMPTY_PULLS_FILTER);
+  const debouncedPullsQ = useDebouncedValue(pullsFilter.q, 300);
+  const pullsFilterActive = hasActivePullsFilter({ ...pullsFilter, q: debouncedPullsQ });
+  // accumulated filtered pages (append on "Load more") — separate from `payload`,
+  // which stays the single cached no-filter list.
+  const [filteredPulls, setFilteredPulls] = useState<GhPullRow[]>([]);
+  const [filteredMeta, setFilteredMeta] = useState<{ page: number; totalCount: number | null; hasMore: boolean } | null>(null);
+  const [filteredLoading, setFilteredLoading] = useState(false);
+  const [filteredError, setFilteredError] = useState<GhError | null>(null);
+  const filteredReqToken = useRef(0);
+
   // ---- list payload/error slots (per tab, like github-render.js module state)
   const [payload, setPayload] = useState<Record<ListKey, GhListPayload | null>>({ issues: null, pulls: null });
   const [loadError, setLoadError] = useState<Record<ListKey, GhError | null>>({ issues: null, pulls: null });
@@ -735,6 +759,56 @@ export function GitHubPage() {
       .catch((e: Error) => { setLoadError((er) => ({ ...er, [key]: { kind: "error", status: 0, detail: e.message } })); })
       .then(() => { loadingRef.current[key] = false; });
   }, [cid]);
+
+  /* ---- filtered pulls load (server-backed author=/involvement=/q=/page=) --
+     A distinct fetch path from loadList("pulls", …): active filters go through
+     GET .../github/pulls?…, appending pages into `filteredPulls` rather than
+     replacing the single cached no-filter payload. */
+  const loadFilteredPulls = useCallback((f: PullsFilter, page: number, append: boolean) => {
+    if (!cid) return;
+    const myToken = ++filteredReqToken.current;
+    setFilteredLoading(true);
+    fetch("/api/containers/" + encodeURIComponent(cid) + "/github/pulls" + buildPullsQuery(f, page))
+      .then((r) => r.json().then((body) => ({ ok: r.ok, status: r.status, body })).catch(() => ({ ok: r.ok, status: r.status, body: null })))
+      .then(({ ok, status, body }) => {
+        if (myToken !== filteredReqToken.current) return; // superseded by a newer filter/page change
+        if (!ok) {
+          setFilteredError(classifyError(status, body));
+          setFilteredLoading(false);
+          return;
+        }
+        const b = body as GhListPayload;
+        if (b && b.available === false) {
+          setFilteredError(classifyError(status, body));
+          setFilteredPulls(append ? (prev) => prev : []);
+          setFilteredLoading(false);
+          return;
+        }
+        const rows = (b && b.pulls) || [];
+        setFilteredPulls((prev) => (append ? [...prev, ...rows] : rows));
+        setFilteredMeta({ page: (b && b.page) || page, totalCount: (b && b.total_count) ?? null, hasMore: !!(b && b.has_more) });
+        setFilteredError(null);
+        setFilteredLoading(false);
+      })
+      .catch((e: Error) => {
+        if (myToken !== filteredReqToken.current) return;
+        setFilteredError({ kind: "error", status: 0, detail: e.message });
+        setFilteredLoading(false);
+      });
+  }, [cid]);
+
+  // filter (debounced q included) or tab change -> fresh fetch from page 1
+  useEffect(() => {
+    if (tab !== "pulls" || browseRoute.on) return;
+    const f: PullsFilter = { ...pullsFilter, q: debouncedPullsQ };
+    if (!hasActivePullsFilter(f)) { setFilteredPulls([]); setFilteredMeta(null); setFilteredError(null); return; }
+    loadFilteredPulls(f, 1, false);
+  }, [tab, pullsFilter.author, pullsFilter.involvement, debouncedPullsQ, browseRoute.on, loadFilteredPulls]);
+
+  const loadMoreFilteredPulls = useCallback(() => {
+    if (!filteredMeta || !filteredMeta.hasMore || filteredLoading) return;
+    loadFilteredPulls({ ...pullsFilter, q: debouncedPullsQ }, filteredMeta.page + 1, true);
+  }, [filteredMeta, filteredLoading, pullsFilter, debouncedPullsQ, loadFilteredPulls]);
 
   /* ---- detail load (github-render.js loadDetail(), token-guarded) --------- */
   const loadDetail = useCallback((kind: GhKind, number: number, force: boolean) => {
@@ -1054,8 +1128,51 @@ export function GitHubPage() {
   );
 
   /* ---- list body (github-state.js bodyHtml, skeleton gate folded in) ------- */
+  // server-backed PR filter footer: "N of ~total" when GitHub's search gave an
+  // honest total_count; otherwise just the loaded count (the list path has none).
+  const loadMoreFooter = () => {
+    if (!filteredMeta) return null;
+    const shown = filteredPulls.length;
+    const of = filteredMeta.totalCount != null ? `${shown} of ~${filteredMeta.totalCount}` : `${shown} loaded`;
+    if (!filteredMeta.hasMore) {
+      return <div className="gh-loadmore-done muted" style={{ padding: "10px 4px", fontSize: 12 }}>{of}</div>;
+    }
+    return (
+      <button
+        className="btn subtle sm gh-loadmore"
+        type="button"
+        style={{ width: "100%", margin: "8px 0 2px" }}
+        disabled={filteredLoading}
+        onClick={loadMoreFilteredPulls}
+      >
+        {filteredLoading ? "Loading…" : `Load more · ${of}`}
+      </button>
+    );
+  };
+
   const listBody = () => {
     const key = tab;
+    const kind: GhKind = key === "pulls" ? "pull" : "issue";
+
+    // Server-backed filter path (pulls tab only): author=/involvement=/q= active
+    // -> render the accumulated filtered/paginated pages instead of the plain
+    // cached list; the Issues tab and the no-filter Pulls view are untouched.
+    if (key === "pulls" && pullsFilterActive) {
+      if (filteredError) return <GhErrorBody err={filteredError} onConnect={() => setConnectOpen(true)} />;
+      if (!filteredPulls.length && filteredLoading) return skeletonReady ? <GhSkeleton kind="list-rows" /> : null;
+      if (!filteredPulls.length) {
+        return <div className="none" style={{ padding: 20 }}>No pull requests match this filter.</div>;
+      }
+      const rows = filteredPulls.map((p) => (p.checks == null && checksByNumber[p.number] != null ? { ...p, checks: checksByNumber[p.number] } : p));
+      return (
+        <>
+          <ColumnHeader tab="pull" />
+          {rows.map((it) => pullRow(it))}
+          {loadMoreFooter()}
+        </>
+      );
+    }
+
     const pl = payload[key];
     const err = loadError[key];
     // unsettled (no payload AND no error yet): the vanilla page's OrchaSkeleton
@@ -1066,7 +1183,6 @@ export function GitHubPage() {
     // classifyError docstring) — the local-run degrade never reaches loadError.
     if (isLocalSourcePayload(pl)) return <LocalSourceCallout onConnect={() => setConnectOpen(true)} originDetected={pl?.origin_detected} />;
     if (!pl || !pl.repo) return <EmptyRepo onConnect={() => setConnectOpen(true)} />;
-    const kind: GhKind = key === "pulls" ? "pull" : "issue";
     const rawItems: GhItem[] = (pl.issues || pl.pulls || []) as GhItem[];
     // merge the progressively-filled checks map onto still-null rollups
     const all = key === "pulls"
@@ -1220,6 +1336,53 @@ export function GitHubPage() {
     ));
   };
 
+  /* ---- PR-list server-backed filter bar (monorepo-scale repos) -------------
+     Author input (+ datalist of authors seen in loaded rows), Assigned-to-me/
+     My-reviews chips (mutually exclusive; disabled+tooltip with no github_login
+     on the acting identity), and the free-text search box lives in the header
+     above (wired to pullsFilter.q on this tab — see the ghSearch input). */
+  const pullsFilterBar = () => {
+    const loadedRows: GhPullRow[] = [...((payload.pulls && payload.pulls.pulls) || []), ...filteredPulls];
+    const authorOptions = authorsFromRows(loadedRows);
+    const noIdentity = !myLogin;
+    const chip = (key: Involvement, label: string) => {
+      const on = pullsFilter.involvement === key;
+      return (
+        <button
+          key={key || "none"}
+          type="button"
+          className={"tag gh-involve-chip" + (on ? " on" : "")}
+          disabled={noIdentity}
+          title={noIdentity ? "Link a GitHub login to use this filter" : undefined}
+          aria-pressed={on}
+          onClick={() => setPullsFilter((f) => ({ ...f, involvement: on ? null : key }))}
+        >
+          {label}
+        </button>
+      );
+    };
+    return (
+      <div className="gh-pulls-filterbar" id="ghPullsFilterBar">
+        <input
+          className="gh-search-in gh-author-in"
+          type="text"
+          list="ghPullsAuthors"
+          placeholder="Author…"
+          spellCheck={false}
+          autoComplete="off"
+          aria-label="Filter by author"
+          value={pullsFilter.author}
+          onChange={(e) => setPullsFilter((f) => ({ ...f, author: e.target.value }))}
+        />
+        <datalist id="ghPullsAuthors">
+          {authorOptions.map((a) => <option key={a} value={a} />)}
+        </datalist>
+        {chip("assigned", "Assigned to me")}
+        {chip("review_requested", "My reviews")}
+      </div>
+    );
+  };
+
   /* ---- Fix-info popover content (fixInfoPopoverBodyHtml) ------------------- */
   const fixInfoBody = () => {
     const p = fixInfo && detailPayload.pull && detailPayload.pull.__number === fixInfo.number ? detailPayload.pull.pull : null;
@@ -1277,11 +1440,13 @@ export function GitHubPage() {
             id="ghSearch"
             className="gh-search-in"
             type="search"
-            placeholder="Filter by title or #number…"
+            placeholder={tab === "pulls" ? "Search title or body…" : "Filter by title or #number…"}
             spellCheck={false}
             autoComplete="off"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={tab === "pulls" ? pullsFilter.q : query}
+            onChange={(e) => (tab === "pulls"
+              ? setPullsFilter((f) => ({ ...f, q: e.target.value }))
+              : setQuery(e.target.value))}
           />
         </div>
 
@@ -1296,6 +1461,7 @@ export function GitHubPage() {
         ) : null}
 
         <div className="filters" id="ghFilters">{route.kind || browseRoute.on ? null : filterChips()}</div>
+        {!route.kind && !browseRoute.on && tab === "pulls" ? pullsFilterBar() : null}
 
         {browseRoute.on ? (
           cid ? (

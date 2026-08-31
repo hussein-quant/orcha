@@ -29,6 +29,24 @@
 .gh-wrap .filters button:hover { color: var(--text); }
 .gh-wrap .filters button.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
 
+/* ---- PR-list server-backed filter bar (monorepo-scale repos) ------------
+   Author input (+ datalist) and the Assigned-to-me/My-reviews involvement
+   chips, rendered as a second row under the Open/Mine/Needs-review chips —
+   pulls tab only. The involvement chips reuse .tag's compact chip sizing
+   (like .tag.gh-unassigned) rather than the .filters button pill idiom,
+   since they carry their own disabled/tooltip state. */
+.gh-pulls-filterbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: -4px; }
+.gh-author-in { min-width: 160px; padding: 6px 10px; font-size: 12px; }
+.tag.gh-involve-chip { cursor: pointer; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border);
+  transition: color .12s, border-color .12s, background .12s; }
+.tag.gh-involve-chip:hover:not(:disabled) { color: var(--text); }
+.tag.gh-involve-chip.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.tag.gh-involve-chip:disabled { cursor: not-allowed; opacity: 0.5; }
+
+/* ---- "Load more" pagination footer (server-backed filter path) ---------- */
+.gh-loadmore { font-weight: 600; }
+.gh-loadmore-done { text-align: center; }
+
 .ghlist-card { padding: 6px; }
 /* detail route: the mount drops the list card's chrome (border/background/6px
    padding) — the detail view builds its OWN cards (subtab body, rail cards),

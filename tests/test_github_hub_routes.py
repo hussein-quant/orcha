@@ -1923,3 +1923,458 @@ async def test_start_issue_vs_slack_start_same_number_same_authoritative_title(
     hub_t = [x for x in hub_listed if x["title"].startswith("GH #300:")][0]
     slack_t = [x for x in slack_listed if x["title"].startswith("GH #300:")][0]
     assert hub_t["title"] == slack_t["title"] == f"GH #300: {real_title}"
+
+
+# ===================================================================================
+# PR-list filtering + pagination (monorepo-scale repos): author= / involvement= / q=
+# / page=/per_page= on GET .../github/pulls. ANY of author/involvement/q present ->
+# GitHub's search API (/search/issues); otherwise the existing single-call list path,
+# now also accepting page/per_page passthrough+clamp.
+# ===================================================================================
+
+def _search_page(items, total_count=None, incomplete=False):
+    return {"total_count": total_count if total_count is not None else len(items),
+            "incomplete_results": incomplete, "items": items}
+
+
+def _search_pr_item(number, title="A PR", **extra):
+    """One /search/issues item shaped as GitHub actually returns it for a PR — no
+    head/base/checks/requested_reviewers (those live only on /pulls, not /issues)."""
+    base = {
+        "number": number, "title": title,
+        "html_url": f"https://github.com/acme/site/pull/{number}",
+        "updated_at": "2026-08-01T00:00:00Z",
+        "draft": False,
+        "pull_request": {"url": f"https://api.github.com/repos/acme/site/pulls/{number}"},
+    }
+    base.update(extra)
+    return base
+
+
+# ------------------------- plain path unchanged (no filter params) --------------------
+
+async def test_pulls_plain_path_unchanged_no_search(client, container, token_env, monkeypatch):
+    """No author/involvement/q -> the existing single /pulls list call; the search API
+    is never touched. page/per_page default to 1/30 and are echoed back."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+
+    def fake_get(path, token):
+        calls.append(path)
+        assert "/search/issues" not in path
+        return [{
+            "number": 12, "title": "Add feature", "draft": False,
+            "updated_at": "2026-07-02T00:00:00Z",
+            "html_url": "https://github.com/acme/site/pull/12",
+            "head": {"ref": "feat/x", "sha": "deadbeef"},
+            "requested_reviewers": [], "mergeable_state": "clean",
+        }]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(calls) == 1
+    assert body["available"] is True
+    assert body["source"] == "list"
+    assert body["page"] == 1 and body["per_page"] == 30
+    assert body["total_count"] is None       # null on the list path
+    assert body["has_more"] is False
+    assert len(body["pulls"]) == 1
+
+
+# ------------------------- page/per_page passthrough + clamp (list path) --------------
+
+async def test_pulls_list_path_page_per_page_passthrough(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+
+    def fake_get(path, token):
+        calls.append(path)
+        return []
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?page=2&per_page=10")
+    assert r.status_code == 200, r.text
+    assert any("page=2" in c and "per_page=10" in c for c in calls)
+    body = r.json()
+    assert body["page"] == 2 and body["per_page"] == 10
+
+
+async def test_pulls_per_page_clamped_to_max_50(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+
+    def fake_get(path, token):
+        calls.append(path)
+        return []
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?per_page=500")
+    assert r.status_code == 200, r.text
+    assert any("per_page=50" in c for c in calls)
+    assert r.json()["per_page"] == 50
+
+
+async def test_pulls_page_below_1_rejected(client, container, token_env):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?page=0")
+    assert r.status_code == 422
+
+
+async def test_pulls_per_page_below_1_rejected(client, container, token_env):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?per_page=0")
+    assert r.status_code == 422
+
+
+# ------------------------- search-path query assembly: author= -----------------------
+
+async def test_pulls_author_filter_uses_search_api(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+
+    def fake_get(path, token):
+        calls.append(path)
+        assert path.startswith("/search/issues?")
+        return _search_page([_search_pr_item(21, author="octocat")])
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?author=octocat")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source"] == "search"
+    assert len(calls) == 1
+    call = calls[0]
+    # q= carries repo scope + is:pr is:open + author:<login>, url-encoded
+    import urllib.parse as up
+    qs = up.parse_qs(up.urlsplit(call).query)
+    assert qs["q"][0] == "repo:acme/site is:pr is:open author:octocat"
+    assert qs["page"][0] == "1"
+    assert qs["per_page"][0] == "30"
+
+
+async def test_pulls_author_match_is_case_insensitive_passthrough(client, container, token_env, monkeypatch):
+    """author= is passed through to GitHub's own author: qualifier (GitHub's search is
+    itself case-insensitive on logins) — the route does not lowercase/reshape it."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    seen = {}
+
+    def fake_get(path, token):
+        seen["path"] = path
+        return _search_page([])
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?author=OctoCAT")
+    assert r.status_code == 200, r.text
+    import urllib.parse as up
+    qs = up.parse_qs(up.urlsplit(seen["path"]).query)
+    assert "author:OctoCAT" in qs["q"][0]
+
+
+# ------------------------- search-path query assembly: q= ----------------------------
+
+async def test_pulls_q_filter_uses_search_api(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        assert path.startswith("/search/issues?")
+        return _search_page([_search_pr_item(5, title="fix login bug")])
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?q=login+bug")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source"] == "search"
+    assert len(body["pulls"]) == 1
+    assert body["pulls"][0]["title"] == "fix login bug"
+
+
+async def test_pulls_q_and_author_combine_in_one_search(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    seen = {}
+
+    def fake_get(path, token):
+        seen["path"] = path
+        return _search_page([])
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    await client.get(f"/api/containers/{cid}/github/pulls?author=octocat&q=oauth")
+    import urllib.parse as up
+    qs = up.parse_qs(up.urlsplit(seen["path"]).query)
+    q = qs["q"][0]
+    assert "repo:acme/site is:pr is:open" in q
+    assert "author:octocat" in q
+    assert "oauth" in q
+
+
+# ------------------------- search-path query assembly: involvement= ------------------
+
+async def test_pulls_involvement_assigned_resolves_server_side(
+        client, container, make_agent, trust_proxy, token_env, monkeypatch):
+    """involvement=assigned resolves against the acting identity's github_login
+    (the /api/me identity seam) and maps to GitHub's assignee:@me-equivalent qualifier
+    (assignee:<login> — search has no server-relative '@me' outside the authenticated
+    user's own token, which this route doesn't hold; the resolved login is substituted
+    directly)."""
+    cid = container["id"]
+    await _bind_owner(client, container, make_agent)  # binds octocat as owner
+    await _bind_repo(client, cid)
+    seen = {}
+
+    def fake_get(path, token):
+        seen["path"] = path
+        return _search_page([])
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?involvement=assigned",
+                        headers=OCTO)
+    assert r.status_code == 200, r.text
+    import urllib.parse as up
+    qs = up.parse_qs(up.urlsplit(seen["path"]).query)
+    assert "assignee:octocat" in qs["q"][0]
+
+
+async def test_pulls_involvement_review_requested_resolves_server_side(
+        client, container, make_agent, trust_proxy, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_owner(client, container, make_agent)
+    await _bind_repo(client, cid)
+    seen = {}
+
+    def fake_get(path, token):
+        seen["path"] = path
+        return _search_page([])
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?involvement=review_requested",
+                        headers=OCTO)
+    assert r.status_code == 200, r.text
+    import urllib.parse as up
+    qs = up.parse_qs(up.urlsplit(seen["path"]).query)
+    assert "review-requested:octocat" in qs["q"][0]
+
+
+async def test_pulls_involvement_bad_value_422(client, container, token_env):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?involvement=bogus")
+    assert r.status_code == 422
+
+
+# ------------------------- identity-less involvement: no github_login ----------------
+
+async def test_pulls_involvement_no_identity_returns_friendly_empty(
+        client, container, token_env):
+    """No trusted proxy identity resolved (self-host / no header) -> the acting
+    identity has no github_login -> a clean 200 with available:true, items:[], and a
+    detail explaining the gap — never a 4xx/5xx, and no GitHub call at all."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?involvement=assigned")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["available"] is True
+    assert body["items"] == []
+    assert "Link a GitHub login" in body["detail"]
+
+
+async def test_pulls_involvement_no_identity_makes_no_github_call(
+        client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    calls = []
+    monkeypatch.setattr(hub, "_gh_get", lambda p, t: calls.append(p))
+    await client.get(f"/api/containers/{cid}/github/pulls?involvement=review_requested")
+    assert calls == []
+
+
+# ------------------------- has_more calculation ---------------------------------------
+
+async def test_pulls_search_has_more_true_when_more_pages_remain(
+        client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        items = [_search_pr_item(n) for n in range(1, 6)]  # 5 items, page 1 of per_page=5
+        return _search_page(items, total_count=12)
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?q=x&page=1&per_page=5")
+    body = r.json()
+    assert body["total_count"] == 12
+    assert body["has_more"] is True
+
+
+async def test_pulls_search_has_more_false_on_last_page(
+        client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        items = [_search_pr_item(n) for n in range(1, 3)]  # last 2 of 12, page 3 of 5
+        return _search_page(items, total_count=12)
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?q=x&page=3&per_page=5")
+    body = r.json()
+    assert body["has_more"] is False
+
+
+async def test_pulls_list_path_has_more_true_when_full_page_returned(
+        client, container, token_env, monkeypatch):
+    """The plain list path has no honest total_count from GitHub's /pulls list, so
+    has_more is inferred from whether a FULL page came back (a partial/empty page means
+    there's nothing more to page to)."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        return [{
+            "number": n, "title": f"pr {n}", "draft": False,
+            "updated_at": "2026-07-02T00:00:00Z",
+            "html_url": f"https://github.com/acme/site/pull/{n}",
+            "head": {"ref": "x", "sha": "s"}, "requested_reviewers": [],
+            "mergeable_state": "clean",
+        } for n in range(1, 4)]  # exactly per_page=3 rows -> maybe more
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?per_page=3")
+    body = r.json()
+    assert body["has_more"] is True
+
+
+async def test_pulls_list_path_has_more_false_on_partial_page(
+        client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        return [{
+            "number": 1, "title": "only one", "draft": False,
+            "updated_at": "2026-07-02T00:00:00Z",
+            "html_url": "https://github.com/acme/site/pull/1",
+            "head": {"ref": "x", "sha": "s"}, "requested_reviewers": [],
+            "mergeable_state": "clean",
+        }]  # 1 row < per_page=30 -> definitely no more
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls")
+    body = r.json()
+    assert body["has_more"] is False
+
+
+# ------------------------- tolerant row mapping (search-sourced rows) -----------------
+
+async def test_pulls_search_row_mapping_omits_unknown_fields(
+        client, container, token_env, monkeypatch):
+    """Search-sourced items map to the existing row shape but lack
+    head/base/checks/requested_reviewers — the route emits what's known and
+    omits/null the rest rather than fabricating them."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        return _search_page([_search_pr_item(21, title="Add OAuth", draft=True)])
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?q=oauth")
+    assert r.status_code == 200, r.text
+    row = r.json()["pulls"][0]
+    assert row["number"] == 21
+    assert row["title"] == "Add OAuth"
+    assert row["draft"] is True
+    assert row["html_url"] == "https://github.com/acme/site/pull/21"
+    assert row["updated_at"] == "2026-08-01T00:00:00Z"
+    # unknown on the search shape -> null/absent, never fabricated
+    assert row["checks"] is None
+    assert row["head"] is None
+    assert row.get("requested_reviewers") in (None, [])
+    assert row["mergeable_state"] is None
+
+
+async def test_pulls_search_rows_carry_tracked_task_id(
+        client, container, token_env, monkeypatch):
+    """Search-sourced rows still get the tracked_task_id stamp — same batched lookup
+    the plain list path uses, so 'already tracked' state isn't lost on the search path."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        if "/search/issues" in path:
+            return _search_page([_search_pr_item(300, title="tracked one")])
+        # the authoritative-title live fetch POST /start makes
+        return {"number": 300, "title": "tracked one",
+                "html_url": "https://github.com/acme/site/pull/300", "body": ""}
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    start_r = await client.post(f"/api/containers/{cid}/github/start",
+                                json={"kind": "pull", "number": 300, "title": "tracked one"})
+    assert start_r.status_code == 201, start_r.text
+    tid = start_r.json()["task_id"]
+
+    r = await client.get(f"/api/containers/{cid}/github/pulls?q=tracked")
+    assert r.status_code == 200, r.text
+    assert r.json()["pulls"][0]["tracked_task_id"] == tid
+
+
+# ------------------------- search path: repo-not-connected / local-source unaffected -
+
+async def test_pulls_search_repo_not_connected(client, container):
+    r = await client.get(f"/api/containers/{container['id']}/github/pulls?q=x")
+    assert r.status_code == 200
+    assert r.json()["reason"] == "repo_not_connected"
+
+
+async def test_pulls_search_error_mapping_403(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+    monkeypatch.setattr(hub, "_gh_get",
+                        lambda p, t: (_ for _ in ()).throw(RuntimeError("github_status:403")))
+    r = await client.get(f"/api/containers/{cid}/github/pulls?q=x")
+    assert r.status_code == 200
+    assert r.json()["reason"] == "rate_limited"
+
+
+# ------------------------- author_login on rows (additive, feeds the datalist) --------
+
+async def test_pulls_list_row_carries_author_login(client, container, token_env, monkeypatch):
+    """The plain list path's rows carry author_login (additive field, off GitHub's
+    user.login) — feeds the frontend filter bar's "authors seen" datalist."""
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        return [{
+            "number": 1, "title": "x", "draft": False,
+            "updated_at": "2026-07-02T00:00:00Z",
+            "html_url": "https://github.com/acme/site/pull/1",
+            "head": {"ref": "x", "sha": "s"}, "requested_reviewers": [],
+            "mergeable_state": "clean", "user": {"login": "octocat"},
+        }]
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls")
+    assert r.json()["pulls"][0]["author_login"] == "octocat"
+
+
+async def test_pulls_search_row_carries_author_login(client, container, token_env, monkeypatch):
+    cid = container["id"]
+    await _bind_repo(client, cid)
+
+    def fake_get(path, token):
+        return _search_page([_search_pr_item(1, title="x", user={"login": "hubot"})])
+
+    monkeypatch.setattr(hub, "_gh_get", fake_get)
+    r = await client.get(f"/api/containers/{cid}/github/pulls?q=x")
+    assert r.json()["pulls"][0]["author_login"] == "hubot"

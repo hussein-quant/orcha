@@ -46,6 +46,7 @@ import concurrent.futures
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from fastapi import HTTPException, Query, Request
@@ -103,6 +104,14 @@ PATCH_BUDGET_BYTES = 800_000
 # rate limit and to the portal process' own thread budget).
 CHECKS_BATCH_MAX_NUMBERS = 30
 CHECKS_POOL_SIZE = 8
+
+# GET .../github/pulls filtering + pagination (monorepo-scale repos, ~1000 open PRs).
+# Defaults/caps mirror the checks batch route's own style: a sane default, a hard
+# ceiling enforced server-side rather than trusting the caller.
+PULLS_DEFAULT_PAGE = 1
+PULLS_DEFAULT_PER_PAGE = 30
+PULLS_MAX_PER_PAGE = 50
+GITHUB_SEARCH_API = "/search/issues"
 
 # In-module TTL cache. Deliberately a plain module dict — one portal process, tiny
 # per-container footprint, invalidated on POST /start. Tests exercise TTL behavior by
@@ -227,6 +236,21 @@ def _load_binding(cur, cid: str, request: Request):
     require_member_read(cur, request, cid)
     cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
     return cur.fetchone()["github_repo"]
+
+
+def _acting_github_login(cur, cid: str, request: Request) -> "str | None":
+    """The acting identity's github_login, per the SAME identity seam every other
+    route here already leans on (`require_member_read` — trusted-proxy login
+    resolved to a live container member). Used by involvement=assigned|
+    review_requested to resolve "me" server-side. None when no trusted identity
+    resolved (trust off/self-host, or a trusted login that isn't a member here —
+    require_member_read itself 403s the non-member case, so reaching this point
+    with None means either trust-off or a still-unmapped container) OR the
+    resolved member simply has no github_login on file."""
+    member = require_member_read(cur, request, cid)
+    if not member:
+        return None
+    return member.get("github_login")
 
 
 def _not_connected():
@@ -448,7 +472,9 @@ def _pull_entry(repo: str, pull: dict) -> dict:
     NEVER a real rollup dict, so the frontend can tell "not loaded" apart from an honest
     all-zero result. `repo` is accepted (unused) to keep this a drop-in swap for the old
     signature at call sites; head sha isn't needed here either (the checks route re-reads
-    it straight off the cached raw pulls list)."""
+    it straight off the cached raw pulls list). `author_login` is an ADDITIVE field (the
+    PR author's login, straight off GitHub's `user.login`) — feeds the filter bar's
+    "authors seen in loaded rows" datalist; existing consumers ignore the extra key."""
     reviewers = [r.get("login") for r in (pull.get("requested_reviewers") or [])
                  if r.get("login")]
     head = pull.get("head") or {}
@@ -462,7 +488,65 @@ def _pull_entry(repo: str, pull: dict) -> dict:
         "requested_reviewers": reviewers,
         "checks": None,
         "mergeable_state": pull.get("mergeable_state"),
+        "author_login": (pull.get("user") or {}).get("login"),
     }
+
+
+def _search_pull_entry(item: dict) -> dict:
+    """One row of the PR list SOURCED FROM GitHub's search API (author=/involvement=/q=
+    present). `/search/issues` returns the issue-shaped subset of a PR — no head/base,
+    no requested_reviewers, no mergeable_state — so this maps to the SAME row shape
+    `_pull_entry` emits (clients tolerate the gaps), filling in only what's known and
+    leaving the rest null/absent rather than fabricating it. `checks` is null here too,
+    same "not loaded yet" convention as the plain list path — the progressive-fill
+    checks route re-resolves shas off a warm /pulls list, which a search-sourced row
+    was never part of, so a search-tab PR simply never gets a checks fill (acceptable:
+    checks aren't in the frozen contract's ask for this surface)."""
+    return {
+        "number": item.get("number"),
+        "title": item.get("title"),
+        "head": None,
+        "draft": bool(item.get("draft")),
+        "updated_at": item.get("updated_at"),
+        "html_url": item.get("html_url"),
+        "requested_reviewers": [],
+        "checks": None,
+        "mergeable_state": None,
+        "author_login": (item.get("user") or {}).get("login"),
+    }
+
+
+def _build_search_query(repo: str, *, author: "str | None", involvement_login: "str | None",
+                         involvement: "str | None", q: "str | None") -> str:
+    """Compose the `q=` search string for GitHub's /search/issues: repo scope + is:pr
+    is:open, plus whichever of author:/assignee:/review-requested:/free-text the
+    caller asked for. `involvement_login` is the ALREADY-RESOLVED acting identity's
+    github_login (server-side — see list_github_pulls); `involvement` is which
+    qualifier that resolves to. Free text (`q`) is appended last, unquoted, exactly as
+    GitHub's search box would take it (title/body full-text match)."""
+    parts = [f"repo:{repo}", "is:pr", "is:open"]
+    if author:
+        parts.append(f"author:{author}")
+    if involvement == "assigned" and involvement_login:
+        parts.append(f"assignee:{involvement_login}")
+    elif involvement == "review_requested" and involvement_login:
+        parts.append(f"review-requested:{involvement_login}")
+    if q:
+        parts.append(q)
+    return " ".join(parts)
+
+
+def _search_pulls(repo: str, token: str, *, author: "str | None",
+                   involvement_login: "str | None", involvement: "str | None",
+                   q: "str | None", page: int, per_page: int) -> dict:
+    """The ONE GitHub call behind a filtered/paginated PR list: GET /search/issues with
+    the composed query string. Returns the raw GitHub search response
+    ({total_count, incomplete_results, items}) — the route maps `items` through
+    `_search_pull_entry` and reads `total_count` for pagination."""
+    query = _build_search_query(repo, author=author, involvement_login=involvement_login,
+                                 involvement=involvement, q=q)
+    params = urllib.parse.urlencode({"q": query, "page": page, "per_page": per_page})
+    return _gh_get(f"{GITHUB_SEARCH_API}?{params}", token)
 
 
 def _logins(items) -> list:
@@ -859,20 +943,64 @@ def _cached_or_fetch_raw_pulls(cid: str, repo: str, token: str):
     return raw
 
 
-@app.get("/api/containers/{cid}/github/pulls")
-def list_github_pulls(cid: str, request: Request):
-    """Open PRs of the container's connected repo — the hub's PRs tab.
+def _clamp_per_page(per_page: int) -> int:
+    return max(1, min(per_page, PULLS_MAX_PER_PAGE))
 
-    Returns {available, repo, pulls:[{number,title,head,draft,updated_at,html_url,
-    requested_reviewers,checks:null,mergeable_state,tracked_task_id}]}. `checks` is
-    ALWAYS null here — "not loaded yet" — never a rollup: this route makes exactly ONE
-    GitHub call (the /pulls list itself); the checks rollup is fetched separately and
-    progressively via GET .../github/checks (see that route's docstring + the module
-    header's PERFORMANCE note). `tracked_task_id` (str | None) is computed fresh on
-    every request, same as the issues list — see _with_tracked_list's docstring. Same
-    clean-error contract + 60s GitHub-cache as the issues route."""
-    with db_cursor() as (_, cur):
+
+@app.get("/api/containers/{cid}/github/pulls")
+def list_github_pulls(
+    cid: str, request: Request,
+    author: "str | None" = Query(None),
+    involvement: "str | None" = Query(None, pattern="^(assigned|review_requested)$"),
+    q: "str | None" = Query(None),
+    page: int = Query(PULLS_DEFAULT_PAGE, ge=1),
+    per_page: int = Query(PULLS_DEFAULT_PER_PAGE, ge=1),
+):
+    """Open PRs of the container's connected repo — the hub's PRs tab. Monorepo-scale
+    filtering/pagination (~1000 open PRs): author=<login> (exact, case-insensitive —
+    passed straight through to GitHub's own author: qualifier, which is itself
+    case-insensitive), involvement=assigned|review_requested (resolved SERVER-SIDE
+    against the acting identity's github_login — see `_acting_github_login`), q=<free
+    text> (title/body search), page=<1-based, default 1>, per_page=<default 30, max 50>.
+
+    When ANY of author/involvement/q is present, this uses GitHub's SEARCH API
+    (`_search_pulls` -> GET /search/issues) instead of the plain /pulls list — search
+    -sourced rows map to the SAME shape but lack head/base/checks/requested_reviewers
+    (GitHub's search index doesn't carry them); those fields come back null/empty
+    rather than fabricated (see `_search_pull_entry`). The plain (no-filter) path is
+    UNCHANGED apart from page/per_page passthrough+clamp, and stays on the existing
+    60s-cached single-call list — this is the common case (open the PRs tab, no
+    filter yet) and must not cost an extra round-trip or lose its cache.
+
+    Returns {available, source:"list"|"search", repo, pulls:[...], page, per_page,
+    total_count, has_more}. `total_count` is GitHub's own search total (int) on the
+    search path; always null on the list path (the plain /pulls list carries no
+    honest total without walking every page). `has_more`: on the search path, whether
+    `page * per_page < total_count`; on the list path (no total available), whether a
+    FULL page came back (a partial/empty page means nothing more to page to).
+    `checks` stays ALWAYS null on the list path — "not loaded yet" — the checks
+    rollup is fetched separately via GET .../github/checks. `tracked_task_id`
+    (str | None) is computed fresh on every request, same as the issues list — see
+    _with_tracked_list's docstring. Same clean-error contract as the issues route
+    (never a 5xx); an identity-less involvement request is a distinct clean-empty
+    shape (see below), not an error.
+
+    involvement with no resolvable github_login for the acting identity (self-host
+    with no trusted proxy, or a trusted member who never linked GitHub) short-circuits
+    BEFORE any GitHub call, returning {available:true, items:[], detail:"Link a
+    GitHub login to use this filter", ...} — a friendly empty state, not a 4xx: the
+    filter is simply unusable for this identity right now, which isn't an error."""
+    with db_cursor() as (conn, cur):
         repo = _load_binding(cur, cid, request)
+        involvement_login = None
+        if involvement:
+            involvement_login = _acting_github_login(cur, cid, request)
+        conn.commit()  # release the read transaction before any GitHub round-trip
+    if involvement and not involvement_login:
+        return {"available": True, "source": "search", "repo": repo, "items": [],
+                "pulls": [], "page": page, "per_page": _clamp_per_page(per_page),
+                "total_count": None, "has_more": False,
+                "detail": "Link a GitHub login to use this filter"}
     if not repo:
         return _not_connected()
     if repo == LOCAL_REPO:
@@ -882,17 +1010,54 @@ def list_github_pulls(cid: str, request: Request):
         if not fallthrough_repo:
             return _local_source_unavailable(local_git.origin_repo())
         repo = fallthrough_repo
-    cached = _cache_get(cid, "pulls")
-    if cached is not None:
-        return {**cached, "pulls": _with_tracked_list(cid, cached["pulls"])}
+    per_page = _clamp_per_page(per_page)
+    filtering = bool(author or involvement or q)
+    if filtering:
+        token = _resolve_repo_token(repo, cid)
+        if not token:
+            return _not_connected()
+        try:
+            raw = _search_pulls(repo, token, author=author, involvement_login=involvement_login,
+                                involvement=involvement, q=q, page=page, per_page=per_page)
+        except RuntimeError as exc:
+            return {**_error_payload(exc), "repo": repo}
+        items = raw.get("items") or []
+        total_count = raw.get("total_count")
+        pulls = [_search_pull_entry(it) for it in items]
+        has_more = isinstance(total_count, int) and (page * per_page) < total_count
+        return {
+            "available": True, "source": "search", "repo": repo,
+            "pulls": _with_tracked_list(cid, pulls),
+            "page": page, "per_page": per_page,
+            "total_count": total_count, "has_more": has_more,
+        }
+    # Plain path (no filters): unchanged single-call list + 60s cache, now with
+    # page/per_page passthrough. Only page 1 at the default per_page is ever served
+    # from the 60s cache — any other page/per_page is a fresh, uncached GitHub call
+    # (the cache's one slot can't hold every page combination).
+    cache_eligible = page == PULLS_DEFAULT_PAGE and per_page == PULLS_DEFAULT_PER_PAGE
+    if cache_eligible:
+        cached = _cache_get(cid, "pulls")
+        if cached is not None:
+            return {**cached, "pulls": _with_tracked_list(cid, cached["pulls"]),
+                    "source": "list", "page": page, "per_page": per_page,
+                    "total_count": None, "has_more": len(cached["pulls"]) >= per_page}
     token = _resolve_repo_token(repo, cid)
     if not token:
         return _not_connected()
     try:
-        payload, _raw = _fetch_and_cache_pulls_list(cid, repo, token)
+        if cache_eligible:
+            payload, _raw = _fetch_and_cache_pulls_list(cid, repo, token)
+        else:
+            raw = _gh_get(f"/repos/{repo}/pulls?state=open&page={page}&per_page={per_page}", token)
+            payload = {"available": True, "repo": repo,
+                       "pulls": [_pull_entry(repo, p) for p in raw]}
     except RuntimeError as exc:
         return {**_error_payload(exc), "repo": repo}
-    return {**payload, "pulls": _with_tracked_list(cid, payload["pulls"])}
+    has_more = len(payload["pulls"]) >= per_page
+    return {**payload, "pulls": _with_tracked_list(cid, payload["pulls"]),
+            "source": "list", "page": page, "per_page": per_page,
+            "total_count": None, "has_more": has_more}
 
 
 @app.get("/api/containers/{cid}/github/checks")

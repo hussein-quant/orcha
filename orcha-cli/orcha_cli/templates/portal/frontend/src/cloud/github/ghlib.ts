@@ -54,6 +54,9 @@ export interface GhPullRow {
   checks?: ChecksRollup | null;
   mergeable_state?: string | null;
   tracked_task_id?: string | null;
+  // additive: the PR author's login, feeds the filter bar's author datalist.
+  // Present on both the plain list path and search-sourced rows.
+  author_login?: string | null;
 }
 export interface GhFileEntry {
   filename?: string | null;
@@ -108,6 +111,17 @@ export interface GhListPayload {
   // token could be resolved for it — null when there's no GitHub origin at all.
   // Absent (undefined) on every other payload shape.
   origin_detected?: string | null;
+  // PR-list filtering + pagination (monorepo-scale repos): present on the pulls
+  // list payload only (GET .../github/pulls). `source` says which GitHub surface
+  // answered ("list" — the plain /pulls call — or "search" — /search/issues, when
+  // author=/involvement=/q= is present). `total_count` is GitHub's own search total
+  // (int) on the search path; always null on the list path. `has_more` tells the
+  // "Load more" footer whether another page exists.
+  source?: "list" | "search";
+  page?: number;
+  per_page?: number;
+  total_count?: number | null;
+  has_more?: boolean;
 }
 export interface GhError {
   // "local_source" — Orcha Cloud local run, Addendum 2: the bound repo is
@@ -392,6 +406,52 @@ export function matchesSearch(item: GhItem, q: string): boolean {
   const num = String(item.number || "");
   return (item.title || "").toLowerCase().indexOf(needle) >= 0
     || num.indexOf(needle.replace(/^#/, "")) >= 0;
+}
+
+/* ---- PR-list server-backed filter bar (monorepo-scale repos) -------------
+   Query params GET .../github/pulls now accepts: author=, involvement=,
+   q=, page=, per_page= — see github_hub_routes.list_github_pulls. */
+export type Involvement = "assigned" | "review_requested" | null;
+export interface PullsFilter {
+  author: string;
+  involvement: Involvement;
+  q: string;
+}
+export const EMPTY_PULLS_FILTER: PullsFilter = { author: "", involvement: null, q: "" };
+export const PULLS_DEFAULT_PER_PAGE = 30;
+
+// Whether ANY server-backed filter is active — the plain client-side-filtered
+// path (existing "Mine"/"Needs review" chips + free-text box over the single
+// cached list) stays in effect only when this is false.
+export function hasActivePullsFilter(f: PullsFilter): boolean {
+  return !!(f.author.trim() || f.involvement || f.q.trim());
+}
+
+// Builds the query string for GET .../github/pulls from filter + paging state.
+// Omits empty/default params so the plain (no-filter) request stays byte-for
+// -byte the vanilla call when nothing is set (page=1 is still passed explicitly
+// once paging beyond page 1, never on the very first request).
+export function buildPullsQuery(f: PullsFilter, page: number, perPage: number = PULLS_DEFAULT_PER_PAGE): string {
+  const params = new URLSearchParams();
+  const author = f.author.trim();
+  if (author) params.set("author", author);
+  if (f.involvement) params.set("involvement", f.involvement);
+  const q = f.q.trim();
+  if (q) params.set("q", q);
+  if (page > 1) params.set("page", String(page));
+  if (perPage !== PULLS_DEFAULT_PER_PAGE) params.set("per_page", String(perPage));
+  const s = params.toString();
+  return s ? "?" + s : "";
+}
+
+// Distinct authors seen across loaded PR rows, for the author input's
+// <datalist> — both the plain list path and search-sourced rows carry
+// author_login, so this simply reads whatever rows are CURRENTLY loaded;
+// as pages accumulate the suggestion list only grows.
+export function authorsFromRows(rows: GhPullRow[]): string[] {
+  const seen = new Set<string>();
+  rows.forEach((r) => { if (r.author_login) seen.add(r.author_login); });
+  return Array.from(seen).sort((a, b) => a.localeCompare(b));
 }
 
 /* ---- misc constants ------------------------------------------------------- */

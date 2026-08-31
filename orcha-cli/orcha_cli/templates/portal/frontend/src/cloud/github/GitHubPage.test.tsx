@@ -61,6 +61,7 @@ const PULLS = {
       checks: null, // ALWAYS null off the list endpoint — progressive fill
       mergeable_state: "clean",
       tracked_task_id: null,
+      author_login: "kedar",
     },
   ],
 };
@@ -466,5 +467,176 @@ describe("GitHubPage local-binding + GitHub-origin fall-through", () => {
     await screen.findByText("From the origin repo");
     expect(screen.getByText("Local")).toBeInTheDocument();
     expect(screen.getByText("· acme/site")).toBeInTheDocument();
+  });
+});
+
+/* ============================================================================
+   PR-list server-backed filter bar + pagination (monorepo-scale repos):
+   author input (+ datalist), Assigned-to-me/My-reviews chips (mutually
+   exclusive; disabled when the acting identity has no github_login), the
+   free-text search box becoming server-backed q on the pulls tab, and a
+   "Load more" pagination footer that appends pages.
+   ============================================================================ */
+const SEARCH_PAGE_1 = {
+  available: true, source: "search", repo: "acme/app",
+  pulls: [
+    { number: 21, title: "Add OAuth flow", draft: false, updated_at: "2026-08-01T00:00:00Z",
+      html_url: "https://github.com/acme/app/pull/21", author_login: "kedar",
+      checks: null, tracked_task_id: null },
+  ],
+  page: 1, per_page: 30, total_count: 2, has_more: true,
+};
+const SEARCH_PAGE_2 = {
+  available: true, source: "search", repo: "acme/app",
+  pulls: [
+    { number: 22, title: "Fix OAuth bug", draft: false, updated_at: "2026-08-02T00:00:00Z",
+      html_url: "https://github.com/acme/app/pull/22", author_login: "forge",
+      checks: null, tracked_task_id: null },
+  ],
+  page: 2, per_page: 30, total_count: 2, has_more: false,
+};
+
+function stubFetchFiltered(opts: { identityLogin?: string | null } = {}): Call[] {
+  const calls: Call[] = [];
+  const json = (data: unknown, status = 200) =>
+    ({ ok: status < 400, status, json: async () => data }) as unknown as Response;
+  global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    calls.push({ url, method: init?.method || "GET", body: init?.body ? JSON.parse(String(init.body)) : null });
+    if (url.startsWith("/api/containers/c1/github/pulls")) {
+      const qs = new URL(url, "http://x").searchParams;
+      const hasFilter = qs.has("author") || qs.has("involvement") || qs.has("q");
+      if (hasFilter) {
+        const page = Number(qs.get("page") || "1");
+        return json(page >= 2 ? SEARCH_PAGE_2 : SEARCH_PAGE_1);
+      }
+      return json(PULLS);
+    }
+    if (url.startsWith("/api/containers/c1/github/issues")) return json(ISSUES);
+    if (url.startsWith("/api/containers/c1/github/checks")) return json(CHECKS);
+    if (url.startsWith("/api/me")) {
+      const login = opts.identityLogin === undefined ? "kedar" : opts.identityLogin;
+      return json({ identity: login ? { agent_id: "h1", github_login: login } : null, trusted: true });
+    }
+    if (url.startsWith("/api/containers/c1")) return json(rawSnap(AGENTS_WITH_HUMAN));
+    if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
+    return json({});
+  }) as unknown as typeof fetch;
+  return calls;
+}
+
+describe("GitHubPage PR-list filter bar + pagination", () => {
+  beforeEach(() => { localStorage.clear(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+  it("typing in the author input triggers a server-backed search request", async () => {
+    const calls = stubFetchFiltered();
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow"); // plain list first
+    const authorInput = screen.getByPlaceholderText("Author…");
+    fireEvent.change(authorInput, { target: { value: "octocat" } });
+    await waitFor(() => {
+      expect(calls.some((c) => c.url.includes("/github/pulls?author=octocat"))).toBe(true);
+    });
+  });
+
+  it("the author datalist offers logins seen in loaded rows", async () => {
+    stubFetchFiltered();
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow");
+    const options = document.querySelectorAll("#ghPullsAuthors option");
+    const values = Array.from(options).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toContain("kedar"); // PULLS fixture row's author_login
+  });
+
+  it("Assigned to me and My reviews chips are mutually exclusive", async () => {
+    const calls = stubFetchFiltered();
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow");
+    fireEvent.click(screen.getByText("Assigned to me"));
+    await waitFor(() => expect(calls.some((c) => c.url.includes("involvement=assigned"))).toBe(true));
+    expect(screen.getByText("Assigned to me").getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByText("My reviews"));
+    await waitFor(() => expect(calls.some((c) => c.url.includes("involvement=review_requested"))).toBe(true));
+    expect(screen.getByText("Assigned to me").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByText("My reviews").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("involvement chips are disabled with a tooltip when the identity has no github_login", async () => {
+    stubFetchFiltered({ identityLogin: null });
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow");
+    const assigned = screen.getByText("Assigned to me");
+    expect(assigned).toBeDisabled();
+    expect(assigned.getAttribute("title")).toBe("Link a GitHub login to use this filter");
+  });
+
+  it("the search box becomes the server-backed q on the pulls tab", async () => {
+    const calls = stubFetchFiltered();
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow");
+    const search = screen.getByPlaceholderText("Search title or body…");
+    fireEvent.change(search, { target: { value: "oauth bug" } });
+    await waitFor(() => expect(calls.some((c) => c.url.includes("q=oauth"))).toBe(true), { timeout: 2000 });
+  });
+
+  it("filtered results replace the plain list and show a Load more footer with ~total", async () => {
+    stubFetchFiltered();
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow");
+    fireEvent.change(screen.getByPlaceholderText("Author…"), { target: { value: "kedar" } });
+    await screen.findByText("Add OAuth flow"); // filtered page 1 result (same title, different source)
+    expect(screen.getByText(/Load more · 1 of ~2/)).toBeInTheDocument();
+  });
+
+  it("clicking Load more appends the next page", async () => {
+    const calls = stubFetchFiltered();
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow");
+    fireEvent.change(screen.getByPlaceholderText("Author…"), { target: { value: "kedar" } });
+    await screen.findByText(/Load more/);
+    fireEvent.click(screen.getByText(/Load more/));
+    await waitFor(() => expect(calls.some((c) => c.url.includes("page=2"))).toBe(true));
+    expect(await screen.findByText("Fix OAuth bug")).toBeInTheDocument();
+    // both pages' rows are visible now, and the footer reflects "no more"
+    expect(screen.getByText("Add OAuth flow")).toBeInTheDocument();
+    expect(screen.queryByText(/Load more/)).not.toBeInTheDocument();
+  });
+
+  it("clearing all filters returns to the plain client-side-filtered list", async () => {
+    stubFetchFiltered();
+    mount();
+    await screen.findByText("Fix login bug");
+    fireEvent.click(screen.getByText("Pull requests"));
+    await screen.findByText("Add OAuth flow");
+    const authorInput = screen.getByPlaceholderText("Author…");
+    fireEvent.change(authorInput, { target: { value: "kedar" } });
+    await waitFor(() => expect(screen.getByText(/Load more/)).toBeInTheDocument());
+    fireEvent.change(authorInput, { target: { value: "" } });
+    await waitFor(() => expect(screen.queryByText(/Load more/)).not.toBeInTheDocument());
+    expect(screen.getByText("Add OAuth flow")).toBeInTheDocument();
+  });
+
+  it("the Issues tab is untouched: no filter bar, plain title search still client-side", async () => {
+    stubFetchFiltered();
+    mount();
+    await screen.findByText("Fix login bug");
+    expect(screen.queryByPlaceholderText("Author…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assigned to me")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Filter by title or #number…")).toBeInTheDocument();
   });
 });
