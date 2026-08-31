@@ -158,6 +158,56 @@ import Testing
         #expect(whole.truncated == false)
     }
 
+    // ---------- per-file `patch` (github_hub_routes.py:_pr_files) ----------
+
+    @Test func changedFileDecodesItsPatchText() throws {
+        let file = try decode(GitHubChangedFile.self, """
+        {"filename": "src/app.py", "additions": 2, "deletions": 1, "status": "modified",
+         "patch": "@@ -1,2 +1,3 @@\\n line\\n-old\\n+new\\n+added", "patch_omitted": false}
+        """)
+        #expect(file.filename == "src/app.py")
+        #expect(file.patch == "@@ -1,2 +1,3 @@\n line\n-old\n+new\n+added")
+        #expect(file.patchOmitted == false)
+    }
+
+    @Test func changedFilePatchOmittedCarriesNilPatch() throws {
+        // Binary file, GitHub-side "too large", or the server's own patch-byte budget —
+        // all three collapse to this same shape (github_hub_routes.py:_pr_files).
+        let file = try decode(GitHubChangedFile.self, """
+        {"filename": "assets/logo.png", "additions": 0, "deletions": 0, "status": "modified",
+         "patch": null, "patch_omitted": true}
+        """)
+        #expect(file.patch == nil)
+        #expect(file.patchOmitted)
+    }
+
+    @Test func changedFileToleratesAbsentPatchFields() throws {
+        // An older server, before `patch`/`patch_omitted` existed on this shape.
+        let file = try decode(GitHubChangedFile.self,
+            #"{"filename": "a.py", "additions": 1, "deletions": 0, "status": "added"}"#)
+        #expect(file.patch == nil)
+        #expect(file.patchOmitted == false)
+    }
+
+    @Test func filesDecodesPatchesTruncatedFlag() throws {
+        let cut = try decode(GitHubFiles.self, """
+        {"count": 2, "items": [
+            {"filename": "big.py", "additions": 500, "deletions": 10, "status": "modified",
+             "patch": "@@ -1,1 +1,1 @@\\n-x\\n+y", "patch_omitted": false},
+            {"filename": "also-big.py", "additions": 400, "deletions": 5, "status": "modified",
+             "patch": null, "patch_omitted": true}
+        ], "patches_truncated": true}
+        """)
+        #expect(cut.patchesTruncated)
+        #expect(cut.items[0].patchOmitted == false)
+        #expect(cut.items[1].patchOmitted)
+
+        // Absent ⇒ false — the common case, a PR under the patch-byte budget.
+        let underBudget = try decode(GitHubFiles.self,
+            #"{"count": 1, "items": [{"filename": "a", "additions": 1, "deletions": 0, "status": "added"}]}"#)
+        #expect(underBudget.patchesTruncated == false)
+    }
+
     // ---------- GET …/github/issues/{number} ----------
 
     @Test func issueDetailDecodesCommentsOldestFirst() throws {

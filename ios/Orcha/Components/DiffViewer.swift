@@ -144,6 +144,18 @@ enum DiffParser {
         }
         return (o, oc, n, nc)
     }
+
+    /// Parse ONE file's raw GitHub `patch` text — hunk lines only (`@@ …` onward), with
+    /// no `diff --git`/`+++`/`---` headers, unlike `parse(_:)`'s full multi-file input
+    /// (`github_hub_routes.py:_pr_files`'s `patch` field is exactly this shape). Reuses
+    /// `parse(_:)` by prepending a synthetic `+++ b/<filename>` header so the same
+    /// hunk-consuming state machine applies; the filename is then overwritten with the
+    /// caller's own (already known from the file row), so it's cosmetic only.
+    static func parseFilePatch(_ patch: String, filename: String) -> DiffFile? {
+        guard var file = parse("+++ b/\(filename)\n" + patch).first else { return nil }
+        file.path = filename
+        return file
+    }
 }
 
 // MARK: - views
@@ -264,7 +276,10 @@ private struct DiffFileSection: View {
 /// The scrolling code block: gutters + code share one horizontal scroller so
 /// they stay aligned; every row is padded to the widest line so the add/del
 /// tints span the full scrollable width (monospaced width = chars × advance).
-private struct DiffFileBody: View {
+/// Not `private`: `GitHubPullDetailScreen`'s per-file expand reuses this hunk body
+/// directly — that row already IS the collapsible header, so it only wants the body,
+/// not `DiffFileSection`'s own duplicate header/chevron.
+struct DiffFileBody: View {
     @Environment(\.palette) private var p
     let file: DiffFile
 

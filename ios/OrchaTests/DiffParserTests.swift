@@ -69,4 +69,49 @@ struct DiffParserTests {
         #expect(bin.count == 1)
         #expect(bin[0].isBinary)
     }
+
+    // ---------- parseFilePatch — GitHub's per-file `patch` (github_hub_routes.py:_pr_files) ----------
+    // Hunk lines only, no `diff --git`/`+++`/`---` headers — unlike `parse(_:)`'s full input.
+
+    @Test func parseFilePatchReadsHunkOnlyText() throws {
+        let patch = """
+        @@ -12,3 +12,4 @@ def charge(amount):
+             if amount <= 0:
+        -        return None
+        +        raise InvalidAmount(amount)
+        +    log.info("charging")
+             return ok
+        """
+        let file = try #require(DiffParser.parseFilePatch(patch, filename: "src/app.py"))
+        #expect(file.path == "src/app.py")
+        #expect(file.adds == 2)
+        #expect(file.dels == 1)
+        #expect(file.hunks.count == 1)
+        #expect(file.hunks[0].header.hasPrefix("@@ -12,3 +12,4 @@"))
+    }
+
+    @Test func parseFilePatchHandlesMultipleHunks() throws {
+        let patch = """
+        @@ -1,2 +1,2 @@
+        -old top
+        +new top
+         keep
+        @@ -20,1 +20,2 @@
+         keep
+        +new bottom
+        """
+        let file = try #require(DiffParser.parseFilePatch(patch, filename: "b.py"))
+        #expect(file.hunks.count == 2)
+        #expect(file.adds == 2)
+        #expect(file.dels == 1)
+    }
+
+    @Test func parseFilePatchOfEmptyTextYieldsNoHunks() throws {
+        // `patch_omitted:true` files never reach this call (`GitHubChangedFile.patch` is
+        // nil, not ""), but empty input should still degrade to a hunk-less file rather
+        // than crash or silently drop the filename.
+        let file = try #require(DiffParser.parseFilePatch("", filename: "a.py"))
+        #expect(file.path == "a.py")
+        #expect(file.hunks.isEmpty)
+    }
 }

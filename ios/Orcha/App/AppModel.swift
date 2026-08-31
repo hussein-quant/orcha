@@ -754,6 +754,17 @@ final class AppModel {
                     attempt = 0                          // clean close / timeout → reopen shortly
                 } catch {
                     if Task.isCancelled { return }
+                    // A 404 means THIS server has no `/stream` endpoint at all (older self-host,
+                    // predates the SSE route) — retrying it is pointless and would otherwise loop
+                    // forever showing a stale "reconnecting…" note. Fall back to polling the
+                    // one-shot log instead, exactly like a finished run — graceful degradation,
+                    // not an error state. Any OTHER failure (network blip, 5xx, auth hiccup) keeps
+                    // retrying the stream itself with backoff, since the endpoint is known-good.
+                    if let apiError = error as? OrchaApiError, apiError.status == 404 {
+                        runStreamNote = nil
+                        await pollRunLogFallback(run)
+                        return
+                    }
                     attempt = min(attempt + 1, 5)
                     runStreamNote = "Log stream interrupted — reconnecting…"
                 }
@@ -761,6 +772,41 @@ final class AppModel {
                 try? await Task.sleep(for: .seconds(attempt == 0 ? 0.3 : Double(attempt)))
             }
         }
+    }
+
+    /// Older-server fallback for `streamRunLog`: no `/stream` SSE route, so the log is
+    /// polled with a one-shot fetch every 3s (independent of, and much tighter than, the
+    /// app-wide 30s `startPolling` refresh loop) until the run itself is no longer
+    /// "running" — checked against a direct re-fetch of this run's own row (never the
+    /// model's `taskRuns`/`agentRuns`, which only refresh when their OWN detail screen
+    /// loads and would otherwise report a stale status here). Runs on the same
+    /// cancellable `runStreamTask` the SSE path uses, so leaving RunDetailScreen still
+    /// stops it; `refresh()` at the end re-syncs the run row wherever else it's shown,
+    /// matching the SSE path's own terminal handling.
+    private func pollRunLogFallback(_ run: RunDto) async {
+        while !Task.isCancelled {
+            await loadRunLog(run)
+            guard await isStillRunning(run), !Task.isCancelled else { break }
+            try? await Task.sleep(for: .seconds(3))
+        }
+        runLogStreaming = false
+        if !Task.isCancelled { await refresh() }
+    }
+
+    /// A fresh look at one run's own status, straight off the list endpoint that owns
+    /// it (task-scoped or agent-scoped) — not the cached `taskRuns`/`agentRuns`, which
+    /// only update when their own detail screen loads.
+    private func isStillRunning(_ run: RunDto) async -> Bool {
+        guard let sel = selectedContainer else { return false }
+        if let taskId = run.taskId,
+           let refreshed = try? await api.taskRuns(sel.baseUrl, taskId).runs.first(where: { $0.runId == run.runId }) {
+            return refreshed.status == "running"
+        }
+        if let aid = run.agentId,
+           let refreshed = try? await api.agentRuns(sel.baseUrl, aid).runs.first(where: { $0.runId == run.runId }) {
+            return refreshed.status == "running"
+        }
+        return false
     }
 
     /// Append a streamed line: web's monotonic-`seq` dedup → classify into typed rows →

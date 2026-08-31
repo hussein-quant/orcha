@@ -241,18 +241,29 @@ struct GitHubPullsResponse: Decodable {
 
 // MARK: - detail models
 
-/// One changed file in a PR (list only — patches are dropped server-side).
+/// One changed file in a PR. Carries the diff text: `patch` is GitHub's raw
+/// unified-diff hunk text for the file (hunk lines only — no `diff --git`/`+++`/`---`
+/// headers), or `nil` when omitted. `patchOmitted` is true either because GitHub itself
+/// never sent a patch (binary file, or GitHub judged it too large) or because the
+/// server's own per-PR patch-byte budget was crossed (`github_hub_routes.py:_pr_files`);
+/// both cases render the same honest "diff not available" affordance — the app has no
+/// way (or need) to tell them apart. Absent on an older server ⇒ `patch: nil`,
+/// `patchOmitted: false`, which the UI treats identically to "not available" via the
+/// `nil` check, so old and new servers degrade the same way.
 struct GitHubChangedFile: Decodable, Equatable, Identifiable {
     var filename = ""
     var additions = 0
     var deletions = 0
     /// `"added"` | `"modified"` | `"removed"` | `"renamed"`.
     var status = ""
+    var patch: String?
+    var patchOmitted = false
 
     var id: String { filename }
 
     enum CodingKeys: String, CodingKey {
-        case filename, additions, deletions, status
+        case filename, additions, deletions, status, patch
+        case patchOmitted = "patch_omitted"
     }
 
     init(from decoder: Decoder) throws {
@@ -261,25 +272,36 @@ struct GitHubChangedFile: Decodable, Equatable, Identifiable {
         additions = try c.decodeIfPresent(Int.self, forKey: .additions) ?? 0
         deletions = try c.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
         status = try c.decodeIfPresent(String.self, forKey: .status) ?? ""
+        patch = try c.decodeIfPresent(String.self, forKey: .patch)
+        patchOmitted = try c.decodeIfPresent(Bool.self, forKey: .patchOmitted) ?? false
     }
 
-    init(filename: String, additions: Int = 0, deletions: Int = 0, status: String = "") {
+    init(filename: String, additions: Int = 0, deletions: Int = 0, status: String = "",
+         patch: String? = nil, patchOmitted: Bool = false) {
         self.filename = filename
         self.additions = additions
         self.deletions = deletions
         self.status = status
+        self.patch = patch
+        self.patchOmitted = patchOmitted
     }
 }
 
 /// The `files` block on a PR detail: GitHub's honest `count`, the first-100 `items`,
-/// and `truncated:true` (present only when `count > items.count`; absent ⇒ false).
+/// `truncated:true` (present only when `count > items.count`; absent ⇒ false), and
+/// `patchesTruncated:true` when the server's per-PR patch-byte budget cut off some
+/// files' `patch` text (distinct from a per-file GitHub-side omission — see
+/// `GitHubChangedFile`). Absent ⇒ false, so an older server (or a PR under budget)
+/// never shows the "diffs cut off" note.
 struct GitHubFiles: Decodable, Equatable {
     var count = 0
     var items: [GitHubChangedFile] = []
     var truncated = false
+    var patchesTruncated = false
 
     enum CodingKeys: String, CodingKey {
         case count, items, truncated
+        case patchesTruncated = "patches_truncated"
     }
 
     init(from decoder: Decoder) throws {
@@ -287,12 +309,14 @@ struct GitHubFiles: Decodable, Equatable {
         count = try c.decodeIfPresent(Int.self, forKey: .count) ?? 0
         items = try c.decodeIfPresent([GitHubChangedFile].self, forKey: .items) ?? []
         truncated = try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+        patchesTruncated = try c.decodeIfPresent(Bool.self, forKey: .patchesTruncated) ?? false
     }
 
-    init(count: Int = 0, items: [GitHubChangedFile] = [], truncated: Bool = false) {
+    init(count: Int = 0, items: [GitHubChangedFile] = [], truncated: Bool = false, patchesTruncated: Bool = false) {
         self.count = count
         self.items = items
         self.truncated = truncated
+        self.patchesTruncated = patchesTruncated
     }
 }
 

@@ -78,7 +78,7 @@ struct GitHubPullDetailScreen: View {
                     }
                 }
                 checksSection(pull.checks)
-                filesSection(pull.files)
+                filesSection(pull.files, htmlUrl: pull.htmlUrl)
                 if let url = pull.htmlUrl.flatMap(URL.init(string:)) {
                     OpenOnGitHubLink(url: url)
                 }
@@ -157,7 +157,7 @@ struct GitHubPullDetailScreen: View {
     }
 
     @ViewBuilder
-    private func filesSection(_ files: GitHubFiles) -> some View {
+    private func filesSection(_ files: GitHubFiles, htmlUrl: String?) -> some View {
         section("Files · \(files.count)") {
             if files.items.isEmpty {
                 Text("No file changes reported.")
@@ -165,27 +165,16 @@ struct GitHubPullDetailScreen: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(files.items) { file in
-                        HStack(spacing: 8) {
-                            Text(file.filename)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(p.text2)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Spacer()
-                            if file.additions > 0 {
-                                Text("+\(file.additions)")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(p.ok)
-                            }
-                            if file.deletions > 0 {
-                                Text("-\(file.deletions)")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .foregroundStyle(p.danger)
-                            }
-                        }
+                        ChangedFileRow(file: file, htmlUrl: htmlUrl)
                     }
                     if files.truncated {
                         Text("Showing the first \(files.items.count) of \(files.count) changed files.")
+                            .font(p.uiFont(11))
+                            .foregroundStyle(p.faint)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if files.patchesTruncated {
+                        Text("Some diffs were too large to include here — view the full changes on GitHub.")
                             .font(p.uiFont(11))
                             .foregroundStyle(p.faint)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -200,6 +189,88 @@ struct GitHubPullDetailScreen: View {
             SectionH(title: title)
             OrchaCard { content() }
         }
+    }
+}
+
+/// A changed-file row: filename + additions/deletions, tappable to expand that file's
+/// patch in place (rendered by `DiffFileBody`, the same per-file body `DiffViewer` uses
+/// for run diffs). A `patch_omitted` file (binary, GitHub-side too-large, or the
+/// server's own patch-byte budget) or a nil `patch` (older server, before this field
+/// existed) collapses to the existing "view on GitHub" affordance instead — never an
+/// empty expand.
+struct ChangedFileRow: View {
+    @Environment(\.palette) private var p
+    let file: GitHubChangedFile
+    /// The PR's own URL — reused for the per-file "view on GitHub" fallback link
+    /// (GitHub has no stable per-file anchor to link to, so this opens the PR itself).
+    let htmlUrl: String?
+
+    @State private var expanded = false
+
+    private var parsedFile: DiffFile? {
+        guard let patch = file.patch else { return nil }
+        return DiffParser.parseFilePatch(patch, filename: file.filename)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.spring(duration: 0.25)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(p.faint)
+                    Text(file.filename)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(p.text2)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    if file.additions > 0 {
+                        Text("+\(file.additions)")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(p.ok)
+                    }
+                    if file.deletions > 0 {
+                        Text("-\(file.deletions)")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(p.danger)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(file.filename), \(file.additions) additions, \(file.deletions) deletions")
+            .accessibilityHint(expanded ? "Collapses the diff" : "Expands the diff")
+
+            if expanded {
+                if let parsedFile {
+                    DiffFileBody(file: parsedFile)
+                        .padding(.top, 6)
+                } else {
+                    omittedNote
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var omittedNote: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(file.patchOmitted
+                 ? "This diff is too large to show here."
+                 : "This diff isn't available from this server yet.")
+                .font(p.uiFont(12))
+                .foregroundStyle(p.muted)
+            if let htmlUrl, let url = URL(string: htmlUrl) {
+                Link("View on GitHub", destination: url)
+                    .font(p.uiFont(12, .semibold))
+                    .foregroundStyle(p.accent)
+            }
+        }
+        .padding(.top, 6)
+        .padding(.bottom, 4)
     }
 }
 
