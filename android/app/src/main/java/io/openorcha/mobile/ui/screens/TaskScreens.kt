@@ -100,7 +100,7 @@ fun TaskDetailScreen(
     var allRuns by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = p.bg,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),

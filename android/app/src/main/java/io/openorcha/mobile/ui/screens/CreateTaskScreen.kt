@@ -90,7 +90,7 @@ fun CreateTaskScreen(
     fun requestClose() { if (dirty) confirmDiscard = true else onBack() }
 
     Scaffold(
-        containerColor = p.bg,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),

@@ -84,7 +84,7 @@ fun ContainersHomeScreen(
     onSettings: () -> Unit,
 ) {
     Scaffold(
-        containerColor = Orcha.palette.bg,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("Orcha", fontWeight = FontWeight.W800) },

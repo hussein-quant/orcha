@@ -86,7 +86,7 @@ fun SettingsScreen(
     // LAN↔remote failover (iOS Settings §6 "Add remote…"): which container's dialog is open.
     var remoteDialogFor by remember { mutableStateOf<StoredContainer?>(null) }
     Scaffold(
-        containerColor = Orcha.palette.bg,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },

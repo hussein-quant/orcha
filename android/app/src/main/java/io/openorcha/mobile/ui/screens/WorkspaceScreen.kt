@@ -94,7 +94,7 @@ fun WorkspaceScreen(
     var controlsSheetOpen by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = Orcha.palette.bg,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),

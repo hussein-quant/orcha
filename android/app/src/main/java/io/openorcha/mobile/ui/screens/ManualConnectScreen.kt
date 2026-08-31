@@ -80,7 +80,7 @@ fun ManualConnectScreen(
 ) {
     var address by remember { mutableStateOf("") }
     Scaffold(
-        containerColor = Orcha.palette.bg,
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("Add your Orcha") },
