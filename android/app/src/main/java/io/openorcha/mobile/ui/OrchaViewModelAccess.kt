@@ -49,6 +49,8 @@ internal interface OrchaViewModelAccess {
     val json: Json
     var pollingJob: Job?
     var runStreamJob: Job?
+    /** Chat send-UX: the bounded post-send poll awaiting the turns delta (iOS `replyWatchTask`). */
+    var replyWatchJob: Job?
     val _uiState: MutableStateFlow<OrchaUiState>
     val scope: CoroutineScope
 
@@ -57,6 +59,8 @@ internal interface OrchaViewModelAccess {
     fun refreshSelectedTask()
     fun refreshAgentDetail()
     fun refreshConversation()
+    suspend fun refreshConversationQuiet(agentId: String)
+    fun cancelReplyWatch()
     fun refreshRunLog()
     fun openTask(taskId: String)
     fun cancelRunStream()

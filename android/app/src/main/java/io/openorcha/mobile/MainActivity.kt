@@ -210,6 +210,7 @@ class MainActivity : ComponentActivity() {
                         onEnd = viewModel::endConversation,
                         onOpenRun = viewModel::openRun,
                         onOpenTask = viewModel::openTask,
+                        onRetry = viewModel::takeFailedSendContent,
                     )
 
                     AppRoute.CreateTask -> CreateTaskScreen(

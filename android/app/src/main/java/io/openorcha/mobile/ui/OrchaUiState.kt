@@ -20,6 +20,7 @@ import io.openorcha.mobile.data.TaskDto
 import io.openorcha.mobile.data.TaskMessageDto
 import io.openorcha.mobile.data.TurnDto
 import io.openorcha.mobile.data.GitHubStartResponse
+import io.openorcha.mobile.domain.ChatSendFlow
 import io.openorcha.mobile.domain.GitHubHubFilter
 import io.openorcha.mobile.domain.GitHubHubKind
 import io.openorcha.mobile.domain.GitHubIssueDetailPhase
@@ -112,6 +113,9 @@ data class OrchaUiState(
     val models: List<ModelDto> = emptyList(),
     val conversation: ConversationDto? = null,
     val turns: List<TurnDto> = emptyList(),
+    /** Chat send-UX (iOS `ChatSendFlow` parity): the conversation composer's optimistic
+     *  send-lifecycle state machine — pending bubble, echo/reply dedupe, tap-to-retry. */
+    val sendFlow: ChatSendFlow = ChatSendFlow(),
     val loading: Boolean = false,
     val actionInFlight: Boolean = false,
     val connecting: Boolean = false,

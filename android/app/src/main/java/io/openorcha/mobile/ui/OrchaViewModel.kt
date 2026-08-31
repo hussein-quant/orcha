@@ -41,6 +41,7 @@ internal class OrchaViewModel(application: Application) : AndroidViewModel(appli
     RunAndConversationActions,
     TaskAndRequestHumanActions,
     AgentAndWorkspaceHumanActions,
+    ChatSendActions,
     GitHubHubActions,
     OrchaViewModelSupport {
     override val store = ContainerStore(application)
@@ -48,6 +49,7 @@ internal class OrchaViewModel(application: Application) : AndroidViewModel(appli
     override val json = Json { ignoreUnknownKeys = true }
     override var pollingJob: Job? = null
     override var runStreamJob: Job? = null
+    override var replyWatchJob: Job? = null
 
     override val _uiState = MutableStateFlow(
         OrchaUiState(
