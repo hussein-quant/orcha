@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.openorcha.mobile.data.GitHubCheckRun
 import io.openorcha.mobile.data.GitHubChecks
+import io.openorcha.mobile.data.GitHubLabel
 import io.openorcha.mobile.domain.ChecksSummary
 import io.openorcha.mobile.domain.GitHubHubUx
 import io.openorcha.mobile.ui.icons.OrchaIcons
@@ -99,16 +100,20 @@ fun MergeStateChip(mergeableState: String?, modifier: Modifier = Modifier) {
 
 /** A single GitHub label chip (issue/PR label names). */
 @Composable
-fun GitHubLabelChip(label: String, modifier: Modifier = Modifier) {
+fun GitHubLabelChip(label: GitHubLabel, modifier: Modifier = Modifier) {
     val p = Orcha.palette
+    // Real repo label colors when the server sends them (bare hex, no '#');
+    // the house violet is the fallback for colorless labels / older servers.
+    val hex = label.color?.toLongOrNull(16)
+    val tint = if (hex != null) Color(0xFF000000 or hex) else p.violet
     Text(
-        label,
+        label.name,
         modifier = modifier
-            .background(p.violetSoft, CircleShape)
-            .border(BorderStroke(1.dp, p.violetLine), CircleShape)
+            .background(tint.copy(alpha = 0.15f), CircleShape)
+            .border(BorderStroke(1.dp, tint.copy(alpha = 0.4f)), CircleShape)
             .padding(horizontal = 6.dp, vertical = 2.dp),
         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.W500, fontSize = 10.sp),
-        color = p.violet,
+        color = tint,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
     )

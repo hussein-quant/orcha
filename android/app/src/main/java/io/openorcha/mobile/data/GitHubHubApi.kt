@@ -14,7 +14,16 @@ import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.descriptors.buildClassSerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.Serializable
 
 // ---------- checks rollup (shared list + detail) ----------
@@ -43,12 +52,43 @@ data class GitHubCheckRun(
 
 // ---------- list rows ----------
 
+/**
+ * One issue/PR label. The server moved from plain name strings to `{name, color}`
+ * (GitHub's own label hex, no leading '#') so the UI can render real repo colors —
+ * this serializer accepts BOTH shapes, so the app never again breaks on the change
+ * (the "couldn't read part of Orcha's reply" Issues-tab failure).
+ */
+@Serializable(with = GitHubLabelSerializer::class)
+data class GitHubLabel(val name: String, val color: String? = null)
+
+object GitHubLabelSerializer : KSerializer<GitHubLabel> {
+    override val descriptor: SerialDescriptor =
+        buildClassSerialDescriptor("io.openorcha.mobile.data.GitHubLabel")
+
+    override fun deserialize(decoder: Decoder): GitHubLabel {
+        val input = decoder as? JsonDecoder ?: error("GitHubLabel decodes from JSON only")
+        return when (val el = input.decodeJsonElement()) {
+            is JsonPrimitive -> GitHubLabel(el.content)
+            is JsonObject -> GitHubLabel(
+                // contentOrNull: JsonNull is a JsonPrimitive whose content is the
+                // string "null" — .content would turn a null color into "null".
+                name = (el["name"] as? JsonPrimitive)?.contentOrNull.orEmpty(),
+                color = (el["color"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() },
+            )
+            else -> GitHubLabel("")
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: GitHubLabel) =
+        encoder.encodeString(value.name)
+}
+
 /** `GET …/github/issues` → one open issue row. */
 @Serializable
 data class GitHubIssueRow(
     val number: Int,
     val title: String = "",
-    val labels: List<String> = emptyList(),
+    val labels: List<GitHubLabel> = emptyList(),
     /** Primary assignee login, or null. */
     val assignee: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null,
@@ -190,7 +230,7 @@ data class GitHubIssueDetail(
     /** RAW markdown — render client-side. */
     @SerialName("body_markdown") val bodyMarkdown: String = "",
     @SerialName("author_login") val authorLogin: String? = null,
-    val labels: List<String> = emptyList(),
+    val labels: List<GitHubLabel> = emptyList(),
     val assignee: String? = null,
     val assignees: List<String> = emptyList(),
     @SerialName("updated_at") val updatedAt: String? = null,
