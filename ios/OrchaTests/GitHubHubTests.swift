@@ -112,6 +112,69 @@ import Testing
         #expect(pull.head.isEmpty)
     }
 
+    // ---------- filter/pagination superset (frozen contract) ----------
+
+    @Test func pullsResponseDecodesPaginationFields() throws {
+        let response = try decode(GitHubPullsResponse.self, """
+        {"available": true, "repo": "o/n", "pulls": [{"number": 1, "title": "A"}],
+         "page": 2, "per_page": 50, "total_count": 137, "has_more": true}
+        """)
+        #expect(response.page == 2)
+        #expect(response.perPage == 50)
+        #expect(response.totalCount == 137)
+        #expect(response.hasMore)
+    }
+
+    @Test func pullsResponseTotalCountToleratesNull() throws {
+        // Search-sourced pages don't always carry a reliable total.
+        let response = try decode(GitHubPullsResponse.self, """
+        {"available": true, "repo": "o/n", "pulls": [], "page": 1, "per_page": 30,
+         "total_count": null, "has_more": false}
+        """)
+        #expect(response.totalCount == nil)
+        #expect(response.hasMore == false)
+    }
+
+    @Test func pullsResponseWithoutPaginationFieldsDefaultsToFalseHasMore() throws {
+        // An older server, before this contract existed — `has_more` absent must
+        // read as false (that server always returned the complete list in one shot).
+        let response = try decode(GitHubPullsResponse.self, """
+        {"available": true, "repo": "o/n", "pulls": [{"number": 1, "title": "A"}]}
+        """)
+        #expect(response.page == 1)
+        #expect(response.perPage == 30)
+        #expect(response.totalCount == nil)
+        #expect(response.hasMore == false)
+    }
+
+    @Test func searchSourcedRowToleratesMissingHeadBaseChecksReviewers() throws {
+        // A search-sourced row (author/q hit GitHub's search API) may omit fields
+        // the plain list endpoint always includes — the row still decodes cleanly.
+        let response = try decode(GitHubPullsResponse.self, """
+        {"available": true, "repo": "o/n", "pulls": [
+            {"number": 44, "title": "Search hit"}
+        ]}
+        """)
+        let pull = try #require(response.pulls.first)
+        #expect(pull.number == 44)
+        #expect(pull.head.isEmpty)
+        #expect(pull.requestedReviewers.isEmpty)
+        #expect(pull.checks.total == 0)
+        #expect(pull.mergeableState == nil)
+    }
+
+    @Test func involvementUnavailableIdentityShape() throws {
+        // The contract's "identity without github_login" shape: available:true,
+        // empty items, an informative detail string.
+        let response = try decode(GitHubPullsResponse.self, """
+        {"available": true, "repo": "o/n", "pulls": [],
+         "detail": "This identity has no linked GitHub login."}
+        """)
+        #expect(response.available)
+        #expect(response.pulls.isEmpty)
+        #expect(response.detail == "This identity has no linked GitHub login.")
+    }
+
     // ---------- GET …/github/pulls/{number} ----------
 
     @Test func pullDetailDecodesFullShape() throws {
@@ -348,6 +411,214 @@ import Testing
         let pull = makePull(number: 9)
         let response = GitHubPullDetailResponse(available: true, repo: "o/n", reason: nil, detail: nil, pull: pull)
         #expect(GitHubHubUx.phase(from: response) == .loaded(repo: "o/n", pull: pull))
+    }
+
+    @Test func loadedPullsCarriesPageInfoFromResponse() {
+        let response = GitHubPullsResponse(
+            available: true, repo: "o/n", pulls: [GitHubPullRow(number: 1)],
+            page: 2, perPage: 50, totalCount: 137, hasMore: true
+        )
+        let phase = GitHubHubUx.phase(from: response)
+        #expect(phase == .loaded(
+            repo: "o/n", pulls: [GitHubPullRow(number: 1)],
+            page: .init(page: 2, perPage: 50, totalCount: 137, hasMore: true)
+        ))
+    }
+}
+
+// MARK: - PR filter-row state (author / involvement / q / page)
+
+@Suite struct GitHubPullsFilterStateTests {
+    @Test func trimmedAuthorAndQueryTreatWhitespaceAsAbsent() {
+        var state = GitHubPullsFilterState()
+        state.author = "   "
+        state.q = "\n\t "
+        #expect(state.trimmedAuthor == nil)
+        #expect(state.trimmedQuery == nil)
+    }
+
+    @Test func trimmedAuthorAndQueryStripSurroundingWhitespace() {
+        var state = GitHubPullsFilterState()
+        state.author = "  octocat  "
+        state.q = "  fix bug  "
+        #expect(state.trimmedAuthor == "octocat")
+        #expect(state.trimmedQuery == "fix bug")
+    }
+
+    @Test func isFilteringIsFalseForTheBareDefaultState() {
+        #expect(GitHubPullsFilterState().isFiltering == false)
+    }
+
+    @Test(arguments: [
+        { (s: inout GitHubPullsFilterState) in s.author = "octocat" },
+        { (s: inout GitHubPullsFilterState) in s.involvement = .assigned },
+        { (s: inout GitHubPullsFilterState) in s.involvement = .reviewRequested },
+        { (s: inout GitHubPullsFilterState) in s.q = "bug" },
+    ] as [(inout GitHubPullsFilterState) -> Void])
+    func isFilteringIsTrueWhenAnyFieldIsActive(mutate: (inout GitHubPullsFilterState) -> Void) {
+        var state = GitHubPullsFilterState()
+        mutate(&state)
+        #expect(state.isFiltering)
+    }
+
+    @Test func resetToFirstPageOnlyTouchesPage() {
+        var state = GitHubPullsFilterState()
+        state.author = "octocat"
+        state.involvement = .assigned
+        state.q = "bug"
+        state.page = 5
+        let reset = state.resetToFirstPage()
+        #expect(reset.page == 1)
+        #expect(reset.author == "octocat")
+        #expect(reset.involvement == .assigned)
+        #expect(reset.q == "bug")
+    }
+}
+
+// MARK: - server-side query param reconciliation (Open|Mine + filter row)
+
+@Suite struct GitHubPullsQueryParamsTests {
+    @Test func openFilterWithNoRowStateSendsNoParams() {
+        let params = GitHubHubUx.pullsQueryParams(filter: .open, state: GitHubPullsFilterState(), login: "octocat")
+        #expect(params.author == nil)
+        #expect(params.involvement == nil)
+        #expect(params.q == nil)
+    }
+
+    @Test func mineFilterBecomesAuthorEqualsMyLogin() {
+        let params = GitHubHubUx.pullsQueryParams(filter: .mine, state: GitHubPullsFilterState(), login: "Octocat")
+        // Normalized (trimmed + lowercased) like the existing Mine login handling.
+        #expect(params.author == "octocat")
+    }
+
+    @Test func mineFilterWithNoKnownLoginSendsNoAuthorParam() {
+        // Self-host / unmapped identity: "Mine" can't be answered server-side either
+        // — send no author param rather than a bogus one.
+        let params = GitHubHubUx.pullsQueryParams(filter: .mine, state: GitHubPullsFilterState(), login: nil)
+        #expect(params.author == nil)
+    }
+
+    @Test func mineFilterOverridesFreeTypedAuthorText() {
+        var state = GitHubPullsFilterState()
+        state.author = "someone-else"
+        let params = GitHubHubUx.pullsQueryParams(filter: .mine, state: state, login: "octocat")
+        #expect(params.author == "octocat")
+    }
+
+    @Test func openFilterUsesFreeTypedAuthorVerbatim() {
+        var state = GitHubPullsFilterState()
+        state.author = "someone-else"
+        let params = GitHubHubUx.pullsQueryParams(filter: .open, state: state, login: "octocat")
+        #expect(params.author == "someone-else")
+    }
+
+    @Test func involvementAndQueryPassThroughIndependentlyOfAuthor() {
+        var state = GitHubPullsFilterState()
+        state.involvement = .reviewRequested
+        state.q = "flaky test"
+        let params = GitHubHubUx.pullsQueryParams(filter: .open, state: state, login: "octocat")
+        #expect(params.involvement == "review_requested")
+        #expect(params.q == "flaky test")
+        #expect(params.author == nil)
+    }
+
+    @Test func involvementQueryValueMapsToWireStrings() {
+        #expect(GitHubHubInvolvement.none.queryValue == nil)
+        #expect(GitHubHubInvolvement.assigned.queryValue == "assigned")
+        #expect(GitHubHubInvolvement.reviewRequested.queryValue == "review_requested")
+    }
+}
+
+// MARK: - the "identity lacks github_login" off-state
+
+@Suite struct GitHubInvolvementUnavailableTests {
+    @Test func unmappedIdentityShapeSurfacesItsDetail() {
+        let response = GitHubPullsResponse(
+            available: true, repo: "o/n", detail: "This identity has no linked GitHub login.", pulls: []
+        )
+        #expect(GitHubHubUx.involvementUnavailableDetail(response) == "This identity has no linked GitHub login.")
+    }
+
+    @Test func nonEmptyPullsNeverCountsAsTheUnavailableShape() {
+        // available:true with rows and a detail string (unrelated informational
+        // detail) must not be mistaken for the unmapped-identity off-state.
+        let response = GitHubPullsResponse(
+            available: true, repo: "o/n", detail: "note", pulls: [GitHubPullRow(number: 1)]
+        )
+        #expect(GitHubHubUx.involvementUnavailableDetail(response) == nil)
+    }
+
+    @Test func unavailableResponseIsNotTheIdentityShapeEitherWay() {
+        let response = GitHubPullsResponse(available: false, reason: "repo_not_connected", detail: "no repo")
+        #expect(GitHubHubUx.involvementUnavailableDetail(response) == nil)
+    }
+
+    @Test func emptyDetailStringDoesNotCountAsInformative() {
+        let response = GitHubPullsResponse(available: true, repo: "o/n", detail: "", pulls: [])
+        #expect(GitHubHubUx.involvementUnavailableDetail(response) == nil)
+    }
+}
+
+// MARK: - pagination accumulation (load more)
+
+@Suite struct GitHubPullsAccumulateTests {
+    @Test func firstPageReplacesRatherThanAppends() {
+        let existing = [GitHubPullRow(number: 1), GitHubPullRow(number: 2)]
+        let incoming = GitHubPullsResponse(available: true, pulls: [GitHubPullRow(number: 99)], page: 1, hasMore: true)
+        let (merged, info) = GitHubHubUx.accumulate(existing: existing, incoming: incoming)
+        #expect(merged.map(\.number) == [99])
+        #expect(info.hasMore)
+    }
+
+    @Test func laterPageAppendsOntoExistingRows() {
+        let existing = [GitHubPullRow(number: 1), GitHubPullRow(number: 2)]
+        let incoming = GitHubPullsResponse(available: true, pulls: [GitHubPullRow(number: 3)], page: 2, hasMore: false)
+        let (merged, info) = GitHubHubUx.accumulate(existing: existing, incoming: incoming)
+        #expect(merged.map(\.number) == [1, 2, 3])
+        #expect(info.hasMore == false)
+    }
+
+    @Test func laterPageDeduplicatesByNumber() {
+        // A retried page (e.g. after a transient failure) must not double a row
+        // that's already on screen from a previous fetch.
+        let existing = [GitHubPullRow(number: 1), GitHubPullRow(number: 2)]
+        let incoming = GitHubPullsResponse(available: true, pulls: [GitHubPullRow(number: 2), GitHubPullRow(number: 3)], page: 2)
+        let (merged, _) = GitHubHubUx.accumulate(existing: existing, incoming: incoming)
+        #expect(merged.map(\.number) == [1, 2, 3])
+    }
+
+    @Test func incomingPageInfoAlwaysWins() {
+        let incoming = GitHubPullsResponse(available: true, pulls: [], page: 3, perPage: 30, totalCount: 61, hasMore: false)
+        let (_, info) = GitHubHubUx.accumulate(existing: [GitHubPullRow(number: 1)], incoming: incoming)
+        #expect(info.page == 3)
+        #expect(info.totalCount == 61)
+        #expect(info.hasMore == false)
+    }
+}
+
+// MARK: - load-more footer caption
+
+@Suite struct GitHubHubLoadMoreCaptionTests {
+    @Test func noRowsLoadedYetHidesTheFooter() {
+        #expect(GitHubHubUx.loadMoreCaption(loadedCount: 0, totalCount: 100, hasMore: true) == nil)
+    }
+
+    @Test func knownTotalShowsNOfApproxTotal() {
+        #expect(GitHubHubUx.loadMoreCaption(loadedCount: 30, totalCount: 137, hasMore: true) == "30 of ~137")
+    }
+
+    @Test func completeListWithKnownTotalStillShowsCaption() {
+        // hasMore false but a total is known — still worth the caption ("that's everything").
+        #expect(GitHubHubUx.loadMoreCaption(loadedCount: 137, totalCount: 137, hasMore: false) == "137 of ~137")
+    }
+
+    @Test func unknownTotalWithMoreAvailableShowsLoadedCount() {
+        #expect(GitHubHubUx.loadMoreCaption(loadedCount: 30, totalCount: nil, hasMore: true) == "30 loaded")
+    }
+
+    @Test func unknownTotalWithNoMoreHidesTheFooterEntirely() {
+        // Nothing left to load and no total to report — the footer would say nothing useful.
+        #expect(GitHubHubUx.loadMoreCaption(loadedCount: 12, totalCount: nil, hasMore: false) == nil)
     }
 }
 

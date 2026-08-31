@@ -49,20 +49,70 @@ extension AppModel {
         }
     }
 
-    /// Load open PRs into `githubPullsPhase`. Same graceful-off contract as issues.
-    func loadGithubPulls() async {
+    /// Load open PRs into `githubPullsPhase`, applying the Open|Mine control plus
+    /// `githubPullsFilter` (author/involvement/q) as server-side params. Same
+    /// graceful-off contract as issues. Always fetches page 1 — call this whenever
+    /// the filter/Open-Mine state changes, not `loadMoreGithubPulls`.
+    func loadGithubPulls(filter: GitHubHubFilter = .open) async {
         guard let sel = selectedContainer else {
             githubPullsPhase = .failed("No workspace is open — close this and try again.")
             return
         }
+        githubPullsFilter = githubPullsFilter.resetToFirstPage()
         githubPullsPhase = .loading
         do {
-            githubPullsPhase = GitHubHubUx.phase(from: try await api.githubPulls(sel.baseUrl, sel.id))
+            let response = try await fetchGithubPulls(sel, filter: filter, page: 1)
+            githubInvolvementUnavailableDetail = GitHubHubUx.involvementUnavailableDetail(response)
+            githubPullsPhase = GitHubHubUx.phase(from: response)
         } catch let error as OrchaApiError where error.status == 404 {
             githubPullsPhase = .unavailable(reason: "repo_not_connected", detail: nil)
         } catch {
             githubPullsPhase = .failed(friendly(error))
         }
+    }
+
+    /// Fetch the next page and append it onto the rows already on screen. A no-op
+    /// unless the phase is currently `.loaded` with `hasMore` — there is no page to
+    /// load more of from `.idle`/`.loading`/`.unavailable`/`.failed`, and calling
+    /// this mid-flight (already `.loadingMore`) would race two in-flight fetches.
+    func loadMoreGithubPulls(filter: GitHubHubFilter = .open) async {
+        guard let sel = selectedContainer,
+              case let .loaded(repo, pulls, page) = githubPullsPhase,
+              page.hasMore
+        else { return }
+        let nextPage = page.page + 1
+        githubPullsPhase = .loadingMore(repo: repo, pulls: pulls, page: page)
+        do {
+            let response = try await fetchGithubPulls(sel, filter: filter, page: nextPage)
+            githubInvolvementUnavailableDetail = GitHubHubUx.involvementUnavailableDetail(response)
+            let (merged, info) = GitHubHubUx.accumulate(existing: pulls, incoming: response)
+            githubPullsFilter.page = info.page
+            githubPullsPhase = response.available
+                ? .loaded(repo: response.repo ?? repo, pulls: merged, page: info)
+                : .unavailable(reason: response.reason, detail: response.detail)
+        } catch let error as OrchaApiError where error.status == 404 {
+            // Restore the page the user was already looking at rather than
+            // dropping it behind a friendly-off screen for a load-more hiccup.
+            githubPullsPhase = .loaded(repo: repo, pulls: pulls, page: page)
+        } catch {
+            githubPullsPhase = .loaded(repo: repo, pulls: pulls, page: page)
+            self.error = friendly(error) // surfaces via the app-wide error banner, list stays put
+        }
+    }
+
+    /// Shared param-building + network call for both the first page and load-more.
+    private func fetchGithubPulls(
+        _ sel: StoredContainer, filter: GitHubHubFilter, page: Int
+    ) async throws -> GitHubPullsResponse {
+        let params = GitHubHubUx.pullsQueryParams(filter: filter, state: githubPullsFilter, login: githubLogin)
+        return try await api.githubPulls(
+            sel.baseUrl, sel.id,
+            author: params.author,
+            involvement: params.involvement,
+            q: params.q,
+            page: page,
+            perPage: 30
+        )
     }
 
     // MARK: detail loads (owned by the detail screens, phase returned)

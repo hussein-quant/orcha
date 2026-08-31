@@ -208,16 +208,32 @@ struct GitHubIssuesResponse: Decodable {
     }
 }
 
-/// `GET …/github/pulls` envelope. Same clean-error contract as issues.
+/// `GET …/github/pulls` envelope. Same clean-error contract as issues, plus the
+/// filter/pagination superset: `page`/`perPage` echo the effective request values
+/// (defaulted server-side ⇒ never nil on a response that decoded at all), `totalCount`
+/// is nullable (GitHub's search API doesn't always report a total), and `hasMore`
+/// is absent on an older server — which this decodes as `false`, matching that
+/// server's existing full-list-in-one-page behavior exactly.
 struct GitHubPullsResponse: Decodable {
     var available = false
     var repo: String?
     var reason: String?
     var detail: String?
     var pulls: [GitHubPullRow] = []
+    /// 1-based.
+    var page = 1
+    var perPage = 30
+    /// nil when the server can't report a total (e.g. a search-sourced page).
+    var totalCount: Int?
+    /// Absent on an older server ⇒ `false` — that server always returned the full
+    /// list in one page, so "no more" is the correct read of a missing key.
+    var hasMore = false
 
     enum CodingKeys: String, CodingKey {
-        case available, repo, reason, detail, pulls
+        case available, repo, reason, detail, pulls, page
+        case perPage = "per_page"
+        case totalCount = "total_count"
+        case hasMore = "has_more"
     }
 
     init(from decoder: Decoder) throws {
@@ -227,15 +243,24 @@ struct GitHubPullsResponse: Decodable {
         reason = try c.decodeIfPresent(String.self, forKey: .reason)
         detail = try c.decodeIfPresent(String.self, forKey: .detail)
         pulls = try c.decodeIfPresent([GitHubPullRow].self, forKey: .pulls) ?? []
+        page = try c.decodeIfPresent(Int.self, forKey: .page) ?? 1
+        perPage = try c.decodeIfPresent(Int.self, forKey: .perPage) ?? 30
+        totalCount = try c.decodeIfPresent(Int.self, forKey: .totalCount)
+        hasMore = try c.decodeIfPresent(Bool.self, forKey: .hasMore) ?? false
     }
 
     init(available: Bool, repo: String? = nil, reason: String? = nil,
-         detail: String? = nil, pulls: [GitHubPullRow] = []) {
+         detail: String? = nil, pulls: [GitHubPullRow] = [],
+         page: Int = 1, perPage: Int = 30, totalCount: Int? = nil, hasMore: Bool = false) {
         self.available = available
         self.repo = repo
         self.reason = reason
         self.detail = detail
         self.pulls = pulls
+        self.page = page
+        self.perPage = perPage
+        self.totalCount = totalCount
+        self.hasMore = hasMore
     }
 }
 

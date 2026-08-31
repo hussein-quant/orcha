@@ -366,7 +366,9 @@ struct OrchaApiClient {
 
     /// Build a `?a=1&b=2` suffix, dropping nil values and percent-encoding each value
     /// (ISO cursors carry `:`/`+` — over-encode to a conservative unreserved set).
-    private func query(_ items: [String: String?]) -> String {
+    /// `internal` (not `private`): the per-feature `OrchaApiClient+*` extensions
+    /// (github hub pagination/filter params) build query strings too.
+    func query(_ items: [String: String?]) -> String {
         let pairs = items
             .sorted { $0.key < $1.key }
             .compactMap { key, value -> String? in

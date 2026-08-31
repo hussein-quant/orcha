@@ -16,6 +16,9 @@ struct GitHubHubScreen: View {
     @State private var startPickerItem: StartTarget?
     /// The task id a Start just produced — drives the push to its TaskDetailScreen.
     @State private var startedTaskId: String?
+    /// Whether the PR filter row (author/involvement/search) is expanded. Starts
+    /// collapsed — most visits just want the plain Open/Mine list.
+    @State private var filterRowExpanded = false
 
     var body: some View {
         Group {
@@ -39,6 +42,15 @@ struct GitHubHubScreen: View {
             TaskDetailScreen(taskId: taskId)
         }
         .task(id: kind) { await load() }
+        // Debounced re-fetch on filter-row edits: waits for a pause in typing before
+        // hitting the network, and `task(id:)` cancels the previous wait outright
+        // whenever the id changes — no manual debounce timer/Task bookkeeping.
+        .task(id: PullsFilterQuery(model.githubPullsFilter)) {
+            guard kind == .pulls else { return }
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            await load()
+        }
     }
 
     // MARK: header (segment + filter)
@@ -54,7 +66,17 @@ struct GitHubHubScreen: View {
 
             HStack(spacing: 8) {
                 ForEach(GitHubHubFilter.allCases, id: \.self) { f in
-                    FilterChip(label: f.label, on: filter == f) { filter = f }
+                    FilterChip(label: f.label, on: filter == f) { setFilter(f) }
+                }
+                if kind == .pulls {
+                    Button {
+                        withAnimation(.snappy(duration: 0.2)) { filterRowExpanded.toggle() }
+                    } label: {
+                        Image(systemName: filterRowExpanded ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(model.githubPullsFilter.isFiltering ? p.accent : p.muted)
+                    }
+                    .accessibilityLabel(filterRowExpanded ? "Hide filters" : "Show filters")
                 }
                 Spacer()
                 if let repo = boundRepo {
@@ -65,16 +87,35 @@ struct GitHubHubScreen: View {
                         .truncationMode(.head)
                 }
             }
+
+            if kind == .pulls, filterRowExpanded {
+                PullsFilterRow(
+                    detail: model.githubInvolvementUnavailableDetail,
+                    knowsLogin: (model.githubLogin?.isEmpty == false)
+                )
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.bar)
     }
 
+    /// The Open|Mine control switch — "Mine" rides through as the `author=<login>`
+    /// shortcut server-side (see `GitHubHubUx.pullsQueryParams`), so changing it
+    /// re-fetches page 1 exactly like any other filter edit.
+    private func setFilter(_ f: GitHubHubFilter) {
+        guard f != filter else { return }
+        filter = f
+        Task { await load() }
+    }
+
     private var boundRepo: String? {
         switch kind {
         case .pulls:
-            if case let .loaded(repo, _) = model.githubPullsPhase { return repo }
+            switch model.githubPullsPhase {
+            case let .loaded(repo, _, _), let .loadingMore(repo, _, _): return repo ?? model.githubRepo
+            default: break
+            }
         case .issues:
             if case let .loaded(repo, _) = model.githubIssuesPhase { return repo }
         }
@@ -92,20 +133,53 @@ struct GitHubHubScreen: View {
             unavailableState(reason: reason, detail: detail)
         case let .failed(message):
             failedState(message)
-        case let .loaded(_, pulls):
-            let visible = GitHubHubUx.filterPulls(pulls, filter: filter, login: model.githubLogin)
-            listScroll(isEmpty: visible.isEmpty, emptyNoun: "pull requests") {
-                ForEach(visible) { pull in
-                    NavigationLink(value: WorkspaceRoute.githubPull(pull.number)) {
-                        GitHubPullRowCard(
-                            pull: pull,
-                            onStartUnassigned: { startUnassigned(for: pull) },
-                            onStartWithAgent: { startTarget(for: pull) }
-                        )
+        // The server already applied Open|Mine + the filter row (author/involvement/
+        // q) — these rows render as-is, no client-side re-filtering.
+        case let .loaded(_, pulls, page):
+            pullsList(pulls, page: page, isLoadingMore: false)
+        case let .loadingMore(_, pulls, page):
+            pullsList(pulls, page: page, isLoadingMore: true)
+        }
+    }
+
+    private func pullsList(_ pulls: [GitHubPullRow], page: GitHubPullsPhase.Info, isLoadingMore: Bool) -> some View {
+        listScroll(isEmpty: pulls.isEmpty, emptyNoun: "pull requests") {
+            ForEach(pulls) { pull in
+                NavigationLink(value: WorkspaceRoute.githubPull(pull.number)) {
+                    GitHubPullRowCard(
+                        pull: pull,
+                        onStartUnassigned: { startUnassigned(for: pull) },
+                        onStartWithAgent: { startTarget(for: pull) }
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            loadMoreFooter(count: pulls.count, page: page, isLoadingMore: isLoadingMore)
+        }
+    }
+
+    @ViewBuilder
+    private func loadMoreFooter(count: Int, page: GitHubPullsPhase.Info, isLoadingMore: Bool) -> some View {
+        if isLoadingMore {
+            HStack {
+                Spacer()
+                ProgressView()
+                Spacer()
+            }
+            .padding(.vertical, 8)
+        } else if let caption = GitHubHubUx.loadMoreCaption(loadedCount: count, totalCount: page.totalCount, hasMore: page.hasMore) {
+            VStack(spacing: 6) {
+                Text(caption)
+                    .font(p.uiFont(11))
+                    .foregroundStyle(p.faint)
+                if page.hasMore {
+                    KitButton(title: "Load more", role: .neutral, small: true) {
+                        Task { await model.loadMoreGithubPulls(filter: filter) }
                     }
-                    .buttonStyle(.plain)
+                    .frame(maxWidth: 160)
                 }
             }
+            .padding(.top, 4)
         }
     }
 
@@ -206,7 +280,7 @@ struct GitHubHubScreen: View {
 
     private func load() async {
         switch kind {
-        case .pulls: await model.loadGithubPulls()
+        case .pulls: await model.loadGithubPulls(filter: filter)
         case .issues: await model.loadGithubIssues()
         }
     }
@@ -259,6 +333,94 @@ private struct StartTarget: Identifiable {
     let htmlUrl: String?
 
     var id: String { "\(kind.startKind)#\(number)" }
+}
+
+/// `Hashable` wrapper over `GitHubPullsFilterState` so `.task(id:)` can debounce
+/// re-fetches on it directly — a fresh id per edit cancels the previous wait.
+private struct PullsFilterQuery: Hashable {
+    let author: String
+    let involvement: GitHubHubInvolvement
+    let q: String
+
+    init(_ state: GitHubPullsFilterState) {
+        author = state.author
+        involvement = state.involvement
+        q = state.q
+    }
+}
+
+// MARK: - PR filter row
+
+/// The compact filter row under the segment/Open-Mine header: free-text author,
+/// mutually-exclusive "Assigned to me"/"My reviews" chips, and a search field.
+/// Edits write straight into `model.githubPullsFilter`; the screen's debounced
+/// `.task(id:)` picks up the change and re-fetches page 1.
+private struct PullsFilterRow: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.palette) private var p
+    /// The server's off-state detail when the identity lacks a github_login —
+    /// disables the involvement chips and explains why via a footnote.
+    let detail: String?
+    /// Whether a login is known at all, independent of `detail` (a chip can be
+    /// tapped before ever hitting the network, so this gates it too).
+    let knowsLogin: Bool
+
+    private var involvementDisabled: Bool { knowsLogin == false }
+
+    var body: some View {
+        @Bindable var model = model
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "person")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(p.faint)
+                    .accessibilityHidden(true)
+                TextField("", text: $model.githubPullsFilter.author, prompt: Text("Filter by author"))
+                    .font(p.uiFont(13))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .accessibilityLabel("Filter by author")
+            }
+            .padding(9)
+            .background(p.surface2, in: RoundedRectangle(cornerRadius: p.radiusCard))
+            .overlay(RoundedRectangle(cornerRadius: p.radiusCard).strokeBorder(p.border2, lineWidth: 1))
+
+            HStack(spacing: 8) {
+                involvementChip(.assigned)
+                involvementChip(.reviewRequested)
+            }
+            if involvementDisabled {
+                Text(detail ?? "Sign in with GitHub to use \u{201C}Assigned to me\u{201D} and \u{201C}My reviews.\u{201D}")
+                    .font(p.uiFont(11))
+                    .foregroundStyle(p.faint)
+            }
+
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(p.faint)
+                    .accessibilityHidden(true)
+                TextField("", text: $model.githubPullsFilter.q, prompt: Text("Search title and body"))
+                    .font(p.uiFont(13))
+                    .textInputAutocapitalization(.never)
+                    .accessibilityLabel("Search pull requests")
+            }
+            .padding(9)
+            .background(p.surface2, in: RoundedRectangle(cornerRadius: p.radiusCard))
+            .overlay(RoundedRectangle(cornerRadius: p.radiusCard).strokeBorder(p.border2, lineWidth: 1))
+        }
+        .padding(.top, 4)
+    }
+
+    private func involvementChip(_ value: GitHubHubInvolvement) -> some View {
+        FilterChip(label: value.chipLabel, on: model.githubPullsFilter.involvement == value) {
+            // Mutually exclusive with itself: tapping the active chip clears it
+            // back to `.none` instead of leaving it stuck on.
+            model.githubPullsFilter.involvement = model.githubPullsFilter.involvement == value ? .none : value
+        }
+        .disabled(involvementDisabled)
+        .opacity(involvementDisabled ? 0.5 : 1)
+    }
 }
 
 // MARK: - rows

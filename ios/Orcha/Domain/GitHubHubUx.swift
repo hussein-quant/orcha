@@ -39,6 +39,70 @@ enum GitHubHubFilter: String, CaseIterable, Equatable {
     }
 }
 
+/// The PR list's server-side involvement filter — mutually exclusive with itself
+/// (only one can be active) and orthogonal to `author`/`q`. Maps 1:1 to the
+/// frozen contract's `involvement=assigned|review_requested` query param.
+enum GitHubHubInvolvement: String, CaseIterable, Equatable {
+    case none
+    case assigned
+    case reviewRequested
+
+    /// The wire value for `involvement=`, or nil for `.none` (param omitted).
+    var queryValue: String? {
+        switch self {
+        case .none: nil
+        case .assigned: "assigned"
+        case .reviewRequested: "review_requested"
+        }
+    }
+
+    var chipLabel: String {
+        switch self {
+        case .none: ""
+        case .assigned: "Assigned to me"
+        case .reviewRequested: "My reviews"
+        }
+    }
+}
+
+/// The PR list's compact filter row state — pure value type, so the query-building
+/// and pagination logic below is fully unit-testable without SwiftUI. `author` and
+/// `q` are free text; `involvement` is mutually exclusive with itself (setting one
+/// value replaces any other — there is no "assigned AND review_requested").
+struct GitHubPullsFilterState: Equatable {
+    var author: String = ""
+    var involvement: GitHubHubInvolvement = .none
+    var q: String = ""
+    /// 1-based; bumped by "load more", reset to 1 by any filter change.
+    var page: Int = 1
+
+    /// Trims free text and treats blank as absent — the query never sends `author=`
+    /// or `q=` for whitespace-only input.
+    var trimmedAuthor: String? {
+        let value = author.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    var trimmedQuery: String? {
+        let value = q.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
+    /// Whether any filter beyond the bare "Open" list is active — drives whether
+    /// the list is showing a filtered subset (vs. the plain open-PRs list).
+    var isFiltering: Bool {
+        trimmedAuthor != nil || involvement != .none || trimmedQuery != nil
+    }
+
+    /// A copy reset to page 1 — every filter-field edit calls this so a stale
+    /// deeper page never mixes with a freshly-typed filter.
+    func resetToFirstPage() -> Self {
+        var copy = self
+        copy.page = 1
+        return copy
+    }
+}
+
 /// The list's loading → available:false → loaded machine for issues.
 enum GitHubIssuesPhase: Equatable {
     case idle
@@ -52,13 +116,28 @@ enum GitHubIssuesPhase: Equatable {
     case failed(String)
 }
 
-/// The PR list's machine (same shape, distinct payload).
+/// The PR list's machine (same shape, distinct payload), plus the pagination
+/// metadata a `.loaded` page carries: `page`/`totalCount`/`hasMore` mirror the
+/// frozen contract's response fields exactly, so the load-more footer and the
+/// "N of ~total" caption read straight off the phase with no extra plumbing.
 enum GitHubPullsPhase: Equatable {
     case idle
     case loading
+    /// Set only by a load-more fetch (page > 1) — the list keeps showing the
+    /// already-loaded rows underneath while the next page is in flight.
+    case loadingMore(repo: String?, pulls: [GitHubPullRow], page: Info)
     case unavailable(reason: String?, detail: String?)
-    case loaded(repo: String?, pulls: [GitHubPullRow])
+    case loaded(repo: String?, pulls: [GitHubPullRow], page: Info = Info())
     case failed(String)
+
+    /// Pagination metadata for a loaded page — bundled so `.loaded` keeps a
+    /// stable arity as fields are added, and so tests can construct it directly.
+    struct Info: Equatable {
+        var page = 1
+        var perPage = 30
+        var totalCount: Int?
+        var hasMore = false
+    }
 }
 
 /// Detail machines (PR / issue), same graceful-off contract.
@@ -90,8 +169,34 @@ enum GitHubHubUx {
 
     static func phase(from response: GitHubPullsResponse) -> GitHubPullsPhase {
         response.available
-            ? .loaded(repo: response.repo, pulls: response.pulls)
+            ? .loaded(repo: response.repo, pulls: response.pulls, page: pageInfo(from: response))
             : .unavailable(reason: response.reason, detail: response.detail)
+    }
+
+    /// Bundle a response's pagination fields into `GitHubPullsPhase.Info`.
+    static func pageInfo(from response: GitHubPullsResponse) -> GitHubPullsPhase.Info {
+        GitHubPullsPhase.Info(
+            page: response.page, perPage: response.perPage,
+            totalCount: response.totalCount, hasMore: response.hasMore
+        )
+    }
+
+    /// Page-1 replaces; page>1 appends onto the rows already showing, de-duplicating
+    /// by PR number (a re-requested page — e.g. a retry after a transient failure —
+    /// must not double a row already on screen). The incoming page's own metadata
+    /// (`hasMore`/`totalCount`/`page`) always wins, since it's the freshest read of
+    /// the server's cursor.
+    static func accumulate(
+        existing: [GitHubPullRow], incoming: GitHubPullsResponse
+    ) -> (pulls: [GitHubPullRow], page: GitHubPullsPhase.Info) {
+        let info = pageInfo(from: incoming)
+        guard incoming.page > 1 else { return (incoming.pulls, info) }
+        var seen = Set(existing.map(\.number))
+        var merged = existing
+        for pull in incoming.pulls where seen.insert(pull.number).inserted {
+            merged.append(pull)
+        }
+        return (merged, info)
     }
 
     static func phase(from response: GitHubPullDetailResponse) -> GitHubPullDetailPhase {
@@ -129,6 +234,58 @@ enum GitHubHubUx {
         guard let value = login?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               value.isEmpty == false else { return nil }
         return value
+    }
+
+    // MARK: server-side filter params (author / involvement / q / page)
+
+    /// The typed request params for `GET …/github/pulls`, reconciled from the
+    /// filter row's state plus the Open|Mine control.
+    struct PullsQueryParams: Equatable {
+        var author: String?
+        var involvement: String?
+        var q: String?
+    }
+
+    /// Reconcile the Open|Mine control with the filter row's state. "Mine" is a
+    /// shortcut for `author=<my login>` — it is NOT `involvement`, so it always
+    /// wins over any free-typed `author` text (the view keeps the author field
+    /// disabled while "Mine" is active, so the two never fight over a request in
+    /// practice; this still resolves deterministically if they did). Involvement
+    /// (`assigned`/`review_requested`) is mutually exclusive with itself and
+    /// orthogonal to `author`/`q` — all can combine in one request.
+    static func pullsQueryParams(
+        filter: GitHubHubFilter, state: GitHubPullsFilterState, login: String?
+    ) -> PullsQueryParams {
+        let mineAuthor = filter == .mine ? normalizedLogin(login) : nil
+        return PullsQueryParams(
+            author: mineAuthor ?? state.trimmedAuthor,
+            involvement: state.involvement.queryValue,
+            q: state.trimmedQuery
+        )
+    }
+
+    /// Whether the identity backing "Assigned to me" / "My reviews" lacks a mapped
+    /// GitHub login — the contract's `available:true`, empty `pulls`, informative
+    /// `detail` shape for an unmapped identity. Both involvement chips disable with
+    /// this string as their footnote so the empty list reads as "can't answer this",
+    /// never as "there's nothing here".
+    static func involvementUnavailableDetail(_ response: GitHubPullsResponse) -> String? {
+        guard response.available, response.pulls.isEmpty, let detail = response.detail,
+              detail.isEmpty == false else { return nil }
+        return detail
+    }
+
+    // MARK: load-more footer copy
+
+    /// The load-more footer's "N of ~total" caption, or nil to hide the footer
+    /// entirely (nothing loaded yet, or the list is already complete with no more
+    /// to fetch and no total to report).
+    static func loadMoreCaption(loadedCount: Int, totalCount: Int?, hasMore: Bool) -> String? {
+        guard loadedCount > 0, hasMore || totalCount != nil else { return nil }
+        if let totalCount {
+            return "\(loadedCount) of ~\(totalCount)"
+        }
+        return hasMore ? "\(loadedCount) loaded" : nil
     }
 
     // MARK: checks chip summary

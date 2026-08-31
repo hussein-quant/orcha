@@ -97,6 +97,14 @@ final class AppModel {
     /// The same `.loading / .unavailable / .loaded / .failed` machine `membersState` uses.
     var githubIssuesPhase: GitHubIssuesPhase = .idle
     var githubPullsPhase: GitHubPullsPhase = .idle
+    /// The PR list's compact filter row (author / involvement / q / page) — owned
+    /// here (not view @State) so a kind switch + back-navigation doesn't lose it,
+    /// mirroring where `githubPullsPhase` itself lives.
+    var githubPullsFilter = GitHubPullsFilterState()
+    /// The most recent PR-list response's `detail` when the identity lacks a mapped
+    /// GitHub login (the involvement chips' disabled-footnote copy) — cleared on
+    /// every successful fetch that isn't that exact off-state.
+    var githubInvolvementUnavailableDetail: String?
     var containerHealth: [String: ContainerHealth] = [:]
     var taskMessages: [TaskMessageDto] = []
     var taskRuns: [RunDto] = []

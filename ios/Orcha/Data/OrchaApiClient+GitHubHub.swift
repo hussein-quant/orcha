@@ -15,8 +15,24 @@ extension OrchaApiClient {
         try await get(base, "/api/containers/\(cid)/github/issues")
     }
 
-    func githubPulls(_ base: String, _ cid: String) async throws -> GitHubPullsResponse {
-        try await get(base, "/api/containers/\(cid)/github/pulls")
+    /// `author`/`involvement`/`q`/`page`/`perPage` are the frozen contract's
+    /// server-side filter/pagination params, all optional — omitting all of them is
+    /// exactly the pre-existing unfiltered call (a nil-only `query` builds `""`), so
+    /// an older server that ignores unknown query params behaves identically either
+    /// way. `involvement` takes the raw wire value (`"assigned"` | `"review_requested"`);
+    /// build it from `GitHubHubInvolvement.queryValue` at the call site.
+    func githubPulls(
+        _ base: String, _ cid: String,
+        author: String? = nil, involvement: String? = nil, q: String? = nil,
+        page: Int? = nil, perPage: Int? = nil
+    ) async throws -> GitHubPullsResponse {
+        try await get(base, "/api/containers/\(cid)/github/pulls" + query([
+            "author": author,
+            "involvement": involvement,
+            "q": q,
+            "page": page.map(String.init),
+            "per_page": perPage.map(String.init),
+        ]))
     }
 
     func githubIssueDetail(_ base: String, _ cid: String, _ number: Int) async throws -> GitHubIssueDetailResponse {
