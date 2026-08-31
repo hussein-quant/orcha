@@ -66,8 +66,8 @@ class DiffParserTest {
         assertEquals("notes.md", files[0].path)
         val lines = files[0].hunks[0].lines
         assertEquals(2, lines.size)
-        assertEquals("++ this looks like a header but isn't", lines[0].text)
-        assertEquals("-- neither does this", lines[1].text)
+        assertEquals("+++ this looks like a header but isn't", lines[0].text)
+        assertEquals("--- neither does this", lines[1].text)
     }
 
     @Test

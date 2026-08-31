@@ -61,6 +61,7 @@ fun ChecksChip(checks: GitHubChecks, modifier: Modifier = Modifier, showsWhenEmp
     }
 }
 
+@Composable
 private fun verdictColor(verdict: ChecksSummary.Verdict): Color {
     val p = Orcha.palette
     return when (verdict) {

@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.ArrowBack as ArrowBackGlyph
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -161,7 +160,7 @@ private fun PullHeader(pull: GitHubPullDetail) {
         // base ← head, mirroring GitHub's own "into base from head" framing.
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(pull.base, style = branchStyle, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Icon(ArrowBackGlyph, contentDescription = null, tint = p.muted, modifier = Modifier.size(14.dp))
+            Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = null, tint = p.muted, modifier = Modifier.size(14.dp))
             Text(pull.head, style = branchStyle, color = p.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

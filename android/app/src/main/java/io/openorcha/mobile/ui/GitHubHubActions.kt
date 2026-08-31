@@ -10,6 +10,7 @@ package io.openorcha.mobile.ui
  */
 
 import io.ktor.client.plugins.ClientRequestException
+import kotlinx.coroutines.flow.update
 import io.openorcha.mobile.data.githubIssueDetail
 import io.openorcha.mobile.data.githubIssues
 import io.openorcha.mobile.data.githubPullDetail
