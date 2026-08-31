@@ -19,6 +19,19 @@ class OrchaApiClient {
         client.get("${baseUrl.endpoint()}/api/containers").body()
     }
 
+    /**
+     * Device-token auth: [listContainers] with an explicit bearer token that ISN'T
+     * (yet) registered in [BearerTokens] -- the pairing probe/retry path. A
+     * protected deployment answers with a clean 401 (see [isAuthRequired]),
+     * distinguishing "reachable, sign-in required" from a genuine network failure.
+     * `overrideToken` always wins over anything already registered for this host
+     * (see [bearerOverride]). Named apart from the view-model's own
+     * `probeContainers()` (the home-card health probe) -- an unrelated concept.
+     */
+    suspend fun listContainersWithBearer(baseUrl: String, overrideToken: String): ContainersResponse = withTimeout(6_000) {
+        client.get("${baseUrl.endpoint()}/api/containers") { bearerOverride(overrideToken) }.body()
+    }
+
     suspend fun getSnapshot(
         baseUrl: String,
         containerId: String,
@@ -31,6 +44,12 @@ class OrchaApiClient {
         ).joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
         client.get("${baseUrl.endpoint()}/api/containers/$containerId$window").body()
     }
+
+    /** [listContainersWithBearer]'s snapshot counterpart -- same override-token contract. */
+    suspend fun getSnapshotWithBearer(baseUrl: String, containerId: String, overrideToken: String): ContainerSnapshot =
+        withTimeout(10_000) {
+            client.get("${baseUrl.endpoint()}/api/containers/$containerId") { bearerOverride(overrideToken) }.body()
+        }
 
     /** Keyset-paged thread fetch: newest page first; older pages via before/before_id. */
     suspend fun getTaskMessages(

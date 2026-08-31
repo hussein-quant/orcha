@@ -1,5 +1,6 @@
 package io.openorcha.mobile
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -52,6 +53,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        routeAuthCallback(intent)
         enableEdgeToEdge()
         setContent {
             val state by viewModel.uiState.collectAsState()
@@ -111,9 +113,14 @@ class MainActivity : ComponentActivity() {
 
                     AppRoute.AddContainer -> ManualConnectScreen(
                         state = state,
-                        onBack = viewModel::showContainers,
+                        onBack = {
+                            viewModel.resetDeviceAuth()
+                            viewModel.showContainers()
+                        },
                         onScan = viewModel::showScanner,
-                        onConnect = viewModel::connectManual,
+                        onConnect = { viewModel.connectManual(it) },
+                        onSignIn = { viewModel.signInWithGitHub(this@MainActivity) },
+                        onConnectWithToken = { rawBaseUrl, token -> viewModel.connectWithAccessToken(rawBaseUrl, token) },
                     )
 
                     AppRoute.Settings -> SettingsScreen(
@@ -125,6 +132,11 @@ class MainActivity : ComponentActivity() {
                         onForget = viewModel::forgetContainer,
                         onAdd = viewModel::showAddContainer,
                         onSetRemoteUrl = viewModel::setRemoteUrl,
+                        onSetAccessToken = viewModel::setContainerAccessToken,
+                        onSignInAgain = { id ->
+                            viewModel.beginSignInAgain(id)
+                            viewModel.signInWithGitHub(this@MainActivity)
+                        },
                     )
 
                     AppRoute.Workspace -> WorkspaceScreen(
@@ -295,6 +307,30 @@ class MainActivity : ComponentActivity() {
                 )
                 }
             }
+        }
+    }
+
+    /**
+     * Device-token auth: `singleTask` (manifest) keeps one MainActivity instance,
+     * so the GitHub sign-in Custom Tab's `orcha://auth/callback` redirect arrives
+     * here rather than starting a second Activity on top of the in-flight flow.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        routeAuthCallback(intent)
+    }
+
+    /**
+     * `orcha://auth/...` belongs to the device-token flow -- hand it to the shared
+     * [DeviceAuthSession] rather than routing it as a normal deep link. A stray
+     * delivery (e.g. a relaunch from the recents tray after the session already
+     * finished) is simply a no-op: [DeviceAuthSession.onCallback] only resumes a
+     * suspend call that's actually waiting.
+     */
+    private fun routeAuthCallback(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (io.openorcha.mobile.ui.DeviceAuthSession.isAuthCallbackIntent(intent)) {
+            viewModel.deviceAuthSession.onCallback(uri)
         }
     }
 }

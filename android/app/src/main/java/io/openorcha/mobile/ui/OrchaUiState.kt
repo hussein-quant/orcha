@@ -28,6 +28,7 @@ import io.openorcha.mobile.domain.GitHubIssuesPhase
 import io.openorcha.mobile.domain.GitHubPullDetailPhase
 import io.openorcha.mobile.domain.GitHubPullsFilterState
 import io.openorcha.mobile.domain.GitHubPullsPhase
+import io.openorcha.mobile.domain.DeviceAuthFlow
 import io.openorcha.mobile.domain.Paging
 import io.openorcha.mobile.domain.RunFeed
 import io.openorcha.mobile.domain.RunFeedRow
@@ -122,6 +123,15 @@ data class OrchaUiState(
     val connecting: Boolean = false,
     val error: String? = null,
     val toast: String? = null,
+    // Device-token auth (cloud unification), iOS `AppModel` parity:
+    /** The last connect probe was bounced by the auth perimeter — the address is
+     *  reachable but needs a device token/sign-in before the connect can proceed. */
+    val connectNeedsToken: Boolean = false,
+    /** The raw address/QR payload whose probe needed a token, kept so the GitHub
+     *  sign-in flow (or a manually pasted token) can retry the SAME draft. */
+    val connectDraft: String? = null,
+    /** The GitHub sign-in options sheet's state machine. */
+    val deviceAuth: DeviceAuthFlow = DeviceAuthFlow(),
     // GitHub hub (Android parity of iOS AppModel+GitHubHub.swift)
     val githubHubKind: GitHubHubKind = GitHubHubKind.Pulls,
     val githubHubFilter: GitHubHubFilter = GitHubHubFilter.Open,

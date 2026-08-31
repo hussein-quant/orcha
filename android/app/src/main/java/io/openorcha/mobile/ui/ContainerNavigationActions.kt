@@ -4,12 +4,14 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.openorcha.mobile.data.AgentDto
+import io.openorcha.mobile.data.BearerTokens
 import io.openorcha.mobile.data.ContainerSnapshot
 import io.openorcha.mobile.data.ContainerStore
 import io.openorcha.mobile.data.ConversationDto
 import io.openorcha.mobile.data.ModelDto
 import io.openorcha.mobile.data.OrchaApiClient
 import io.openorcha.mobile.data.OrchaServerAddress
+import io.openorcha.mobile.data.isAuthRequired
 import io.openorcha.mobile.data.RequestDto
 import io.openorcha.mobile.data.RunDto
 import io.openorcha.mobile.data.RunStream
@@ -109,7 +111,12 @@ fun showScanner() {
     _uiState.update { it.copy(route = AppRoute.Scanner, error = null) }
 }
 
-/** Flow 03: a scanned QR payload runs through the same parse+probe as manual entry. */
+/**
+ * Flow 03: a scanned QR payload runs through the same parse+probe as manual entry.
+ * Device-token auth: a probe that bounces off the perimeter (401) sets
+ * `connectNeedsToken` the same way manual entry does, and this screen renders the
+ * sign-in state instead of the failure panel.
+ */
 fun connectScanned(payload: String) {
     _uiState.update { it.copy(route = AppRoute.AddContainer) }
     connectManual(payload)
@@ -152,33 +159,63 @@ fun setSearchQuery(query: String) {
     _uiState.update { it.copy(searchQuery = query) }
 }
 
-fun connectManual(rawBaseUrl: String) {
+/**
+ * Flow 03/04 manual entry. Device-token auth: `accessToken` is the credential a
+ * caller already has in hand (a pasted team/device token) -- omit it for a plain
+ * probe, which a protected deployment bounces with a 401 that
+ * [connectWithToken] turns into `connectNeedsToken`.
+ */
+fun connectManual(rawBaseUrl: String, accessToken: String? = null) {
+    scope.launch { connectWithToken(rawBaseUrl, accessToken) }
+}
+
+/**
+ * Device-token auth (cloud unification): probe+pair [rawBaseUrl] with an explicit
+ * bearer token (or none). One pairing stores EVERY project the token is good for
+ * on that box the same way `connectManual` always has -- this container's
+ * `accessToken` rides [BearerTokens] for every later request via the Ktor request
+ * seam in `OrchaHttpClient.kt`. iOS parity: `AppModel.connect(_:accessToken:)`.
+ */
+override suspend fun connectWithToken(rawBaseUrl: String, accessToken: String?): Boolean {
+    val trimmedToken = accessToken?.trim()?.takeIf { it.isNotEmpty() }
     val baseUrl = try {
         OrchaServerAddress.normalize(pairingBaseUrl(rawBaseUrl))
     } catch (err: IllegalArgumentException) {
-        _uiState.update { it.copy(error = err.message ?: friendlyConnectionError()) }
-        return
+        _uiState.update { it.copy(error = err.message ?: friendlyConnectionError(), connectNeedsToken = false) }
+        return false
     }
     // LAN↔remote failover pairing: an `orcha-pair` QR may carry a second address
     // (e.g. Tailscale) — tolerant, absent for plain address/manual entry.
     val remoteUrl = pairingRemoteUrl(rawBaseUrl)
-    scope.launch {
-        _uiState.update { it.copy(connecting = true, error = null) }
-        runCatching {
-            val container = api.listContainers(baseUrl).containers.firstOrNull()
-                ?: error("No Orcha container was found at this address.")
-            val snapshot = api.getSnapshot(baseUrl, container.id)
-            val human = snapshot.agents.firstOrNull { it.kind == "human" }
-            StoredContainer(
-                id = container.id,
-                displayName = container.name,
-                baseUrl = baseUrl,
-                humanAgentId = human?.id,
-                humanAlias = human?.alias,
-                lastOpenedAt = System.currentTimeMillis(),
-                remoteBaseUrl = remoteUrl,
-            ) to snapshot
-        }.onSuccess { (stored, snapshot) ->
+    _uiState.update { it.copy(connecting = true, error = null, connectNeedsToken = false) }
+    val outcome = runCatching {
+        val listed = if (trimmedToken != null) {
+            api.listContainersWithBearer(baseUrl, trimmedToken).containers
+        } else {
+            api.listContainers(baseUrl).containers
+        }
+        val container = listed.firstOrNull() ?: error("No Orcha container was found at this address.")
+        val snapshot = if (trimmedToken != null) {
+            api.getSnapshotWithBearer(baseUrl, container.id, trimmedToken)
+        } else {
+            api.getSnapshot(baseUrl, container.id)
+        }
+        val human = snapshot.agents.firstOrNull { it.kind == "human" }
+        StoredContainer(
+            id = container.id,
+            displayName = container.name,
+            baseUrl = baseUrl,
+            humanAgentId = human?.id,
+            humanAlias = human?.alias,
+            lastOpenedAt = System.currentTimeMillis(),
+            remoteBaseUrl = remoteUrl,
+            accessToken = trimmedToken,
+        ) to snapshot
+    }
+    return outcome.fold(
+        onSuccess = { (stored, snapshot) ->
+            BearerTokens.set(baseUrl, trimmedToken)
+            remoteUrl?.let { BearerTokens.set(it, trimmedToken) }
             val containers = store.upsert(stored)
             _uiState.update {
                 it.copy(
@@ -187,15 +224,36 @@ fun connectManual(rawBaseUrl: String) {
                     snapshot = snapshot,
                     route = AppRoute.Workspace,
                     connecting = false,
+                    connectNeedsToken = false,
+                    connectDraft = null,
                     selectedTab = WorkspaceTab.Home,
                 )
             }
             startPolling()
-        }.onFailure { err ->
-            android.util.Log.w("OrchaApp", "connect failed", err)
-            _uiState.update { it.copy(connecting = false, error = friendlyConnectionError(err)) }
-        }
-    }
+            true
+        },
+        onFailure = { err ->
+            if (isAuthRequired(err)) {
+                // Item-1 UX: scan/enter -> token prompt only when the perimeter asks.
+                _uiState.update {
+                    it.copy(
+                        connecting = false,
+                        connectNeedsToken = true,
+                        connectDraft = rawBaseUrl,
+                        error = if (trimmedToken == null) {
+                            "This Orcha is protected — sign in with GitHub or enter its access token to connect."
+                        } else {
+                            "That access token wasn't accepted. Check it and try again."
+                        },
+                    )
+                }
+            } else {
+                android.util.Log.w("OrchaApp", "connect failed", err)
+                _uiState.update { it.copy(connecting = false, error = friendlyConnectionError(err)) }
+            }
+            false
+        },
+    )
 }
 
 fun openContainer(id: String) {

@@ -21,6 +21,14 @@ data class StoredContainer(
      * decodes fine — `ignoreUnknownKeys` + this default).
      */
     val remoteBaseUrl: String? = null,
+    /**
+     * Device-token auth (cloud unification): the per-device bearer token minted by
+     * the GitHub sign-in flow (or pasted manually) for a deployment behind the
+     * auth perimeter. Absent for an unprotected local server, and for connections
+     * paired before this field existed -- old stored JSON decodes fine
+     * (`ignoreUnknownKeys` + this default), same pattern as `remoteBaseUrl`.
+     */
+    val accessToken: String? = null,
 )
 
 class ContainerStore(context: Context) {
@@ -66,6 +74,18 @@ class ContainerStore(context: Context) {
      */
     fun setRemoteUrl(id: String, url: String?): List<StoredContainer> {
         val next = load().map { if (it.id == id) it.copy(remoteBaseUrl = url) else it }
+        save(next)
+        return next
+    }
+
+    /**
+     * Device-token auth: persist (or clear, `token = null`/blank) the per-device
+     * bearer token for one container -- set after a successful GitHub sign-in
+     * round-trip, or by the Settings "Sign in again" manual-entry fallback.
+     */
+    fun setAccessToken(id: String, token: String?): List<StoredContainer> {
+        val normalized = token?.trim()?.takeIf { it.isNotEmpty() }
+        val next = load().map { if (it.id == id) it.copy(accessToken = normalized) else it }
         save(next)
         return next
     }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,6 +24,8 @@ import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.WifiOff
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.data.StoredContainer
+import io.openorcha.mobile.domain.DeviceAuthFlow
 import io.openorcha.mobile.ui.ContainerHealth
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.components.Avatar
@@ -77,6 +81,9 @@ fun ManualConnectScreen(
     onBack: () -> Unit,
     onScan: () -> Unit,
     onConnect: (String) -> Unit,
+    // Device-token auth (cloud unification):
+    onSignIn: () -> Unit = {},
+    onConnectWithToken: (String, String) -> Unit = { _, _ -> },
 ) {
     var address by remember { mutableStateOf("") }
     Scaffold(
@@ -89,6 +96,20 @@ fun ManualConnectScreen(
             )
         },
     ) { padding ->
+        if (state.connectNeedsToken) {
+            // Device-token auth: the perimeter bounced this address — GitHub
+            // sign-in is the primary way through, pasting a token the fallback.
+            DeviceSignInPanel(
+                state = state,
+                modifier = Modifier.padding(padding),
+                onSignIn = onSignIn,
+                onConnectWithToken = { token ->
+                    val draft = state.connectDraft ?: address
+                    onConnectWithToken(draft, token)
+                },
+            )
+            return@Scaffold
+        }
         if (state.error != null && state.error.contains("reach", ignoreCase = true)) {
             // A3 · unreachable after probe — checklist copy from the design package
             StateLayout(
@@ -139,6 +160,100 @@ fun ManualConnectScreen(
                 )
             }
             state.error?.let { item { Banner(BannerKind.Danger, it) } }
+        }
+    }
+}
+
+/**
+ * Device-token auth (cloud unification), Android parity of iOS's `AuthOptionsSheet`:
+ * shown when a probe bounces off the auth perimeter. Primary path is GitHub
+ * sign-in — a Custom Tab round-trip that mints this phone's own device token,
+ * nothing to paste. Pasting a team/device token stays available, collapsed, as
+ * the advanced fallback.
+ */
+@Composable
+private fun DeviceSignInPanel(
+    state: OrchaUiState,
+    modifier: Modifier = Modifier,
+    onSignIn: () -> Unit,
+    onConnectWithToken: (String) -> Unit,
+) {
+    val p = Orcha.palette
+    var showTokenEntry by remember { mutableStateOf(false) }
+    var token by remember { mutableStateOf("") }
+    val phase = state.deviceAuth.phase
+    val busy = phase is DeviceAuthFlow.Phase.SigningIn || phase is DeviceAuthFlow.Phase.Connecting || state.connecting
+    val signInTitle = when (phase) {
+        is DeviceAuthFlow.Phase.SigningIn -> "Waiting for GitHub…"
+        is DeviceAuthFlow.Phase.Connecting -> "Connecting…"
+        else -> "Sign in with GitHub"
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize().imePadding(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item {
+            Banner(
+                BannerKind.Info,
+                "This Orcha is protected. Sign in with GitHub and this phone gets its own device token — nothing to paste.",
+            )
+        }
+        item {
+            PrimaryButton(
+                signInTitle,
+                onSignIn,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy,
+                leading = { Icon(Icons.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp)) },
+            )
+        }
+        val failedMessage = (phase as? DeviceAuthFlow.Phase.Failed)?.message
+        if (failedMessage != null) {
+            item { Banner(BannerKind.Danger, failedMessage) }
+        }
+        item {
+            OrchaCard {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(Icons.Rounded.Key, null, tint = p.accent, modifier = Modifier.size(16.dp))
+                    Text(
+                        "Use an access token instead",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { showTokenEntry = !showTokenEntry }) {
+                        Text(if (showTokenEntry) "Hide" else "Show", color = p.accent)
+                    }
+                }
+                if (showTokenEntry) {
+                    Spacer(Modifier.height(8.dp))
+                    OrchaField(
+                        token, { token = it },
+                        label = "Access token",
+                        masked = true,
+                    )
+                    Text(
+                        "Advanced: paste the team access token your admin shared. Sign-in above does this for you.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = p.faint,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    NeutralButton(
+                        if (state.connecting) "Connecting…" else "Connect with token",
+                        { onConnectWithToken(token) },
+                        enabled = !busy && token.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (failedMessage == null) {
+                        state.error?.let { Banner(BannerKind.Danger, it) }
+                    }
+                }
+            }
         }
     }
 }

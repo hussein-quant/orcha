@@ -177,6 +177,9 @@ fun OrchaField(
      *  instead of firing a network request per keystroke. No-op for the multi-line
      *  fields that don't pass it. */
     onSearch: (() -> Unit)? = null,
+    /** Device-token auth: mask input like iOS's `SecureField` — the access-token
+     *  entry fields (sign-in fallback, Settings token update). */
+    masked: Boolean = false,
 ) {
     OutlinedTextField(
         value = value,
@@ -189,8 +192,16 @@ fun OrchaField(
         isError = isError,
         supportingText = supporting?.let { { Text(it, color = if (isError) Orcha.palette.danger else Orcha.palette.muted) } },
         shape = RoundedCornerShape(Orcha.palette.radiusButton.dp),
-        singleLine = onSearch != null,
-        keyboardOptions = if (onSearch != null) androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search) else androidx.compose.foundation.text.KeyboardOptions.Default,
+        singleLine = onSearch != null || masked,
+        visualTransformation = if (masked) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        keyboardOptions = when {
+            masked -> androidx.compose.foundation.text.KeyboardOptions(
+                imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+            )
+            onSearch != null -> androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search)
+            else -> androidx.compose.foundation.text.KeyboardOptions.Default
+        },
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch?.invoke() }),
         colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = Orcha.palette.surface2,
