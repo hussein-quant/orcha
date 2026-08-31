@@ -54,6 +54,7 @@ __all__ = [
     "_compose",
     "_copy_tree",
     "_detect_github_repo",
+    "_migration_tip",
     "_discover_pairing_host",
     "_discover_stacks",
     "_ensure_secret_key",

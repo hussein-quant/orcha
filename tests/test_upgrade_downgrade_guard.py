@@ -102,3 +102,13 @@ def test_equal_tip_passes_the_guard(tmp_path, monkeypatch):
     with pytest.raises((FileNotFoundError, SystemExit, AttributeError)) as e:
         cmd_upgrade(argparse.Namespace(allow_downgrade=False), svc)
     assert "NEWER Orcha than your CLI" not in str(e.value)
+
+
+def test_migration_tip_reaches_the_real_services_namespace():
+    """Regression: cmd_upgrade receives `orcha_cli.__main__` as its services module
+    (star-imported facade). The guard's `_migration_tip` is underscore-prefixed, so
+    it only survives the star import via the facade's __all__ — the first deploy
+    crashed with AttributeError because it wasn't listed."""
+    from orcha_cli import __main__ as services
+    assert hasattr(services, "_migration_tip")
+    assert services._migration_tip.__module__.endswith("cli_project_facade")
