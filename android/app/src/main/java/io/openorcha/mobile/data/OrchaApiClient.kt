@@ -10,8 +10,10 @@ import kotlinx.coroutines.withTimeout
 
 /** Exposes the OpenAPI-backed operations used by the Android application. */
 class OrchaApiClient {
-    private val client = createOrchaHttpClient()
-    private val transport = OrchaJsonTransport(client)
+    // internal (not private): GitHubHubApi.kt adds inline reified GET/POST extensions
+    // to this client from the same package without inflating this file.
+    internal val client = createOrchaHttpClient()
+    internal val transport = OrchaJsonTransport(client)
 
     suspend fun listContainers(baseUrl: String): ContainersResponse = withTimeout(6_000) {
         client.get("${baseUrl.endpoint()}/api/containers").body()

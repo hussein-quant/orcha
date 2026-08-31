@@ -72,6 +72,7 @@ fun WorkspaceScreen(
     onVerifyFor: (String, Boolean, String?) -> Unit,
     onSetWakes: (Boolean) -> Unit,
     onSetAutonomy: (String) -> Unit,
+    onOpenGithubHub: () -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val snapshot = state.snapshot
@@ -181,6 +182,7 @@ fun WorkspaceScreen(
                         state, needsYou.planApprovals, needsYou.verifications, needsYou.requests,
                         onOpenTask, onOpenRequest, onOpenAgent, onTab,
                         onPlanSheet = { planSheetTask = it }, onVerifySheet = { verifySheetTask = it },
+                        onOpenGithubHub = onOpenGithubHub,
                     )
                     WorkspaceTab.Tasks -> TasksTab(snapshot.tasks, snapshot.agents, onOpenTask)
                     WorkspaceTab.Requests -> RequestsTab(snapshot.requests, snapshot.agents, humanId, onOpenRequest)

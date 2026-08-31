@@ -1,0 +1,92 @@
+package io.openorcha.mobile.ui.screens
+
+/** The PR detail's Files section — split out of GitHubPullDetailScreen.kt to keep that
+ *  file lean. Expanding a row renders its unified-diff patch via [DiffViewer] (Android's
+ *  #177 gap closed — iOS drops patches server-side and has no diff viewer). */
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.openorcha.mobile.data.GitHubChangedFile
+import io.openorcha.mobile.data.GitHubFiles
+import io.openorcha.mobile.ui.components.DiffViewer
+import io.openorcha.mobile.ui.components.OrchaCard
+import io.openorcha.mobile.ui.components.SectionH
+import io.openorcha.mobile.ui.theme.Orcha
+
+@Composable
+internal fun FilesSection(files: GitHubFiles) {
+    val p = Orcha.palette
+    var expandedFile by remember { mutableStateOf<String?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SectionH("Files · ${files.count}")
+        OrchaCard {
+            if (files.items.isEmpty()) {
+                Text("No file changes reported.", color = p.muted)
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    files.items.forEach { file ->
+                        FileRow(file, expanded = expandedFile == file.filename) {
+                            expandedFile = if (expandedFile == file.filename) null else file.filename
+                        }
+                    }
+                    if (files.truncated) {
+                        Text(
+                            "Showing the first ${files.items.size} of ${files.count} changed files.",
+                            style = MaterialTheme.typography.labelMedium, color = p.faint,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FileRow(file: GitHubChangedFile, expanded: Boolean, onToggle: () -> Unit) {
+    val p = Orcha.palette
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onToggle),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                file.filename, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
+            if (file.additions > 0) Text("+${file.additions}", style = fileCountStyle, color = p.diffAdd)
+            if (file.deletions > 0) Text("-${file.deletions}", style = fileCountStyle, color = p.diffDel)
+        }
+        if (expanded) {
+            val patch = file.patch
+            Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp)) {
+                if (patch.isNullOrBlank()) {
+                    Text("No diff available for this file.", style = MaterialTheme.typography.labelMedium, color = p.faint)
+                } else {
+                    DiffViewer(patch)
+                }
+            }
+        }
+    }
+}
+
+private val fileCountStyle = TextStyle(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.W600, fontSize = 11.sp)

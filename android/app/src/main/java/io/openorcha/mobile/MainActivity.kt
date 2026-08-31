@@ -18,12 +18,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.openorcha.mobile.domain.GitHubHubKind
+import io.openorcha.mobile.domain.GitHubIssueDetailPhase
+import io.openorcha.mobile.domain.GitHubPullDetailPhase
 import io.openorcha.mobile.ui.AppRoute
 import io.openorcha.mobile.ui.OrchaViewModel
 import io.openorcha.mobile.ui.screens.AgentDetailScreen
 import io.openorcha.mobile.ui.screens.ContainersHomeScreen
 import io.openorcha.mobile.ui.screens.ConversationScreen
 import io.openorcha.mobile.ui.screens.CreateTaskScreen
+import io.openorcha.mobile.ui.screens.GitHubHubScreen
+import io.openorcha.mobile.ui.screens.GitHubIssueDetailScreen
+import io.openorcha.mobile.ui.screens.GitHubPullDetailScreen
 import io.openorcha.mobile.ui.screens.ManualConnectScreen
 import io.openorcha.mobile.ui.screens.RequestDetailScreen
 import io.openorcha.mobile.ui.screens.RunDetailScreen
@@ -52,6 +58,16 @@ class MainActivity : ComponentActivity() {
                         snackbarHost.showSnackbar(toast)
                     }
                 }
+                // A GitHub Start (hub list, or either detail screen) hands back the
+                // created/already-tracked task; navigate to it once, mirroring iOS's
+                // `navigationDestination(item: $startedTaskId)`.
+                LaunchedEffect(state.githubStarted) {
+                    val started = state.githubStarted
+                    if (started != null) {
+                        viewModel.clearGithubStarted()
+                        viewModel.openTask(started.taskId)
+                    }
+                }
                 // Predictive/system back navigates the internal route stack (IA doc §3):
                 // detail → tab root → containers home → (system default exits).
                 BackHandler(enabled = state.route != AppRoute.Containers) {
@@ -59,7 +75,8 @@ class MainActivity : ComponentActivity() {
                         AppRoute.TaskThread -> viewModel.backToTaskDetail()
                         AppRoute.RunDetail, AppRoute.Conversation ->
                             state.selectedAgent?.let { viewModel.openAgent(it.id) } ?: viewModel.showWorkspace()
-                        AppRoute.TaskDetail, AppRoute.RequestDetail, AppRoute.AgentDetail, AppRoute.CreateTask ->
+                        AppRoute.GitHubIssueDetail, AppRoute.GitHubPullDetail -> viewModel.showGithubHub()
+                        AppRoute.TaskDetail, AppRoute.RequestDetail, AppRoute.AgentDetail, AppRoute.CreateTask, AppRoute.GitHubHub ->
                             viewModel.showWorkspace()
                         AppRoute.Workspace, AppRoute.AddContainer, AppRoute.Settings, AppRoute.Scanner ->
                             viewModel.showContainers()
@@ -117,6 +134,7 @@ class MainActivity : ComponentActivity() {
                         onVerifyFor = viewModel::verifyTaskById,
                         onSetWakes = viewModel::setWakes,
                         onSetAutonomy = viewModel::setAutonomy,
+                        onOpenGithubHub = viewModel::showGithubHub,
                     )
 
                     AppRoute.TaskDetail -> TaskDetailScreen(
@@ -196,6 +214,65 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         onBack = viewModel::showWorkspace,
                         onCreate = viewModel::createTask,
+                    )
+
+                    AppRoute.GitHubHub -> GitHubHubScreen(
+                        state = state,
+                        onBack = viewModel::showWorkspace,
+                        onSelectKind = viewModel::selectGithubHubKind,
+                        onSelectFilter = viewModel::selectGithubHubFilter,
+                        onRefresh = {
+                            viewModel.loadGithubIssues()
+                            viewModel.loadGithubPulls()
+                        },
+                        onOpenIssue = viewModel::openGithubIssue,
+                        onOpenPull = viewModel::openGithubPull,
+                        onStartIssue = { issue, agentId ->
+                            viewModel.startGithubItem(
+                                kind = GitHubHubKind.Issues, number = issue.number,
+                                title = issue.title, bodyExcerpt = issue.bodyExcerpt, htmlUrl = issue.htmlUrl,
+                                assigneeAgentId = agentId,
+                            )
+                        },
+                        onStartPull = { pull, agentId ->
+                            viewModel.startGithubItem(
+                                kind = GitHubHubKind.Pulls, number = pull.number,
+                                title = pull.title, bodyExcerpt = null, htmlUrl = pull.htmlUrl,
+                                assigneeAgentId = agentId,
+                            )
+                        },
+                    )
+
+                    AppRoute.GitHubIssueDetail -> GitHubIssueDetailScreen(
+                        state = state,
+                        onBack = viewModel::showGithubHub,
+                        onRefresh = viewModel::loadGithubIssueDetail,
+                        onStart = { agentId ->
+                            val issue = (state.githubIssueDetailPhase as? GitHubIssueDetailPhase.Loaded)?.issue
+                            if (issue != null) {
+                                viewModel.startGithubItem(
+                                    kind = GitHubHubKind.Issues, number = issue.number,
+                                    title = issue.title, bodyExcerpt = issue.bodyMarkdown.take(200), htmlUrl = issue.htmlUrl,
+                                    assigneeAgentId = agentId,
+                                )
+                            }
+                        },
+                    )
+
+                    AppRoute.GitHubPullDetail -> GitHubPullDetailScreen(
+                        state = state,
+                        onBack = viewModel::showGithubHub,
+                        onRefresh = viewModel::loadGithubPullDetail,
+                        onStart = { agentId ->
+                            val pull = (state.githubPullDetailPhase as? GitHubPullDetailPhase.Loaded)?.pull
+                            if (pull != null) {
+                                viewModel.startGithubItem(
+                                    kind = GitHubHubKind.Pulls, number = pull.number,
+                                    title = pull.title, bodyExcerpt = null, htmlUrl = pull.htmlUrl,
+                                    assigneeAgentId = agentId,
+                                )
+                            }
+                        },
                     )
                 }
                 SnackbarHost(

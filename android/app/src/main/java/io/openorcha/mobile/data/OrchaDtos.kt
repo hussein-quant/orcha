@@ -44,6 +44,9 @@ data class ContainerDto(
     @SerialName("autonomy_level") val autonomyLevel: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("completed_at") val completedAt: String? = null,
+    /** The container's currently-bound repo ("owner/name"), or null. GitHub hub entry
+     *  point parity (iOS `ContainerDto.githubRepo`). */
+    @SerialName("github_repo") val githubRepo: String? = null,
 )
 
 @Serializable
@@ -62,6 +65,9 @@ data class AgentDto(
     @SerialName("last_active") val lastActive: String? = null,
     @SerialName("heartbeat_age_secs") val heartbeatAgeSecs: Double? = null,
     @SerialName("terminated_at") val terminatedAt: String? = null,
+    /** The signed-in GitHub login for a human agent, or null (self-host / unmapped).
+     *  Drives the GitHub hub's "Mine" filter (iOS `AgentDto.githubLogin`). */
+    @SerialName("github_login") val githubLogin: String? = null,
 )
 
 @Serializable
