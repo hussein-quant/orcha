@@ -67,17 +67,21 @@ private fun schemeFor(p: OrchaPalette): ColorScheme {
  * mono 12 · monoSm 10.5
  */
 private fun orchaTypography(displayFamily: FontFamily?): Typography {
-    val family = displayFamily ?: FontFamily.Default
+    // Inter is the base face on every skin (web/token parity — no more Roboto
+    // stand-in); a skin's display family, when present, styles display/title
+    // roles only, exactly like the web's per-skin heading faces over Inter body.
+    val display = displayFamily ?: InterFontFamily
+    val body = InterFontFamily
     return Typography(
-        displaySmall = TextStyle(fontFamily = family, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.W800, letterSpacing = (-0.4).sp),
-        titleLarge = TextStyle(fontFamily = family, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.3).sp),
-        titleMedium = TextStyle(fontFamily = family, fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.2).sp),
-        titleSmall = TextStyle(fontFamily = family, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.W600),
-        bodyLarge = TextStyle(fontFamily = family, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.W400),
-        bodyMedium = TextStyle(fontFamily = family, fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.W400),
-        labelLarge = TextStyle(fontFamily = family, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.W600, letterSpacing = 0.2.sp),
-        labelMedium = TextStyle(fontFamily = family, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.W700, letterSpacing = 0.8.sp),
-        labelSmall = TextStyle(fontFamily = family, fontSize = 10.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp),
+        displaySmall = TextStyle(fontFamily = display, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.W800, letterSpacing = (-0.4).sp),
+        titleLarge = TextStyle(fontFamily = display, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.3).sp),
+        titleMedium = TextStyle(fontFamily = display, fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.2).sp),
+        titleSmall = TextStyle(fontFamily = display, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.W600),
+        bodyLarge = TextStyle(fontFamily = body, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.W400),
+        bodyMedium = TextStyle(fontFamily = body, fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.W400),
+        labelLarge = TextStyle(fontFamily = body, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.W600, letterSpacing = 0.2.sp),
+        labelMedium = TextStyle(fontFamily = body, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.W700, letterSpacing = 0.8.sp),
+        labelSmall = TextStyle(fontFamily = body, fontSize = 10.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp),
     )
 }
 

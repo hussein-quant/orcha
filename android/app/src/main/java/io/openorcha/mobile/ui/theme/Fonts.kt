@@ -28,6 +28,18 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import io.openorcha.mobile.R
 
+/** Inter — the tokens' BODY face on every skin (the web ships it; Android
+ * previously fell back to Roboto per the token note, which read as "wrong font"
+ * next to iOS). Five static cuts at true weights. OFL license:
+ * app/src/main/fontLicenses/OFL-inter.txt. */
+val InterFontFamily: FontFamily = FontFamily(
+    Font(R.font.inter_regular, FontWeight.Normal),
+    Font(R.font.inter_medium, FontWeight.Medium),
+    Font(R.font.inter_semibold, FontWeight.SemiBold),
+    Font(R.font.inter_bold, FontWeight.Bold),
+    Font(R.font.inter_extrabold, FontWeight.ExtraBold),
+)
+
 val SpaceGroteskFontFamily: FontFamily = FontFamily(
     Font(R.font.space_grotesk, FontWeight.Normal),
     Font(R.font.space_grotesk, FontWeight.Medium),
