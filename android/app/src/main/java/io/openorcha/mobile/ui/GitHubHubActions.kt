@@ -22,8 +22,10 @@ import io.openorcha.mobile.domain.GitHubHubUx
 import io.openorcha.mobile.domain.GitHubIssueDetailPhase
 import io.openorcha.mobile.domain.GitHubIssuesPhase
 import io.openorcha.mobile.domain.GitHubPullDetailPhase
+import io.openorcha.mobile.domain.GitHubPullsFilterState
 import io.openorcha.mobile.domain.GitHubPullsPhase
 import io.openorcha.mobile.domain.MobileUx
+import io.openorcha.mobile.domain.PullsInvolvement
 import kotlinx.coroutines.launch
 
 /** Owns the GitHub hub's lists, detail screens, and the Start-as-a-task write. */
@@ -68,17 +70,95 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
         }
     }
 
+    /** Loads page 1 under the current [OrchaUiState.githubPullsFilter] — a fresh filter
+     *  (author / involvement / q changing) always replaces the list, never appends. */
     fun loadGithubPulls() {
         val selected = _uiState.value.selectedContainer ?: run {
             _uiState.update { it.copy(githubPullsPhase = GitHubPullsPhase.Failed("No workspace is open — close this and try again.")) }
             return
         }
-        _uiState.update { it.copy(githubPullsPhase = GitHubPullsPhase.Loading) }
+        val filter = _uiState.value.githubPullsFilter.copy(page = 1)
+        _uiState.update { it.copy(githubPullsPhase = GitHubPullsPhase.Loading, githubPullsFilter = filter) }
         scope.launch {
-            runCatching { api.githubPulls(selected.baseUrl, selected.id) }
-                .onSuccess { response -> _uiState.update { it.copy(githubPullsPhase = GitHubHubUx.phase(response)) } }
+            runCatching {
+                api.githubPulls(
+                    selected.baseUrl, selected.id,
+                    author = filter.author.takeIf { it.isNotBlank() },
+                    involvement = filter.involvement.wire,
+                    q = filter.q.takeIf { it.isNotBlank() },
+                    page = 1,
+                )
+            }
+                .onSuccess { response -> _uiState.update { it.copy(githubPullsPhase = GitHubHubUx.phase(response, filter.involvement)) } }
                 .onFailure { err -> _uiState.update { it.copy(githubPullsPhase = githubPullsFailure(err)) } }
         }
+    }
+
+    /** "Load more" — fetches the NEXT page and appends it to what's already shown
+     *  (de-duplicated at the seam) without disturbing the current filter or scroll
+     *  position. A no-op when the current phase isn't a [GitHubPullsPhase.Loaded] with
+     *  `hasMore`, or a load is already in flight. */
+    fun loadMoreGithubPulls() {
+        val selected = _uiState.value.selectedContainer ?: return
+        val loaded = _uiState.value.githubPullsPhase as? GitHubPullsPhase.Loaded ?: return
+        if (!loaded.hasMore || loaded.loadingMore) return
+        val filter = _uiState.value.githubPullsFilter.copy(page = loaded.page + 1)
+        _uiState.update {
+            it.copy(githubPullsPhase = loaded.copy(loadingMore = true), githubPullsFilter = filter)
+        }
+        scope.launch {
+            runCatching {
+                api.githubPulls(
+                    selected.baseUrl, selected.id,
+                    author = filter.author.takeIf { it.isNotBlank() },
+                    involvement = filter.involvement.wire,
+                    q = filter.q.takeIf { it.isNotBlank() },
+                    page = filter.page,
+                )
+            }
+                .onSuccess { response ->
+                    _uiState.update { st ->
+                        val current = st.githubPullsPhase as? GitHubPullsPhase.Loaded ?: return@update st
+                        val next = GitHubHubUx.phase(response, filter.involvement) as? GitHubPullsPhase.Loaded ?: return@update st
+                        st.copy(githubPullsPhase = next.copy(pulls = GitHubHubUx.appendPulls(current.pulls, next.pulls), loadingMore = false))
+                    }
+                }
+                .onFailure {
+                    // Load-more failures stay quiet in place (keep the current rows, drop the
+                    // spinner) — the user can just tap "load more" again, same as any list.
+                    _uiState.update { st ->
+                        val current = st.githubPullsPhase as? GitHubPullsPhase.Loaded ?: return@update st
+                        st.copy(githubPullsPhase = current.copy(loadingMore = false))
+                    }
+                }
+        }
+    }
+
+    /** Replaces the PR list's author text and reloads from page 1. */
+    fun setGithubPullsAuthor(author: String) {
+        _uiState.update { it.copy(githubPullsFilter = it.githubPullsFilter.copy(author = author, page = 1)) }
+        loadGithubPulls()
+    }
+
+    /** Toggles an involvement filter — selecting the already-active one clears it back
+     *  to [PullsInvolvement.None] (the chip behaves as an on/off toggle, not a picker). */
+    fun selectGithubPullsInvolvement(involvement: PullsInvolvement) {
+        val current = _uiState.value.githubPullsFilter
+        val next = if (current.involvement == involvement) PullsInvolvement.None else involvement
+        _uiState.update { it.copy(githubPullsFilter = current.copy(involvement = next, page = 1)) }
+        loadGithubPulls()
+    }
+
+    /** Replaces the PR list's search text and reloads from page 1. */
+    fun setGithubPullsQuery(q: String) {
+        _uiState.update { it.copy(githubPullsFilter = it.githubPullsFilter.copy(q = q, page = 1)) }
+        loadGithubPulls()
+    }
+
+    /** Clears every PR-list filter back to defaults and reloads from page 1. */
+    fun clearGithubPullsFilters() {
+        _uiState.update { it.copy(githubPullsFilter = GitHubPullsFilterState()) }
+        loadGithubPulls()
     }
 
     fun openGithubIssue(number: Int) {

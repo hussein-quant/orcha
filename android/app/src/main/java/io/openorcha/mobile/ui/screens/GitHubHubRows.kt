@@ -54,21 +54,24 @@ fun GitHubPullRowCard(pull: GitHubPullRow, onClick: () -> Unit, onStart: () -> U
             color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
         )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (pull.head.isNotEmpty()) {
+            if (!pull.head.isNullOrEmpty()) {
                 Text(
                     pull.head, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.5.sp),
                     color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(Modifier.weight(1f))
-            ChecksChip(pull.checks)
+            // Search-sourced rows lack `checks` entirely — hide the chip rather than
+            // showing a false "no checks" pill (which would imply a rollup that ran).
+            pull.checks?.let { ChecksChip(it) }
             MergeStateChip(pull.mergeableState)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (pull.requestedReviewers.isNotEmpty()) {
+            val reviewers = pull.requestedReviewers
+            if (!reviewers.isNullOrEmpty()) {
                 Icon(Icons.Rounded.RemoveRedEye, contentDescription = null, tint = p.muted, modifier = Modifier.size(12.dp))
                 Text(
-                    pull.requestedReviewers.joinToString(", "), style = MaterialTheme.typography.labelMedium, color = p.muted,
+                    reviewers.joinToString(", "), style = MaterialTheme.typography.labelMedium, color = p.muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }

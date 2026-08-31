@@ -26,6 +26,7 @@ import io.openorcha.mobile.domain.GitHubHubKind
 import io.openorcha.mobile.domain.GitHubIssueDetailPhase
 import io.openorcha.mobile.domain.GitHubIssuesPhase
 import io.openorcha.mobile.domain.GitHubPullDetailPhase
+import io.openorcha.mobile.domain.GitHubPullsFilterState
 import io.openorcha.mobile.domain.GitHubPullsPhase
 import io.openorcha.mobile.domain.Paging
 import io.openorcha.mobile.domain.RunFeed
@@ -126,6 +127,9 @@ data class OrchaUiState(
     val githubHubFilter: GitHubHubFilter = GitHubHubFilter.Open,
     val githubIssuesPhase: GitHubIssuesPhase = GitHubIssuesPhase.Idle,
     val githubPullsPhase: GitHubPullsPhase = GitHubPullsPhase.Idle,
+    /** PR list's author/involvement/q/page filter — Android extension of the frozen
+     *  filter+pagination contract (issue: PR-list filtering + pagination). */
+    val githubPullsFilter: GitHubPullsFilterState = GitHubPullsFilterState(),
     val githubIssueNumber: Int? = null,
     val githubIssueDetailPhase: GitHubIssueDetailPhase = GitHubIssueDetailPhase.Loading,
     val githubPullNumber: Int? = null,

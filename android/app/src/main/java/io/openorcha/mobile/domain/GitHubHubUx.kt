@@ -31,6 +31,31 @@ enum class GitHubHubFilter(val label: String) {
     Mine("Mine"),
 }
 
+/** The PR list's server-resolved involvement filter — mutually exclusive with itself
+ *  (picking one clears the other) and orthogonal to [author]/[q] text filters. Maps
+ *  onto the frozen contract's `involvement=assigned|review_requested` query param;
+ *  [None] omits the param entirely. */
+enum class PullsInvolvement(val label: String, val wire: String?) {
+    None("All", null),
+    Assigned("Assigned to me", "assigned"),
+    ReviewRequested("My reviews", "review_requested"),
+}
+
+/** Pure filter/pagination state for the PR list (the frozen contract's author /
+ *  involvement / q / page params). [page] is the NEXT page to request — starts at 1
+ *  and increments on "load more"; any other field changing resets it back to
+ *  `copy(page = 1)` so a new filter always restarts from the top. */
+data class GitHubPullsFilterState(
+    val author: String = "",
+    val involvement: PullsInvolvement = PullsInvolvement.None,
+    val q: String = "",
+    val page: Int = 1,
+) {
+    /** Whether any filter beyond page 1 is active — used to decide whether "load more"
+     *  should append (same filter, later page) or the caller should reset+replace. */
+    val isDefault: Boolean get() = author.isBlank() && involvement == PullsInvolvement.None && q.isBlank()
+}
+
 /** The list's loading → available:false → loaded machine for issues. */
 sealed class GitHubIssuesPhase {
     object Idle : GitHubIssuesPhase()
@@ -44,12 +69,30 @@ sealed class GitHubIssuesPhase {
     data class Failed(val message: String) : GitHubIssuesPhase()
 }
 
-/** The PR list's machine (same shape, distinct payload). */
+/** The PR list's machine (same shape, distinct payload) — extended with the frozen
+ *  contract's pagination fields. [Loaded.loadingMore] keeps the current rows on screen
+ *  (with a footer spinner) while a "load more" page request is in flight, instead of
+ *  bouncing back to the full-screen [Loading] skeleton. */
 sealed class GitHubPullsPhase {
     object Idle : GitHubPullsPhase()
     object Loading : GitHubPullsPhase()
     data class Unavailable(val reason: String?, val detail: String?) : GitHubPullsPhase()
-    data class Loaded(val repo: String?, val pulls: List<GitHubPullRow>) : GitHubPullsPhase()
+    data class Loaded(
+        val repo: String?,
+        val pulls: List<GitHubPullRow>,
+        val source: String? = null,
+        val page: Int = 1,
+        val perPage: Int = 30,
+        val totalCount: Int? = null,
+        val hasMore: Boolean = false,
+        val loadingMore: Boolean = false,
+        /** Set when the server answered `available:true` with an empty list and a
+         *  detail string because the caller's identity has no `github_login` on file —
+         *  the involvement filter chips ("Assigned to me" / "My reviews") key off this
+         *  to show themselves disabled with this message, distinct from a genuine
+         *  "nothing assigned to you" empty result (which carries no detail). */
+        val identityDetail: String? = null,
+    ) : GitHubPullsPhase()
     data class Failed(val message: String) : GitHubPullsPhase()
 }
 
@@ -94,12 +137,41 @@ object GitHubHubUx {
             GitHubIssuesPhase.Unavailable(response.reason, response.detail)
         }
 
-    fun phase(response: GitHubPullsResponse): GitHubPullsPhase =
+    /** [filter] is the request's own involvement filter — the identity-missing detail
+     *  only applies when an involvement filter was actually requested (an empty result
+     *  under [PullsInvolvement.None] is just "no open PRs", never an identity gap). */
+    fun phase(response: GitHubPullsResponse, filter: PullsInvolvement = PullsInvolvement.None): GitHubPullsPhase =
         if (response.available) {
-            GitHubPullsPhase.Loaded(response.repo, response.pulls)
+            val identityDetail = if (filter != PullsInvolvement.None && response.pulls.isEmpty()) response.detail else null
+            GitHubPullsPhase.Loaded(
+                repo = response.repo,
+                pulls = response.pulls,
+                source = response.source,
+                page = response.page,
+                perPage = response.perPage,
+                totalCount = response.totalCount,
+                hasMore = response.hasMore,
+                identityDetail = identityDetail,
+            )
         } else {
             GitHubPullsPhase.Unavailable(response.reason, response.detail)
         }
+
+    // ---------- PR list filter/pagination (frozen contract: author, involvement, q, page) ----------
+
+    /** True when [login] is blank/null — the involvement chips ("Assigned to me" /
+     *  "My reviews") disable themselves client-side on this alone, without waiting on
+     *  a round trip, since the server can only resolve "me" from a known GitHub login. */
+    fun involvementDisabled(login: String?): Boolean = normalizedLogin(login) == null
+
+    /** Appends a freshly-fetched page onto what's already shown, de-duplicating by PR
+     *  number at the seam (a page re-fetched after a filter no-op, or an overlapping
+     *  concurrent load, must never double a row). Used for "load more"; a fresh
+     *  filter/search instead replaces the list outright (page 1 that isn't appended). */
+    fun appendPulls(existing: List<GitHubPullRow>, next: List<GitHubPullRow>): List<GitHubPullRow> {
+        val seen = existing.mapTo(HashSet()) { it.number }
+        return existing + next.filter { it.number !in seen }
+    }
 
     fun phase(response: GitHubPullDetailResponse): GitHubPullDetailPhase {
         val pull = response.pull
@@ -129,11 +201,13 @@ object GitHubHubUx {
         return issues.filter { normalizedLogin(it.assignee) == normalized }
     }
 
-    /** PRs whose review is requested from [login]. Same blank-login fallback. */
+    /** PRs whose review is requested from [login]. Same blank-login fallback. A
+     *  search-sourced row with no `requested_reviewers` (the field is absent, not just
+     *  empty) never matches "Mine" — it's simply excluded, not an error. */
     fun filterPulls(pulls: List<GitHubPullRow>, filter: GitHubHubFilter, login: String?): List<GitHubPullRow> {
         val normalized = normalizedLogin(login) ?: return pulls
         if (filter != GitHubHubFilter.Mine) return pulls
-        return pulls.filter { pull -> pull.requestedReviewers.any { normalizedLogin(it) == normalized } }
+        return pulls.filter { pull -> pull.requestedReviewers.orEmpty().any { normalizedLogin(it) == normalized } }
     }
 
     private fun normalizedLogin(login: String?): String? {

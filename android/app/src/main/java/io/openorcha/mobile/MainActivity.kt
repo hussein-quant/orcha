@@ -251,6 +251,10 @@ class MainActivity : ComponentActivity() {
                                 assigneeAgentId = agentId,
                             )
                         },
+                        onPullsAuthorChange = viewModel::setGithubPullsAuthor,
+                        onPullsQueryChange = viewModel::setGithubPullsQuery,
+                        onSelectPullsInvolvement = viewModel::selectGithubPullsInvolvement,
+                        onLoadMorePulls = viewModel::loadMoreGithubPulls,
                     )
 
                     AppRoute.GitHubIssueDetail -> GitHubIssueDetailScreen(

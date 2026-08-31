@@ -27,17 +27,25 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.domain.GitHubHubUx
+import io.openorcha.mobile.domain.GitHubPullsFilterState
+import io.openorcha.mobile.domain.PullsInvolvement
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.components.Banner
 import io.openorcha.mobile.ui.components.BannerKind
 import io.openorcha.mobile.ui.components.NeutralButton
 import io.openorcha.mobile.ui.components.OrchaCard
+import io.openorcha.mobile.ui.components.OrchaField
 import io.openorcha.mobile.ui.components.Skeleton
 import io.openorcha.mobile.ui.components.StateLayout
 import io.openorcha.mobile.ui.theme.Orcha
@@ -91,22 +99,89 @@ internal fun GitHubFailedState(message: String, onRetry: () -> Unit) {
     }
 }
 
-/** `.chip` filter pill (Open / Mine) — small toggle, accent when active. */
+/** `.chip` filter pill (Open / Mine, and the PR list's involvement toggles) — small
+ *  toggle, accent when active. [disabled] (no known GitHub login) dims the chip and
+ *  drops its click entirely — the caller renders the reason as a caption nearby (see
+ *  [GitHubInvolvementRow]) rather than requiring a tap to discover it. */
 @Composable
-internal fun GitHubFilterChip(label: String, on: Boolean, onClick: () -> Unit) {
+internal fun GitHubFilterChip(label: String, on: Boolean, disabled: Boolean = false, onClick: () -> Unit) {
     val p = Orcha.palette
     val fill = if (on) p.accentSoft else p.surface2
     val line = if (on) p.accentLine else p.border2
     Text(
         label,
         modifier = Modifier
+            .alpha(if (disabled) 0.5f else 1f)
             .background(fill, RoundedCornerShape(999.dp))
             .border(BorderStroke(1.dp, line), RoundedCornerShape(999.dp))
-            .clickable(onClick = onClick)
+            .clickable(enabled = !disabled, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 5.dp),
         style = MaterialTheme.typography.labelMedium,
         color = if (on) p.accent else p.muted,
     )
+}
+
+/** The Pulls segment's compact filter row: author text + search text (both server-side,
+ *  committed on the IME search action so typing never spams a request per keystroke)
+ *  and the mutually-exclusive "Assigned to me" / "My reviews" involvement chips. The
+ *  chips disable themselves (dimmed, non-clickable) with a caption explaining why when
+ *  [login] is unknown — the server can't resolve "me" without a `github_login` on file. */
+@Composable
+internal fun GitHubPullsFilterRow(
+    filter: GitHubPullsFilterState,
+    login: String?,
+    identityDetail: String?,
+    onAuthorChange: (String) -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSelectInvolvement: (PullsInvolvement) -> Unit,
+) {
+    val p = Orcha.palette
+    var author by remember(filter.author) { mutableStateOf(filter.author) }
+    var query by remember(filter.q) { mutableStateOf(filter.q) }
+    val disabled = GitHubHubUx.involvementDisabled(login)
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OrchaField(
+                author, { author = it }, modifier = Modifier.weight(1f),
+                placeholder = "Author", onSearch = { onAuthorChange(author) },
+            )
+            OrchaField(
+                query, { query = it }, modifier = Modifier.weight(1f),
+                placeholder = "Search", onSearch = { onQueryChange(query) },
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            PullsInvolvement.entries.filter { it != PullsInvolvement.None }.forEach { involvement ->
+                GitHubFilterChip(
+                    label = involvement.label,
+                    on = filter.involvement == involvement,
+                    onClick = { onSelectInvolvement(involvement) },
+                    disabled = disabled,
+                )
+            }
+        }
+        val caption = identityDetail ?: if (disabled) "Connect a GitHub login to use these filters." else null
+        if (caption != null) {
+            Text(caption, style = MaterialTheme.typography.labelSmall, color = p.faint)
+        }
+    }
+}
+
+/** The PR list's "N of ~total" / "N so far" load-more footer — a tap fetches the next
+ *  page and appends it. Renders nothing once [hasMore] is false (the list is exhausted
+ *  or was never paginated). */
+@Composable
+internal fun GitHubLoadMoreFooter(shown: Int, totalCount: Int?, hasMore: Boolean, loading: Boolean, onLoadMore: () -> Unit) {
+    if (!hasMore) return
+    val p = Orcha.palette
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            totalCount?.let { "$shown of ~$it" } ?: "$shown so far",
+            style = MaterialTheme.typography.labelMedium, color = p.faint,
+        )
+        NeutralButton(if (loading) "Loading…" else "Load more", onLoadMore, enabled = !loading)
+    }
 }
 
 /** Shared "open on GitHub" row — launches the browser (iOS parity: a `Link` styled as a

@@ -8,6 +8,7 @@ import io.openorcha.mobile.data.GitHubIssuesResponse
 import io.openorcha.mobile.data.GitHubPullRow
 import io.openorcha.mobile.data.GitHubPullDetail
 import io.openorcha.mobile.data.GitHubPullDetailResponse
+import io.openorcha.mobile.data.GitHubPullsResponse
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -149,5 +150,107 @@ class GitHubHubUxTest {
         assertTrue(GitHubHubUx.unavailableCopy("not_found", null).contains("no longer exists"))
         assertEquals("custom detail", GitHubHubUx.unavailableCopy("github_error", "custom detail"))
         assertEquals("custom detail", GitHubHubUx.unavailableCopy(null, "custom detail"))
+    }
+
+    // ---------- PR list filter/pagination (frozen contract) ----------
+
+    @Test
+    fun pullsResponseMapsPaginationFieldsIntoLoaded() {
+        val response = GitHubPullsResponse(
+            available = true, repo = "acme/widgets", source = "search",
+            items = listOf(GitHubPullRow(number = 7)),
+            page = 2, perPage = 20, totalCount = 45, hasMore = true,
+        )
+        val phase = assertIs<GitHubPullsPhase.Loaded>(GitHubHubUx.phase(response))
+        assertEquals("search", phase.source)
+        assertEquals(2, phase.page)
+        assertEquals(20, phase.perPage)
+        assertEquals(45, phase.totalCount)
+        assertTrue(phase.hasMore)
+        assertNull(phase.identityDetail)
+    }
+
+    @Test
+    fun pullsResponseToleratesLegacyPullsKeyWhenItemsAbsent() {
+        // Constructed via the public `items` field only — the legacy `pulls` wire key
+        // is exercised by GitHubHubApiTest's JSON decode, not constructible here since
+        // it's a private backing field. `items` non-empty always wins.
+        val response = GitHubPullsResponse(available = true, items = listOf(GitHubPullRow(number = 3)))
+        assertEquals(listOf(3), response.pulls.map { it.number })
+    }
+
+    @Test
+    fun involvementFilterEmptyResultSurfacesIdentityDetailAsIdentityDetail() {
+        val response = GitHubPullsResponse(available = true, items = emptyList(), detail = "no github_login on file")
+        val phase = assertIs<GitHubPullsPhase.Loaded>(GitHubHubUx.phase(response, PullsInvolvement.Assigned))
+        assertEquals("no github_login on file", phase.identityDetail)
+    }
+
+    @Test
+    fun noInvolvementFilterEmptyResultNeverSurfacesIdentityDetail() {
+        // Same shape (available, empty, a detail string) but no involvement filter was
+        // requested — an ordinary "no open PRs", never treated as an identity gap.
+        val response = GitHubPullsResponse(available = true, items = emptyList(), detail = "some unrelated detail")
+        val phase = assertIs<GitHubPullsPhase.Loaded>(GitHubHubUx.phase(response, PullsInvolvement.None))
+        assertNull(phase.identityDetail)
+    }
+
+    @Test
+    fun involvementFilterNonEmptyResultNeverSurfacesIdentityDetail() {
+        val response = GitHubPullsResponse(available = true, items = listOf(GitHubPullRow(number = 1)), detail = "should be ignored")
+        val phase = assertIs<GitHubPullsPhase.Loaded>(GitHubHubUx.phase(response, PullsInvolvement.ReviewRequested))
+        assertNull(phase.identityDetail)
+    }
+
+    @Test
+    fun involvementDisabledTracksBlankOrNullLogin() {
+        assertTrue(GitHubHubUx.involvementDisabled(null))
+        assertTrue(GitHubHubUx.involvementDisabled("   "))
+        assertFalse(GitHubHubUx.involvementDisabled("octocat"))
+    }
+
+    @Test
+    fun appendPullsDedupesByNumberAtTheSeam() {
+        val existing = listOf(GitHubPullRow(number = 1), GitHubPullRow(number = 2))
+        val next = listOf(GitHubPullRow(number = 2, title = "stale duplicate"), GitHubPullRow(number = 3))
+        val merged = GitHubHubUx.appendPulls(existing, next)
+        assertEquals(listOf(1, 2, 3), merged.map { it.number })
+        // The original row #2 wins at the seam — the appended duplicate is dropped, not merged over it.
+        assertEquals("", merged.first { it.number == 2 }.title)
+    }
+
+    @Test
+    fun appendPullsOnEmptyExistingIsJustNext() {
+        val next = listOf(GitHubPullRow(number = 5))
+        assertEquals(next, GitHubHubUx.appendPulls(emptyList(), next))
+    }
+
+    @Test
+    fun pullsInvolvementWireValuesMatchTheFrozenContract() {
+        assertNull(PullsInvolvement.None.wire)
+        assertEquals("assigned", PullsInvolvement.Assigned.wire)
+        assertEquals("review_requested", PullsInvolvement.ReviewRequested.wire)
+    }
+
+    @Test
+    fun filterStateIsDefaultOnlyWithNoFiltersActive() {
+        assertTrue(GitHubPullsFilterState().isDefault)
+        assertFalse(GitHubPullsFilterState(author = "octocat").isDefault)
+        assertFalse(GitHubPullsFilterState(involvement = PullsInvolvement.Assigned).isDefault)
+        assertFalse(GitHubPullsFilterState(q = "fix").isDefault)
+        // page alone (paginating the default filter) still counts as default.
+        assertTrue(GitHubPullsFilterState(page = 3).isDefault)
+    }
+
+    // ---------- PR row nullable-tolerant fields (search-sourced rows) ----------
+
+    @Test
+    fun filterPullsMineExcludesRowsMissingRequestedReviewersEntirely() {
+        val pulls = listOf(
+            GitHubPullRow(number = 1, requestedReviewers = null), // search-sourced: field absent
+            GitHubPullRow(number = 2, requestedReviewers = listOf("octocat")),
+        )
+        val mine = GitHubHubUx.filterPulls(pulls, GitHubHubFilter.Mine, "octocat")
+        assertEquals(listOf(2), mine.map { it.number })
     }
 }

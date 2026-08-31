@@ -41,6 +41,7 @@ import io.openorcha.mobile.domain.GitHubHubKind
 import io.openorcha.mobile.domain.GitHubHubUx
 import io.openorcha.mobile.domain.GitHubIssuesPhase
 import io.openorcha.mobile.domain.GitHubPullsPhase
+import io.openorcha.mobile.domain.PullsInvolvement
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.components.SegControl
 import io.openorcha.mobile.ui.theme.Orcha
@@ -57,6 +58,10 @@ fun GitHubHubScreen(
     onOpenPull: (Int) -> Unit,
     onStartIssue: (GitHubIssueRow, agentId: String?) -> Unit,
     onStartPull: (GitHubPullRow, agentId: String?) -> Unit,
+    onPullsAuthorChange: (String) -> Unit,
+    onPullsQueryChange: (String) -> Unit,
+    onSelectPullsInvolvement: (PullsInvolvement) -> Unit,
+    onLoadMorePulls: () -> Unit,
 ) {
     val p = Orcha.palette
     var startTarget by remember { mutableStateOf<GitHubStartTarget?>(null) }
@@ -94,10 +99,21 @@ fun GitHubHubScreen(
                         )
                     }
                 }
+                if (state.githubHubKind == GitHubHubKind.Pulls) {
+                    val identityDetail = (state.githubPullsPhase as? GitHubPullsPhase.Loaded)?.identityDetail
+                    GitHubPullsFilterRow(
+                        filter = state.githubPullsFilter,
+                        login = githubLoginOf(state),
+                        identityDetail = identityDetail,
+                        onAuthorChange = onPullsAuthorChange,
+                        onQueryChange = onPullsQueryChange,
+                        onSelectInvolvement = onSelectPullsInvolvement,
+                    )
+                }
             }
             PullToRefreshBox(isRefreshing = false, onRefresh = onRefresh, modifier = Modifier.weight(1f, fill = true)) {
                 when (state.githubHubKind) {
-                    GitHubHubKind.Pulls -> PullsList(state, onOpenPull, onRefresh) { pull -> startTarget = GitHubStartTarget.ForPull(pull) }
+                    GitHubHubKind.Pulls -> PullsList(state, onOpenPull, onRefresh, onLoadMorePulls) { pull -> startTarget = GitHubStartTarget.ForPull(pull) }
                     GitHubHubKind.Issues -> IssuesList(state, onOpenIssue, onRefresh) { issue -> startTarget = GitHubStartTarget.ForIssue(issue) }
                 }
             }
@@ -136,7 +152,7 @@ private sealed class GitHubStartTarget {
 }
 
 @Composable
-private fun PullsList(state: OrchaUiState, onOpen: (Int) -> Unit, onRefresh: () -> Unit, onStart: (GitHubPullRow) -> Unit) {
+private fun PullsList(state: OrchaUiState, onOpen: (Int) -> Unit, onRefresh: () -> Unit, onLoadMore: () -> Unit, onStart: (GitHubPullRow) -> Unit) {
     when (val phase = state.githubPullsPhase) {
         is GitHubPullsPhase.Idle, is GitHubPullsPhase.Loading -> GitHubLoadingList()
         is GitHubPullsPhase.Unavailable -> GitHubUnavailableState(phase.reason, phase.detail)
@@ -146,6 +162,14 @@ private fun PullsList(state: OrchaUiState, onOpen: (Int) -> Unit, onRefresh: () 
             ListScroll(isEmpty = visible.isEmpty(), emptyNoun = "pull requests", mine = state.githubHubFilter == GitHubHubFilter.Mine) {
                 items(visible, key = { it.number }) { pull ->
                     GitHubPullRowCard(pull = pull, onClick = { onOpen(pull.number) }, onStart = { onStart(pull) })
+                }
+                if (visible.isNotEmpty() && phase.hasMore) {
+                    item {
+                        GitHubLoadMoreFooter(
+                            shown = phase.pulls.size, totalCount = phase.totalCount,
+                            hasMore = phase.hasMore, loading = phase.loadingMore, onLoadMore = onLoadMore,
+                        )
+                    }
                 }
             }
         }

@@ -172,6 +172,11 @@ fun OrchaField(
     maxLines: Int = Int.MAX_VALUE,
     isError: Boolean = false,
     supporting: String? = null,
+    /** Fires on the IME "search"/"done" action (single-line fields only) — lets a
+     *  server-backed field (e.g. the PR list's author/search filters) commit on submit
+     *  instead of firing a network request per keystroke. No-op for the multi-line
+     *  fields that don't pass it. */
+    onSearch: (() -> Unit)? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -184,6 +189,9 @@ fun OrchaField(
         isError = isError,
         supportingText = supporting?.let { { Text(it, color = if (isError) Orcha.palette.danger else Orcha.palette.muted) } },
         shape = RoundedCornerShape(Orcha.palette.radiusButton.dp),
+        singleLine = onSearch != null,
+        keyboardOptions = if (onSearch != null) androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search) else androidx.compose.foundation.text.KeyboardOptions.Default,
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch?.invoke() }),
         colors = OutlinedTextFieldDefaults.colors(
             focusedContainerColor = Orcha.palette.surface2,
             unfocusedContainerColor = Orcha.palette.surface2,

@@ -12,6 +12,7 @@ package io.openorcha.mobile.data
 
 import io.ktor.client.call.body
 import io.ktor.client.request.get
+import io.ktor.http.encodeURLParameter
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -56,19 +57,27 @@ data class GitHubIssueRow(
     @SerialName("body_excerpt") val bodyExcerpt: String? = null,
 )
 
-/** `GET …/github/pulls` → one open PR row. */
+/** `GET …/github/pulls` → one open PR row. `head`/`base`/`checks`/`requestedReviewers`
+ *  are nullable (rather than defaulting to empty) because a search-sourced row (author /
+ *  involvement / q filters hitting GitHub's search API) genuinely LACKS these — GitHub
+ *  search results don't carry them — and the UI must hide those chips rather than render
+ *  a false "no checks" / "no reviewers" state. A plain list-sourced row always has them. */
 @Serializable
 data class GitHubPullRow(
     val number: Int,
     val title: String = "",
-    val head: String = "",
+    val head: String? = null,
+    val base: String? = null,
     val draft: Boolean = false,
     @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("html_url") val htmlUrl: String? = null,
-    @SerialName("requested_reviewers") val requestedReviewers: List<String> = emptyList(),
-    val checks: GitHubChecks = GitHubChecks(),
+    @SerialName("requested_reviewers") val requestedReviewers: List<String>? = null,
+    val checks: GitHubChecks? = null,
     /** GitHub's raw `mergeable_state` ("clean" | "dirty" | "blocked" | …) or null. */
     @SerialName("mergeable_state") val mergeableState: String? = null,
+    /** The PR author's login — present on both list and search-sourced rows; used by the
+     *  author filter's local echo / row display. */
+    @SerialName("author_login") val authorLogin: String? = null,
 )
 
 // ---------- list responses (the `available:false` clean-error contract) ----------
@@ -82,14 +91,33 @@ data class GitHubIssuesResponse(
     val issues: List<GitHubIssueRow> = emptyList(),
 )
 
+/** `GET …/github/pulls` — the filter/pagination superset (author, involvement, q, page).
+ *  `source` distinguishes the plain list from a GitHub search-API result, whose rows may
+ *  omit `head`/`checks`/`requested_reviewers` (search doesn't carry them) — DTOs below
+ *  default those fields so a search-sourced row degrades instead of failing to decode.
+ *  `total_count` is nullable (GitHub search doesn't always report an exact count); when
+ *  absent the UI shows "N so far" instead of "N of ~total". The row list itself decodes
+ *  under `items` (the frozen filter/pagination contract's key) — [pulls] also tolerates
+ *  the pre-filter server's `pulls` key so a not-yet-upgraded self-host still decodes. */
 @Serializable
 data class GitHubPullsResponse(
     val available: Boolean = false,
     val repo: String? = null,
     val reason: String? = null,
     val detail: String? = null,
-    val pulls: List<GitHubPullRow> = emptyList(),
-)
+    /** "list" (repo pulls) | "search" (author/involvement/q hit the search API), or null
+     *  on an older server that doesn't report it. */
+    val source: String? = null,
+    val items: List<GitHubPullRow> = emptyList(),
+    @SerialName("pulls") private val pullsLegacy: List<GitHubPullRow> = emptyList(),
+    val page: Int = 1,
+    @SerialName("per_page") val perPage: Int = 30,
+    @SerialName("total_count") val totalCount: Int? = null,
+    @SerialName("has_more") val hasMore: Boolean = false,
+) {
+    /** Unified row access regardless of which key the server used. */
+    val pulls: List<GitHubPullRow> get() = if (items.isNotEmpty()) items else pullsLegacy
+}
 
 // ---------- detail models ----------
 
@@ -221,8 +249,30 @@ data class GitHubStartResponse(
 suspend fun OrchaApiClient.githubIssues(baseUrl: String, containerId: String): GitHubIssuesResponse =
     withTimeout(8_000) { client.get("${baseUrl.endpoint()}/api/containers/$containerId/github/issues").body() }
 
-suspend fun OrchaApiClient.githubPulls(baseUrl: String, containerId: String): GitHubPullsResponse =
-    withTimeout(8_000) { client.get("${baseUrl.endpoint()}/api/containers/$containerId/github/pulls").body() }
+/** `GET …/github/pulls?author=&involvement=&q=&page=&per_page=` — the filtered,
+ *  paginated PR list. All params are optional; omitted ones are left off the query
+ *  string entirely (never sent as an empty/blank value) so an older server that
+ *  ignores unknown query params behaves exactly as it did pre-filter. `involvement`
+ *  is server-resolved "me" (assigned | review_requested) — the server, not this client,
+ *  maps it onto the caller's identity. */
+suspend fun OrchaApiClient.githubPulls(
+    baseUrl: String,
+    containerId: String,
+    author: String? = null,
+    involvement: String? = null,
+    q: String? = null,
+    page: Int = 1,
+    perPage: Int = 30,
+): GitHubPullsResponse = withTimeout(8_000) {
+    val params = listOfNotNull(
+        author?.takeIf { it.isNotBlank() }?.let { "author=${it.encodeURLParameter()}" },
+        involvement?.takeIf { it.isNotBlank() }?.let { "involvement=${it.encodeURLParameter()}" },
+        q?.takeIf { it.isNotBlank() }?.let { "q=${it.encodeURLParameter()}" },
+        if (page != 1) "page=$page" else null,
+        if (perPage != 30) "per_page=$perPage" else null,
+    ).joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
+    client.get("${baseUrl.endpoint()}/api/containers/$containerId/github/pulls$params").body()
+}
 
 suspend fun OrchaApiClient.githubIssueDetail(baseUrl: String, containerId: String, number: Int): GitHubIssueDetailResponse =
     withTimeout(8_000) { client.get("${baseUrl.endpoint()}/api/containers/$containerId/github/issues/$number").body() }
