@@ -51,13 +51,22 @@ def pairing_base_url(request: Request) -> tuple[Optional[str], Optional[dict]]:
     req_host = request.url.hostname or ""
     if env_host and not is_local_pairing_host(env_host):
         host = env_host
+        # An operator-pinned host is the PUBLIC address (a hosted box behind a
+        # reverse proxy). The container's own request rides the internal hop
+        # (http://…:8000), so its scheme/port must not leak into the QR — that
+        # shipped phones a loopback-only port they can never reach. Honor the
+        # proxy's forwarded proto (Caddy sets it), default https; the port is
+        # standard-for-scheme unless the operator pins ORCHA_PAIRING_PORT.
+        scheme = (request.headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
+        env_port = (os.environ.get("ORCHA_PAIRING_PORT") or "").strip()
+        port = int(env_port) if env_port.isdigit() else None
     elif req_host and not is_local_pairing_host(req_host):
         host = req_host
+        port = request.url.port
+        scheme = request.url.scheme or "http"
     else:
         return None, pairing_warning("no_lan_address")
 
-    port = request.url.port
-    scheme = request.url.scheme or "http"
     default_port = (scheme == "http" and port in (None, 80)) or (
         scheme == "https" and port in (None, 443)
     )
