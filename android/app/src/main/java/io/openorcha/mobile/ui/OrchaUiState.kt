@@ -67,7 +67,7 @@ enum class WorkspaceTab { Home, Tasks, Requests, Agents, Search }
 
 /** Per-card reachability + glance counts for the Containers home (flow 04 H1). */
 data class ContainerHealth(
-    val state: String,               // live | polling | unreachable | probing
+    val state: String,               // live | polling | unreachable | signin | probing
     val agents: Int = 0,
     val tasks: Int = 0,
     val needsYou: Int = 0,

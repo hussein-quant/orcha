@@ -160,6 +160,7 @@ fun ConnChip(state: String, modifier: Modifier = Modifier) {
         "polling" -> p.warn to "polling"
         "paused" -> p.warn to "paused"
         "unreachable", "off" -> p.danger to "unreachable"
+        "signin" -> p.warn to "sign in"
         else -> p.idle to state.lowercase()
     }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {

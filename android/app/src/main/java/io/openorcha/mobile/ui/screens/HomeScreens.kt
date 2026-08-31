@@ -175,6 +175,10 @@ private fun ContainerCard(
                 "Last seen a while ago — is this Orcha up?",
                 style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.muted,
             )
+            health.state == "signin" -> Text(
+                "Signed out — Settings → Sign in again to reconnect.",
+                style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.warn,
+            )
             else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${health.agents} agents · ${health.tasks} tasks", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.muted)
                 Spacer(Modifier.weight(1f))

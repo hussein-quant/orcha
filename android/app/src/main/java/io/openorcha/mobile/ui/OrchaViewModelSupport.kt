@@ -80,6 +80,25 @@ override fun pairingBaseUrl(raw: String): String {
 }
 
 /**
+ * The QR's target project (iOS `OrchaServerAddress.Payload.containerId`): a pairing
+ * payload is a capability for ONE specific project — connect selects it as primary
+ * rather than whatever the portal lists first. Absent for manual entry; tolerant.
+ */
+override fun pairingContainerId(raw: String): String? = pairingField(raw, "containerId")
+
+/** The QR's paired operator (iOS `Payload.humanAgentId`) — verified against the
+ *  snapshot's humans before being trusted; disambiguates multi-human containers. */
+override fun pairingHumanAgentId(raw: String): String? = pairingField(raw, "humanAgentId")
+
+private fun pairingField(raw: String, key: String): String? {
+    val trimmed = raw.trim()
+    if (!trimmed.startsWith("{")) return null
+    return runCatching {
+        json.parseToJsonElement(trimmed).jsonObject[key]?.jsonPrimitive?.content
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+}
+
+/**
  * LAN↔remote failover pairing (iOS `OrchaServerAddress.Payload.remoteBaseUrl`): the QR's
  * optional second address (typically a Tailscale name/IP). Tolerant of a malformed value —
  * a bad remote address degrades to LAN-only pairing rather than failing the whole scan.

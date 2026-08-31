@@ -70,6 +70,8 @@ internal interface OrchaViewModelAccess {
     fun startPolling()
     fun pairingBaseUrl(raw: String): String
     fun pairingRemoteUrl(raw: String): String?
+    fun pairingContainerId(raw: String): String?
+    fun pairingHumanAgentId(raw: String): String?
     fun friendlyConnectionError(err: Throwable? = null): String
     fun messageKey(message: TaskMessageDto): Any
     fun runHumanAction(success: String, block: suspend (StoredContainer, String) -> Unit)

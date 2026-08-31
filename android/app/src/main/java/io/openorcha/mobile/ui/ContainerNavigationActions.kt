@@ -87,7 +87,11 @@ fun probeContainers() {
                     val needs = io.openorcha.mobile.domain.OrchaSelectors.needsYou(snap).total
                     ContainerHealth("polling", snap.agents.size, snap.taskTotal ?: snap.tasks.size, needs)
                 }
-                .getOrElse { ContainerHealth("unreachable") }
+                .getOrElse { err ->
+                    // An auth bounce is not "unreachable" — the box answered; the phone's
+                    // token is missing/stale. Rendered as its own chip + card copy.
+                    ContainerHealth(if (isAuthRequired(err)) "signin" else "unreachable")
+                }
             _uiState.update { it.copy(containerHealth = it.containerHealth + (stored.id to health)) }
         }
     }
@@ -187,6 +191,8 @@ override suspend fun connectWithToken(rawBaseUrl: String, accessToken: String?):
     // LAN↔remote failover pairing: an `orcha-pair` QR may carry a second address
     // (e.g. Tailscale) — tolerant, absent for plain address/manual entry.
     val remoteUrl = pairingRemoteUrl(rawBaseUrl)
+    val pairedContainerId = pairingContainerId(rawBaseUrl)
+    val pairedHumanId = pairingHumanAgentId(rawBaseUrl)
     _uiState.update { it.copy(connecting = true, error = null, connectNeedsToken = false) }
     val outcome = runCatching {
         val listed = if (trimmedToken != null) {
@@ -194,33 +200,62 @@ override suspend fun connectWithToken(rawBaseUrl: String, accessToken: String?):
         } else {
             api.listContainers(baseUrl).containers
         }
-        val container = listed.firstOrNull() ?: error("No Orcha container was found at this address.")
+        if (listed.isEmpty()) error("No Orcha container was found at this address.")
+        // The QR is a capability for ONE project (iOS `payload.containerId` parity):
+        // select it as primary; manual entry has no id and takes the first. Taking
+        // `first()` unconditionally made scanning a second project on the same box
+        // a silent no-op — same host, same first container, upsert deduped it away.
+        val primary = listed.firstOrNull { it.id == pairedContainerId } ?: listed.first()
         val snapshot = if (trimmedToken != null) {
-            api.getSnapshotWithBearer(baseUrl, container.id, trimmedToken)
+            api.getSnapshotWithBearer(baseUrl, primary.id, trimmedToken)
         } else {
-            api.getSnapshot(baseUrl, container.id)
+            api.getSnapshot(baseUrl, primary.id)
         }
-        val human = snapshot.agents.firstOrNull { it.kind == "human" }
-        StoredContainer(
-            id = container.id,
-            displayName = container.name,
-            baseUrl = baseUrl,
-            humanAgentId = human?.id,
-            humanAlias = human?.alias,
-            lastOpenedAt = System.currentTimeMillis(),
-            remoteBaseUrl = remoteUrl,
-            accessToken = trimmedToken,
-        ) to snapshot
+        Triple(listed, primary, snapshot)
     }
     return outcome.fold(
-        onSuccess = { (stored, snapshot) ->
-            BearerTokens.set(baseUrl, trimmedToken)
-            remoteUrl?.let { BearerTokens.set(it, trimmedToken) }
-            val containers = store.upsert(stored)
+        onSuccess = { (listed, primary, snapshot) ->
+            // A token-less connect (scan/manual re-pair of an already-authed host)
+            // means "no NEW credential", never "clear": set(null) DELETES the host's
+            // registry entry, which silently de-authed the app on every re-scan —
+            // the next probe went headerless into the perimeter and the container
+            // showed "unreachable".
+            trimmedToken?.let { token ->
+                BearerTokens.set(baseUrl, token)
+                remoteUrl?.let { BearerTokens.set(it, token) }
+            }
+            // Prefer the operator named in the QR (multi-human disambiguation), verified
+            // against the snapshot; fall back to the sole human for manual entry.
+            val humans = snapshot.agents.filter { it.kind == "human" }
+            val human = humans.firstOrNull { it.id == pairedHumanId } ?: humans.singleOrNull()
+            // One pairing stores EVERY project the portal lists (iOS `for dto in listed`
+            // parity — "Every project on a paired Orcha appears here automatically"),
+            // preserving local edits (rename, remote, resolved human) on re-pair.
+            // Primary upserts last so it sorts to the top of the containers list.
+            val existingById = _uiState.value.containers.associateBy { it.id }
+            var containers = _uiState.value.containers
+            var primaryStored: StoredContainer? = null
+            for (dto in listed.sortedBy { it.id == primary.id }) {
+                val prev = existingById[dto.id]
+                val isPrimary = dto.id == primary.id
+                val stored = StoredContainer(
+                    id = dto.id,
+                    displayName = prev?.displayName ?: dto.name,
+                    baseUrl = baseUrl,
+                    humanAgentId = if (isPrimary) human?.id else prev?.humanAgentId,
+                    humanAlias = if (isPrimary) human?.alias else prev?.humanAlias,
+                    lastOpenedAt = if (isPrimary) System.currentTimeMillis()
+                        else prev?.lastOpenedAt ?: System.currentTimeMillis(),
+                    remoteBaseUrl = remoteUrl ?: prev?.remoteBaseUrl,
+                    accessToken = trimmedToken ?: prev?.accessToken,
+                )
+                containers = store.upsert(stored)
+                if (isPrimary) primaryStored = stored
+            }
             _uiState.update {
                 it.copy(
                     containers = containers,
-                    selectedContainer = stored,
+                    selectedContainer = primaryStored,
                     snapshot = snapshot,
                     route = AppRoute.Workspace,
                     connecting = false,
