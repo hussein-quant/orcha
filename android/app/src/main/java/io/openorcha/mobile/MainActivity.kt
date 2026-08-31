@@ -6,18 +6,25 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import io.openorcha.mobile.ui.theme.Orcha
 import io.openorcha.mobile.domain.GitHubHubKind
 import io.openorcha.mobile.domain.GitHubIssueDetailPhase
 import io.openorcha.mobile.domain.GitHubPullDetailPhase
@@ -83,7 +90,7 @@ class MainActivity : ComponentActivity() {
                         AppRoute.Containers -> Unit
                     }
                 }
-                Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize().paletteChromeBackground()) {
                 when (state.route) {
                     AppRoute.Containers -> ContainersHomeScreen(
                         state = state,
@@ -286,4 +293,51 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
+
+/**
+ * Classic-skin radial background chrome (iOS `PaletteEnvironment` parity): two faint
+ * brand radial gradients from `bgGrad1`/`bgGrad2` behind the whole app, honoring the
+ * palette's `flatChrome` flag — Swiss/Minimal stay flat (the portal's `--bg-grad-*:
+ * transparent`), Classic keeps the portal's glow. Painted on the root `Box`; each
+ * screen's own `Scaffold(containerColor = Orcha.palette.bg)` currently paints an
+ * opaque background over it, so this radial is architecturally in place but not
+ * yet visible behind screen content — making it show through means moving every
+ * screen's Scaffold to a transparent container color, out of this wave's scope
+ * (root composable only).
+ */
+@Composable
+private fun Modifier.paletteChromeBackground(): Modifier {
+    val p = Orcha.palette
+    val flat = p.flatChrome
+    val bg = p.bg
+    val grad1 = p.bgGrad1
+    val grad2 = p.bgGrad2
+    return this.background(bg).then(
+        if (flat) {
+            Modifier
+        } else {
+            Modifier.drawWithCache {
+                // iOS PaletteEnvironment parity: fractional centers (0.15, 0.0) and
+                // (1.0, 0.1) of the canvas, radii 500/450dp — resolved against the
+                // actual draw size (radialGradient's `center` is pixel-absolute).
+                val radius1 = 500.dp.toPx()
+                val radius2 = 450.dp.toPx()
+                val brush1 = Brush.radialGradient(
+                    colors = listOf(grad1, Color.Transparent),
+                    center = Offset(size.width * 0.15f, 0f),
+                    radius = radius1,
+                )
+                val brush2 = Brush.radialGradient(
+                    colors = listOf(grad2, Color.Transparent),
+                    center = Offset(size.width * 1f, size.height * 0.1f),
+                    radius = radius2,
+                )
+                onDrawBehind {
+                    drawRect(brush1)
+                    drawRect(brush2)
+                }
+            }
+        },
+    )
 }
