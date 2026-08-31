@@ -109,7 +109,7 @@ fun ContainersHomeScreen(
             // H3 · first launch: one job — get the user to pairing.
             StateLayout(
                 title = "Add your Orcha",
-                sub = "On your computer, open the Orcha portal and choose Pair phone — then scan the QR code here. Phone and laptop must share a Wi-Fi network.",
+                sub = "Open your Orcha portal and choose Pair phone, then scan the QR here — or type the portal address, like orcha.yourteam.com. One pairing brings in every project on that Orcha.",
                 modifier = Modifier.padding(padding),
                 glyph = { BrandMark(44.dp) },
             ) {
@@ -135,7 +135,7 @@ fun ContainersHomeScreen(
                 }
                 item {
                     Text(
-                        "Long-press a card to rename or disconnect. Your phone talks to each Orcha directly on your network.",
+                        "Every project on a paired Orcha appears here automatically — tap one to switch into it. Long-press a card to rename or disconnect.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Orcha.palette.faint,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
@@ -179,7 +179,7 @@ private fun ContainerCard(
         when {
             health == null || health.state == "probing" -> Text("Checking…", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.faint)
             health.state == "unreachable" -> Text(
-                "Last seen a while ago — is the laptop awake?",
+                "Last seen a while ago — is this Orcha up?",
                 style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.muted,
             )
             else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -196,7 +196,7 @@ private fun ContainerCard(
         AlertDialog(
             onDismissRequest = { confirmDisconnect = false },
             title = { Text("Disconnect ${container.displayName}?") },
-            text = { Text("This only removes the pairing from this phone. The Orcha keeps running on your computer, and you can pair again anytime from the portal.") },
+            text = { Text("This removes the pairing — and every project sharing its address — from this phone only. The Orcha keeps running, and you can pair again anytime from the portal.") },
             confirmButton = {
                 TextButton(onClick = { confirmDisconnect = false; onForget(container.id) }) {
                     Text("Disconnect", color = Orcha.palette.danger, fontWeight = FontWeight.W700)
@@ -223,7 +223,8 @@ private fun ContainerCard(
 }
 
 /* =============================================================================
-   Flow 03 — pairing. The pairing endpoint (doc 13 ask A1/A2) doesn't exist yet,
-   so the scanner is honest about the gap: QR payloads paste-able, LAN address
-   manual entry, unreachable state with the design's checklist copy.
+   Flow 03 — pairing entry point (see ScannerScreen.kt / ManualConnectScreen.kt):
+   scan is primary, manual address+token entry is the fallback. Both a local
+   self-host address and a deployed cloud/remote portal address work equally —
+   see ManualConnectScreen.kt for the address-neutral copy and self-host help.
    ============================================================================= */

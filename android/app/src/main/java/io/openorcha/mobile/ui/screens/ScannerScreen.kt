@@ -143,13 +143,13 @@ fun ScannerScreen(
                             .padding(horizontal = 14.dp, vertical = 8.dp),
                     )
                     TextButton(onClick = onManualEntry) {
-                        Text("Can't scan? Enter manually", color = p.accent, fontWeight = FontWeight.W700)
+                        Text("Can't scan? Enter the address", color = p.accent, fontWeight = FontWeight.W700)
                     }
                 }
             }
             denied -> StateLayout(
                 title = "Camera access needed",
-                sub = "Orcha uses the camera only to read the pairing QR from your portal. Grant access, or type the address instead.",
+                sub = "Orcha uses the camera only to read the pairing QR from your portal. Grant access in Settings, or type the address instead.",
                 danger = true,
                 glyph = { Icon(Icons.Rounded.NoPhotography, null, tint = p.danger, modifier = Modifier.size(34.dp)) },
             ) {
@@ -158,7 +158,7 @@ fun ScannerScreen(
                         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
                     )
                 })
-                NeutralButton("Enter code manually", onManualEntry)
+                NeutralButton("Enter the address instead", onManualEntry)
             }
             else -> StateLayout(title = "Requesting camera…", sub = null)
         }
