@@ -5,6 +5,7 @@ package io.openorcha.mobile.ui.theme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
@@ -132,7 +133,13 @@ fun OrchaTheme(mode: ThemeMode = ThemeMode.Auto, skin: SkinMode = SkinMode.Class
             colorScheme = schemeFor(palette),
             typography = orchaTypography(palette.displayFontFamily),
             shapes = orchaShapes(palette),
-            content = content,
-        )
+        ) {
+            // Screens paint the skin gradient themselves and use transparent
+            // Scaffolds, so nothing sets LocalContentColor — it stays the
+            // default black, and every color-less Text vanishes in dark mode.
+            // Anchor it to the palette's text color; M3 components that manage
+            // their own content colors are unaffected.
+            CompositionLocalProvider(LocalContentColor provides palette.text, content = content)
+        }
     }
 }
