@@ -586,6 +586,7 @@ final class AppModel {
             // fire later as a background needs-you notification.
             NotificationCoordinator.shared.markSeen(snap, container: selectedContainer ?? sel)
             noteSeen(snap, container: selectedContainer ?? sel)
+            WidgetPublisher.publish(snap, container: selectedContainer ?? sel)
             // Collab v1: keep the acting identity fresh on the same cadence the
             // snapshot polls (role/grant changes propagate within a poll).
             await refreshIdentity()

@@ -2,7 +2,7 @@
 # docs/design/mobile). Generate with `xcodegen generate`; no Xcode GUI needed.
 name: Orcha
 # Device signing: create gitignored ios/project.local.yml with your team
-# (targets: Orcha/OrchaWidgetsExt? -> settings: base: {DEVELOPMENT_TEAM: X,
+# (targets: Orcha/OrchaWidgetsExt -> settings: base: {DEVELOPMENT_TEAM: X,
 # CODE_SIGNING_ALLOWED: "YES"}) then re-run `xcodegen generate`.
 include:
   - path: project.local.yml
@@ -25,6 +25,14 @@ targets:
     platform: iOS
     sources:
       - path: Orcha
+      - path: Shared
+    dependencies:
+      - target: OrchaWidgetsExt
+        embed: true
+    entitlements:
+      path: Orcha/Orcha.entitlements
+      properties:
+        com.apple.security.application-groups: [group.io.openorcha.mobile]
     info:
       path: Orcha/Info.plist
       properties:
@@ -73,6 +81,28 @@ targets:
       testTargets:
         - OrchaTests
       gatherCoverageData: false
+  OrchaWidgetsExt:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: Orcha
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Widgets/OrchaWidgetsExt.entitlements
+      properties:
+        com.apple.security.application-groups: [group.io.openorcha.mobile]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.openorcha.mobile.ios.widgets
+        TARGETED_DEVICE_FAMILY: "1"
   OrchaTests:
     type: bundle.unit-test
     platform: iOS
