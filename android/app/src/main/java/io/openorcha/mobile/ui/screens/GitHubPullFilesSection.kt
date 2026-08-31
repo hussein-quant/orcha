@@ -32,7 +32,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.openorcha.mobile.data.GitHubChangedFile
 import io.openorcha.mobile.data.GitHubFiles
-import io.openorcha.mobile.ui.components.DiffViewer
+import io.openorcha.mobile.domain.DiffParser
+import io.openorcha.mobile.ui.components.DiffFileBody
 import io.openorcha.mobile.ui.components.OrchaCard
 import io.openorcha.mobile.ui.components.SectionH
 import io.openorcha.mobile.ui.icons.OrchaIcons
@@ -110,7 +111,15 @@ private fun FileRow(file: GitHubChangedFile, htmlUrl: String?, expanded: Boolean
                         )
                     }
                 } else {
-                    DiffViewer(patch)
+                    // iOS ChangedFileRow parity: this row already IS the collapsible
+                    // header, so render the hunk body directly — nesting the full
+                    // DiffViewer duplicated the summary + per-file header inside.
+                    val parsed = remember(patch) { DiffParser.parse(patch) }
+                    if (parsed.isEmpty()) {
+                        Text("No net change (empty diff).", style = MaterialTheme.typography.labelMedium, color = p.faint)
+                    } else {
+                        parsed.forEach { parsedFile -> DiffFileBody(parsedFile) }
+                    }
                 }
             }
         }

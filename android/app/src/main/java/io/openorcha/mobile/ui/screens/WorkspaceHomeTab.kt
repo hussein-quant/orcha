@@ -202,18 +202,29 @@ internal fun HomeTab(
 @Composable
 private fun GitHubHubEntryChip(repo: String, onOpenHub: () -> Unit) {
     val p = Orcha.palette
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(OrchaIcons.GitHub, contentDescription = "GitHub", tint = p.muted, modifier = Modifier.size(16.dp))
+    // One tap target: repo name, GitHub mark, and Hub chip all open the in-app
+    // issues/PRs hub — no external browser detour.
+    Row(
+        Modifier.clickable(onClick = onOpenHub),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         MetaTag(repo, mono = true)
-        Text(
-            "Hub",
-            modifier = Modifier
+        Row(
+            Modifier
                 .background(p.accentSoft, RoundedCornerShape(999.dp))
                 .border(BorderStroke(1.dp, p.accentLine), RoundedCornerShape(999.dp))
                 .clickable(onClick = onOpenHub)
                 .padding(horizontal = 9.dp, vertical = 5.dp),
-            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.W600),
-            color = p.accent,
-        )
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Icon(OrchaIcons.GitHub, contentDescription = null, tint = p.accent, modifier = Modifier.size(13.dp))
+            Text(
+                "Hub",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.W600),
+                color = p.accent,
+            )
+        }
     }
 }
