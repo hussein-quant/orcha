@@ -2,6 +2,7 @@ package io.openorcha.mobile.data
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.HttpResponseValidator
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.api.createClientPlugin
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
@@ -13,6 +14,7 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import io.ktor.client.statement.request
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -29,6 +31,17 @@ import kotlinx.serialization.json.Json
  * plugin swaps it for a real `Authorization` header and strips the marker, so an
  * override always wins over anything already registered for that host.
  */
+/**
+ * The auth perimeter intercepted the request (bearer missing or rejected). iOS
+ * parity: `OrchaApiClient.perimeterIntercepted` — the perimeter never answers
+ * portal JSON without a valid credential; the request falls through to the
+ * browser OAuth lane and, after the redirects are followed, comes back as an
+ * HTML page (or a direct 401). Surfaced as its own type so connect flows show
+ * "sign in", never a decode error dressed up as a network failure.
+ */
+internal class OrchaAuthRequiredException(url: String) :
+    Exception("Auth perimeter intercepted: " + url)
+
 private const val BEARER_OVERRIDE_HEADER = "X-Orcha-Bearer-Override"
 
 private val BearerAuthPlugin = createClientPlugin("BearerAuthPlugin") {
@@ -68,6 +81,18 @@ internal fun createOrchaHttpClient(): HttpClient {
             socketTimeoutMillis = 10_000
         }
         install(BearerAuthPlugin)
+        // iOS `perimeterIntercepted` clone, arm (b): a 2xx whose body is HTML can
+        // only be the perimeter's sign-in/welcome page standing in for portal
+        // JSON (OkHttp already followed the 302). Arm (a), the direct 401, is
+        // covered by expectSuccess -> ResponseException in isAuthRequired.
+        HttpResponseValidator {
+            validateResponse { response ->
+                val contentType = response.contentType()
+                if (contentType != null && contentType.match(ContentType.Text.Html)) {
+                    throw OrchaAuthRequiredException(response.request.url.toString())
+                }
+            }
+        }
     }
 }
 

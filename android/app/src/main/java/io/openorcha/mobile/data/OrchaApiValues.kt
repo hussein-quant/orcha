@@ -15,4 +15,5 @@ internal fun String?.blankToNull(): String? = this?.trim()?.takeIf { it.isNotEmp
  * so they pass through unaffected.
  */
 internal fun isAuthRequired(err: Throwable?): Boolean =
-    err is ResponseException && err.response.status == HttpStatusCode.Unauthorized
+    err is OrchaAuthRequiredException ||
+        (err is ResponseException && err.response.status == HttpStatusCode.Unauthorized)
