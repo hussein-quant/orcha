@@ -12,7 +12,7 @@
  * state replaces the vanilla keyed diffViews Map — mount the component keyed
  * by run_id and selection/filter/collapse survive the 3s poll re-renders.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export interface DiffFile {
   path: string;
@@ -211,6 +211,21 @@ export function FilesChanged({ diff, preparsed }: { diff?: string | null | undef
   const [selPath, setSelPath] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  // Full-view mode: the widget expands to a fixed overlay so a big diff can be
+  // reviewed without the surrounding PR chrome; Esc or the ✕ collapses back.
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFull(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden"; // the overlay owns scrolling
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [full]);
 
   if (!files.length && (!diff || !diff.trim()))
     return (
@@ -289,13 +304,30 @@ export function FilesChanged({ diff, preparsed }: { diff?: string | null | undef
     ) : null;
 
   return (
-    <div className="dfv">
+    <div className={"dfv" + (full ? " dfv-full" : "")}>
       <div className="dfv-top">
         <span className="dfv-n">
           {files.length} file{files.length === 1 ? "" : "s"} changed
         </span>
         <span className="a">+{addT}</span>
         <span className="d">−{delT}</span>
+        <button
+          type="button"
+          className="dfv-max"
+          aria-label={full ? "Collapse diff to the PR view" : "Expand diff to full view"}
+          title={full ? "Collapse (Esc)" : "Expand to full view"}
+          onClick={() => setFull((v) => !v)}
+        >
+          {full ? (
+            <svg viewBox="0 0 20 20" width={15} height={15} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round">
+              <path d="M5 5l10 10M15 5L5 15" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 20 20" width={15} height={15} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 4H4v4M12 4h4v4M8 16H4v-4M12 16h4v-4" />
+            </svg>
+          )}
+        </button>
       </div>
       <div className="dfv-body">
         {side}

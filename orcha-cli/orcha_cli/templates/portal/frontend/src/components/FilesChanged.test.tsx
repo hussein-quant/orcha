@@ -100,3 +100,38 @@ describe("FilesChanged (.dfv widget)", () => {
     expect(container.querySelector(".dfv-path")!.textContent).toBe("src/lib/one.ts");
   });
 });
+
+describe("FilesChanged full view", () => {
+  afterEach(cleanup);
+
+  it("expand button toggles the fixed full view and back", () => {
+    const { container } = render(<FilesChanged diff={MULTI} />);
+    const btn = container.querySelector<HTMLButtonElement>(".dfv-max")!;
+    expect(btn).not.toBeNull();
+    expect(btn.getAttribute("aria-label")).toMatch(/expand/i);
+    expect(container.querySelector(".dfv-full")).toBeNull();
+
+    fireEvent.click(btn);
+    expect(container.querySelector(".dfv-full")).not.toBeNull();
+    expect(btn.getAttribute("aria-label")).toMatch(/collapse/i);
+
+    fireEvent.click(btn);
+    expect(container.querySelector(".dfv-full")).toBeNull();
+  });
+
+  it("Escape collapses the full view", () => {
+    const { container } = render(<FilesChanged diff={MULTI} />);
+    fireEvent.click(container.querySelector(".dfv-max")!);
+    expect(container.querySelector(".dfv-full")).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(container.querySelector(".dfv-full")).toBeNull();
+  });
+
+  it("full view restores body scrolling on collapse", () => {
+    const { container } = render(<FilesChanged diff={MULTI} />);
+    fireEvent.click(container.querySelector(".dfv-max")!);
+    expect(document.body.style.overflow).toBe("hidden");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.body.style.overflow).toBe("");
+  });
+});

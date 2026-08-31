@@ -304,3 +304,7 @@
 @media (max-width: 720px) {
   .gh-detail-title { font-size: 17px; }
 }
+
+/* GitHub bodies are real multi-paragraph Markdown — without pre-wrap every
+   newline collapsed and issues/PRs rendered as one unbroken wall of text. */
+.gh-conversation-body, .gh-comment-text { white-space: pre-wrap; }

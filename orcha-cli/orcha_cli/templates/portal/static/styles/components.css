@@ -247,3 +247,17 @@
   .dfv-main { max-height: 380px; }
 }
 
+
+/* ---- dfv full-view (2026-08-30): expand the diff widget to a fixed overlay,
+   collapse back with the same button or Esc. */
+.dfv-max { margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border);
+  background: none; color: var(--muted); cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s; }
+.dfv-max:hover { color: var(--text); border-color: var(--border-2); background: var(--hover); }
+.dfv.dfv-full { position: fixed; inset: 12px; z-index: 90; display: flex; flex-direction: column;
+  box-shadow: 0 24px 80px -24px rgba(0,0,0,.6); }
+.dfv.dfv-full .dfv-body { flex: 1; min-height: 0; max-height: none; }
+.dfv.dfv-full .dfv-side { max-height: none; }
+.dfv.dfv-full .dfv-tree { max-height: none; flex: 1; }
+.dfv.dfv-full .dfv-main { max-height: none; overflow: auto; }

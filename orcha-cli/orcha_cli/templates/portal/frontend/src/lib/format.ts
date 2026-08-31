@@ -164,7 +164,12 @@ export const mdText = (src: unknown, tasks: Task[] = []): string => {
   s = s.replace(/(^|[^*])\*(?!\s)([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>");
   s = s.replace(/(^|[^_\w])_(?!\s)([^_\n]+?)_(?![\w_])/g, "$1<em>$2</em>");
   s = s.replace(/^\s{0,3}#{1,3}\s+(.+)$/gm, '<span class="md-h">$1</span>');
+  // task-list items BEFORE the generic bullet rule (which would swallow the [ ]).
+  s = s.replace(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/gm, (_m, chk: string, body: string) =>
+    `<span class="md-li md-task"><span class="md-cb${/x/i.test(chk) ? " on" : ""}" aria-hidden="true"></span>${body}</span>`);
   s = s.replace(/^\s*[-*]\s+(.+)$/gm, '<span class="md-li">$1</span>');
+  // ordered lists: 1. / 1) — GitHub bodies lean on these heavily.
+  s = s.replace(/^\s*(\d{1,3})[.)]\s+(.+)$/gm, '<span class="md-li md-oli"><span class="md-num">$1.</span>$2</span>');
   s = taskRefs(s, tasks);
   return s.replace(new RegExp(Z + "(\\d+)" + Z, "g"), (_m, i: string) => stash[+i]);
 };

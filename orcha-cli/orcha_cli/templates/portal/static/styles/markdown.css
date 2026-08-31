@@ -57,3 +57,21 @@
   text-align: left; vertical-align: top; }
 .md .md-table th { background: var(--surface-2); font-weight: 650; }
 .md .md-table tr:nth-child(even) td { background: color-mix(in oklab, var(--surface-2) 45%, transparent); }
+
+/* ---- md block structure (2026-08-30): GitHub issue/PR bodies were a wall of
+   text — the md-h/md-li spans had no block styling anywhere, and ordered lists
+   / task-lists weren't parsed at all. Spans stay spans (esc-first pipeline
+   unchanged); these rules give them document shape. */
+.md .md-h { display: block; font-weight: 650; font-size: 1.06em; margin: 12px 0 4px; }
+.md .md-li { display: block; position: relative; padding-left: 18px; margin: 3px 0; }
+.md .md-li::before { content: "•"; position: absolute; left: 4px; color: var(--faint); }
+.md .md-li.md-oli { padding-left: 4px; }
+.md .md-li.md-oli::before { content: none; }
+.md .md-num { color: var(--faint); font-variant-numeric: tabular-nums; margin-right: 7px; }
+.md .md-li.md-task { padding-left: 24px; }
+.md .md-li.md-task::before { content: none; }
+.md .md-cb { position: absolute; left: 2px; top: 3px; width: 13px; height: 13px;
+  border: 1px solid var(--border); border-radius: 4px; background: var(--surface-2); }
+.md .md-cb.on { background: var(--ok-soft); border-color: var(--ok); }
+.md .md-cb.on::after { content: "✓"; position: absolute; inset: -3px 0 0 1px; font-size: 11px;
+  color: var(--ok); }
