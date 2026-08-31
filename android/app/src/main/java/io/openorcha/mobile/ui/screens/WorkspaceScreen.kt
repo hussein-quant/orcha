@@ -140,16 +140,16 @@ fun WorkspaceScreen(
         when {
             snapshot == null && state.loading -> WorkspaceSkeleton(Modifier.padding(padding))
             snapshot == null -> StateLayout(
-                title = "Can't reach your laptop",
+                title = "Can't reach this Orcha",
                 sub = "${selected?.baseUrl ?: "The container"} didn't answer. Your work is safe — the phone just can't see it right now.",
                 modifier = Modifier.padding(padding),
                 danger = true,
                 glyph = { Icon(Icons.Rounded.WifiOff, null, tint = Orcha.palette.danger) },
             ) {
                 OrchaCard {
-                    Text("1  Is the phone on the same Wi-Fi as the laptop?", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
-                    Text("2  Is the laptop awake and Orcha running?", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
-                    Text("3  Firewall or VPN blocking the port?", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
+                    Text("1  Are you online? The portal needs an internet connection.", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
+                    Text("2  Is the deployment up — or, self-hosting, is the computer awake with Orcha running?", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
+                    Text("3  Access token rotated? Update it in Settings → Containers.", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
                 }
                 NeutralButton("Try again", onRefresh)
             }

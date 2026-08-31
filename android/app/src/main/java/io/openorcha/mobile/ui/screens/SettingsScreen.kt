@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -19,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Settings
@@ -129,32 +132,54 @@ fun SettingsScreen(
             }
             item { SectionH("Containers", "${state.containers.size}") }
             items(state.containers, key = { it.id }) { c ->
+                // iOS containersSection parity: three stacked rows (identity+Disconnect /
+                // token / remote) — four TextButtons on one row squeezed the weighted
+                // text column to zero width, ballooning the card with wrapped text.
                 OrchaCard(onClick = { onOpen(c.id) }) {
+                    val hasToken = !c.accessToken.isNullOrBlank()
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Avatar(c.displayName, human = false)
                         Column(Modifier.weight(1f)) {
                             Text(c.displayName, style = MaterialTheme.typography.titleSmall)
                             Text(c.baseUrl, style = MonoSmStyle, color = Orcha.palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (!c.remoteBaseUrl.isNullOrBlank()) {
-                                Text(
-                                    "remote: ${c.remoteBaseUrl}", style = MonoSmStyle, color = Orcha.palette.faint,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            // Device-token auth: per-container "Signed in"/"No token" indicator.
-                            val hasToken = !c.accessToken.isNullOrBlank()
+                        }
+                        TextButton(onClick = { onForget(c.id) }) { Text("Disconnect", color = Orcha.palette.danger) }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(
+                            Icons.Rounded.Key, null, modifier = Modifier.size(16.dp),
+                            tint = if (hasToken) Orcha.palette.accent else Orcha.palette.faint,
+                        )
+                        Text(
+                            if (hasToken) "Access token set" else "No access token",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (hasToken) Orcha.palette.text2 else Orcha.palette.faint,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { onSignInAgain(c.id) }) { Text("Sign in again", color = Orcha.palette.accent) }
+                        TextButton(onClick = { tokenDialogFor = c }) {
+                            Text(if (hasToken) "Update token…" else "Add token…", color = Orcha.palette.accent)
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Icon(
+                            Icons.Rounded.Public, null, modifier = Modifier.size(16.dp),
+                            tint = if (c.remoteBaseUrl.isNullOrBlank()) Orcha.palette.faint else Orcha.palette.accent,
+                        )
+                        if (!c.remoteBaseUrl.isNullOrBlank()) {
                             Text(
-                                if (hasToken) "Signed in" else "No token",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (hasToken) Orcha.palette.ok else Orcha.palette.faint,
+                                c.remoteBaseUrl.orEmpty(), style = MonoSmStyle, color = Orcha.palette.text2,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                            )
+                        } else {
+                            Text(
+                                "No second address", style = MaterialTheme.typography.bodySmall,
+                                color = Orcha.palette.faint, modifier = Modifier.weight(1f),
                             )
                         }
                         TextButton(onClick = { remoteDialogFor = c }) {
                             Text(if (c.remoteBaseUrl.isNullOrBlank()) "Add remote…" else "Edit remote…", color = Orcha.palette.accent)
                         }
-                        TextButton(onClick = { onSignInAgain(c.id) }) { Text("Sign in again", color = Orcha.palette.accent) }
-                        TextButton(onClick = { tokenDialogFor = c }) { Text("Update token…", color = Orcha.palette.accent) }
-                        TextButton(onClick = { onForget(c.id) }) { Text("Disconnect", color = Orcha.palette.danger) }
                     }
                 }
             }

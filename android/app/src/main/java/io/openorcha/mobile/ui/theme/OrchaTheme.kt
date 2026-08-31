@@ -56,8 +56,8 @@ private fun schemeFor(p: OrchaPalette): ColorScheme {
 }
 
 /**
- * Token type scale (tokens `typography.scale`; foundations §3). Platform system sans
- * (Roboto) stands in for Inter per the token fallback note; JetBrains Mono falls back
+ * Token type scale (tokens `typography.scale`; foundations §3). Inter (bundled) is the
+ * base face on every skin; JetBrains Mono falls back
  * to the platform mono stack. `displayFamily` swaps in the skin's bundled display font
  * (Space Grotesk for Swiss, Hanken Grotesk for Minimal) — `null` keeps the platform
  * default for Classic, matching iOS's `uiFont` fallback to `.system`.
@@ -72,13 +72,22 @@ private fun orchaTypography(displayFamily: FontFamily?): Typography {
     // roles only, exactly like the web's per-skin heading faces over Inter body.
     val display = displayFamily ?: InterFontFamily
     val body = InterFontFamily
+    // Every M3 slot is overridden: an unset slot keeps Material's Roboto default,
+    // which leaks through components that style themselves (AlertDialog titles use
+    // headlineSmall, several widgets use bodySmall) — the "wrong font" bug class.
     return Typography(
+        displayLarge = TextStyle(fontFamily = display, fontSize = 34.sp, lineHeight = 40.sp, fontWeight = FontWeight.W800, letterSpacing = (-0.5).sp),
+        displayMedium = TextStyle(fontFamily = display, fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.W800, letterSpacing = (-0.4).sp),
         displaySmall = TextStyle(fontFamily = display, fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.W800, letterSpacing = (-0.4).sp),
+        headlineLarge = TextStyle(fontFamily = display, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.3).sp),
+        headlineMedium = TextStyle(fontFamily = display, fontSize = 23.sp, lineHeight = 29.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.3).sp),
+        headlineSmall = TextStyle(fontFamily = display, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.3).sp),
         titleLarge = TextStyle(fontFamily = display, fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.3).sp),
         titleMedium = TextStyle(fontFamily = display, fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.W700, letterSpacing = (-0.2).sp),
         titleSmall = TextStyle(fontFamily = display, fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.W600),
         bodyLarge = TextStyle(fontFamily = body, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.W400),
         bodyMedium = TextStyle(fontFamily = body, fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.W400),
+        bodySmall = TextStyle(fontFamily = body, fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.W400),
         labelLarge = TextStyle(fontFamily = body, fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.W600, letterSpacing = 0.2.sp),
         labelMedium = TextStyle(fontFamily = body, fontSize = 11.sp, lineHeight = 14.sp, fontWeight = FontWeight.W700, letterSpacing = 0.8.sp),
         labelSmall = TextStyle(fontFamily = body, fontSize = 10.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.W700, letterSpacing = 0.5.sp),
