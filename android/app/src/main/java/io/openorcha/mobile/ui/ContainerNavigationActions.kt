@@ -147,6 +147,11 @@ fun selectTab(tab: WorkspaceTab) {
     _uiState.update { it.copy(selectedTab = tab) }
 }
 
+/** Search tab (iOS `SearchTabView` parity): the live query, over the selected workspace. */
+fun setSearchQuery(query: String) {
+    _uiState.update { it.copy(searchQuery = query) }
+}
+
 fun connectManual(rawBaseUrl: String) {
     val baseUrl = try {
         OrchaServerAddress.normalize(pairingBaseUrl(rawBaseUrl))

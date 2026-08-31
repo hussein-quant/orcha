@@ -136,6 +136,7 @@ class MainActivity : ComponentActivity() {
                         onSetWakes = viewModel::setWakes,
                         onSetAutonomy = viewModel::setAutonomy,
                         onOpenGithubHub = viewModel::showGithubHub,
+                        onSearchQueryChange = viewModel::setSearchQuery,
                     )
 
                     AppRoute.TaskDetail -> TaskDetailScreen(

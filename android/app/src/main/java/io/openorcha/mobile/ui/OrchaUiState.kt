@@ -60,7 +60,7 @@ enum class AppRoute {
     GitHubPullDetail,
 }
 
-enum class WorkspaceTab { Home, Tasks, Requests, Agents }
+enum class WorkspaceTab { Home, Tasks, Requests, Agents, Search }
 
 /** Per-card reachability + glance counts for the Containers home (flow 04 H1). */
 data class ContainerHealth(
@@ -91,6 +91,9 @@ data class OrchaUiState(
     val selectedContainer: StoredContainer? = null,
     val snapshot: ContainerSnapshot? = null,
     val selectedTab: WorkspaceTab = WorkspaceTab.Home,
+    // Search tab (iOS `SearchTabView` parity): the live query, kept in state so it
+    // survives tab switches within the same workspace session.
+    val searchQuery: String = "",
     val selectedTask: TaskDto? = null,
     val taskMessages: List<TaskMessageDto> = emptyList(),
     // thread keyset paging (issue 4): cursors point at the OLDEST loaded message

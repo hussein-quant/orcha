@@ -11,6 +11,7 @@ import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SmartToy
 import androidx.compose.material.icons.rounded.WifiOff
@@ -73,6 +74,7 @@ fun WorkspaceScreen(
     onSetWakes: (Boolean) -> Unit,
     onSetAutonomy: (String) -> Unit,
     onOpenGithubHub: () -> Unit = {},
+    onSearchQueryChange: (String) -> Unit = {},
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     val snapshot = state.snapshot
@@ -122,6 +124,7 @@ fun WorkspaceScreen(
                 WorkspaceNavItem(state, WorkspaceTab.Tasks, "Tasks", Icons.Rounded.Checklist, badge = 0, onTab)
                 WorkspaceNavItem(state, WorkspaceTab.Requests, "Requests", Icons.Rounded.Forum, badge = requestGroups.badgeCount, onTab)
                 WorkspaceNavItem(state, WorkspaceTab.Agents, "Agents", Icons.Rounded.SmartToy, badge = 0, onTab)
+                WorkspaceNavItem(state, WorkspaceTab.Search, "Search", Icons.Rounded.Search, badge = 0, onTab)
             }
         },
         floatingActionButton = {
@@ -187,6 +190,14 @@ fun WorkspaceScreen(
                     WorkspaceTab.Tasks -> TasksTab(snapshot.tasks, snapshot.agents, onOpenTask)
                     WorkspaceTab.Requests -> RequestsTab(snapshot.requests, snapshot.agents, humanId, onOpenRequest)
                     WorkspaceTab.Agents -> AgentsTab(snapshot.agents, onOpenAgent)
+                    WorkspaceTab.Search -> SearchTab(
+                        snapshot = snapshot,
+                        query = state.searchQuery,
+                        onQueryChange = onSearchQueryChange,
+                        onOpenTask = onOpenTask,
+                        onOpenRequest = onOpenRequest,
+                        onOpenAgent = onOpenAgent,
+                    )
                 }
                 }
             }
