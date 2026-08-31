@@ -84,8 +84,20 @@ fun probeContainers() {
             // and read totals from task_total/request_total instead of row counts.
             val health = runCatching { api.getSnapshot(stored.baseUrl, stored.id, taskLimit = PROBE_LIMIT, requestLimit = PROBE_LIMIT) }
                 .map { snap ->
-                    val needs = io.openorcha.mobile.domain.OrchaSelectors.needsYou(snap).total
-                    ContainerHealth("polling", snap.agents.size, snap.taskTotal ?: snap.tasks.size, needs)
+                    // iOS probeHealth parity: needs-you = undecided plans + tasks
+                    // awaiting verification + open requests routed to THIS human (or
+                    // unrouted) — not every open request on the box; tasks = the
+                    // server's open (non-terminal) total, never the capped row count.
+                    val plans = snap.tasks.count { it.status == "in_progress" && it.planMessage != null && it.planDecision == null }
+                    val verifs = snap.tasks.count { it.status == "needs_verification" }
+                    val reqs = snap.requests.count {
+                        it.status == "open" && (it.targetId == stored.humanAgentId || it.targetId == null)
+                    }
+                    ContainerHealth(
+                        "polling", snap.agents.size, snap.taskOpenTotal,
+                        needsYou = plans + verifs + reqs,
+                        githubRepo = snap.container.githubRepo,
+                    )
                 }
                 .getOrElse { err ->
                     // An auth bounce is not "unreachable" — the box answered; the phone's

@@ -69,8 +69,12 @@ enum class WorkspaceTab { Home, Tasks, Requests, Agents, Search }
 data class ContainerHealth(
     val state: String,               // live | polling | unreachable | signin | probing
     val agents: Int = 0,
+    /** OPEN (non-terminal) task count — iOS parity: `snap.taskOpenTotal`, never the
+     *  length of the capped snapshot array. */
     val tasks: Int = 0,
     val needsYou: Int = 0,
+    /** The bound GitHub repo ("owner/name"), shown on the card's secondary line. */
+    val githubRepo: String? = null,
 )
 
 /** Flow 09: lazily-fetched agent-detail sections (each best-effort, absent on failure). */

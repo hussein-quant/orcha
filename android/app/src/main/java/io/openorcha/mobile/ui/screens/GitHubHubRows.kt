@@ -42,17 +42,17 @@ import io.openorcha.mobile.ui.theme.Orcha
 fun GitHubPullRowCard(pull: GitHubPullRow, onClick: () -> Unit, onStart: () -> Unit) {
     val p = Orcha.palette
     OrchaCard(onClick = onClick) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("#${pull.number}", style = numberStyle, color = p.faint)
-            if (pull.draft) MetaTag("draft")
-            Spacer(Modifier.weight(1f))
+        // Compact: the Start affordance shares the title line instead of owning a row.
+        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                pull.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.W600, fontSize = 15.sp),
+                color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
             GitHubStartRowButton(onStart)
         }
-        Text(
-            pull.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.W600, fontSize = 15.sp),
-            color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
-        )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("#${pull.number}", style = numberStyle, color = p.faint)
+            if (pull.draft) MetaTag("draft")
             if (!pull.head.isNullOrEmpty()) {
                 Text(
                     pull.head, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace, fontSize = 10.5.sp),
@@ -89,15 +89,17 @@ fun GitHubPullRowCard(pull: GitHubPullRow, onClick: () -> Unit, onStart: () -> U
 fun GitHubIssueRowCard(issue: GitHubIssueRow, onClick: () -> Unit, onStart: () -> Unit) {
     val p = Orcha.palette
     OrchaCard(onClick = onClick) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("#${issue.number}", style = numberStyle, color = p.faint)
-            Spacer(Modifier.weight(1f))
+        // Compact: Start shares the title line (same treatment as the PR row).
+        Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                issue.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.W600, fontSize = 15.sp),
+                color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
             GitHubStartRowButton(onStart)
         }
-        Text(
-            issue.title, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.W600, fontSize = 15.sp),
-            color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("#${issue.number}", style = numberStyle, color = p.faint)
+        }
         if (issue.labels.isNotEmpty()) {
             val scroll = rememberScrollState()
             Row(Modifier.horizontalScroll(scroll), horizontalArrangement = Arrangement.spacedBy(6.dp)) {

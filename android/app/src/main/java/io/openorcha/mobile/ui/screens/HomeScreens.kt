@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -179,11 +180,22 @@ private fun ContainerCard(
                 "Signed out — Settings → Sign in again to reconnect.",
                 style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.warn,
             )
-            else -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${health.agents} agents · ${health.tasks} tasks", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.muted)
-                Spacer(Modifier.weight(1f))
-                if (health.needsYou > 0) {
-                    io.openorcha.mobile.ui.components.StatusPill("${health.needsYou} need you", io.openorcha.mobile.ui.components.StatusDomain.Agent)
+            else -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // iOS ContainerCard parity: "N open" (non-terminal tasks), not the
+                    // all-time task total.
+                    Text("${health.agents} agents · ${health.tasks} open", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.muted)
+                    Spacer(Modifier.weight(1f))
+                    if (health.needsYou > 0) {
+                        io.openorcha.mobile.ui.components.StatusPill("${health.needsYou} need you", io.openorcha.mobile.ui.components.StatusDomain.Agent)
+                    }
+                }
+                // Bound GitHub repo (glance-only — connect/change lives in the workspace).
+                health.githubRepo?.let { repo ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Icon(OrchaIcons.GitHub, contentDescription = null, tint = Orcha.palette.faint, modifier = Modifier.size(12.dp))
+                        Text(repo, style = MonoSmStyle, color = Orcha.palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }

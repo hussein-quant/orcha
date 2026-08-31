@@ -56,6 +56,18 @@ class MarkdownLiteTest {
     }
 
     @Test
+    fun boldWrappingCodeSpanStillBolds() {
+        // The iOS/Android formatting difference: **`path` — words.** must bold the
+        // whole run, code chip included (web stashes code behind placeholders first).
+        val spans = MarkdownLite.inline("**`scripts/dev-stack.sh` — a real fix, not docs.**")
+        val code = spans.first { it.code }
+        assertEquals("scripts/dev-stack.sh", code.text)
+        assertTrue(code.bold)
+        assertTrue(spans.last().bold)
+        assertTrue(spans.none { it.text.contains("**") })
+    }
+
+    @Test
     fun boldInsideCodeStaysLiteral() {
         val spans = MarkdownLite.inline("`**not bold**`")
         val code = spans.single()

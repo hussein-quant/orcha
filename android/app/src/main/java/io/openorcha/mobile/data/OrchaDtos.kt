@@ -31,7 +31,22 @@ data class ContainerSnapshot(
     val requests: List<RequestDto> = emptyList(),
     @SerialName("task_total") val taskTotal: Int? = null,
     @SerialName("request_total") val requestTotal: Int? = null,
-)
+    /** Server-computed, non-capped OPEN counts (iOS `taskOpenTotalRaw` parity) —
+     *  additive fields, null on a pre-fix server. Read via [taskOpenTotal]. */
+    @SerialName("task_open_total") private val taskOpenTotalRaw: Int? = null,
+    @SerialName("request_open_total") private val requestOpenTotalRaw: Int? = null,
+) {
+    /** Non-terminal (open) task count — prefers the server's true count over the
+     *  capped/priority-ordered `tasks` array; falls back to counting the loaded rows
+     *  on an older server (iOS `ContainerSnapshot.taskOpenTotal` parity). */
+    val taskOpenTotal: Int
+        get() = taskOpenTotalRaw
+            ?: tasks.count { it.status != "completed" && it.status != "cancelled" }
+
+    /** Open (status == "open") request count — same contract as [taskOpenTotal]. */
+    val requestOpenTotal: Int
+        get() = requestOpenTotalRaw ?: requests.count { it.status == "open" }
+}
 
 @Serializable
 data class ContainerDto(

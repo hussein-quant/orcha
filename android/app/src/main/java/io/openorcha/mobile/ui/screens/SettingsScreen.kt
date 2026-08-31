@@ -147,7 +147,6 @@ fun SettingsScreen(
                             color = if (hasToken) Orcha.palette.text2 else Orcha.palette.faint,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = { onSignInAgain(c.id) }) { Text("Sign in again", color = Orcha.palette.accent) }
                         TextButton(onClick = { tokenDialogFor = c }) {
                             Text(if (hasToken) "Update token…" else "Add token…", color = Orcha.palette.accent)
                         }

@@ -148,25 +148,22 @@ fun WorkspaceScreen(
                 // state (SSE is a listed follow-up). GH #148: laptop-level container-pause
                 // is a separate, higher tier than the in-container notifier switch — never
                 // conflate the two banners.
-                when {
-                    containerPaused -> Banner(
+                // No steady-state banner: polling is the normal connection model and
+                // pull-to-refresh already covers manual refresh — only genuinely
+                // abnormal states (paused) warrant a banner.
+                if (containerPaused) {
+                    Banner(
                         BannerKind.Info,
                         "This Orcha is paused/stopped on the laptop — resume it there before agents can act.",
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
-                    notifierPaused -> Banner(
+                } else if (notifierPaused) {
+                    Banner(
                         BannerKind.Info,
                         "This Orcha is paused — agents won't act until resumed.",
                         Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         action = "Resume",
                         onAction = { controlsSheetOpen = true },
-                    )
-                    else -> Banner(
-                        BannerKind.Warn,
-                        "Live updates unavailable — checking every 30s",
-                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                        action = "Refresh now",
-                        onAction = onRefresh,
                     )
                 }
                 PullToRefreshBox(isRefreshing = state.loading, onRefresh = onRefresh, modifier = Modifier.weight(1f)) {
