@@ -112,3 +112,19 @@ def test_migration_tip_reaches_the_real_services_namespace():
     from orcha_cli import __main__ as services
     assert hasattr(services, "_migration_tip")
     assert services._migration_tip.__module__.endswith("cli_project_facade")
+
+
+def test_persisted_pairing_host_outranks_discovery(tmp_path, monkeypatch):
+    """A hosted box pins ORCHA_PAIRING_HOST in the stack .env; compose-up must use it
+    instead of re-discovering the machine's raw IP (which regressed the pairing QR
+    from the domain to the bare IP on every relaunch)."""
+    monkeypatch.delenv("ORCHA_PAIRING_HOST", raising=False)
+    orcha_dir = tmp_path / ".orcha"
+    orcha_dir.mkdir()
+    (orcha_dir / ".env").write_text("OTHER=1\nORCHA_PAIRING_HOST=orcha.example.com\n")
+    assert cli_project_setup.pairing_host_from_env_file(orcha_dir) == "orcha.example.com"
+    # operator shell env still wins over the file
+    monkeypatch.setenv("ORCHA_PAIRING_HOST", "operator.example.com")
+    cli_project_setup.export_pairing_host(lambda: "10.0.0.5", orcha_dir)
+    import os
+    assert os.environ["ORCHA_PAIRING_HOST"] == "operator.example.com"

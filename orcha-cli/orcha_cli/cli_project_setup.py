@@ -203,11 +203,32 @@ def discover_pairing_host() -> Optional[str]:
     return None
 
 
-def export_pairing_host(discover: Callable[[], Optional[str]]) -> None:
-    """Expose a discovered host address for Compose unless the operator supplied one."""
+def pairing_host_from_env_file(orcha_dir: pathlib.Path) -> Optional[str]:
+    """A persisted ORCHA_PAIRING_HOST from the stack's .orcha/.env, or None.
+
+    Hosted boxes pin a public domain here (e.g. orcha.<domain>); without this
+    read, every `orcha up` re-discovered the machine's raw IP in the shell env,
+    which OUTRANKS the .env file in Compose interpolation — so the pairing QR
+    silently regressed from the domain to the bare IP on each relaunch."""
+    try:
+        for line in (orcha_dir / ".env").read_text().splitlines():
+            if line.startswith(f"{PAIRING_HOST_ENV}="):
+                value = line.split("=", 1)[1].strip()
+                if value:
+                    return value
+    except OSError:
+        pass
+    return None
+
+
+def export_pairing_host(
+    discover: Callable[[], Optional[str]], orcha_dir: Optional[pathlib.Path] = None
+) -> None:
+    """Expose a pairing host for Compose: operator shell env > stack .env > discovery."""
     if os.environ.get(PAIRING_HOST_ENV):
         return
-    host = discover()
+    persisted = pairing_host_from_env_file(orcha_dir) if orcha_dir else None
+    host = persisted or discover()
     if host:
         os.environ[PAIRING_HOST_ENV] = host
 
@@ -253,6 +274,12 @@ def compose(
             except OSError:
                 pass
         ensure_key(orcha_dir)
+        # A pairing host persisted in the stack's .env outranks LAN discovery
+        # (but never an operator's shell env) — see pairing_host_from_env_file.
+        if not os.environ.get(PAIRING_HOST_ENV):
+            persisted_pairing_host = pairing_host_from_env_file(orcha_dir)
+            if persisted_pairing_host:
+                os.environ[PAIRING_HOST_ENV] = persisted_pairing_host
         export_host()
         export_gh_token()
     command = ["docker", "compose", "-f", str(orcha_dir / "docker-compose.yml"), *args]
