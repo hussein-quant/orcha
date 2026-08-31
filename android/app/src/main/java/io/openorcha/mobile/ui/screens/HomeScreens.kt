@@ -15,14 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.QrCodeScanner
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -63,6 +55,7 @@ import io.openorcha.mobile.ui.components.SectionH
 import io.openorcha.mobile.ui.components.SegControl
 import io.openorcha.mobile.ui.components.StateLayout
 import io.openorcha.mobile.ui.components.NeutralButton
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.Orcha
 import io.openorcha.mobile.ui.theme.ThemeMode
@@ -90,8 +83,8 @@ fun ContainersHomeScreen(
                 title = { Text("Orcha", fontWeight = FontWeight.W800) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 actions = {
-                    IconButton(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, "Refresh") }
-                    IconButton(onClick = onSettings) { Icon(Icons.Rounded.Settings, "Settings") }
+                    IconButton(onClick = onRefresh) { Icon(OrchaIcons.Refresh, "Refresh") }
+                    IconButton(onClick = onSettings) { Icon(OrchaIcons.Settings, "Settings") }
                 },
             )
         },
@@ -100,7 +93,7 @@ fun ContainersHomeScreen(
                 onClick = onScan,
                 containerColor = Orcha.palette.accent,
                 contentColor = Orcha.palette.accentInk,
-                icon = { Icon(Icons.Rounded.QrCodeScanner, null) },
+                icon = { Icon(OrchaIcons.QrCodeScanner, null) },
                 text = { Text("Add", fontWeight = FontWeight.W700) },
             )
         },
@@ -114,7 +107,7 @@ fun ContainersHomeScreen(
                 glyph = { BrandMark(44.dp) },
             ) {
                 Spacer(Modifier.height(6.dp))
-                PrimaryButton("Add your Orcha", onScan, leading = { Icon(Icons.Rounded.QrCodeScanner, null, tint = Orcha.palette.accentInk) })
+                PrimaryButton("Add your Orcha", onScan, leading = { Icon(OrchaIcons.QrCodeScanner, null, tint = Orcha.palette.accentInk) })
                 TextButton(onClick = onAdd) { Text("Enter address manually", color = Orcha.palette.accent, fontWeight = FontWeight.W700) }
             }
         } else {
@@ -168,7 +161,7 @@ private fun ContainerCard(
             }
             ConnChip(health?.state ?: "probing")
             IconButton(onClick = { menu = true }) {
-                Icon(Icons.Rounded.ChevronRight, null, tint = Orcha.palette.faint)
+                Icon(OrchaIcons.ChevronRight, null, tint = Orcha.palette.faint)
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(text = { Text("Open") }, onClick = { menu = false; onOpen(container.id) })
                     DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; renaming = true })

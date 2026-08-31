@@ -10,8 +10,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +34,7 @@ import io.openorcha.mobile.ui.components.Avatar
 import io.openorcha.mobile.ui.components.AvatarSize
 import io.openorcha.mobile.ui.components.PrimaryButton
 import io.openorcha.mobile.ui.components.SectionH
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,7 +64,7 @@ fun GitHubStartSheet(
             )
 
             PickRow(selected = picked == null, title = "Unassigned", sub = "Parked in the backlog", onClick = { picked = null }) {
-                Icon(Icons.Rounded.Inbox, contentDescription = null, tint = p.muted)
+                Icon(OrchaIcons.Inbox, contentDescription = null, tint = p.muted)
             }
 
             SectionH("Agents", "${agents.size}")

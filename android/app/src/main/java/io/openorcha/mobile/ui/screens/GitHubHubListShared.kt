@@ -21,8 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,6 +46,7 @@ import io.openorcha.mobile.ui.components.OrchaCard
 import io.openorcha.mobile.ui.components.OrchaField
 import io.openorcha.mobile.ui.components.Skeleton
 import io.openorcha.mobile.ui.components.StateLayout
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
 internal fun githubLoginOf(state: OrchaUiState): String? =
@@ -202,6 +201,6 @@ internal fun OpenOnGitHubLink(url: String) {
     ) {
         Text("Open on GitHub", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.W600), color = p.text)
         Spacer(Modifier.weight(1f))
-        Icon(Icons.Rounded.OpenInNew, contentDescription = null, tint = p.text, modifier = Modifier.size(18.dp))
+        Icon(OrchaIcons.OpenInNew, contentDescription = null, tint = p.text, modifier = Modifier.size(18.dp))
     }
 }

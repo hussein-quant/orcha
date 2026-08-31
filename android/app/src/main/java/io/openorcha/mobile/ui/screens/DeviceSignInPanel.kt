@@ -12,9 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.OpenInNew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +32,7 @@ import io.openorcha.mobile.ui.components.NeutralButton
 import io.openorcha.mobile.ui.components.OrchaCard
 import io.openorcha.mobile.ui.components.OrchaField
 import io.openorcha.mobile.ui.components.PrimaryButton
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
 /**
@@ -79,7 +77,7 @@ fun DeviceSignInPanel(
                 onSignIn,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = !busy,
-                leading = { Icon(Icons.Rounded.OpenInNew, null, modifier = Modifier.size(18.dp)) },
+                leading = { Icon(OrchaIcons.OpenInNew, null, modifier = Modifier.size(18.dp)) },
             )
         }
         val failedMessage = (phase as? DeviceAuthFlow.Phase.Failed)?.message
@@ -93,7 +91,7 @@ fun DeviceSignInPanel(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(Icons.Rounded.Key, null, tint = p.accent, modifier = Modifier.size(16.dp))
+                    Icon(OrchaIcons.Key, null, tint = p.accent, modifier = Modifier.size(16.dp))
                     Text(
                         "Use an access token instead",
                         style = MaterialTheme.typography.titleSmall,

@@ -18,11 +18,6 @@ import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -64,6 +59,7 @@ import io.openorcha.mobile.ui.components.OrchaField
 import io.openorcha.mobile.ui.components.StatusDomain
 import io.openorcha.mobile.ui.components.StatusPill
 import io.openorcha.mobile.ui.components.pulseAlpha
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.Orcha
 
@@ -118,10 +114,10 @@ fun ConversationScreen(
                         }
                     }
                 },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(OrchaIcons.ArrowBack, "Back") } },
                 actions = {
-                    IconButton(onClick = onRefresh) { Icon(Icons.Rounded.Refresh, "Refresh") }
-                    IconButton(onClick = { menuOpen = true }) { Icon(Icons.Rounded.MoreVert, "More") }
+                    IconButton(onClick = onRefresh) { Icon(OrchaIcons.Refresh, "Refresh") }
+                    IconButton(onClick = { menuOpen = true }) { Icon(OrchaIcons.MoreVert, "More") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(text = { Text("End conversation") }, onClick = { menuOpen = false; confirmEnd = true })
                     }
@@ -218,7 +214,7 @@ fun ConversationScreen(
                         containerColor = p.accent, contentColor = p.accentInk,
                         disabledContainerColor = p.accent.copy(alpha = 0.4f), disabledContentColor = p.accentInk,
                     ),
-                ) { Icon(Icons.AutoMirrored.Rounded.Send, "Send") }
+                ) { Icon(OrchaIcons.Send, "Send") }
             }
         }
     }

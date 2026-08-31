@@ -16,12 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import io.openorcha.mobile.domain.MobileUx
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoFontFamily
 import io.openorcha.mobile.ui.theme.Orcha
 import io.openorcha.mobile.ui.theme.OrchaPalette
@@ -189,11 +184,11 @@ fun RequestStatusPill(status: String, escalated: Boolean = false, modifier: Modi
     val shown = if (escalated && status.lowercase() == "open") "escalated" else status.lowercase()
     val tint = palette.tint(if (shown == "escalated") "danger" else statusColorName(status, StatusDomain.Request))
     val icon: androidx.compose.ui.graphics.vector.ImageVector? = when (shown) {
-        "open" -> Icons.Rounded.WarningAmber
-        "accepted" -> Icons.Rounded.PlayArrow
-        "answered" -> Icons.Rounded.Check
-        "rejected", "escalated" -> Icons.Rounded.Close
-        "converted_to_task" -> Icons.AutoMirrored.Rounded.ArrowForward
+        "open" -> OrchaIcons.WarningAmber
+        "accepted" -> OrchaIcons.PlayArrow
+        "answered" -> OrchaIcons.Check
+        "rejected", "escalated" -> OrchaIcons.Close
+        "converted_to_task" -> OrchaIcons.ArrowForward
         else -> null // closed & unknown keep the neutral dot
     }
     Row(

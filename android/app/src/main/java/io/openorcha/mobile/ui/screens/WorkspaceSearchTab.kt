@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,6 +34,7 @@ import io.openorcha.mobile.ui.components.SectionH
 import io.openorcha.mobile.ui.components.StateLayout
 import io.openorcha.mobile.ui.components.StatusDomain
 import io.openorcha.mobile.ui.components.StatusPill
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.Orcha
 
@@ -67,7 +66,7 @@ internal fun SearchTab(
                 StateLayout(
                     title = "Search this workspace",
                     sub = "Tasks, agents, and requests — matches open the same detail screens as the tabs.",
-                    glyph = { Icon(Icons.Rounded.Search, null, tint = p.muted) },
+                    glyph = { Icon(OrchaIcons.Search, null, tint = p.muted) },
                 )
             }
         } else {

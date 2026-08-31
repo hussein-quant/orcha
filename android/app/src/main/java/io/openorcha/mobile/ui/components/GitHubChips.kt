@@ -13,12 +13,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Circle
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +29,7 @@ import io.openorcha.mobile.data.GitHubCheckRun
 import io.openorcha.mobile.data.GitHubChecks
 import io.openorcha.mobile.domain.ChecksSummary
 import io.openorcha.mobile.domain.GitHubHubUx
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
 /** The compact CI verdict chip ("3✓ 2✗ 2•" tinted by the dominant state). Hidden when
@@ -73,10 +68,10 @@ private fun verdictColor(verdict: ChecksSummary.Verdict): Color {
 }
 
 private fun verdictIcon(verdict: ChecksSummary.Verdict) = when (verdict) {
-    ChecksSummary.Verdict.Failing -> Icons.Rounded.Close
-    ChecksSummary.Verdict.Pending -> Icons.Rounded.Schedule
-    ChecksSummary.Verdict.Passing -> Icons.Rounded.Verified
-    ChecksSummary.Verdict.None -> Icons.Rounded.Circle
+    ChecksSummary.Verdict.Failing -> OrchaIcons.Close
+    ChecksSummary.Verdict.Pending -> OrchaIcons.Schedule
+    ChecksSummary.Verdict.Passing -> OrchaIcons.Verified
+    ChecksSummary.Verdict.None -> OrchaIcons.Circle
 }
 
 /** The merge-state chip — tinted green when clean, red on conflicts/blocked, amber
@@ -125,10 +120,10 @@ fun CheckRunGlyph(run: GitHubCheckRun, modifier: Modifier = Modifier) {
     val verdict = GitHubHubUx.runVerdict(run)
     val p = Orcha.palette
     val (icon, color) = when (verdict) {
-        ChecksSummary.Verdict.Failing -> Icons.Rounded.Close to p.danger
-        ChecksSummary.Verdict.Pending -> Icons.Rounded.Schedule to p.warn
-        ChecksSummary.Verdict.Passing -> Icons.Rounded.Check to p.ok
-        ChecksSummary.Verdict.None -> Icons.Rounded.Circle to p.muted
+        ChecksSummary.Verdict.Failing -> OrchaIcons.Close to p.danger
+        ChecksSummary.Verdict.Pending -> OrchaIcons.Schedule to p.warn
+        ChecksSummary.Verdict.Passing -> OrchaIcons.Check to p.ok
+        ChecksSummary.Verdict.None -> OrchaIcons.Circle to p.muted
     }
     Icon(icon, contentDescription = verdictAccessibilityLabel(verdict), tint = color, modifier = modifier)
 }

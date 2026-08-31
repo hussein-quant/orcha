@@ -46,7 +46,6 @@ dependencies {
     // Device-token auth (cloud unification): Custom Tabs for the GitHub sign-in round-trip.
     implementation("androidx.browser:browser:1.8.0")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")

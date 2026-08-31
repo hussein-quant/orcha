@@ -16,16 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Key
-import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.QrCodeScanner
-import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -66,6 +56,7 @@ import io.openorcha.mobile.ui.components.SectionH
 import io.openorcha.mobile.ui.components.SegControl
 import io.openorcha.mobile.ui.components.StateLayout
 import io.openorcha.mobile.ui.components.NeutralButton
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.Orcha
 import io.openorcha.mobile.ui.theme.SkinMode
@@ -99,7 +90,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = { Text("Settings") },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(OrchaIcons.ArrowBack, "Back") } },
             )
         },
     ) { padding ->
@@ -147,7 +138,7 @@ fun SettingsScreen(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(
-                            Icons.Rounded.Key, null, modifier = Modifier.size(16.dp),
+                            OrchaIcons.Key, null, modifier = Modifier.size(16.dp),
                             tint = if (hasToken) Orcha.palette.accent else Orcha.palette.faint,
                         )
                         Text(
@@ -163,7 +154,7 @@ fun SettingsScreen(
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Icon(
-                            Icons.Rounded.Public, null, modifier = Modifier.size(16.dp),
+                            OrchaIcons.Public, null, modifier = Modifier.size(16.dp),
                             tint = if (c.remoteBaseUrl.isNullOrBlank()) Orcha.palette.faint else Orcha.palette.accent,
                         )
                         if (!c.remoteBaseUrl.isNullOrBlank()) {

@@ -23,9 +23,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -44,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.openorcha.mobile.domain.DiffFile
 import io.openorcha.mobile.domain.DiffParser
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
 /** Very large files start collapsed so a big sweep stays scrollable. */
@@ -105,7 +103,7 @@ private fun DiffFileSection(file: DiffFile, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(
-                if (expanded) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight,
+                if (expanded) OrchaIcons.ExpandMore else OrchaIcons.ChevronRight,
                 contentDescription = if (expanded) "Collapse" else "Expand",
                 tint = p.faint,
                 modifier = Modifier.width(16.dp),

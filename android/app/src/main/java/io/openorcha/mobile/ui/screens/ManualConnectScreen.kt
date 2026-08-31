@@ -9,9 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.WifiOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,6 +35,7 @@ import io.openorcha.mobile.ui.components.OrchaCard
 import io.openorcha.mobile.ui.components.OrchaField
 import io.openorcha.mobile.ui.components.PrimaryButton
 import io.openorcha.mobile.ui.components.StateLayout
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
 /* =============================================================================
@@ -81,7 +79,7 @@ fun ManualConnectScreen(
             TopAppBar(
                 title = { Text("Add your Orcha") },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back") } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(OrchaIcons.ArrowBack, "Back") } },
             )
         },
     ) { padding ->
@@ -109,7 +107,7 @@ fun ManualConnectScreen(
                 sub = "${address.ifBlank { "That address" }} didn't answer. Your work is safe — the phone just can't see it right now.",
                 modifier = Modifier.padding(padding),
                 danger = true,
-                glyph = { Icon(Icons.Rounded.WifiOff, null, tint = Orcha.palette.danger) },
+                glyph = { Icon(OrchaIcons.WifiOff, null, tint = Orcha.palette.danger) },
             ) {
                 OrchaCard {
                     Text("1  Is the address right? A cloud portal needs no port.", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)

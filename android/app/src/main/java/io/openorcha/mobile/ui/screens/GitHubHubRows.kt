@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.RemoveRedEye
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +33,7 @@ import io.openorcha.mobile.ui.components.MergeStateChip
 import io.openorcha.mobile.ui.components.MetaTag
 import io.openorcha.mobile.ui.components.OrchaCard
 import io.openorcha.mobile.ui.components.TonalButton
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
 /** Compact PR row: type icon + #number + title, head branch, reviewers, checks + merge
@@ -69,7 +68,7 @@ fun GitHubPullRowCard(pull: GitHubPullRow, onClick: () -> Unit, onStart: () -> U
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             val reviewers = pull.requestedReviewers
             if (!reviewers.isNullOrEmpty()) {
-                Icon(Icons.Rounded.RemoveRedEye, contentDescription = null, tint = p.muted, modifier = Modifier.size(12.dp))
+                Icon(OrchaIcons.RemoveRedEye, contentDescription = null, tint = p.muted, modifier = Modifier.size(12.dp))
                 Text(
                     reviewers.joinToString(", "), style = MaterialTheme.typography.labelMedium, color = p.muted,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
