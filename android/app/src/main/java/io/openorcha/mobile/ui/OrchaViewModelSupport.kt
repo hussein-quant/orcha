@@ -78,6 +78,20 @@ override fun pairingBaseUrl(raw: String): String {
     }
 }
 
+/**
+ * LAN↔remote failover pairing (iOS `OrchaServerAddress.Payload.remoteBaseUrl`): the QR's
+ * optional second address (typically a Tailscale name/IP). Tolerant of a malformed value —
+ * a bad remote address degrades to LAN-only pairing rather than failing the whole scan.
+ */
+override fun pairingRemoteUrl(raw: String): String? {
+    val trimmed = raw.trim()
+    if (!trimmed.startsWith("{")) return null
+    val remote = runCatching {
+        json.parseToJsonElement(trimmed).jsonObject["remoteBaseUrl"]?.jsonPrimitive?.content
+    }.getOrNull()?.takeIf { it.isNotBlank() } ?: return null
+    return runCatching { OrchaServerAddress.normalize(remote) }.getOrNull()
+}
+
 override fun friendlyConnectionError(err: Throwable?): String {
     if (err is IllegalArgumentException && !err.message.isNullOrBlank()) {
         return err.message.orEmpty()

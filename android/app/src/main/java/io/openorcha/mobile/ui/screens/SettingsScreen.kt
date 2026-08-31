@@ -81,7 +81,10 @@ fun SettingsScreen(
     onOpen: (String) -> Unit,
     onForget: (String) -> Unit,
     onAdd: () -> Unit,
+    onSetRemoteUrl: (String, String?) -> Unit = { _, _ -> },
 ) {
+    // LAN↔remote failover (iOS Settings §6 "Add remote…"): which container's dialog is open.
+    var remoteDialogFor by remember { mutableStateOf<StoredContainer?>(null) }
     Scaffold(
         containerColor = Orcha.palette.bg,
         topBar = {
@@ -127,6 +130,15 @@ fun SettingsScreen(
                         Column(Modifier.weight(1f)) {
                             Text(c.displayName, style = MaterialTheme.typography.titleSmall)
                             Text(c.baseUrl, style = MonoSmStyle, color = Orcha.palette.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (!c.remoteBaseUrl.isNullOrBlank()) {
+                                Text(
+                                    "remote: ${c.remoteBaseUrl}", style = MonoSmStyle, color = Orcha.palette.faint,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        TextButton(onClick = { remoteDialogFor = c }) {
+                            Text(if (c.remoteBaseUrl.isNullOrBlank()) "Add remote…" else "Edit remote…", color = Orcha.palette.accent)
                         }
                         TextButton(onClick = { onForget(c.id) }) { Text("Disconnect", color = Orcha.palette.danger) }
                     }
@@ -143,4 +155,54 @@ fun SettingsScreen(
             }
         }
     }
+    remoteDialogFor?.let { c ->
+        AddRemoteDialog(
+            container = c,
+            onDismiss = { remoteDialogFor = null },
+            onSave = { url -> onSetRemoteUrl(c.id, url); remoteDialogFor = null },
+        )
+    }
+}
+
+/**
+ * LAN↔remote failover (iOS §6 "Add remote…" alert parity): set/clear the container's
+ * second address. Validated via `OrchaServerAddress.normalize` — blank clears it.
+ */
+@Composable
+private fun AddRemoteDialog(container: StoredContainer, onDismiss: () -> Unit, onSave: (String?) -> Unit) {
+    val p = Orcha.palette
+    var text by remember { mutableStateOf(container.remoteBaseUrl.orEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Remote address") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "A second address for ${container.displayName} (e.g. a Tailscale name) — the app fails over to it when the local address doesn't answer, and swaps back once it's reachable again. Leave blank to remove it.",
+                    style = MaterialTheme.typography.bodyMedium, color = p.muted,
+                )
+                io.openorcha.mobile.ui.components.OrchaField(
+                    text, { text = it; error = null },
+                    label = "Remote address",
+                    placeholder = "100.x.x.x:8001",
+                )
+                error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = p.danger) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val trimmed = text.trim()
+                if (trimmed.isBlank()) {
+                    onSave(null)
+                    return@TextButton
+                }
+                runCatching { io.openorcha.mobile.data.OrchaServerAddress.normalize(trimmed) }
+                    .onSuccess { onSave(it) }
+                    .onFailure { error = it.message ?: "That doesn't look like an address." }
+            }) { Text("Save", color = p.accent, fontWeight = FontWeight.W700) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = p.muted) } },
+        containerColor = p.raised,
+    )
 }

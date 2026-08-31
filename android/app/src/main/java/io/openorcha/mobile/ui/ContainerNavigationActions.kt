@@ -35,7 +35,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** Owns saved-container navigation, probing, connection, and snapshot refresh. */
-internal interface ContainerNavigationActions : OrchaViewModelAccess {
+internal interface ContainerNavigationActions : OrchaViewModelAccess, ContainerFailoverActions {
 fun showContainers() {
     pollingJob?.cancel()
     cancelRunStream()
@@ -154,6 +154,9 @@ fun connectManual(rawBaseUrl: String) {
         _uiState.update { it.copy(error = err.message ?: friendlyConnectionError()) }
         return
     }
+    // LAN↔remote failover pairing: an `orcha-pair` QR may carry a second address
+    // (e.g. Tailscale) — tolerant, absent for plain address/manual entry.
+    val remoteUrl = pairingRemoteUrl(rawBaseUrl)
     scope.launch {
         _uiState.update { it.copy(connecting = true, error = null) }
         runCatching {
@@ -168,6 +171,7 @@ fun connectManual(rawBaseUrl: String) {
                 humanAgentId = human?.id,
                 humanAlias = human?.alias,
                 lastOpenedAt = System.currentTimeMillis(),
+                remoteBaseUrl = remoteUrl,
             ) to snapshot
         }.onSuccess { (stored, snapshot) ->
             val containers = store.upsert(stored)
@@ -233,7 +237,7 @@ override fun refreshSelected() {
                 )
             }
         }.onFailure { err ->
-            _uiState.update { it.copy(loading = false, error = friendlyConnectionError(err)) }
+            attemptRemoteFailover(selected, err)
         }
     }
 }

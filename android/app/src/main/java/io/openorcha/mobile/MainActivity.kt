@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
                         onOpen = viewModel::openContainer,
                         onForget = viewModel::forgetContainer,
                         onAdd = viewModel::showAddContainer,
+                        onSetRemoteUrl = viewModel::setRemoteUrl,
                     )
 
                     AppRoute.Workspace -> WorkspaceScreen(

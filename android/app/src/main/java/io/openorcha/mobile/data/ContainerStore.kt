@@ -13,6 +13,14 @@ data class StoredContainer(
     val humanAgentId: String? = null,
     val humanAlias: String? = null,
     val lastOpenedAt: Long = System.currentTimeMillis(),
+    /**
+     * LAN↔remote failover (iOS `AppModel.swift` parity, e.g. a Tailscale address):
+     * a second base URL `refreshSelected()` tries when `baseUrl` doesn't answer,
+     * swapping the two on success — symmetric, so it swaps back to LAN once it's
+     * reachable again. Absent for connections paired without one (old stored JSON
+     * decodes fine — `ignoreUnknownKeys` + this default).
+     */
+    val remoteBaseUrl: String? = null,
 )
 
 class ContainerStore(context: Context) {
@@ -48,6 +56,16 @@ class ContainerStore(context: Context) {
     /** Rename is LOCAL ONLY (flow 04): edits the phone's display name, never the server. */
     fun rename(id: String, displayName: String): List<StoredContainer> {
         val next = load().map { if (it.id == id) it.copy(displayName = displayName) else it }
+        save(next)
+        return next
+    }
+
+    /**
+     * Settings "Add remote…" (iOS §6 parity): set/clear the failover address for one
+     * container. `url = null` clears it — the card goes back to LAN-only.
+     */
+    fun setRemoteUrl(id: String, url: String?): List<StoredContainer> {
+        val next = load().map { if (it.id == id) it.copy(remoteBaseUrl = url) else it }
         save(next)
         return next
     }
