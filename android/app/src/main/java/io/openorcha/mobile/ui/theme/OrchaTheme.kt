@@ -67,11 +67,13 @@ private fun schemeFor(p: OrchaPalette): ColorScheme {
  * mono 12 · monoSm 10.5
  */
 private fun orchaTypography(displayFamily: FontFamily?): Typography {
-    // Inter is the base face on every skin (web/token parity — no more Roboto
-    // stand-in); a skin's display family, when present, styles display/title
-    // roles only, exactly like the web's per-skin heading faces over Inter body.
+    // Web parity: a skin's face applies to EVERYTHING, not just headings —
+    // `html[data-skin=swiss] body { font-family: "Space Grotesk" }` and
+    // skin-minimal set the whole body; base tokens.css uses Inter. Splitting
+    // display/body faces here left Swiss/Minimal detail text on Inter while
+    // headers switched ("header respects my fonts but not the details").
     val display = displayFamily ?: InterFontFamily
-    val body = InterFontFamily
+    val body = displayFamily ?: InterFontFamily
     // Every M3 slot is overridden: an unset slot keeps Material's Roboto default,
     // which leaks through components that style themselves (AlertDialog titles use
     // headlineSmall, several widgets use bodySmall) — the "wrong font" bug class.
