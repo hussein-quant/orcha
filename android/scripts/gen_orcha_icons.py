@@ -34,6 +34,7 @@ MAP = {  # Compose property name -> (lucide file, autoMirror)
     "Verified": ("badge-check", False),
     "WarningAmber": ("triangle-alert", False),
     "WifiOff": ("wifi-off", False),
+    "GitHub": ("github", False),
 }
 
 def f(v):

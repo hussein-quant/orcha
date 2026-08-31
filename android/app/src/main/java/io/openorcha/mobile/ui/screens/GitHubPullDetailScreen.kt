@@ -49,6 +49,7 @@ import io.openorcha.mobile.ui.components.Avatar
 import io.openorcha.mobile.ui.components.AvatarSize
 import io.openorcha.mobile.ui.components.CheckRunGlyph
 import io.openorcha.mobile.ui.components.ChecksChip
+import io.openorcha.mobile.ui.components.MarkdownText
 import io.openorcha.mobile.ui.components.MergeStateChip
 import io.openorcha.mobile.ui.components.MetaTag
 import io.openorcha.mobile.ui.components.OrchaCard
@@ -136,12 +137,12 @@ private fun PullDetailBody(pull: GitHubPullDetail) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionH("Description")
-                    OrchaCard { Text(pull.bodyMarkdown, color = p.text2) }
+                    OrchaCard { MarkdownText(pull.bodyMarkdown) }
                 }
             }
         }
         item { ChecksSection(pull.checks) }
-        item { FilesSection(pull.files) }
+        item { FilesSection(pull.files, pull.htmlUrl) }
         pull.htmlUrl?.let { url -> item { OpenOnGitHubLink(url) } }
     }
 }
@@ -167,11 +168,20 @@ private fun PullHeader(pull: GitHubPullDetail) {
                 Avatar(author, human = true, size = AvatarSize.Sm)
                 Text(author, style = MaterialTheme.typography.bodyMedium, color = p.text2)
             }
-            if (pull.requestedReviewers.isNotEmpty()) MetaTag("reviewers: ${pull.requestedReviewers.joinToString(", ")}")
-            Spacer(Modifier.weight(1f))
+            // The reviewers tag is the flexible member — unbounded it squeezed the
+            // "updated" text to zero width (one character per line, stretching the row).
+            if (pull.requestedReviewers.isNotEmpty()) {
+                MetaTag(
+                    "reviewers: ${pull.requestedReviewers.joinToString(", ")}",
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
             Text(
                 MobileUx.agoLabel(pull.updatedAt)?.let { "updated $it" } ?: "",
                 style = MaterialTheme.typography.labelMedium, color = p.faint,
+                maxLines = 1, softWrap = false,
             )
         }
     }

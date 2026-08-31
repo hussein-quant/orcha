@@ -12,11 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,6 +49,7 @@ import io.openorcha.mobile.ui.components.StatusDomain
 import io.openorcha.mobile.ui.components.StatusPill
 import io.openorcha.mobile.ui.components.StatTile
 import io.openorcha.mobile.ui.theme.MonoSmStyle
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
 /* Home tab (flow 04 H5): needs-you queue → agents glance → stat tiles → activity feed. */
@@ -200,6 +203,7 @@ internal fun HomeTab(
 private fun GitHubHubEntryChip(repo: String, onOpenHub: () -> Unit) {
     val p = Orcha.palette
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Icon(OrchaIcons.GitHub, contentDescription = "GitHub", tint = p.muted, modifier = Modifier.size(16.dp))
         MetaTag(repo, mono = true)
         Text(
             "Hub",

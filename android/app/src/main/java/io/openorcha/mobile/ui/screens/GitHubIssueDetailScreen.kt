@@ -48,6 +48,7 @@ import io.openorcha.mobile.ui.components.SectionH
 import io.openorcha.mobile.ui.components.Skeleton
 import io.openorcha.mobile.ui.components.StatusDomain
 import io.openorcha.mobile.ui.components.StatusPill
+import io.openorcha.mobile.ui.components.MarkdownText
 import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
@@ -127,7 +128,7 @@ private fun IssueDetailBody(issue: GitHubIssueDetail) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SectionH("Description")
-                    OrchaCard { Text(issue.bodyMarkdown, color = p.text2) }
+                    OrchaCard { MarkdownText(issue.bodyMarkdown) }
                 }
             }
         }
@@ -190,6 +191,6 @@ private fun CommentCard(comment: GitHubComment) {
             Spacer(Modifier.weight(1f))
             Text(MobileUx.agoLabel(comment.createdAt) ?: "", style = MaterialTheme.typography.labelSmall, color = p.faint)
         }
-        Text(comment.bodyMarkdown, color = p.text2)
+        MarkdownText(comment.bodyMarkdown)
     }
 }

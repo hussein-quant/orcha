@@ -134,6 +134,9 @@ data class GitHubChangedFile(
     val status: String = "",
     /** Unified-diff hunk text for this file, when the server provides it. */
     val patch: String? = null,
+    /** iOS parity: true when the server deliberately dropped an oversized patch —
+     *  distinguishes "too large to show" from "not available from this server yet". */
+    @SerialName("patch_omitted") val patchOmitted: Boolean = false,
 )
 
 /** The `files` block on a PR detail: GitHub's honest `count`, the first-100 `items`,

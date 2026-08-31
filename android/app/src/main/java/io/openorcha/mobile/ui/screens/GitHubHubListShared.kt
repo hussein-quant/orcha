@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,8 +20,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -32,8 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.domain.GitHubHubUx
 import io.openorcha.mobile.domain.GitHubPullsFilterState
@@ -43,7 +51,6 @@ import io.openorcha.mobile.ui.components.Banner
 import io.openorcha.mobile.ui.components.BannerKind
 import io.openorcha.mobile.ui.components.NeutralButton
 import io.openorcha.mobile.ui.components.OrchaCard
-import io.openorcha.mobile.ui.components.OrchaField
 import io.openorcha.mobile.ui.components.Skeleton
 import io.openorcha.mobile.ui.components.StateLayout
 import io.openorcha.mobile.ui.icons.OrchaIcons
@@ -120,16 +127,19 @@ internal fun GitHubFilterChip(label: String, on: Boolean, disabled: Boolean = fa
     )
 }
 
-/** The Pulls segment's compact filter row: author text + search text (both server-side,
- *  committed on the IME search action so typing never spams a request per keystroke)
- *  and the mutually-exclusive "Assigned to me" / "My reviews" involvement chips. The
- *  chips disable themselves (dimmed, non-clickable) with a caption explaining why when
- *  [login] is unknown — the server can't resolve "me" without a `github_login` on file. */
+/** The Pulls segment's compact filter row: an author picker (dropdown over the logins
+ *  seen in the loaded list, free text still committed on IME search) + search text
+ *  (both server-side, committed on submit so typing never spams a request per
+ *  keystroke) and the mutually-exclusive "Assigned to me" / "My reviews" involvement
+ *  chips. The chips disable themselves (dimmed, non-clickable) with a caption
+ *  explaining why when [login] is unknown — the server can't resolve "me" without a
+ *  `github_login` on file. */
 @Composable
 internal fun GitHubPullsFilterRow(
     filter: GitHubPullsFilterState,
     login: String?,
     identityDetail: String?,
+    authorOptions: List<String> = emptyList(),
     onAuthorChange: (String) -> Unit,
     onQueryChange: (String) -> Unit,
     onSelectInvolvement: (PullsInvolvement) -> Unit,
@@ -137,15 +147,42 @@ internal fun GitHubPullsFilterRow(
     val p = Orcha.palette
     var author by remember(filter.author) { mutableStateOf(filter.author) }
     var query by remember(filter.q) { mutableStateOf(filter.q) }
+    var authorMenuOpen by remember { mutableStateOf(false) }
     val disabled = GitHubHubUx.involvementDisabled(login)
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OrchaField(
-                author, { author = it }, modifier = Modifier.weight(1f),
-                placeholder = "Author", onSearch = { onAuthorChange(author) },
-            )
-            OrchaField(
+            Box(Modifier.weight(1f)) {
+                GitHubCompactField(
+                    author, { author = it },
+                    placeholder = "Author", onSearch = { onAuthorChange(author) },
+                    trailing = {
+                        Icon(
+                            OrchaIcons.ExpandMore, "Pick author",
+                            tint = p.muted,
+                            modifier = Modifier.size(16.dp).clickable { authorMenuOpen = !authorMenuOpen },
+                        )
+                    },
+                )
+                DropdownMenu(expanded = authorMenuOpen, onDismissRequest = { authorMenuOpen = false }) {
+                    if (author.isNotBlank() || filter.author.isNotBlank()) {
+                        DropdownMenuItem(
+                            text = { Text("Anyone", color = p.muted) },
+                            onClick = { authorMenuOpen = false; author = ""; onAuthorChange("") },
+                        )
+                    }
+                    authorOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = { authorMenuOpen = false; author = option; onAuthorChange(option) },
+                        )
+                    }
+                    if (authorOptions.isEmpty()) {
+                        DropdownMenuItem(text = { Text("No authors in view yet", color = p.faint) }, onClick = { authorMenuOpen = false })
+                    }
+                }
+            }
+            GitHubCompactField(
                 query, { query = it }, modifier = Modifier.weight(1f),
                 placeholder = "Search", onSearch = { onQueryChange(query) },
             )
@@ -165,6 +202,49 @@ internal fun GitHubPullsFilterRow(
             Text(caption, style = MaterialTheme.typography.labelSmall, color = p.faint)
         }
     }
+}
+
+/** Compact single-line filter field — the stock OutlinedTextField's 56dp minimum
+ *  dwarfed the filter row ("author and search are big"); this is a 36dp-tall
+ *  BasicTextField with the house surface/border treatment and IME-search commit. */
+@Composable
+internal fun GitHubCompactField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String? = null,
+    onSearch: (() -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val p = Orcha.palette
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier,
+        textStyle = MaterialTheme.typography.bodyMedium.copy(color = p.text),
+        cursorBrush = SolidColor(p.accent),
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = { onSearch?.invoke() }),
+        decorationBox = { inner ->
+            Row(
+                Modifier
+                    .background(p.surface2, RoundedCornerShape(8.dp))
+                    .border(BorderStroke(1.dp, p.border), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(Modifier.weight(1f)) {
+                    if (value.isEmpty() && placeholder != null) {
+                        Text(placeholder, style = MaterialTheme.typography.bodyMedium, color = p.faint, maxLines = 1)
+                    }
+                    inner()
+                }
+                trailing?.invoke()
+            }
+        },
+    )
 }
 
 /** The PR list's "N of ~total" / "N so far" load-more footer — a tap fetches the next

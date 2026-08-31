@@ -229,16 +229,18 @@ fun SegControl(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
     ) {
         options.forEachIndexed { i, opt ->
             val on = i == selected
+            // Selected segment speaks the accent language — surface3-on-surface2 was
+            // indistinguishable in the dark skins ("colors need update for selected tab").
             Text(
                 opt,
                 modifier = Modifier
                     .weight(1f)
-                    .background(if (on) Orcha.palette.surface3 else Color.Transparent, RoundedCornerShape(8.dp))
+                    .background(if (on) Orcha.palette.accentSoft else Color.Transparent, RoundedCornerShape(8.dp))
                     .clickable { onSelect(i) }
                     .padding(vertical = 7.dp),
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.W600),
-                color = if (on) Orcha.palette.text else Orcha.palette.muted,
+                color = if (on) Orcha.palette.accent else Orcha.palette.muted,
             )
         }
     }

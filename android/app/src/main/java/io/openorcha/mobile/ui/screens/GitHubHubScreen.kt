@@ -99,11 +99,15 @@ fun GitHubHubScreen(
                     }
                 }
                 if (state.githubHubKind == GitHubHubKind.Pulls) {
-                    val identityDetail = (state.githubPullsPhase as? GitHubPullsPhase.Loaded)?.identityDetail
+                    val loaded = state.githubPullsPhase as? GitHubPullsPhase.Loaded
                     GitHubPullsFilterRow(
                         filter = state.githubPullsFilter,
                         login = githubLoginOf(state),
-                        identityDetail = identityDetail,
+                        identityDetail = loaded?.identityDetail,
+                        // Author picker options: the logins visible in the loaded page —
+                        // no extra endpoint, and it grows as the user pages/loosens filters.
+                        authorOptions = loaded?.pulls.orEmpty()
+                            .mapNotNull { it.authorLogin }.distinct().sorted(),
                         onAuthorChange = onPullsAuthorChange,
                         onQueryChange = onPullsQueryChange,
                         onSelectInvolvement = onSelectPullsInvolvement,
