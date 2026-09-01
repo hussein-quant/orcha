@@ -31,9 +31,13 @@ import { getCachedBlob, isCacheableSha, putCachedBlob } from "./blobCache";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { CodeSpaceLanding } from "./CodeSpaceLanding";
 import type { CodeThreadSummary } from "./codespaceTypes";
+import { DraftsBar } from "./DraftsBar";
+import { getDraft, listDrafts, putDraft, type DraftListEntry } from "./draftStore";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { fetchGithubEditable } from "./githubEditApi";
 import { isLineSelected, rangeFrom, singleLine, type LineSelection } from "./gutter";
 import { HistoryPanel } from "./HistoryPanel";
+import { LazyDraftEditorPane } from "./LazyDraftEditorPane";
 import { LazyEditorPane } from "./LazyEditorPane";
 import { MdRenderedPane } from "./MdRenderedPane";
 import { recordFileView } from "./recentFiles";
@@ -187,37 +191,134 @@ export function CodeSpacePage() {
     return () => { cancelled = true; };
   }, [cid]);
 
+  // Phase 4 — GitHub-bound editing: a container with no writable worktree
+  // (worktreeAvailable=false) can still offer local-draft editing when the
+  // bound repo answers editable:true (code/github/editable). Probed once per
+  // cid, and ONLY once worktreeAvailable's own probe has resolved false —
+  // a local-binding container never needs this second round trip at all.
+  const [githubEditable, setGithubEditable] = useState(false);
+  useEffect(() => {
+    if (!cid || worktreeAvailable) { setGithubEditable(false); return; }
+    let cancelled = false;
+    fetchGithubEditable(cid).then((available) => {
+      if (cancelled) return;
+      setGithubEditable(available);
+    });
+    return () => { cancelled = true; };
+  }, [cid, worktreeAvailable]);
+
   // Edit toggle (Item 3, editor build) — a pencil/eye affordance in the file
-  // header that swaps the read-only viewer for EditorPane. Only offered when
-  // the container is LOCAL-binding (worktreeAvailable, same signal History
-  // uses) AND the human is viewing the worktree/default state of the file
-  // (gitRef === "HEAD" — anything else is a pinned historical sha, which is
-  // read-only by definition: there's no "save" for a past commit). Resets to
-  // view mode on every file switch so opening a new file never inherits the
-  // previous file's edit state. editorDirty drives the toggle's dirty dot;
-  // editorContent/editorHash hold the FRESH worktree read fetched the moment
-  // Edit is flipped on (never the ref-pinned filePayload/blobCache path —
-  // those are for immutable committed reads only, per worktreeApi.ts's doc).
+  // header that swaps the read-only viewer for EditorPane. Two independent
+  // editable paths converge on the same toggle:
+  //   - LOCAL-binding (worktreeAvailable, same signal History uses): writes
+  //     go straight to the worktree (EditorPane/editorSave.ts).
+  //   - GITHUB-binding (githubEditable): writes go to a local IndexedDB
+  //     draft (draftStore.ts/DraftEditorPane.tsx) — never the network —
+  //     until a human explicitly proposes them (DraftsBar's Propose panel).
+  // Both require viewing the default ref (gitRef === "HEAD" — anything else
+  // is a pinned historical sha, read-only by definition: there's no "save"
+  // for a past commit, and no "propose" against a moving target either).
+  // Resets to view mode on every file switch so opening a new file never
+  // inherits the previous file's edit state.
   const [editMode, setEditMode] = useState(false);
   const [editorDirty, setEditorDirty] = useState(false);
   const [editorFile, setEditorFile] = useState<WorktreeFilePayload | null>(null);
-  const canEdit = worktreeAvailable && gitRef === "HEAD" && !!path;
+  const [draftMode, setDraftMode] = useState(false); // true while THIS edit session is draft-backed (github mode)
+  const [draftContent, setDraftContent] = useState<string | null>(null);
+  const [draftBaseHash, setDraftBaseHash] = useState<string | null>(null);
+  const canEdit = (worktreeAvailable || githubEditable) && gitRef === "HEAD" && !!path;
   useEffect(() => {
     setEditMode(false);
     setEditorDirty(false);
     setEditorFile(null);
+    setDraftMode(false);
+    setDraftContent(null);
+    setDraftBaseHash(null);
   }, [path, cid]);
+
+  // Drafts bar — lists every local draft for (cid, "HEAD"), independent of
+  // whichever file is currently open. draftsToken bumps to force a re-list
+  // after any write (autosave, discard, propose, reload-base) since
+  // draftStore has no live-subscription mechanism (IndexedDB, like
+  // blobCache.ts, is a plain get/put store).
+  const [drafts, setDrafts] = useState<DraftListEntry[]>([]);
+  const [draftsToken, setDraftsToken] = useState(0);
+  const refreshDrafts = useCallback(() => setDraftsToken((n) => n + 1), []);
+  useEffect(() => {
+    if (!cid) { setDrafts([]); return; }
+    let cancelled = false;
+    listDrafts(cid, "HEAD").then((list) => {
+      if (!cancelled) setDrafts(list);
+    });
+    return () => { cancelled = true; };
+  }, [cid, draftsToken]);
 
   const enterEditMode = useCallback(() => {
     if (!cid || !path) return;
+    if (!worktreeAvailable && githubEditable) {
+      // GitHub mode: seed from an existing draft if one exists, else the
+      // already-loaded read-only filePayload — never a network read (there's
+      // no worktree to read from on a GitHub-bound container).
+      setDraftMode(true);
+      setEditMode(true);
+      getDraft(cid, "HEAD", path).then((draft) => {
+        const base = filePayload?.path === path ? (filePayload.content ?? "") : "";
+        setDraftContent(draft?.content ?? base);
+        // A fresh draft claims the loaded payload's blob sha as its base (real
+        // drift protection server-side); an existing draft keeps its own claim.
+        setDraftBaseHash(draft ? draft.baseHash : (filePayload?.path === path ? filePayload.blob_sha ?? null : null));
+        setEditorDirty(!!draft && draft.content !== base);
+      });
+      return;
+    }
     setEditorFile(null);
     setEditMode(true);
     fetchWorktreeFile(cid, path).then((data) => setEditorFile(data));
-  }, [cid, path]);
+  }, [cid, path, worktreeAvailable, githubEditable, filePayload]);
 
   const exitEditMode = useCallback(() => {
     setEditMode(false);
   }, []);
+
+  // GitHub-mode autosave landing: DraftEditorPane debounces edits and calls
+  // this with the buffer's current text — write-through to IndexedDB, then
+  // recompute dirty against the read-only payload this file view loaded.
+  const onDraftChange = useCallback((content: string) => {
+    if (!cid || !path) return;
+    const base = filePayload?.path === path ? (filePayload.content ?? "") : "";
+    setEditorDirty(content !== base);
+    putDraft(cid, "HEAD", path, { content, baseHash: draftBaseHash }).then(refreshDrafts);
+  }, [cid, path, filePayload, draftBaseHash, refreshDrafts]);
+
+  // If the draft backing the CURRENTLY OPEN draft-mode file disappears out
+  // from under it (discarded via the drafts bar, or cleared by a successful
+  // Propose) drop back to the read-only view rather than leaving a phantom
+  // "editing" toggle on with nothing left to autosave.
+  useEffect(() => {
+    if (!draftMode || !path) return;
+    if (drafts.some((d) => d.path === path)) return;
+    setEditMode(false);
+    setDraftMode(false);
+    setDraftContent(null);
+    setDraftBaseHash(null);
+    setEditorDirty(false);
+  }, [drafts, draftMode, path]);
+
+  // openDraftFile navigates first (path-change effect resets editMode to
+  // false), then this effect re-enters edit mode once the new path's
+  // filePayload has actually landed — avoids seeding the draft editor from
+  // the PREVIOUS file's filePayload for one paint.
+  const pendingDraftOpenRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pendingDraftOpenRef.current) return;
+    if (pendingDraftOpenRef.current !== path) return;
+    if (!filePayload || filePayload.path !== path) return;
+    pendingDraftOpenRef.current = null;
+    enterEditMode();
+    // enterEditMode is recreated per filePayload/path; only fire on the
+    // (path, filePayload) pair actually settling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, filePayload]);
 
   // Item 1 — Raw|Rendered toggle: Rendered is the default ONLY for .md files;
   // every other extension only ever sees Raw (the toggle itself is hidden for
@@ -264,6 +365,18 @@ export function CodeSpacePage() {
       return p;
     }, { replace });
   }, [setSearchParams]);
+
+  const openDraftFile = useCallback((p: string) => {
+    setSelection(null);
+    setComposerOpen(false);
+    setWorktreePath(null);
+    setHistoryOpen(false);
+    navigate({ ref: "HEAD", path: p, line: null, thread: null });
+    // enterEditMode fires from the pendingDraftOpenRef effect above once the
+    // new file's payload + editable gating are in place — mirrors how
+    // selectFile leaves editMode itself to the path-change reset effect.
+    pendingDraftOpenRef.current = p;
+  }, [navigate]);
 
   const selectFile = useCallback((p: string) => {
     setSelection(null);
@@ -571,6 +684,15 @@ export function CodeSpacePage() {
           />
 
           <div className="cs-code-pane">
+            {drafts.length > 0 ? (
+              <DraftsBar
+                cid={cid}
+                gitRef="HEAD"
+                drafts={drafts}
+                onOpenDraft={openDraftFile}
+                onDraftsChanged={refreshDrafts}
+              />
+            ) : null}
             <div className="cs-code-scroll">
               <ErrorBoundary label="content" key={path}>
               {worktreePath ? (
@@ -713,7 +835,21 @@ export function CodeSpacePage() {
                     </>
                   }
                 >
-                  {editMode ? (
+                  {editMode && draftMode ? (
+                    draftContent == null ? (
+                      <div className="none" style={{ padding: 10 }}>Loading file…</div>
+                    ) : filePayload?.binary ? (
+                      <div className="muted" style={{ padding: 10, fontSize: 13 }}>Binary file — editing isn't supported.</div>
+                    ) : (
+                      <LazyDraftEditorPane
+                        key={path}
+                        cid={cid}
+                        path={path}
+                        initialContent={draftContent}
+                        onDraftChange={onDraftChange}
+                      />
+                    )
+                  ) : editMode ? (
                     !editorFile ? (
                       <div className="none" style={{ padding: 10 }}>Loading file…</div>
                     ) : !editorFile.available ? (

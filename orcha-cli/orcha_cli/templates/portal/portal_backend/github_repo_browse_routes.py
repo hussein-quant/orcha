@@ -687,7 +687,11 @@ def browse_file(cid: str, request: Request, ref: str = Query(default=""), path: 
     # Decode defensively: a cap can land mid-multibyte-character; drop any trailing
     # partial sequence rather than raise.
     content = capped_bytes.decode("utf-8", errors="ignore")
+    # blob_sha: the file's git blob sha at this ref (straight off the contents
+    # response) — the P4 draft editor's base_hash, so propose-time drift checks
+    # compare REAL shas instead of degrading to no-claim.
     return {
+        "blob_sha": raw.get("sha"),
         "ref": resolved_ref,
         "path": clean_path,
         "content": content,

@@ -441,6 +441,49 @@
   border-radius: 6px; cursor: pointer; }
 .cs-editor-banner-btn:hover { border-color: var(--accent-line); color: var(--accent); }
 
+/* ---- Drafts bar + Propose panel (DraftsBar.tsx, GitHub-bound editing) ------ */
+.cs-drafts-bar { flex: none; display: flex; flex-direction: column; gap: 0;
+  border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.cs-drafts-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; flex-wrap: wrap; }
+.cs-drafts-count { flex: none; font-size: 11.5px; font-weight: 700; color: var(--text-2); }
+.cs-drafts-paths { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cs-drafts-chip { display: inline-flex; align-items: center; gap: 4px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 10px; max-width: 100%; }
+.cs-drafts-chip.stale { border-color: var(--warn); }
+.cs-drafts-chip-path { border: 0; background: transparent; color: var(--text); font: inherit; font-size: 11.5px;
+  font-family: "JetBrains Mono", monospace; cursor: pointer; padding: 2px 0; max-width: 260px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.cs-drafts-chip-path:hover { color: var(--accent); }
+.cs-drafts-reload-btn { flex: none; border: 1px solid var(--warn); background: var(--warn-soft); color: var(--warn);
+  font: inherit; font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px; cursor: pointer; }
+.cs-drafts-reload-btn:disabled { opacity: .6; cursor: default; }
+.cs-drafts-discard-btn { flex: none; border: 0; background: transparent; color: var(--muted); font-size: 12px;
+  line-height: 1; cursor: pointer; padding: 2px 4px; border-radius: 50%; }
+.cs-drafts-discard-btn:hover { color: var(--danger); background: var(--danger-soft); }
+.cs-propose-open-btn { flex: none; border: 1px solid var(--accent-line); background: var(--accent-soft);
+  color: var(--accent); font: inherit; font-size: 11.5px; font-weight: 700; padding: 5px 11px; border-radius: 999px;
+  cursor: pointer; }
+.cs-propose-open-btn:hover { filter: brightness(1.05); }
+
+.cs-propose-panel { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 10px;
+  border-top: 1px solid var(--border); }
+.cs-propose-message { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 7px 9px; font: inherit; font-size: 12.5px; resize: vertical; min-height: 72px; }
+.cs-propose-message:focus { border-color: var(--accent-line); box-shadow: var(--ring); outline: none; }
+.cs-propose-actions { display: flex; align-items: center; gap: 8px; }
+.cs-propose-send-btn { flex: none; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent);
+  font: inherit; font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 7px; cursor: pointer; }
+.cs-propose-send-btn:disabled { opacity: .5; cursor: default; }
+.cs-propose-cancel-btn { flex: none; border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+  font: inherit; font-size: 11.5px; font-weight: 600; padding: 6px 12px; border-radius: 7px; cursor: pointer; }
+.cs-propose-cancel-btn:hover { border-color: var(--accent-line); color: var(--accent); }
+.cs-propose-notice { font-size: 12.5px; padding: 8px 10px; border-radius: 7px; display: flex; align-items: center;
+  gap: 10px; flex-wrap: wrap; }
+.cs-propose-notice-ok { background: var(--ok-soft); color: var(--ok); }
+.cs-propose-notice-warn { background: var(--warn-soft); color: var(--warn); }
+.cs-propose-notice-error { background: var(--danger-soft); color: var(--danger); }
+.cs-propose-hub-link { font-weight: 600; }
+
 /* ---- Changes tab: commit + push UI (ChangesTab.tsx) ------------------------ */
 .cs-changes-commit { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 9px;
   border-top: 1px solid var(--border); }

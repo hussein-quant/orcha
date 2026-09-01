@@ -23,6 +23,10 @@ export interface BrowseTreePayload {
 }
 
 export interface BrowseFilePayload {
+  /** The file's git blob sha at this ref (GitHub-bound reads; absent on older
+   *  servers/local reads) — the P4 draft editor's base_hash for REAL propose-time
+   *  drift checks instead of the null no-claim fallback. */
+  blob_sha?: string | null;
   ref: string;
   path: string;
   content?: string; // OMITTED by the backend when binary:true
