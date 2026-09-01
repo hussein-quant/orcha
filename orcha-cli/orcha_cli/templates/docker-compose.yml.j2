@@ -109,11 +109,13 @@ services:
       # inode so the container would never see a refreshed token. Mounting the parent dir
       # read-only avoids both: no file → the portal serves the graceful off state.
       - ./:/app/stack-dir:ro
-      # Local-or-GitHub code source (Addendum 2): the project root itself, read-only,
-      # ONE level up from this .orcha/ compose dir — the repo binding sentinel "local"
-      # lets the browse/Code Space surfaces run `git -C $ORCHA_LOCAL_REPO_DIR` against
-      # this mount, no GitHub App/PAT required.
-      - ..:/app/workspace:ro
+      # Local-or-GitHub code source (Addendum 2): the project root itself, ONE level
+      # up from this .orcha/ compose dir — the repo binding sentinel "local" lets the
+      # browse/Code Space surfaces run `git -C $ORCHA_LOCAL_REPO_DIR` against this
+      # mount, no GitHub App/PAT required. Read-WRITE since Code Space editing
+      # (worktree PUT/commit): every write is drift-guarded server-side (base_hash)
+      # and path-restricted (no .git/, no escapes) — see code_workingtree_routes.py.
+      - ..:/app/workspace
     depends_on:
       db: { condition: service_healthy }
 
