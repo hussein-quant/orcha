@@ -117,11 +117,14 @@ def test_diff_numstat_tracked_modification(local_repo):
     assert row["deletions"] == 0
 
 
-def test_diff_numstat_untracked_counts_lines(local_repo):
+def test_diff_numstat_untracked_lists_without_line_counts(local_repo):
+    # Untracked rows deliberately carry NO line count (additions None): computing
+    # one was a full file read over the bind mount per untracked file — seconds
+    # in aggregate for a cosmetic number (the Changes-tab perf fix, 2026-09-01).
     (local_repo / "untracked.py").write_text("a\nb\nc\n")
     entries = local_git.diff_numstat()
     row = next(e for e in entries if e["path"] == "untracked.py")
-    assert row["additions"] == 3
+    assert row["additions"] is None
     assert row["deletions"] == 0
 
 
@@ -221,7 +224,8 @@ async def test_worktree_changes_mixed_dirty_states(client, container, local_repo
     assert by_path["README.md"]["additions"] == 1
     assert by_path["to_delete.txt"]["status"] == "D"
     assert by_path["brand_new.py"]["status"] == "??"
-    assert by_path["brand_new.py"]["additions"] == 1
+    # untracked rows list without line counts — see test_diff_numstat_untracked_*
+    assert by_path["brand_new.py"]["additions"] is None
     assert body["summary"]["files"] == 3
 
 

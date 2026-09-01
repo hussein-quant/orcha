@@ -45,6 +45,7 @@ unsafe path is the one case that legitimately gets a 400, matching the existing
 `path is required` 400s in this module).
 """
 
+import threading
 import time
 
 from fastapi import HTTPException, Query, Request
@@ -125,18 +126,53 @@ def _require_local_binding(cur, cid: str, request: Request):
 # commit) invalidates the cid's entries so the next read is honest. Push doesn't
 # change the working tree but DOES change ahead/behind — it invalidates too.
 _WORKTREE_CACHE: dict = {}
-_CHANGES_TTL_SECONDS = 10.0
+_CHANGES_TTL_SECONDS = 12.0
 _BRANCH_TTL_SECONDS = 30.0
 
 
-def _cache_get(kind: str, cid: str, ttl: float):
+# Past the fresh TTL a cached payload is still served IMMEDIATELY (stale-while-
+# revalidate) while a single-flight background thread recomputes it — the Changes
+# tab's poll never waits on a multi-second bind-mount git scan again. Stale
+# payloads older than this are considered dead and recomputed inline.
+_STALE_MAX_SECONDS = 600.0
+_REFRESH_IN_FLIGHT: set = set()
+_REFRESH_LOCK = threading.Lock()
+
+
+def _cache_get(kind: str, cid: str, ttl: float, refresh=None):
     hit = _WORKTREE_CACHE.get((kind, cid))
     if not hit:
         return None
     ts, payload = hit
-    if time.monotonic() - ts > ttl:
+    age = time.monotonic() - ts
+    if age <= ttl:
+        return payload
+    if age > _STALE_MAX_SECONDS or refresh is None:
         return None
+    _spawn_refresh(kind, cid, refresh)
     return payload
+
+
+def _spawn_refresh(kind: str, cid: str, refresh) -> None:
+    """Single-flight: at most one background recompute per (kind, cid)."""
+    key = (kind, cid)
+    with _REFRESH_LOCK:
+        if key in _REFRESH_IN_FLIGHT:
+            return
+        _REFRESH_IN_FLIGHT.add(key)
+
+    def _run():
+        try:
+            payload = refresh()
+            if payload is not None:
+                _cache_put(kind, cid, payload)
+        except Exception:
+            pass
+        finally:
+            with _REFRESH_LOCK:
+                _REFRESH_IN_FLIGHT.discard(key)
+
+    threading.Thread(target=_run, daemon=True, name=f"worktree-{kind}-refresh").start()
 
 
 def _cache_put(kind: str, cid: str, payload: dict) -> dict:
@@ -168,9 +204,17 @@ def get_worktree_changes(cid: str, request: Request):
         is_local, degrade = _require_local_binding(cur, cid, request)
     if not is_local:
         return degrade
-    cached = _cache_get("changes", cid, _CHANGES_TTL_SECONDS)
+    cached = _cache_get("changes", cid, _CHANGES_TTL_SECONDS, refresh=_compute_changes)
     if cached is not None:
         return cached
+    payload = _compute_changes()
+    if payload.get("available"):
+        return _cache_put("changes", cid, payload)
+    return payload
+
+
+def _compute_changes() -> dict:
+    """The actual scan — also the body the stale-while-revalidate refresher runs."""
     status_entries = local_git.status_porcelain()
     if status_entries is None:
         return {
@@ -201,12 +245,12 @@ def get_worktree_changes(cid: str, request: Request):
         if entry["status"] == "R" and entry.get("orig_path"):
             row["orig_path"] = entry["orig_path"]
         files.append(row)
-    return _cache_put("changes", cid, {
+    return {
         "available": True,
         "dirty": bool(files),
         "files": files,
         "summary": {"files": len(files), "additions": total_additions, "deletions": total_deletions},
-    })
+    }
 
 
 @app.get("/api/containers/{cid}/code/worktree/diff")
@@ -448,19 +492,26 @@ def get_worktree_branch(cid: str, request: Request):
         is_local, degrade = _require_local_binding(cur, cid, request)
     if not is_local:
         return degrade
-    cached = _cache_get("branch", cid, _BRANCH_TTL_SECONDS)
+    cached = _cache_get("branch", cid, _BRANCH_TTL_SECONDS, refresh=_compute_branch)
     if cached is not None:
         return cached
+    payload = _compute_branch()
+    if payload.get("available"):
+        return _cache_put("branch", cid, payload)
+    return payload
+
+
+def _compute_branch() -> dict:
     info = local_git.branch_info()
     if info is None:
         return {
             "available": False, "reason": "not_found",
             "detail": "the local repository has no commits yet",
         }
-    return _cache_put("branch", cid, {
+    return {
         "available": True, "branch": info["branch"], "sha": info["sha"],
         "ahead": info["ahead"], "behind": info["behind"], "remote": info["remote"],
-    })
+    }
 
 
 @app.get("/api/containers/{cid}/code/worktree/available")
@@ -476,4 +527,7 @@ def get_worktree_available(cid: str, request: Request):
         is_local, degrade = _require_local_binding(cur, cid, request)
     if not is_local:
         return degrade
-    return {"available": local_git.available()}
+    ok = local_git.available()
+    if ok and _cache_get("changes", cid, _CHANGES_TTL_SECONDS, refresh=None) is None:
+        _spawn_refresh("changes", cid, _compute_changes)
+    return {"available": ok}

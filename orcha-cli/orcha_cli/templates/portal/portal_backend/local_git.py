@@ -517,28 +517,12 @@ def _untracked_numstat() -> list:
         and not e["path"].startswith(".orcha/")
         and "node_modules/" not in e["path"]
     ]
-    results = []
-    # Hard cap: past this many untracked files the rest still LIST (status "??")
-    # but without line counts (additions None) — reading hundreds of files over a
-    # Docker-for-Mac bind mount costs seconds for a purely cosmetic number.
-    for i, path in enumerate(untracked_paths):
-        if i >= 200:
-            results.append({"path": path, "additions": None, "deletions": 0})
-            continue
-        raw = _read_worktree_file(path)
-        if raw is None:
-            continue
-        if _is_probably_binary(raw):
-            results.append({"path": path, "additions": None, "deletions": 0})
-            continue
-        # A trailing-newline-terminated file of N lines has N '\n' bytes; a file with
-        # no trailing newline has one more line than '\n' bytes — count() then adjust,
-        # matching how `git diff`'s own numstat counts an untracked file's line total.
-        line_count = raw.count(b"\n")
-        if raw and not raw.endswith(b"\n"):
-            line_count += 1
-        results.append({"path": path, "additions": line_count, "deletions": 0})
-    return results
+    # NO per-file reads: each line count was a full file read over the bind mount
+    # (Docker-for-Mac: ~10-50ms EACH, seconds in aggregate for hundreds of
+    # untracked files) for a purely cosmetic number. An untracked row's counts are
+    # additions=None/deletions=0 — the UI renders that as a plain "new file" row,
+    # the same shape it already uses for binaries.
+    return [{"path": path, "additions": None, "deletions": 0} for path in untracked_paths]
 
 
 def _is_probably_binary(raw: bytes) -> bool:
@@ -882,9 +866,18 @@ def push_current_branch() -> dict:
     repo_dir = _env_dir()
     if not repo_dir:
         return {"ok": False, "detail": "local repository is not configured"}
+    # HTTPS GitHub remotes have no credential helper inside the portal container —
+    # ride the same gh-CLI token the compose env already exports for the GitHub
+    # features (ORCHA_GITHUB_PAT), injected as an insteadOf rewrite so ssh remotes
+    # and file:// test remotes are untouched. The token must NEVER surface in the
+    # returned detail: stderr is sanitized below before it leaves this function.
+    pat = (os.environ.get("ORCHA_GITHUB_PAT") or "").strip()
+    cred_args = []
+    if pat:
+        cred_args = ["-c", f"url.https://x-access-token:{pat}@github.com/.insteadOf=https://github.com/"]
     try:
         result = subprocess.run(
-            ["git", "-C", repo_dir, "push", "origin", "HEAD"],
+            ["git", "-C", repo_dir, *cred_args, "push", "origin", "HEAD"],
             capture_output=True,
             timeout=PUSH_TIMEOUT_SECONDS,
             shell=False,
@@ -897,6 +890,10 @@ def push_current_branch() -> dict:
     if result.returncode == 0:
         return {"ok": True, "detail": ""}
     stderr_text = (result.stderr or b"").decode("utf-8", errors="ignore").strip()
+    if pat:
+        # The injected token must never leave this function, even inside a git
+        # error line that echoes the rewritten URL.
+        stderr_text = stderr_text.replace(pat, "***")
     detail = stderr_text[-PUSH_DETAIL_MAX_CHARS:] if stderr_text else f"git push exited {result.returncode}"
     logger.debug("local_git: push_current_branch exited %s: %s", result.returncode, detail)
     return {"ok": False, "detail": detail}

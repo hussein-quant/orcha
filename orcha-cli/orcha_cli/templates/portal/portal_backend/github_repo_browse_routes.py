@@ -328,7 +328,10 @@ def _extract_source_files(
                 continue
             if is_vendored_path(rel_path):
                 continue
-            if not any(rel_path.endswith(ext) for ext in extensions):
+            # extensions=None = keep EVERY (non-vendored, size-capped) file — the
+            # browse fast-path wants docs/configs too, not just source files; the
+            # symbol indexer pre-filters its own path list before consumption.
+            if extensions is not None and not any(rel_path.endswith(ext) for ext in extensions):
                 continue
             if member.size > max_file_bytes:
                 continue

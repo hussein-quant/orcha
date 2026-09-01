@@ -628,6 +628,10 @@ def post_code_thread_message(tid: str, body: CodeThreadMessageCreate):
 # Files above this size are skipped entirely (never fetched into the indexer) — matches
 # the design's "skip files >200KB and non-source extensions" cap.
 MAX_SOURCE_FILE_BYTES = 200_000
+# Snapshot member cap when building the ALL-files snapshot (extensions=None): the
+# same 500KB the browse file endpoint caps content at — bigger files fall back to
+# the per-file git path anyway, so snapshotting them is pure memory cost.
+SNAPSHOT_ANY_FILE_MAX_BYTES = 500_000
 
 SYMBOL_SEARCH_MAX_RESULTS = 200
 SYMBOL_INDEX_BUDGET = 40   # files fetched per request while the index warms
@@ -882,7 +886,7 @@ def warm_local_symbol_index() -> bool:
                 indexable.append(path)
             snapshot = _fetch_repo_snapshot(
                 LOCAL_REPO, sha, None, cid,
-                tuple(LANGUAGE_BY_EXTENSION), MAX_SOURCE_FILE_BYTES,
+                None, SNAPSHOT_ANY_FILE_MAX_BYTES,
             )
             if snapshot is None:
                 continue
@@ -949,7 +953,7 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
         try:
             snapshot = _fetch_repo_snapshot(
                 repo, resolved_ref, token, cid,
-                tuple(LANGUAGE_BY_EXTENSION), MAX_SOURCE_FILE_BYTES,
+                None, SNAPSHOT_ANY_FILE_MAX_BYTES,
             )
         except RuntimeError:
             # Tarball download failed (rate limit, network) — not fatal to indexing
