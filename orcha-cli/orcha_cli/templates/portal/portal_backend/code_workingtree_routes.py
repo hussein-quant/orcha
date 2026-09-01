@@ -207,10 +207,15 @@ def get_worktree_changes(cid: str, request: Request):
     cached = _cache_get("changes", cid, _CHANGES_TTL_SECONDS, refresh=_compute_changes)
     if cached is not None:
         return cached
-    payload = _compute_changes()
-    if payload.get("available"):
-        return _cache_put("changes", cid, payload)
-    return payload
+    # Total cache miss: NEVER compute inline — a cold scan on a big repo over a
+    # Docker-for-Mac bind mount is 5-20s, and this route sits directly under the
+    # Changes tab. Kick the single-flight background scan and answer immediately
+    # with scanning:true; the tab fast-polls until the real payload lands.
+    _spawn_refresh("changes", cid, _compute_changes)
+    return {
+        "available": True, "scanning": True, "dirty": False, "files": [],
+        "summary": {"files": 0, "additions": 0, "deletions": 0},
+    }
 
 
 def _compute_changes() -> dict:
@@ -531,3 +536,13 @@ def get_worktree_available(cid: str, request: Request):
     if ok and _cache_get("changes", cid, _CHANGES_TTL_SECONDS, refresh=None) is None:
         _spawn_refresh("changes", cid, _compute_changes)
     return {"available": ok}
+
+
+def prewarm_worktree(cids) -> None:
+    """Startup/periodic warm hook (called from code_space_routes' background
+    warmer thread, NEVER a request path): kicks the single-flight changes scan
+    for every local-bound cid so the Changes tab's first open is served from
+    cache instead of showing the scanning state."""
+    for cid in cids:
+        if _cache_get("changes", cid, _CHANGES_TTL_SECONDS, refresh=None) is None:
+            _spawn_refresh("changes", cid, _compute_changes)

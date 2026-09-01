@@ -34,6 +34,10 @@ export interface WorktreeChangesSummary {
 
 export interface WorktreeChangesPayload {
   available: boolean;
+  /** First-scan-in-progress (total cache miss server-side): the scan runs in a
+   *  background thread and this payload carries no rows yet — fast-poll until
+   *  it clears rather than treating the empty list as "clean tree". */
+  scanning?: boolean;
   reason?: string;
   detail?: string;
   dirty?: boolean;

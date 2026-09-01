@@ -9,6 +9,7 @@ import subprocess
 import pytest
 
 from portal_backend import code_space_routes as cs
+from portal_backend import code_workingtree_routes as wt
 from portal_backend import github_repo_browse_routes as browse
 from portal_backend import local_git
 
@@ -22,12 +23,14 @@ def _clear_caches():
     browse._REPO_SNAPSHOT_CACHE.clear()
     browse._REPO_SNAPSHOT_ORDER.clear()
     cs._SYMBOL_TREE_CACHE.clear()
+    wt._WORKTREE_CACHE.clear()
     yield
     browse._TREE_CACHE.clear()
     browse._DEFAULT_BRANCH_CACHE.clear()
     browse._REPO_SNAPSHOT_CACHE.clear()
     browse._REPO_SNAPSHOT_ORDER.clear()
     cs._SYMBOL_TREE_CACHE.clear()
+    wt._WORKTREE_CACHE.clear()
 
 
 def _git(repo_dir, *args):
@@ -56,6 +59,26 @@ def local_repo(tmp_path, monkeypatch):
 
     monkeypatch.setenv("ORCHA_LOCAL_REPO_DIR", str(repo_dir))
     return repo_dir
+
+
+async def _changes_settled(client, cid):
+    """GET worktree/changes until the async first scan lands (scanning:false).
+
+    The route NEVER computes inline on a total cache miss — it kicks a background
+    single-flight scan and answers {scanning:true, files:[]} immediately (the big-
+    repo Changes-tab fix) — so tests poll briefly for the settled payload."""
+    import asyncio
+    # Tests mutate the repo directly on disk between calls (no PUT/commit-side
+    # invalidation) — drop any cached payload first so every settle observes the
+    # CURRENT tree, never a previous step's cache.
+    wt._cache_invalidate(cid)
+    for _ in range(100):
+        r = await client.get(f"/api/containers/{cid}/code/worktree/changes")
+        assert r.status_code == 200, r.text
+        if not r.json().get("scanning"):
+            return r
+        await asyncio.sleep(0.1)
+    raise AssertionError("changes scan never settled")
 
 
 async def _bind_local(client, cid):
@@ -199,7 +222,7 @@ def test_log_follow_path_traversal_rejected(local_repo):
 async def test_worktree_changes_clean(client, container, local_repo):
     cid = container["id"]
     await _bind_local(client, cid)
-    r = await client.get(f"/api/containers/{cid}/code/worktree/changes")
+    r = await _changes_settled(client, cid)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["available"] is True
@@ -214,7 +237,7 @@ async def test_worktree_changes_mixed_dirty_states(client, container, local_repo
     (local_repo / "README.md").write_text("hello local\nplus a line\n")
     (local_repo / "to_delete.txt").unlink()
     (local_repo / "brand_new.py").write_text("z = 1\n")
-    r = await client.get(f"/api/containers/{cid}/code/worktree/changes")
+    r = await _changes_settled(client, cid)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["available"] is True
@@ -234,7 +257,7 @@ async def test_worktree_changes_staged_add(client, container, local_repo):
     await _bind_local(client, cid)
     (local_repo / "staged.py").write_text("a = 1\n")
     _git(local_repo, "add", "staged.py")
-    r = await client.get(f"/api/containers/{cid}/code/worktree/changes")
+    r = await _changes_settled(client, cid)
     body = r.json()
     by_path = {f["path"]: f for f in body["files"]}
     assert by_path["staged.py"]["status"] == "A"
@@ -244,7 +267,7 @@ async def test_worktree_changes_github_binding_honest_degrade(client, container)
     cid = container["id"]
     r = await client.put(f"/api/containers/{cid}/github", json={"repo": "acme/site"})
     assert r.status_code == 200, r.text
-    r = await client.get(f"/api/containers/{cid}/code/worktree/changes")
+    r = await _changes_settled(client, cid)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["available"] is False
@@ -253,7 +276,7 @@ async def test_worktree_changes_github_binding_honest_degrade(client, container)
 
 async def test_worktree_changes_unbound_container(client, container, local_repo):
     cid = container["id"]
-    r = await client.get(f"/api/containers/{cid}/code/worktree/changes")
+    r = await _changes_settled(client, cid)
     assert r.status_code == 200
     assert r.json()["reason"] == "repo_not_connected"
 

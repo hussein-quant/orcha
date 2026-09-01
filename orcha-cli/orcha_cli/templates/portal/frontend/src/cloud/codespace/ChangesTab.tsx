@@ -122,6 +122,8 @@ function BranchBar({ cid }: { cid: string }) {
 export function ChangesTab({ cid, selectedPath, onOpenChange, onDirtyCountChange }: ChangesTabProps) {
   const toast = useToast();
   const [payload, setPayload] = useState<WorktreeChangesPayload | null>(null);
+  const payloadRef = useRef<WorktreeChangesPayload | null>(null);
+  payloadRef.current = payload;
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("");
   const [committing, setCommitting] = useState(false);
@@ -160,7 +162,14 @@ export function ChangesTab({ cid, selectedPath, onOpenChange, onDirtyCountChange
       if (typeof document !== "undefined" && document.hidden) return;
       tick();
     }, POLL_MS);
+    // While the server's FIRST scan is still running (payload.scanning), the
+    // 15s cadence would leave the tab in limbo — poll fast until it settles.
+    const fastId = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (payloadRef.current?.scanning) tick();
+    }, 1500);
     return () => {
+      window.clearInterval(fastId);
       cancelled = true;
       window.clearInterval(id);
     };
@@ -215,7 +224,11 @@ export function ChangesTab({ cid, selectedPath, onOpenChange, onDirtyCountChange
     <div className="cs-changes">
       <BranchBar cid={cid} />
       {!files.length ? (
-        <div className="none" style={{ padding: 10 }}>Working tree clean — everything is committed.</div>
+        payload.scanning ? (
+          <div className="none" style={{ padding: 10 }}>Scanning the working tree…</div>
+        ) : (
+          <div className="none" style={{ padding: 10 }}>Working tree clean — everything is committed.</div>
+        )
       ) : (
         <>
           <div className="cs-changes-summary">

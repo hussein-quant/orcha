@@ -866,6 +866,10 @@ def warm_local_symbol_index() -> bool:
         sha = local_git.resolve_ref("HEAD")
         if not sha:
             return False
+        # Same warm pass also pre-scans the working tree so the Changes tab's
+        # first open is cache-served (import here to avoid a route-module cycle).
+        from portal_backend.code_workingtree_routes import prewarm_worktree
+        prewarm_worktree(cids)
         built = False
         for cid in cids:
             if _symbol_state_get(cid, sha) is not None:
