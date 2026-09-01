@@ -388,7 +388,13 @@ def status_porcelain() -> "list | None":
     None` before checking truthiness."""
     if not available():
         return None
-    out = _run(["status", "--porcelain=v1", "-z"], binary=True)
+    # TWO-PHASE scan (Docker-for-Mac bind-mount reality): a plain `status` walks
+    # every directory in the tree hunting untracked files — 15-100s on a large
+    # monorepo over gRPC-FUSE, past GIT_TIMEOUT_SECONDS. `--untracked-files=no`
+    # walks only the INDEX (~1s), and untracked files come from a separate
+    # `ls-files --others --exclude-standard` whose failure/timeout degrades to
+    # "tracked changes only" instead of killing the whole scan.
+    out = _run(["status", "--porcelain=v1", "-z", "--untracked-files=no"], binary=True)
     if out is None:
         return None
     # Split on NUL; a rename record is TWO consecutive fields (new name, then old
@@ -413,6 +419,11 @@ def status_porcelain() -> "list | None":
                 orig_path = fields[i]
                 i += 1
         entries.append({"path": path, "status": status, "orig_path": orig_path})
+    others = _run(["ls-files", "--others", "--exclude-standard", "-z"], binary=True)
+    if others is not None:
+        for raw_path in others.decode("utf-8", errors="ignore").split("\x00"):
+            if raw_path:
+                entries.append({"path": raw_path, "status": "??", "orig_path": None})
     return entries
 
 
@@ -497,9 +508,23 @@ def _untracked_numstat() -> list:
     matching numstat's own "-" convention for binaries, via the same `_is_probably_binary`
     NUL-byte sniff `diff_unified` uses for its own untracked-file whole-file-add form)."""
     entries = status_porcelain() or []
-    untracked_paths = [e["path"] for e in entries if e["status"] == "??"]
+    untracked_paths = [
+        e["path"] for e in entries
+        if e["status"] == "??"
+        # Orcha's own runtime dirs and dependency trees are never "the agents'
+        # work" — and each line-count below is a full file read over the bind
+        # mount, so skipping them here is a real cost cut, not just cosmetics.
+        and not e["path"].startswith(".orcha/")
+        and "node_modules/" not in e["path"]
+    ]
     results = []
-    for path in untracked_paths:
+    # Hard cap: past this many untracked files the rest still LIST (status "??")
+    # but without line counts (additions None) — reading hundreds of files over a
+    # Docker-for-Mac bind mount costs seconds for a purely cosmetic number.
+    for i, path in enumerate(untracked_paths):
+        if i >= 200:
+            results.append({"path": path, "additions": None, "deletions": 0})
+            continue
         raw = _read_worktree_file(path)
         if raw is None:
             continue
