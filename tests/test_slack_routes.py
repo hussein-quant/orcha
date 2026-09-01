@@ -1881,7 +1881,7 @@ async def test_view_submission_partial_screenshot_failure_counted_honestly(
 
 
 async def test_view_submission_with_task_lands_images_on_task_attachments(
-        client, container, make_agent, db, slack_enabled, monkeypatch, att_dir):
+        client, container, make_agent, db, slack_enabled, monkeypatch, att_dir, caplog):
     """The founder's actual goal: for the 'Create Orcha task' shortcut, downloaded
     images land on the created task's own attachment store DIRECTLY — task-first
     means no GitHub commit happens at creation time at all (the agent commits them
@@ -1899,6 +1899,12 @@ async def test_view_submission_with_task_lands_images_on_task_attachments(
         files=[_slack_image_file(name="proof.png")],
     )
     headers, body = _sign(_payload_form(payload))
+    import logging as _logging
+    # CI-only failure forensics (this test has failed on the runner while passing
+    # locally under identical flags): capture the slack file-filter verdicts and
+    # attach-write path at DEBUG so a red run SAYS which gate dropped the image.
+    caplog.set_level(_logging.DEBUG, logger="portal_backend.slack_routes")
+    caplog.set_level(_logging.DEBUG, logger="portal_backend.slack_files")
     r = await client.post("/api/slack/interactions", content=body, headers=headers)
     assert r.status_code == 200, r.text
 
@@ -1908,7 +1914,10 @@ async def test_view_submission_with_task_lands_images_on_task_attachments(
     t = [x for x in listed if x["title"] == "Task with screenshot"][0]
     msgs = (await client.get(f"/api/tasks/{t['id']}/messages")).json()["messages"]
     attach_msgs = [m for m in msgs if m.get("attachments")]
-    assert len(attach_msgs) == 1
+    assert len(attach_msgs) == 1, (
+        f"no attachment message landed — messages={msgs!r}\n"
+        f"captured logs:\n{caplog.text}"
+    )
     refs = attach_msgs[0]["attachments"]
     assert len(refs) == 1
     assert refs[0]["name"] == "proof.png"
