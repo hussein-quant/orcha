@@ -250,10 +250,14 @@ def export_gh_token() -> None:
         probe = subprocess.run(
             ["gh", "auth", "token"], capture_output=True, text=True, timeout=10
         )
-    except (OSError, subprocess.TimeoutExpired):
+        token = (probe.stdout or "").strip()
+        returncode = probe.returncode
+    except Exception:
+        # Best-effort sugar, never a reason for `orcha up` to fail — this also
+        # covers test doubles that stub subprocess.run for the compose call and
+        # hand back None/odd shapes for this probe (AttributeError included).
         return
-    token = (probe.stdout or "").strip()
-    if probe.returncode == 0 and token:
+    if returncode == 0 and token:
         os.environ["ORCHA_GITHUB_PAT"] = token
         print("[orcha] GitHub: using your `gh` CLI login for the portal's GitHub features")
 

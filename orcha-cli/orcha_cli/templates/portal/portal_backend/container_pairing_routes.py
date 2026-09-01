@@ -46,20 +46,39 @@ def pairing_warning(reason: str) -> dict:
     }
 
 
+def _is_bare_ip(host: str) -> bool:
+    """True for a literal IPv4/IPv6 address (LAN pinning), False for a hostname."""
+    import ipaddress
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
 def pairing_base_url(request: Request) -> tuple[Optional[str], Optional[dict]]:
     env_host = (os.environ.get("ORCHA_PAIRING_HOST") or "").strip()
     req_host = request.url.hostname or ""
     if env_host and not is_local_pairing_host(env_host):
         host = env_host
-        # An operator-pinned host is the PUBLIC address (a hosted box behind a
-        # reverse proxy). The container's own request rides the internal hop
-        # (http://…:8000), so its scheme/port must not leak into the QR — that
-        # shipped phones a loopback-only port they can never reach. Honor the
-        # proxy's forwarded proto (Caddy sets it), default https; the port is
-        # standard-for-scheme unless the operator pins ORCHA_PAIRING_PORT.
-        scheme = (request.headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
-        env_port = (os.environ.get("ORCHA_PAIRING_PORT") or "").strip()
-        port = int(env_port) if env_port.isdigit() else None
+        if _is_bare_ip(env_host):
+            # A pinned bare IP is the LAN self-host case (the operator fixed the
+            # machine's address, not a proxied public domain) — the phone reaches
+            # the portal port directly, so keep the request's own scheme + port
+            # exactly like the request-host branch below.
+            scheme = request.url.scheme or "http"
+            port = request.url.port
+        else:
+            # An operator-pinned hostname is the PUBLIC address (a hosted box
+            # behind a reverse proxy). The container's own request rides the
+            # internal hop (http://…:8000), so its scheme/port must not leak into
+            # the QR — that shipped phones a loopback-only port they can never
+            # reach. Honor the proxy's forwarded proto (Caddy sets it), default
+            # https; the port is standard-for-scheme unless the operator pins
+            # ORCHA_PAIRING_PORT.
+            scheme = (request.headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
+            env_port = (os.environ.get("ORCHA_PAIRING_PORT") or "").strip()
+            port = int(env_port) if env_port.isdigit() else None
     elif req_host and not is_local_pairing_host(req_host):
         host = req_host
         port = request.url.port

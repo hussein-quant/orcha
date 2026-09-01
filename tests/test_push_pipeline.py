@@ -19,6 +19,16 @@ Contract under test (portal_backend/push_routes.py + push_outbox.py):
 """
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _team_plan(monkeypatch):
+    """This suite exercises Team-plan features (members/device identity) under the
+    plan-gating addendum (docs/orcha-cloud-local-run.md) — same idiom as
+    tests/test_access_model.py. Solo-tier 402 behavior is covered by
+    tests/test_plan_gating.py, so nothing here masks the gate itself."""
+    monkeypatch.setenv("ORCHA_PLAN", "team")
+
+
 pytestmark = pytest.mark.asyncio
 
 OCTO = {"X-Auth-Request-User": "octocat"}      # bound owner of the arena

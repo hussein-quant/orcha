@@ -490,7 +490,11 @@ def test_shell_autonomy_switch_posts_levels_to_the_same_endpoint():
     API teeth exercise (one endpoint, one contract), and the control is human-gated (an
     acting human must be picked before any write fires)."""
     src = (_FRONTEND / "shell" / "Shell.tsx").read_text()
-    assert "function AutonomySwitch" in src, "the shell lost the AutonomySwitch"
+    # The switch was split (Shell.autonomy-split): AutonomyLevels renders the
+    # three rungs, AutonomyControls hosts them + the notifier — same endpoint,
+    # same teeth, new names. The tripwire pins the split components.
+    assert "function AutonomyLevels" in src and "function AutonomyControls" in src, \
+        "the shell lost the autonomy switch (AutonomyLevels/AutonomyControls)"
     assert "/autonomy" in src and 'sendJSON("POST"' in src, \
         "the level slider no longer POSTs the /autonomy endpoint"
     for level in ('level: "plan"', 'level: "pr"', 'level: "full"'):

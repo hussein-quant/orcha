@@ -464,6 +464,10 @@ def post_worktree_commit(cid: str, body: WorktreeCommitCreate, request: Request)
     if result is None:
         return {"available": True, "ok": False, "reason": "nothing_committed"}
     _cache_invalidate(cid)
+    # A commit moves HEAD — drop the browse module's 5s resolved-ref micro-cache
+    # so the very next browse shows the new tree, not a stale sha's.
+    from portal_backend.github_repo_browse_routes import _LOCAL_REF_CACHE
+    _LOCAL_REF_CACHE.clear()
     return {"available": True, "ok": True, "sha": result["sha"], "short": result["short"]}
 
 

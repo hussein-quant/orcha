@@ -41,12 +41,14 @@ def _clear_caches():
     browse._TREE_CACHE.clear()
     browse._DEFAULT_BRANCH_CACHE.clear()
     browse._REPO_SNAPSHOT_CACHE.clear()
+    browse._LOCAL_REF_CACHE.clear()
     browse._REPO_SNAPSHOT_ORDER.clear()
     cs._SYMBOL_TREE_CACHE.clear()
     yield
     browse._TREE_CACHE.clear()
     browse._DEFAULT_BRANCH_CACHE.clear()
     browse._REPO_SNAPSHOT_CACHE.clear()
+    browse._LOCAL_REF_CACHE.clear()
     browse._REPO_SNAPSHOT_ORDER.clear()
     cs._SYMBOL_TREE_CACHE.clear()
 
