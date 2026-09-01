@@ -1,14 +1,20 @@
 /**
- * Working-tree changes + file history — fetch wrappers over
- * code_workingtree_routes.py's CONTRACT (docs/orcha-cloud-local-run.md
- * addendum, agentic-era IDE features). Local-binding only; every route
- * degrades honestly to {available:false, reason:"github_source"} on a
- * GitHub-bound container — callers render that as "hidden" (History) or a
+ * Working-tree changes + file history + the editor's read/write/commit/push
+ * surface — fetch wrappers over code_workingtree_routes.py's CONTRACT
+ * (docs/orcha-cloud-local-run.md addendum, agentic-era IDE features).
+ * Local-binding only; every route degrades honestly to
+ * {available:false, reason:"github_source"} on a GitHub-bound container —
+ * callers render that as "hidden" (History, the Edit toggle) or a
  * disabled-state card (Changes tab), never an error.
  *
- *   GET /api/containers/{cid}/code/worktree/changes
- *   GET /api/containers/{cid}/code/worktree/diff?path=
- *   GET /api/containers/{cid}/code/file/history?path=&ref=&n=
+ *   GET  /api/containers/{cid}/code/worktree/changes
+ *   GET  /api/containers/{cid}/code/worktree/diff?path=
+ *   GET  /api/containers/{cid}/code/file/history?path=&ref=&n=
+ *   GET  /api/containers/{cid}/code/worktree/file?path=
+ *   PUT  /api/containers/{cid}/code/worktree/file
+ *   POST /api/containers/{cid}/code/worktree/commit
+ *   POST /api/containers/{cid}/code/worktree/push
+ *   GET  /api/containers/{cid}/code/worktree/branch
  */
 export type WorktreeFileStatus = "M" | "A" | "D" | "R" | "??";
 
@@ -64,6 +70,98 @@ export interface FileHistoryPayload {
 async function getJson<T>(url: string): Promise<T> {
   const r = await fetch(url);
   return (await r.json()) as T;
+}
+
+async function sendJson<T>(url: string, method: string, body: unknown): Promise<T> {
+  const r = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (await r.json()) as T;
+}
+
+/* ---- editor read/write ----------------------------------------------------
+ * The worktree file endpoint is ALWAYS fresh (never sha-cached, unlike the
+ * ref-pinned blob reads blobCache.ts covers) — it's reading/writing the live
+ * working tree, which an agent can change out from under the editor at any
+ * moment; that's exactly what the drift contract exists to catch. */
+export interface WorktreeFilePayload {
+  available: boolean;
+  reason?: string;
+  detail?: string;
+  path?: string;
+  content?: string;
+  binary?: boolean;
+  truncated?: boolean;
+  content_hash?: string;
+  exists?: boolean;
+}
+
+export function fetchWorktreeFile(cid: string, path: string): Promise<WorktreeFilePayload> {
+  const q = new URLSearchParams({ path });
+  return getJson<WorktreeFilePayload>(
+    "/api/containers/" + encodeURIComponent(cid) + "/code/worktree/file?" + q.toString(),
+  );
+}
+
+export type SaveFileResult =
+  | { ok: true; content_hash: string }
+  | { ok: false; reason: "drift" | "exists" | "too_large"; current_hash?: string };
+
+export function saveWorktreeFile(
+  cid: string,
+  path: string,
+  content: string,
+  baseHash: string | null,
+): Promise<SaveFileResult> {
+  return sendJson<SaveFileResult>(
+    "/api/containers/" + encodeURIComponent(cid) + "/code/worktree/file",
+    "PUT",
+    { path, content, base_hash: baseHash },
+  );
+}
+
+/* ---- commit / push --------------------------------------------------------- */
+export type CommitResult =
+  | { ok: true; sha: string; short: string }
+  | { ok: false; reason: "nothing_committed" };
+
+export function commitWorktree(
+  cid: string,
+  paths: string[],
+  message: string,
+  opts: { author_name?: string; author_email?: string } = {},
+): Promise<CommitResult> {
+  return sendJson<CommitResult>(
+    "/api/containers/" + encodeURIComponent(cid) + "/code/worktree/commit",
+    "POST",
+    { paths, message, ...opts },
+  );
+}
+
+export interface PushResult {
+  ok: boolean;
+  detail?: string;
+}
+
+export function pushWorktree(cid: string): Promise<PushResult> {
+  return sendJson<PushResult>("/api/containers/" + encodeURIComponent(cid) + "/code/worktree/push", "POST", {});
+}
+
+export interface WorktreeBranchPayload {
+  available: boolean;
+  reason?: string;
+  detail?: string;
+  branch?: string;
+  sha?: string;
+  ahead?: number;
+  behind?: number;
+  remote?: string;
+}
+
+export function fetchWorktreeBranch(cid: string): Promise<WorktreeBranchPayload> {
+  return getJson<WorktreeBranchPayload>("/api/containers/" + encodeURIComponent(cid) + "/code/worktree/branch");
 }
 
 export function fetchWorktreeChanges(cid: string): Promise<WorktreeChangesPayload> {

@@ -420,6 +420,49 @@
   white-space: nowrap; min-width: 0; }
 .cs-history-time { flex: none; font-size: 10.5px; }
 
+/* ---- Edit toggle (file header) + EditorPane (CM6 wrapper) ------------------ */
+.cs-edit-toggle-btn { position: relative; flex: none; border: 1px solid var(--border); background: var(--surface);
+  color: var(--muted); font: inherit; font-size: 13px; line-height: 1; padding: 4px 9px; border-radius: 6px;
+  cursor: pointer; }
+.cs-edit-toggle-btn:hover { border-color: var(--accent-line); color: var(--accent); }
+.cs-edit-toggle-btn.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.cs-edit-dirty-dot { position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--warn); border: 1px solid var(--surface); }
+
+.cs-editor-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.cs-editor-host { flex: 1; min-height: 0; overflow: auto; }
+.cs-editor-host .cm-editor { height: 100%; }
+.cs-editor-banner { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+  font-size: 12.5px; border-bottom: 1px solid var(--border); }
+.cs-editor-banner-drift { background: var(--warn-soft); color: var(--warn); }
+.cs-editor-banner-error { background: var(--danger-soft); color: var(--danger); }
+.cs-editor-banner-btn { flex: none; border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-2); font: inherit; font-size: 11.5px; font-weight: 600; padding: 4px 9px;
+  border-radius: 6px; cursor: pointer; }
+.cs-editor-banner-btn:hover { border-color: var(--accent-line); color: var(--accent); }
+
+/* ---- Changes tab: commit + push UI (ChangesTab.tsx) ------------------------ */
+.cs-changes-commit { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 8px 9px;
+  border-top: 1px solid var(--border); }
+.cs-commit-msg { width: 100%; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+  border-radius: 7px; padding: 6px 9px; font: inherit; font-size: 12.5px; resize: none; }
+.cs-commit-msg:focus { border-color: var(--accent-line); box-shadow: var(--ring); outline: none; }
+.cs-commit-row { display: flex; align-items: center; gap: 8px; }
+.cs-commit-btn { flex: none; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent);
+  font: inherit; font-size: 12px; font-weight: 700; padding: 6px 12px; border-radius: 7px; cursor: pointer; }
+.cs-commit-btn:disabled { opacity: .5; cursor: default; }
+.cs-changes-row-check { flex: none; margin: 0; }
+.cs-branch-bar { flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 9px;
+  border-bottom: 1px solid var(--border); font-size: 12px; }
+.cs-branch-name { font-family: "JetBrains Mono", monospace; color: var(--text-2); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.cs-branch-ahead { flex: none; color: var(--info); background: var(--info-soft); border-radius: 999px;
+  padding: 1px 8px; font-size: 11px; font-weight: 600; }
+.cs-branch-push-btn { flex: none; border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+  font: inherit; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+.cs-branch-push-btn:hover { border-color: var(--accent-line); color: var(--accent); }
+.cs-branch-push-btn:disabled { opacity: .5; cursor: default; }
+
 @media (max-width: 1100px) {
   .cs-tree-pane { width: 220px; }
   .cs-rail { width: 300px; }

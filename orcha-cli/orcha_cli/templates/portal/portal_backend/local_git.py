@@ -56,12 +56,37 @@ Every function degrades to None/[]/False on ANY failure (git not installed, dir
 missing, bad ref, git binary error, timeout) — logged, never raised as a 500. This
 module never talks to a database or FastAPI; it is a pure subprocess wrapper so it's
 trivially testable against a real temp git repo (see tests/test_local_git_source.py).
+
+Write path (Code Space editing Phase 1+2 — docs/orcha-cloud-local-run.md addendum,
+Part C): the ONLY functions in this module that ever mutate the working tree or the
+repo's history. Everything above this point is read-only, including against
+uncommitted state; these functions are the deliberate exception, gated one layer up
+by code_workingtree_routes' membership check (human UI actions riding proxy trust,
+same as every write elsewhere in this portal):
+  - worktree_file_hash(path)      -> sha256 hexdigest of a worktree file's raw bytes,
+                                      or None (unreadable/missing) — the drift-check
+                                      primitive the PUT route compares base_hash against.
+  - write_worktree_file(path,b)   -> bool; atomic (tempfile + os.replace) write of raw
+                                      bytes to a worktree path, creating parent dirs as
+                                      needed. False on any failure, including an unsafe
+                                      path or a `.git/...` path.
+  - stage_and_commit(paths,msg,…) -> {"sha","short"} | None; `git add -A -- <paths>` +
+                                      `git commit`, optionally with a one-off `-c
+                                      user.name=/user.email=` override so the commit
+                                      succeeds (and is attributed) even on a box with no
+                                      git identity configured.
+  - push_current_branch()         -> {"ok","detail"}; `git push origin HEAD`. Never
+                                      raises; `detail` carries stderr's tail on failure.
+  - branch_info()                 -> {"branch","sha","ahead","behind","remote"} | None;
+                                      current branch/head/upstream tracking summary.
 """
 
+import hashlib
 import logging
 import os
 import re
 import subprocess
+import tempfile
 
 logger = logging.getLogger("portal_backend.local_git")
 
@@ -686,6 +711,216 @@ def origin_repo() -> "str | None":
     if not owner or not name:
         return None
     return f"{owner}/{name}"
+
+
+def worktree_file_hash(rel_path: str) -> "str | None":
+    """sha256 hexdigest of a worktree file's raw bytes, via `_read_worktree_file` —
+    the SAME "plain filesystem read, not a git object" leaf every other worktree
+    reader uses, so this hashes exactly what a subsequent read would return. None
+    when the path fails `_safe_rel_path`, the file doesn't exist, or any OSError
+    (mirrors `_read_worktree_file`'s own None contract). Used as the optimistic-
+    concurrency primitive for the editor's PUT route: a caller's `base_hash` is
+    compared against a FRESH call to this function immediately before writing, never
+    a cached value, so a concurrent agent edit is always detected."""
+    raw = _read_worktree_file(rel_path)
+    if raw is None:
+        return None
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _is_git_internal_path(rel_path: str) -> bool:
+    """True when the path's first segment is `.git` — writing there would let a
+    caller corrupt the repo's own object store/index/hooks rather than a tracked
+    file. Checked in ADDITION to `_safe_rel_path` (which only rejects traversal, not
+    an in-repo `.git/...` target) by every write in this module."""
+    normalized = rel_path.replace("\\", "/")
+    first_segment = normalized.split("/", 1)[0]
+    return first_segment == ".git"
+
+
+def write_worktree_file(rel_path: str, content: bytes) -> bool:
+    """Write `content` (raw bytes) to `rel_path` inside the working tree, ATOMICALLY:
+    the bytes land in a tempfile created in the SAME directory as the target (so
+    `os.replace` is a same-filesystem rename, never a cross-device copy) and are then
+    renamed onto the final path — a reader (or a concurrent git command) never
+    observes a partially-written file. Parent directories are created as needed
+    (`os.makedirs(..., exist_ok=True)`) so a PUT can create a brand-new file in a
+    brand-new subdirectory in one call.
+
+    False on ANY failure, never raises: an unsafe path (`_safe_rel_path`), a path
+    whose first segment is `.git` (`_is_git_internal_path` — this module's write path
+    touches TRACKED FILES ONLY, never git's own internal state), a missing/unset
+    `ORCHA_LOCAL_REPO_DIR`, or any OSError (permission, disk full, a race). On
+    failure the tempfile is best-effort cleaned up; a failure to clean it up is
+    logged, not raised (a stray tempfile is a cheap leak, not a correctness bug)."""
+    if not _safe_rel_path(rel_path):
+        return False
+    if _is_git_internal_path(rel_path):
+        return False
+    repo_dir = _env_dir()
+    if not repo_dir:
+        return False
+    full_path = os.path.join(repo_dir, rel_path)
+    parent_dir = os.path.dirname(full_path)
+    try:
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=parent_dir or repo_dir, prefix=".orcha-write-")
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(content)
+            os.replace(tmp_path, full_path)
+        except OSError:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+    except OSError as exc:
+        logger.debug("local_git: write_worktree_file(%s) failed: %s", rel_path, exc)
+        return False
+    return True
+
+
+def stage_and_commit(
+    paths: list, message: str, author_name: "str | None" = None, author_email: "str | None" = None,
+) -> "dict | None":
+    """`git add -A -- <paths>` then `git commit -m <message>`, returning
+    {"sha","short"} (full + 7-char sha, via `rev-parse HEAD` after a successful
+    commit) on success, or None on ANY failure — including the honest "nothing
+    changed" case (git commit exits non-zero when there is nothing staged, which
+    `_run` already maps to None, so callers can't tell "nothing to commit" from a
+    genuine git error; the route layer re-checks `status_porcelain()` beforehand
+    to give a distinct `reason:"nothing_committed"` in that specific case rather
+    than a bare failure).
+
+    When BOTH `author_name` and `author_email` are given, they're passed as
+    `-c user.name=<name> -c user.email=<email>` BEFORE the `commit` subcommand
+    (config-style overrides, not `--author=`) so the SAME identity also becomes the
+    COMMITTER — this makes a commit succeed (and be attributed correctly) even on a
+    box with no git identity configured at all, which `--author` alone would not
+    fix (git still needs a committer identity to make the commit in the first
+    place). When either is missing, falls through to whatever identity the repo/
+    environment already has configured (unchanged behavior, no override).
+
+    `paths` must be a non-empty list of repo-relative paths; each is checked with
+    `_safe_rel_path` — a single unsafe path fails the WHOLE call (None), rather than
+    silently skipping just that one path."""
+    if not isinstance(paths, list) or not paths:
+        return None
+    if not all(_safe_rel_path(p) for p in paths):
+        return None
+    if not isinstance(message, str) or not message.strip():
+        return None
+    add_out = _run(["add", "-A", "--"] + paths)
+    if add_out is None:
+        return None
+    commit_args = []
+    if author_name and author_email:
+        commit_args += [
+            "-c", f"user.name={author_name}",
+            "-c", f"user.email={author_email}",
+        ]
+    commit_args += ["commit", "-m", message]
+    commit_out = _run(commit_args)
+    if commit_out is None:
+        return None
+    sha_out = _run(["rev-parse", "HEAD"])
+    if sha_out is None:
+        return None
+    sha = sha_out.strip()
+    if not _FULL_SHA_RE.match(sha):
+        return None
+    return {"sha": sha, "short": sha[:7]}
+
+
+# `git push` talks to a remote — generous enough for a real (if slow) network round
+# trip, bounded so a hung/unreachable remote never hangs a request indefinitely.
+PUSH_TIMEOUT_SECONDS = 30
+
+# How much of a failed push's stderr to surface to the caller — enough for the
+# actionable line (e.g. "! [rejected] ... (non-fast-forward)"), not a full traceback.
+PUSH_DETAIL_MAX_CHARS = 500
+
+
+def push_current_branch() -> dict:
+    """`git push origin HEAD` — pushes whatever branch is currently checked out to
+    its same-named branch on `origin`, bounded by `PUSH_TIMEOUT_SECONDS` (longer than
+    `GIT_TIMEOUT_SECONDS` since this is the one operation in this module that
+    genuinely talks to a network, not just the local filesystem). Returns
+    {"ok": bool, "detail": str} — `detail` is "" on success, or the trimmed TAIL of
+    stderr (the actionable line is almost always the last one — a rejected push,
+    an auth failure, a missing remote) on failure, capped at
+    PUSH_DETAIL_MAX_CHARS. Never raises: a missing repo dir, no `origin` remote, no
+    upstream configured, auth failure, non-fast-forward rejection, or a timeout all
+    surface as `{"ok": False, "detail": "..."}`, never an exception."""
+    repo_dir = _env_dir()
+    if not repo_dir:
+        return {"ok": False, "detail": "local repository is not configured"}
+    try:
+        result = subprocess.run(
+            ["git", "-C", repo_dir, "push", "origin", "HEAD"],
+            capture_output=True,
+            timeout=PUSH_TIMEOUT_SECONDS,
+            shell=False,
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "detail": "git push timed out"}
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("local_git: push_current_branch failed to run: %s", exc)
+        return {"ok": False, "detail": "git push could not be started"}
+    if result.returncode == 0:
+        return {"ok": True, "detail": ""}
+    stderr_text = (result.stderr or b"").decode("utf-8", errors="ignore").strip()
+    detail = stderr_text[-PUSH_DETAIL_MAX_CHARS:] if stderr_text else f"git push exited {result.returncode}"
+    logger.debug("local_git: push_current_branch exited %s: %s", result.returncode, detail)
+    return {"ok": False, "detail": detail}
+
+
+def branch_info() -> "dict | None":
+    """A summary of where the current branch stands: {"branch", "sha", "ahead",
+    "behind", "remote"}. `branch` is the current branch's short name, or the literal
+    "HEAD" for a detached checkout (`symbolic-ref` fails there, so this falls back
+    to that sentinel rather than returning None for an otherwise-healthy repo).
+    `sha` is the short (7-char) HEAD commit sha. `ahead`/`behind` are the commit
+    counts local HEAD leads/trails its upstream by, via
+    `git rev-list --left-right --count @{u}...HEAD` (left=behind, right=ahead) —
+    BOTH None (not 0) when there is no upstream configured, since "0 ahead, 0
+    behind" would falsely claim the branch IS tracking something. `remote` is the
+    `origin` URL (any host, not just GitHub — unlike `origin_repo()`, this is a
+    raw pass-through for display, not a GitHub-specific parse), or None when no
+    `origin` remote exists. None (the whole function) only when the repository is
+    unavailable or has no commits yet (HEAD doesn't resolve) — every other partial
+    failure (no upstream, no origin) degrades field-by-field instead."""
+    if not available():
+        return None
+    sha_out = _run(["rev-parse", "--short", "HEAD"])
+    if sha_out is None:
+        return None
+    sha = sha_out.strip()
+    branch_out = _run(["symbolic-ref", "--quiet", "--short", "HEAD"])
+    branch = branch_out.strip() if branch_out else "HEAD"
+    ahead, behind = _ahead_behind()
+    remote_out = _run(["remote", "get-url", "origin"])
+    remote = remote_out.strip() if remote_out else None
+    return {"branch": branch, "sha": sha, "ahead": ahead, "behind": behind, "remote": remote}
+
+
+def _ahead_behind() -> "tuple[int | None, int | None]":
+    """(ahead, behind) counts against the configured upstream, via
+    `git rev-list --left-right --count @{u}...HEAD` (left-hand side of `...` is
+    upstream, so its count is BEHIND; right-hand side is HEAD, so its count is
+    AHEAD). (None, None) when there is no upstream configured or the command
+    otherwise fails — deliberately NOT (0, 0), which would misreport an untracked
+    branch as fully in sync."""
+    out = _run(["rev-list", "--left-right", "--count", "@{u}...HEAD"])
+    if out is None:
+        return None, None
+    fields = out.strip().split()
+    if len(fields) != 2 or not all(f.isdigit() for f in fields):
+        return None, None
+    behind, ahead = int(fields[0]), int(fields[1])
+    return ahead, behind
 
 
 def workspace_name() -> "str | None":

@@ -13,9 +13,27 @@
  * at least once in this mount (no background poll from other tabs); an
  * acceptable v1 tradeoff given the endpoint is only cheap to poll while the
  * tab a human is actually looking at.
+ *
+ * Commit/push UI (editor build addendum): a checkbox per row (checked by
+ * default), a single-line growing commit-message input, and a "Commit N
+ * files" button that POSTs only the CHECKED paths — a successful commit
+ * toasts and forces an immediate re-poll (rather than waiting up to 5s for
+ * the interval) so the list reflects the now-clean tree right away. Below
+ * the list, a branch bar (name, "N ahead", Push) — hidden entirely when
+ * GET .../worktree/branch itself reports unavailable, same honest-degrade
+ * contract as the rest of this file.
  */
 import { useEffect, useRef, useState } from "react";
-import { fetchWorktreeChanges, type WorktreeChangedFile, type WorktreeChangesPayload } from "./worktreeApi";
+import { useToast } from "../../components/ui";
+import {
+  commitWorktree,
+  fetchWorktreeBranch,
+  fetchWorktreeChanges,
+  pushWorktree,
+  type WorktreeBranchPayload,
+  type WorktreeChangedFile,
+  type WorktreeChangesPayload,
+} from "./worktreeApi";
 
 const POLL_MS = 5000;
 
@@ -51,28 +69,95 @@ function CountBadge({ additions, deletions }: { additions: number | null; deleti
   );
 }
 
+function BranchBar({ cid }: { cid: string }) {
+  const toast = useToast();
+  const [branch, setBranch] = useState<WorktreeBranchPayload | null>(null);
+  const [pushing, setPushing] = useState(false);
+  const token = useRef(0);
+
+  const load = () => {
+    const myToken = ++token.current;
+    fetchWorktreeBranch(cid).then((data) => {
+      if (myToken !== token.current) return;
+      setBranch(data);
+    });
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cid]);
+
+  if (!branch || !branch.available) return null;
+
+  const onPush = () => {
+    setPushing(true);
+    pushWorktree(cid).then((res) => {
+      setPushing(false);
+      if (res.ok) {
+        toast(res.detail || "Pushed", "ok");
+        load();
+      } else {
+        toast(res.detail || "Push failed", "danger");
+      }
+    });
+  };
+
+  return (
+    <div className="cs-branch-bar">
+      <span className="cs-branch-name mono">{branch.branch}</span>
+      {branch.ahead ? <span className="cs-branch-ahead">{branch.ahead} ahead</span> : null}
+      <span className="grow" />
+      <button type="button" className="cs-branch-push-btn" onClick={onPush} disabled={pushing || !branch.ahead}>
+        {pushing ? "Pushing…" : "Push"}
+      </button>
+    </div>
+  );
+}
+
 export function ChangesTab({ cid, selectedPath, onOpenChange, onDirtyCountChange }: ChangesTabProps) {
+  const toast = useToast();
   const [payload, setPayload] = useState<WorktreeChangesPayload | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [message, setMessage] = useState("");
+  const [committing, setCommitting] = useState(false);
   const token = useRef(0);
   const onDirtyCountChangeRef = useRef(onDirtyCountChange);
   onDirtyCountChangeRef.current = onDirtyCountChange;
 
+  const poll = () => {
+    const myToken = token.current;
+    fetchWorktreeChanges(cid).then((data) => {
+      if (myToken !== token.current) return;
+      setPayload(data);
+      onDirtyCountChangeRef.current?.(data.available ? (data.files ?? []).length : 0);
+      // Default every NEW file to checked; drop any that are no longer dirty
+      // (committed/reverted elsewhere) so a stale checkbox never lingers.
+      setChecked((prev) => {
+        const files = data.files ?? [];
+        const next = new Set<string>();
+        files.forEach((f) => {
+          if (!prev.size || prev.has(f.path)) next.add(f.path);
+        });
+        return next;
+      });
+    });
+  };
+
   useEffect(() => {
     let cancelled = false;
     const myToken = ++token.current;
-    const poll = () => {
-      fetchWorktreeChanges(cid).then((data) => {
-        if (cancelled || myToken !== token.current) return;
-        setPayload(data);
-        onDirtyCountChangeRef.current?.(data.available ? (data.files ?? []).length : 0);
-      });
+    const tick = () => {
+      if (cancelled || myToken !== token.current) return;
+      poll();
     };
-    poll();
-    const id = window.setInterval(poll, POLL_MS);
+    tick();
+    const id = window.setInterval(tick, POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cid]);
 
   if (!payload) {
@@ -94,32 +179,88 @@ export function ChangesTab({ cid, selectedPath, onOpenChange, onDirtyCountChange
   const files = payload.files ?? [];
   const summary = payload.summary ?? { files: 0, additions: 0, deletions: 0 };
 
-  if (!files.length) {
-    return <div className="none" style={{ padding: 10 }}>Working tree clean — everything is committed.</div>;
-  }
+  const toggleChecked = (path: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  };
+
+  const checkedPaths = files.map((f) => f.path).filter((p) => checked.has(p));
+
+  const onCommit = () => {
+    if (!checkedPaths.length || !message.trim()) return;
+    setCommitting(true);
+    commitWorktree(cid, checkedPaths, message.trim()).then((res) => {
+      setCommitting(false);
+      if (res.ok) {
+        toast("Committed " + res.short, "ok");
+        setMessage("");
+        poll();
+      } else {
+        toast("Nothing to commit", "warn");
+      }
+    });
+  };
 
   return (
     <div className="cs-changes">
-      <div className="cs-changes-summary">
-        <span>{summary.files} file{summary.files === 1 ? "" : "s"} changed</span>
-        <span className="a">+{summary.additions}</span>
-        <span className="d">−{summary.deletions}</span>
-      </div>
-      <div className="cs-changes-list">
-        {files.map((f) => (
-          <div
-            key={f.path}
-            className={"cs-changes-row" + (f.path === selectedPath ? " on" : "")}
-            onClick={() => onOpenChange(f.path)}
-            title={statusLabel(f.status)}
-          >
-            <span className={"cs-changes-badge " + f.status.replace("?", "u")}>{f.status}</span>
-            <span className="cs-changes-path mono">{f.path}</span>
-            <span className="grow" />
-            <CountBadge additions={f.additions} deletions={f.deletions} />
+      <BranchBar cid={cid} />
+      {!files.length ? (
+        <div className="none" style={{ padding: 10 }}>Working tree clean — everything is committed.</div>
+      ) : (
+        <>
+          <div className="cs-changes-summary">
+            <span>{summary.files} file{summary.files === 1 ? "" : "s"} changed</span>
+            <span className="a">+{summary.additions}</span>
+            <span className="d">−{summary.deletions}</span>
           </div>
-        ))}
-      </div>
+          <div className="cs-changes-list">
+            {files.map((f) => (
+              <div
+                key={f.path}
+                className={"cs-changes-row" + (f.path === selectedPath ? " on" : "")}
+                onClick={() => onOpenChange(f.path)}
+                title={statusLabel(f.status)}
+              >
+                <input
+                  type="checkbox"
+                  className="cs-changes-row-check"
+                  checked={checked.has(f.path)}
+                  onChange={() => toggleChecked(f.path)}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={"Include " + f.path + " in the next commit"}
+                />
+                <span className={"cs-changes-badge " + f.status.replace("?", "u")}>{f.status}</span>
+                <span className="cs-changes-path mono">{f.path}</span>
+                <span className="grow" />
+                <CountBadge additions={f.additions} deletions={f.deletions} />
+              </div>
+            ))}
+          </div>
+          <div className="cs-changes-commit">
+            <textarea
+              className="cs-commit-msg"
+              rows={1}
+              placeholder="Commit message"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+            />
+            <div className="cs-commit-row">
+              <span className="grow" />
+              <button
+                type="button"
+                className="cs-commit-btn"
+                onClick={onCommit}
+                disabled={committing || !checkedPaths.length || !message.trim()}
+              >
+                {committing ? "Committing…" : "Commit " + checkedPaths.length + " file" + (checkedPaths.length === 1 ? "" : "s")}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -27,12 +27,14 @@ import {
   ContentPaneChrome,
 } from "../shared/browseTree";
 import { useBrowseTree } from "../shared/useBrowseTree";
+import { getCachedBlob, isCacheableSha, putCachedBlob } from "./blobCache";
 import { Breadcrumbs } from "./Breadcrumbs";
 import { CodeSpaceLanding } from "./CodeSpaceLanding";
 import type { CodeThreadSummary } from "./codespaceTypes";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { isLineSelected, rangeFrom, singleLine, type LineSelection } from "./gutter";
 import { HistoryPanel } from "./HistoryPanel";
+import { LazyEditorPane } from "./LazyEditorPane";
 import { MdRenderedPane } from "./MdRenderedPane";
 import { recordFileView } from "./recentFiles";
 import { RecentFilesDropdown } from "./RecentFilesDropdown";
@@ -40,7 +42,7 @@ import { IdentifierTokens } from "./symbols/IdentifierTokens";
 import { SymbolSearch } from "./symbols/SymbolSearch";
 import { ThreadRail, type RailTab } from "./ThreadRail";
 import { usePaneWidths } from "./usePaneWidths";
-import { fetchWorktreeChanges } from "./worktreeApi";
+import { fetchWorktreeChanges, fetchWorktreeFile, type WorktreeFilePayload } from "./worktreeApi";
 import { WorktreeDiffPane } from "./WorktreeDiffPane";
 import "./codespace.css";
 
@@ -99,6 +101,40 @@ export function CodeSpacePage() {
 
   const { dirCache, expanded, rows, toggleDir, retryDir, filePayload, fileError, fileLoading } = useBrowseTree(cid || "", gitRef, path);
 
+  // sha-keyed blob cache (blobCache.ts) — FAST loading for ref-PINNED reads
+  // only (gitRef is a real immutable commit sha, e.g. after opening History
+  // — isCacheableSha rejects "HEAD" and branch names, which are moving refs
+  // and must always hit the network). Two independent effects:
+  //  - write-through: every real filePayload that lands under a cacheable
+  //    sha gets stored, keyed by (cid, sha, path).
+  //  - read-through fast-path: BEFORE the network fetch resolves (while
+  //    useBrowseTree's fileLoading is true), a cache hit paints instantly
+  //    into cachedPreview; the render below prefers the real filePayload
+  //    once it arrives and otherwise falls back to this preview so a
+  //    previously-viewed pinned file never re-shows a loading skeleton.
+  const [cachedPreview, setCachedPreview] = useState<{ path: string; ref: string; content?: string; truncated: boolean; binary: boolean } | null>(null);
+  useEffect(() => {
+    if (!filePayload || !isCacheableSha(gitRef)) return;
+    putCachedBlob(cid || "", gitRef, filePayload.path, {
+      content: filePayload.content,
+      truncated: !!filePayload.truncated,
+      binary: !!filePayload.binary,
+    });
+  }, [cid, gitRef, filePayload]);
+  useEffect(() => {
+    setCachedPreview(null);
+    if (!cid || !path || !isCacheableSha(gitRef)) return;
+    let cancelled = false;
+    getCachedBlob(cid, gitRef, path).then((hit) => {
+      if (cancelled || !hit) return;
+      setCachedPreview({ path, ref: gitRef, content: hit.content, truncated: hit.truncated, binary: hit.binary });
+    });
+    return () => { cancelled = true; };
+  }, [cid, gitRef, path]);
+  // Only used while the real fetch hasn't landed yet for THIS (ref, path) —
+  // the instant filePayload arrives it's preferred outright, cache or not.
+  const showCachedPreview = !filePayload && fileLoading && cachedPreview && cachedPreview.path === path && cachedPreview.ref === gitRef;
+
   const [selection, setSelection] = useState<LineSelection | null>(null);
   const [composerOpen, setComposerOpen] = useState(false);
   // Item 2 — true when the open composer's {start:1,end:1} selection is the
@@ -136,6 +172,38 @@ export function CodeSpacePage() {
     });
     return () => { cancelled = true; };
   }, [cid]);
+
+  // Edit toggle (Item 3, editor build) — a pencil/eye affordance in the file
+  // header that swaps the read-only viewer for EditorPane. Only offered when
+  // the container is LOCAL-binding (worktreeAvailable, same signal History
+  // uses) AND the human is viewing the worktree/default state of the file
+  // (gitRef === "HEAD" — anything else is a pinned historical sha, which is
+  // read-only by definition: there's no "save" for a past commit). Resets to
+  // view mode on every file switch so opening a new file never inherits the
+  // previous file's edit state. editorDirty drives the toggle's dirty dot;
+  // editorContent/editorHash hold the FRESH worktree read fetched the moment
+  // Edit is flipped on (never the ref-pinned filePayload/blobCache path —
+  // those are for immutable committed reads only, per worktreeApi.ts's doc).
+  const [editMode, setEditMode] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [editorFile, setEditorFile] = useState<WorktreeFilePayload | null>(null);
+  const canEdit = worktreeAvailable && gitRef === "HEAD" && !!path;
+  useEffect(() => {
+    setEditMode(false);
+    setEditorDirty(false);
+    setEditorFile(null);
+  }, [path, cid]);
+
+  const enterEditMode = useCallback(() => {
+    if (!cid || !path) return;
+    setEditorFile(null);
+    setEditMode(true);
+    fetchWorktreeFile(cid, path).then((data) => setEditorFile(data));
+  }, [cid, path]);
+
+  const exitEditMode = useCallback(() => {
+    setEditMode(false);
+  }, []);
 
   // Item 1 — Raw|Rendered toggle: Rendered is the default ONLY for .md files;
   // every other extension only ever sees Raw (the toggle itself is hidden for
@@ -505,6 +573,29 @@ export function CodeSpacePage() {
                   onSearchSymbols={focusSymbolSearch}
                   onFocusTree={focusTree}
                 />
+              ) : showCachedPreview ? (
+                // blobCache.ts fast-path — a previously-viewed, ref-PINNED
+                // (immutable sha) file paints instantly from IndexedDB while
+                // the network re-fetch (still fired, for correctness) is in
+                // flight, instead of the skeleton below. Reuses the SAME
+                // read-only chrome/body a real filePayload renders — no
+                // gutter-affordance/thread-anchor differences, this is
+                // purely a perceived-latency win for immutable content.
+                <ContentPaneChrome
+                  gitRef={cachedPreview!.ref}
+                  payload={{ ref: cachedPreview!.ref, path: cachedPreview!.path, content: cachedPreview!.content, size: (cachedPreview!.content ?? "").length, truncated: cachedPreview!.truncated, binary: cachedPreview!.binary }}
+                  htmlUrl={htmlUrl}
+                  headerExtra={<Breadcrumbs path={path} onOpenDir={openDirInTree} />}
+                >
+                  <div className="rb-code mono">
+                    {(cachedPreview!.content ?? "").split("\n").map((line, i) => (
+                      <div key={i + 1} className="cs-line" data-cs-line={i + 1}>
+                        <span className="cs-gutter">{i + 1}</span>
+                        <span className="cs-line-text">{line}</span>
+                      </div>
+                    ))}
+                  </div>
+                </ContentPaneChrome>
               ) : fileLoading || (filePayload && filePayload.path !== path) ? (
                 // BUG 3 root-cause fix — the old guard (fileLoading &&
                 // !filePayload) only blocked stale content on the very
@@ -551,7 +642,7 @@ export function CodeSpacePage() {
                           ) : null}
                         </span>
                       ) : null}
-                      {isMd ? (
+                      {!editMode && isMd ? (
                         <>
                           {viewMode === "rendered" ? (
                             <button
@@ -581,10 +672,38 @@ export function CodeSpacePage() {
                           </div>
                         </>
                       ) : null}
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          className={"cs-edit-toggle-btn" + (editMode ? " on" : "")}
+                          onClick={editMode ? exitEditMode : enterEditMode}
+                          title={editMode ? "Stop editing" : "Edit this file"}
+                          aria-pressed={editMode}
+                        >
+                          {editMode ? "\u{1F441}" : "✏️"}
+                          {editorDirty ? <span className="cs-edit-dirty-dot" aria-label="Unsaved changes" /> : null}
+                        </button>
+                      ) : null}
                     </>
                   }
                 >
-                  {isMd && viewMode === "rendered" ? (
+                  {editMode ? (
+                    !editorFile ? (
+                      <div className="none" style={{ padding: 10 }}>Loading file…</div>
+                    ) : !editorFile.available ? (
+                      <div className="none" style={{ padding: 10 }}>{editorFile.detail || "Editing is unavailable."}</div>
+                    ) : editorFile.binary ? (
+                      <div className="muted" style={{ padding: 10, fontSize: 13 }}>Binary file — editing isn't supported.</div>
+                    ) : (
+                      <LazyEditorPane
+                        cid={cid}
+                        path={path}
+                        initialContent={editorFile.content ?? ""}
+                        contentHash={editorFile.content_hash ?? null}
+                        onDirty={setEditorDirty}
+                      />
+                    )
+                  ) : isMd && viewMode === "rendered" ? (
                     <MdRenderedPane
                       content={filePayload.content ?? ""}
                       onDiscussHeading={onDiscussHeading}
