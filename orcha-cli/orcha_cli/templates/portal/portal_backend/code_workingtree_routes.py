@@ -45,6 +45,8 @@ unsafe path is the one case that legitimately gets a 400, matching the existing
 `path is required` 400s in this module).
 """
 
+import time
+
 from fastapi import HTTPException, Query, Request
 
 from portal_backend import local_git
@@ -112,6 +114,41 @@ def _require_local_binding(cur, cid: str, request: Request):
     return True, None
 
 
+
+
+# ---- short-TTL read cache -----------------------------------------------------
+# Working-tree reads run real git against a bind mount — on Docker-for-Mac a
+# `status` + per-file untracked numstat over a large repo takes SECONDS (it can
+# even hit local_git's own 20s subprocess timeout), and the Code Space page plus
+# the Changes tab's poll hit these routes on every mount/tab switch. A short TTL
+# absorbs that fan-in; any successful WRITE through this module (PUT file,
+# commit) invalidates the cid's entries so the next read is honest. Push doesn't
+# change the working tree but DOES change ahead/behind — it invalidates too.
+_WORKTREE_CACHE: dict = {}
+_CHANGES_TTL_SECONDS = 10.0
+_BRANCH_TTL_SECONDS = 30.0
+
+
+def _cache_get(kind: str, cid: str, ttl: float):
+    hit = _WORKTREE_CACHE.get((kind, cid))
+    if not hit:
+        return None
+    ts, payload = hit
+    if time.monotonic() - ts > ttl:
+        return None
+    return payload
+
+
+def _cache_put(kind: str, cid: str, payload: dict) -> dict:
+    _WORKTREE_CACHE[(kind, cid)] = (time.monotonic(), payload)
+    return payload
+
+
+def _cache_invalidate(cid: str) -> None:
+    for key in [k for k in _WORKTREE_CACHE if k[1] == cid]:
+        _WORKTREE_CACHE.pop(key, None)
+
+
 @app.get("/api/containers/{cid}/code/worktree/changes")
 def get_worktree_changes(cid: str, request: Request):
     """The dirty working tree, summarized: every file that differs from HEAD (tracked
@@ -131,6 +168,9 @@ def get_worktree_changes(cid: str, request: Request):
         is_local, degrade = _require_local_binding(cur, cid, request)
     if not is_local:
         return degrade
+    cached = _cache_get("changes", cid, _CHANGES_TTL_SECONDS)
+    if cached is not None:
+        return cached
     status_entries = local_git.status_porcelain()
     if status_entries is None:
         return {
@@ -161,12 +201,12 @@ def get_worktree_changes(cid: str, request: Request):
         if entry["status"] == "R" and entry.get("orig_path"):
             row["orig_path"] = entry["orig_path"]
         files.append(row)
-    return {
+    return _cache_put("changes", cid, {
         "available": True,
         "dirty": bool(files),
         "files": files,
         "summary": {"files": len(files), "additions": total_additions, "deletions": total_deletions},
-    }
+    })
 
 
 @app.get("/api/containers/{cid}/code/worktree/diff")
@@ -335,6 +375,7 @@ def put_worktree_file(cid: str, body: WorktreeFileWrite, request: Request):
     if not local_git.write_worktree_file(clean_path, encoded):
         return {"available": True, "ok": False, "reason": "write_failed"}
     new_hash = local_git.worktree_file_hash(clean_path)
+    _cache_invalidate(cid)
     return {"available": True, "ok": True, "content_hash": new_hash}
 
 
@@ -373,6 +414,7 @@ def post_worktree_commit(cid: str, body: WorktreeCommitCreate, request: Request)
         clean_paths, message, author_name=body.author_name, author_email=body.author_email)
     if result is None:
         return {"available": True, "ok": False, "reason": "nothing_committed"}
+    _cache_invalidate(cid)
     return {"available": True, "ok": True, "sha": result["sha"], "short": result["short"]}
 
 
@@ -388,6 +430,7 @@ def post_worktree_push(cid: str, request: Request):
     if not is_local:
         return degrade
     result = local_git.push_current_branch()
+    _cache_invalidate(cid)
     return {"available": True, "ok": result["ok"], "detail": result["detail"]}
 
 
@@ -405,13 +448,32 @@ def get_worktree_branch(cid: str, request: Request):
         is_local, degrade = _require_local_binding(cur, cid, request)
     if not is_local:
         return degrade
+    cached = _cache_get("branch", cid, _BRANCH_TTL_SECONDS)
+    if cached is not None:
+        return cached
     info = local_git.branch_info()
     if info is None:
         return {
             "available": False, "reason": "not_found",
             "detail": "the local repository has no commits yet",
         }
-    return {
+    return _cache_put("branch", cid, {
         "available": True, "branch": info["branch"], "sha": info["sha"],
         "ahead": info["ahead"], "behind": info["behind"], "remote": info["remote"],
-    }
+    })
+
+
+@app.get("/api/containers/{cid}/code/worktree/available")
+def get_worktree_available(cid: str, request: Request):
+    """The CHEAP yes/no the Code Space page needs on mount: "is this a local-binding
+    container with a usable working tree?" — binding lookup + `local_git.available()`
+    (env dir + git binary present), NO git subprocess against the tree. The page's
+    edit/History gating used to probe /worktree/changes for this, which runs a full
+    `git status` + per-file untracked numstat — seconds on a large repo over a
+    Docker-for-Mac bind mount, serialized on every mount/tab switch. Same membership
+    gate + github_source degrade as every other route in this module."""
+    with db_cursor() as (_, cur):
+        is_local, degrade = _require_local_binding(cur, cid, request)
+    if not is_local:
+        return degrade
+    return {"available": local_git.available()}

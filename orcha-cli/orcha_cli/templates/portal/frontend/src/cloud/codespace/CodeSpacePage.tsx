@@ -42,7 +42,7 @@ import { IdentifierTokens } from "./symbols/IdentifierTokens";
 import { SymbolSearch } from "./symbols/SymbolSearch";
 import { ThreadRail, type RailTab } from "./ThreadRail";
 import { usePaneWidths } from "./usePaneWidths";
-import { fetchWorktreeChanges, fetchWorktreeFile, type WorktreeFilePayload } from "./worktreeApi";
+import { fetchWorktreeFile, type WorktreeFilePayload, fetchWorktreeAvailable } from "./worktreeApi";
 import { WorktreeDiffPane } from "./WorktreeDiffPane";
 import "./codespace.css";
 
@@ -89,6 +89,8 @@ function pulseTreeRow(dirPath: string): void {
   window.setTimeout(() => el.classList.remove("cs-tree-row-pulse"), 900);
 }
 
+const LARGE_FILE_LINES = 1500;
+
 export function CodeSpacePage() {
   const { snap, cid } = useSnapshot();
   const toast = useToast();
@@ -133,6 +135,18 @@ export function CodeSpacePage() {
   }, [cid, gitRef, path]);
   // Only used while the real fetch hasn't landed yet for THIS (ref, path) —
   // the instant filePayload arrives it's preferred outright, cache or not.
+  // Orca-style large-file handling: the hand-rolled read-only pane tokenizes
+  // EVERY line synchronously on every render (highlightLine × N) — fine to a
+  // point, a multi-second main-thread stall past it. Above this threshold the
+  // read-only view swaps to the CM6 editor in readOnly mode instead: virtualized
+  // rendering + incremental highlighting, so a 20k-line file opens instantly.
+  // Tradeoff: thread-gutter anchors aren't offered in that mode (same as edit
+  // mode) — the file is at least instantly READABLE, which wins.
+  const fileLineCount = useMemo(
+    () => (filePayload?.content ? filePayload.content.split("\n").length : 0),
+    [filePayload],
+  );
+
   const showCachedPreview = !filePayload && fileLoading && cachedPreview && cachedPreview.path === path && cachedPreview.ref === gitRef;
 
   const [selection, setSelection] = useState<LineSelection | null>(null);
@@ -166,9 +180,9 @@ export function CodeSpacePage() {
   useEffect(() => {
     if (!cid) return;
     let cancelled = false;
-    fetchWorktreeChanges(cid).then((data) => {
+    fetchWorktreeAvailable(cid).then((available) => {
       if (cancelled) return;
-      setWorktreeAvailable(data.available);
+      setWorktreeAvailable(available);
     });
     return () => { cancelled = true; };
   }, [cid]);
@@ -703,6 +717,15 @@ export function CodeSpacePage() {
                         onDirty={setEditorDirty}
                       />
                     )
+                  ) : !isMd && fileLineCount > LARGE_FILE_LINES ? (
+                    <LazyEditorPane
+                      cid={cid}
+                      path={path}
+                      initialContent={filePayload.content ?? ""}
+                      contentHash={null}
+                      readOnly
+                      onDirty={() => {}}
+                    />
                   ) : isMd && viewMode === "rendered" ? (
                     <MdRenderedPane
                       content={filePayload.content ?? ""}

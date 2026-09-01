@@ -189,3 +189,18 @@ export function fetchFileHistory(
     "/api/containers/" + encodeURIComponent(cid) + "/code/file/history?" + q.toString(),
   );
 }
+
+/** The CHEAP mount-time probe — binding + git presence only, no `git status`
+ *  (GET .../code/worktree/available). The page's edit/History gating used to
+ *  probe /worktree/changes for this yes/no, which runs a full status + per-file
+ *  untracked numstat: seconds on a large repo over a Docker-for-Mac bind mount. */
+export async function fetchWorktreeAvailable(cid: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/containers/${encodeURIComponent(cid)}/code/worktree/available`);
+    if (!res.ok) return false;
+    const data = (await res.json()) as { available?: boolean };
+    return !!data.available;
+  } catch {
+    return false;
+  }
+}

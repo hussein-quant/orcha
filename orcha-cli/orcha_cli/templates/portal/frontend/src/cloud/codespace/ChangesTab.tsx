@@ -35,7 +35,11 @@ import {
   type WorktreeChangesPayload,
 } from "./worktreeApi";
 
-const POLL_MS = 5000;
+// 15s, not 5s: each poll is a real `git status` + numstat on the server —
+// seconds on a big repo over a Docker-for-Mac bind mount (the server also
+// caches for 10s, so faster polling was already a no-op). Skipped entirely
+// while the tab/page is hidden.
+const POLL_MS = 15000;
 
 export interface ChangesTabProps {
   cid: string;
@@ -152,7 +156,10 @@ export function ChangesTab({ cid, selectedPath, onOpenChange, onDirtyCountChange
       poll();
     };
     tick();
-    const id = window.setInterval(tick, POLL_MS);
+    const id = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      tick();
+    }, POLL_MS);
     return () => {
       cancelled = true;
       window.clearInterval(id);
