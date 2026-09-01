@@ -1903,8 +1903,9 @@ async def test_view_submission_with_task_lands_images_on_task_attachments(
     # CI-only failure forensics (this test has failed on the runner while passing
     # locally under identical flags): capture the slack file-filter verdicts and
     # attach-write path at DEBUG so a red run SAYS which gate dropped the image.
-    caplog.set_level(_logging.DEBUG, logger="portal_backend.slack_routes")
+    caplog.set_level(_logging.DEBUG, logger="orcha.slack")
     caplog.set_level(_logging.DEBUG, logger="portal_backend.slack_files")
+    caplog.set_level(_logging.DEBUG)
     r = await client.post("/api/slack/interactions", content=body, headers=headers)
     assert r.status_code == 200, r.text
 
@@ -1914,8 +1915,11 @@ async def test_view_submission_with_task_lands_images_on_task_attachments(
     t = [x for x in listed if x["title"] == "Task with screenshot"][0]
     msgs = (await client.get(f"/api/tasks/{t['id']}/messages")).json()["messages"]
     attach_msgs = [m for m in msgs if m.get("attachments")]
+    on_disk = sorted(str(q.relative_to(att_dir)) for q in att_dir.rglob("*") if q.is_file())
     assert len(attach_msgs) == 1, (
         f"no attachment message landed — messages={msgs!r}\n"
+        f"interactions response body: {r.text!r}\n"
+        f"att_dir files on disk: {on_disk!r}\n"
         f"captured logs:\n{caplog.text}"
     )
     refs = attach_msgs[0]["attachments"]
