@@ -183,6 +183,10 @@ def _resolve_default_branch(repo: str, token: str, cid: str) -> str:
     return branch
 
 
+LOCAL_REF_TTL_SECONDS = 5.0
+_LOCAL_REF_CACHE: dict = {}
+
+
 def _resolve_ref(repo: str, token: str, cid: str, ref) -> str:
     """Turn the caller's `ref` query param into a resolvable ref/sha.
 
@@ -196,9 +200,20 @@ def _resolve_ref(repo: str, token: str, cid: str, ref) -> str:
     rev-parse` on the local path.
     """
     if repo == LOCAL_REPO:
+        # Micro-TTL on the rev-parse: EVERY browse request resolves its ref, and a
+        # git subprocess over a Docker-for-Mac bind mount costs 0.3-3s depending on
+        # page-cache pressure — it was the dominant per-click latency even when the
+        # snapshot served the bytes from memory. HEAD moving up to 5s late in the
+        # BROWSE view is invisible (the worktree/editor surfaces never come through
+        # here); a commit made through the portal lands within one TTL.
+        key = ref or "HEAD"
+        hit = _LOCAL_REF_CACHE.get(key)
+        if hit and time.monotonic() - hit[0] <= LOCAL_REF_TTL_SECONDS:
+            return hit[1]
         sha = local_git.resolve_ref(ref or None)
         if sha is None:
             raise RuntimeError("github_status:404")
+        _LOCAL_REF_CACHE[key] = (time.monotonic(), sha)
         return sha
     if not ref:
         return _resolve_default_branch(repo, token, cid)
