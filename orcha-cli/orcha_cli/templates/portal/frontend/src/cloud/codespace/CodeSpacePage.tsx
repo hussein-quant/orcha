@@ -293,10 +293,17 @@ export function CodeSpacePage() {
   // If the draft backing the CURRENTLY OPEN draft-mode file disappears out
   // from under it (discarded via the drafts bar, or cleared by a successful
   // Propose) drop back to the read-only view rather than leaving a phantom
-  // "editing" toggle on with nothing left to autosave.
+  // "editing" toggle on with nothing left to autosave. Guarded on
+  // `draftExisted`: entering edit mode on a fresh file has NO draft yet (the
+  // first draft is written on the first keystroke's autosave), so without
+  // this the effect would close edit mode the instant the pencil opened it.
+  const draftExistedRef = useRef(false);
   useEffect(() => {
-    if (!draftMode || !path) return;
-    if (drafts.some((d) => d.path === path)) return;
+    if (!draftMode || !path) { draftExistedRef.current = false; return; }
+    const present = drafts.some((d) => d.path === path);
+    if (present) { draftExistedRef.current = true; return; }
+    if (!draftExistedRef.current) return; // never had a draft yet — don't close
+    draftExistedRef.current = false;
     setEditMode(false);
     setDraftMode(false);
     setDraftContent(null);
