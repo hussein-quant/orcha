@@ -173,6 +173,22 @@ object GitHubHubUx {
         return existing + next.filter { it.number !in seen }
     }
 
+    /** The server caps one `…/github/checks` call at this many PR numbers
+     *  (`github_hub_routes.CHECKS_BATCH_MAX_NUMBERS`); a longer request is a 400. */
+    const val CHECKS_BATCH_MAX = 30
+
+    /** Split a page's PR numbers into server-sized batches, order preserved. */
+    fun checksBatches(numbers: List<Int>, max: Int = CHECKS_BATCH_MAX): List<List<Int>> =
+        if (max <= 0 || numbers.isEmpty()) emptyList() else numbers.chunked(max)
+
+    /** Fill list rows' checks from one batch response. Rows are matched by PR number
+     *  (the batch is keyed by the number as a string); a row the batch didn't answer for
+     *  keeps what it had, so a filter change mid-flight can't misattribute a rollup. */
+    fun mergeChecks(pulls: List<GitHubPullRow>, checks: Map<String, GitHubChecks>): List<GitHubPullRow> {
+        if (checks.isEmpty()) return pulls
+        return pulls.map { row -> checks[row.number.toString()]?.let { row.copy(checks = it) } ?: row }
+    }
+
     fun phase(response: GitHubPullDetailResponse): GitHubPullDetailPhase {
         val pull = response.pull
         return if (response.available && pull != null) {

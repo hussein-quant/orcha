@@ -260,3 +260,29 @@ private func mineTurn(seq: Int, content: String) -> TurnDto {
         #expect(!ChatSendFlow.isBlankReply("done — see the log"))
     }
 }
+
+
+// MARK: - start-conversation decode (PR #223 audit)
+
+/// `POST …/conversations` answers `{conversation, created}` with NO `turns` key; the
+/// synthesized decoder threw `keyNotFound`, so the FIRST message to any agent (the
+/// only send that starts a conversation) always landed in the failed-send bubble.
+@Suite struct StartConversationDecodeTests {
+    @Test func postResponseWithoutTurnsDecodes() throws {
+        let response = try JSONDecoder().decode(ConversationResponse.self, from: Data("""
+        {"conversation": {"id": "c-1", "status": "active"}, "created": true}
+        """.utf8))
+        #expect(response.conversation?.id == "c-1")
+        #expect(response.turns.isEmpty)
+    }
+
+    @Test func getResponseWithTurnsStillDecodes() throws {
+        let response = try JSONDecoder().decode(ConversationResponse.self, from: Data("""
+        {"conversation": {"id": "c-1"}, "turns": [{"id": "t1", "seq": 1, "role": "human", "content": "hi"}]}
+        """.utf8))
+        #expect(response.turns.map(\.content) == ["hi"])
+        let none = try JSONDecoder().decode(ConversationResponse.self,
+            from: Data(#"{"conversation": null, "turns": []}"#.utf8))
+        #expect(none.conversation == nil && none.turns.isEmpty)
+    }
+}

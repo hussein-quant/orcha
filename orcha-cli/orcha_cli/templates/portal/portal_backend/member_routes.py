@@ -140,20 +140,46 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
             raise HTTPException(
                 409, f"GitHub user '{body.github_login}' is already a member"
             )
-        try:
+        # Re-inviting a REMOVED member. Removal is a retire, never a hard delete (the
+        # audit trail and thread attribution keep pointing at the row) — and BOTH
+        # uniqueness guards (agents.container_id+alias, the 036 lower(github_login)
+        # partial index) still match that retired row, so a fresh INSERT would 409
+        # forever and lock the login out of the project. Reactivate the same row
+        # instead: one stable identity per login per project; the role comes from
+        # THIS invite, grants start empty, and the presence stamp resets so the
+        # roster shows them as pending until they arrive again.
+        cur.execute(
+            """SELECT id FROM agents
+               WHERE container_id=%s AND kind='human'
+                 AND lower(github_login)=lower(%s) AND terminated_at IS NOT NULL
+               ORDER BY terminated_at DESC LIMIT 1""",
+            (cid, body.github_login),
+        )
+        retired = cur.fetchone()
+        if retired:
             cur.execute(
-                f"""INSERT INTO agents
-                       (container_id, alias, role, kind, github_login, member_role)
-                   VALUES (%s, %s, 'collaborator', 'human', %s, %s)
-                   RETURNING {_MEMBER_FIELDS}""",
-                (cid, body.github_login, body.github_login, body.role),
+                f"""UPDATE agents
+                       SET terminated_at=NULL, status='idle', member_role=%s,
+                           grants='[]'::jsonb, last_heartbeat_at=NULL
+                     WHERE id=%s
+                 RETURNING {_MEMBER_FIELDS}""",
+                (body.role, retired["id"]),
             )
-        except psycopg.errors.UniqueViolation:
-            raise HTTPException(
-                409,
-                f"'{body.github_login}' is already a member "
-                "(or the alias is taken) in this container",
-            )
+        else:
+            try:
+                cur.execute(
+                    f"""INSERT INTO agents
+                           (container_id, alias, role, kind, github_login, member_role)
+                       VALUES (%s, %s, 'collaborator', 'human', %s, %s)
+                       RETURNING {_MEMBER_FIELDS}""",
+                    (cid, body.github_login, body.github_login, body.role),
+                )
+            except psycopg.errors.UniqueViolation:
+                raise HTTPException(
+                    409,
+                    f"'{body.github_login}' is already a member "
+                    "(or the alias is taken) in this container",
+                )
         member = cur.fetchone()
         log_event(
             cur,
@@ -163,7 +189,8 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
             "agent",
             str(member["agent_id"]),
             "member_invited",
-            {"github_login": body.github_login, "role": body.role},
+            {"github_login": body.github_login, "role": body.role,
+             "reactivated": bool(retired)},
         )
         conn.commit()
     return member

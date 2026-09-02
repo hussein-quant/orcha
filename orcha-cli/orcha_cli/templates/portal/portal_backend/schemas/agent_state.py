@@ -57,16 +57,19 @@ class AgentUpdate(BaseModel):
 
 class AutoWakeUpdate(BaseModel):
     """#266: set/clear an agent's clock-driven AUTO-WAKE cadence. HUMAN-AUTHORITY gated.
-    `interval_secs` is REQUIRED but NULLABLE — send an int (>=60s floor) to enable a recurring
-    heartbeat wake, or null to DISABLE (opt-out). Unlike a partial PATCH (where an omitted field
-    means 'unchanged'), the value is always explicit here, so null unambiguously means 'disable'
-    rather than 'don't touch'. The 60s floor + nullability are also enforced by the DB CHECK."""
+    `interval_secs` is NULLABLE — send an int (>=60s floor) to enable a recurring heartbeat
+    wake, or null to DISABLE (opt-out). Unlike a partial PATCH (where an omitted field means
+    'unchanged'), there is no 'don't touch' here: null AND an OMITTED key both mean 'disable'.
+    Omission must equal null because both phone clients' JSON layers drop null-valued keys
+    (iOS `compactMapValues`, Android `explicitNulls=false`) — with the key required, "Auto-wake:
+    Off" was a 422 from every phone. The 60s floor + nullability are also enforced by the DB
+    CHECK."""
 
     actor_agent_id: str
     interval_secs: Optional[int] = Field(
-        ...,
+        None,
         ge=60,
-        description="seconds between clock-driven auto-wakes (>=60s floor); null disables auto-wake",
+        description="seconds between clock-driven auto-wakes (>=60s floor); null or omitted disables auto-wake",
     )
 
 

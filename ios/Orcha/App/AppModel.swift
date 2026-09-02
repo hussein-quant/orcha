@@ -1007,7 +1007,7 @@ final class AppModel {
             return .failed("No workspace is open — close this and try again.")
         }
         do {
-            return RepoConnect.phase(from: try await api.githubRepos(sel.baseUrl))
+            return RepoConnect.phase(from: try await api.githubRepos(sel.baseUrl, cid: sel.id))
         } catch {
             return .failed(friendly(error))
         }

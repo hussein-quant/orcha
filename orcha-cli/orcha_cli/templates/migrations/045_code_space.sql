@@ -18,7 +18,7 @@
 --                  request/respond lifecycle so the request itself flips to 'answered' too).
 --   * resolved   — a human explicitly resolved it via POST .../messages {resolve:true}.
 -- ADD-only; applied on portal boot by the migration runner (no wipe), exactly like 044.
-CREATE TABLE code_threads (
+CREATE TABLE IF NOT EXISTS code_threads (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     container_id        UUID NOT NULL REFERENCES containers(id),
     repo                TEXT NOT NULL,          -- "owner/name", mirrors containers.github_repo at creation time
@@ -42,16 +42,16 @@ CREATE TABLE code_threads (
     CHECK (end_line >= start_line)
 );
 
-CREATE INDEX code_threads_container_ref_path_idx ON code_threads (container_id, ref, path);
-CREATE INDEX code_threads_container_status_idx ON code_threads (container_id, status);
-CREATE INDEX code_threads_request_id_idx ON code_threads (request_id) WHERE request_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS code_threads_container_ref_path_idx ON code_threads (container_id, ref, path);
+CREATE INDEX IF NOT EXISTS code_threads_container_status_idx ON code_threads (container_id, status);
+CREATE INDEX IF NOT EXISTS code_threads_request_id_idx ON code_threads (request_id) WHERE request_id IS NOT NULL;
 
 -- One conversation, N messages. The thread's own first message is inserted alongside the
 -- thread row (creation body); every reply after that appends here. `author_agent_id` NULL +
 -- `is_human` true would be a contradiction for an agent-authored row, so `is_human` is kept
 -- as an explicit flag (not derived from agents.kind) so a message survives even if the
 -- authoring agent row is later deleted/anonymized — mirrors task_messages' shape.
-CREATE TABLE code_thread_messages (
+CREATE TABLE IF NOT EXISTS code_thread_messages (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     thread_id         UUID NOT NULL REFERENCES code_threads(id),
     author_agent_id   UUID REFERENCES agents(id),
@@ -60,4 +60,4 @@ CREATE TABLE code_thread_messages (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX code_thread_messages_thread_id_idx ON code_thread_messages (thread_id, created_at);
+CREATE INDEX IF NOT EXISTS code_thread_messages_thread_id_idx ON code_thread_messages (thread_id, created_at);

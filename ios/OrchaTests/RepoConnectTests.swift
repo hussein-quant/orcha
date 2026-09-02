@@ -39,6 +39,15 @@ import Testing
 
     // ---------- GET /api/github/repos ----------
 
+    @Test func reposPathScopesToTheSelectedProjectViaCid() {
+        // The server reads a project's saved PAT ONLY when `cid` is passed (the React
+        // client always sends it); an unscoped call lists nothing for a PAT-only project.
+        let api = OrchaApiClient()
+        #expect(api.githubReposPath(cid: nil) == "/api/github/repos")
+        #expect(api.githubReposPath(cid: "c1") == "/api/github/repos?cid=c1")
+        #expect(api.githubReposPath(cid: "a b/c") == "/api/github/repos?cid=a%20b%2Fc")
+    }
+
     @Test func reposResponseDecodesTheAvailableShape() throws {
         let response = try decode(GithubReposResponse.self, """
         {"available": true, "repos": [

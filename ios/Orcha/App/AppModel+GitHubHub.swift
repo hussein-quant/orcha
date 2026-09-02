@@ -64,6 +64,7 @@ extension AppModel {
             let response = try await fetchGithubPulls(sel, filter: filter, page: 1)
             githubInvolvementUnavailableDetail = GitHubHubUx.involvementUnavailableDetail(response)
             githubPullsPhase = GitHubHubUx.phase(from: response)
+            fillGithubChecks(for: response.pulls)
         } catch let error as OrchaApiError where error.status == 404 {
             githubPullsPhase = .unavailable(reason: "repo_not_connected", detail: nil)
         } catch {
@@ -90,6 +91,7 @@ extension AppModel {
             githubPullsPhase = response.available
                 ? .loaded(repo: response.repo ?? repo, pulls: merged, page: info)
                 : .unavailable(reason: response.reason, detail: response.detail)
+            fillGithubChecks(for: response.pulls)
         } catch let error as OrchaApiError where error.status == 404 {
             // Restore the page the user was already looking at rather than
             // dropping it behind a friendly-off screen for a load-more hiccup.
@@ -97,6 +99,38 @@ extension AppModel {
         } catch {
             githubPullsPhase = .loaded(repo: repo, pulls: pulls, page: page)
             self.error = friendly(error) // surfaces via the app-wide error banner, list stays put
+        }
+    }
+
+    /// Progressive fill of the list's checks chips. The PR list ships `checks: null`
+    /// on every row (the server's lazy split — one GitHub call per PR is too slow
+    /// inline; the portal fills the same way), so once a page lands, batch its PR
+    /// numbers through `…/github/checks` and merge the rollups into whatever phase is
+    /// current. Fire-and-forget: a failed batch (or an older server's 404) just leaves
+    /// those chips hidden, exactly as before this fill existed.
+    func fillGithubChecks(for pulls: [GitHubPullRow]) {
+        guard let sel = selectedContainer else { return }
+        let numbers = pulls.map(\.number)
+        guard !numbers.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            for batch in GitHubHubUx.checksBatches(numbers) {
+                guard let response = try? await self.api.githubChecks(sel.baseUrl, sel.id, numbers: batch),
+                      response.available, !response.checks.isEmpty
+                else { continue }
+                self.applyGithubChecks(response.checks)
+            }
+        }
+    }
+
+    private func applyGithubChecks(_ checks: [String: GitHubChecks]) {
+        switch githubPullsPhase {
+        case let .loaded(repo, pulls, page):
+            githubPullsPhase = .loaded(repo: repo, pulls: GitHubHubUx.mergeChecks(pulls, checks), page: page)
+        case let .loadingMore(repo, pulls, page):
+            githubPullsPhase = .loadingMore(repo: repo, pulls: GitHubHubUx.mergeChecks(pulls, checks), page: page)
+        default:
+            break
         }
     }
 

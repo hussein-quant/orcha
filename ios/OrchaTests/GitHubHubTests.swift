@@ -16,9 +16,13 @@ import Testing
     // ---------- GET …/github/issues ----------
 
     @Test func issuesResponseDecodesTheAvailableShape() throws {
+        // The REAL shape `github_hub_routes._labels()` emits: {name, color} objects,
+        // color = GitHub's bare hex, or null on a colorless label.
         let response = try decode(GitHubIssuesResponse.self, """
         {"available": true, "repo": "owner/name", "issues": [
-            {"number": 7, "title": "Bug", "labels": ["bug", "p1"], "assignee": "octocat",
+            {"number": 7, "title": "Bug",
+             "labels": [{"name": "bug", "color": "d73a4a"}, {"name": "p1", "color": null}],
+             "assignee": "octocat",
              "updated_at": "2026-07-01T00:00:00Z",
              "html_url": "https://github.com/owner/name/issues/7",
              "body_excerpt": "first 200 chars"}
@@ -29,10 +33,36 @@ import Testing
         let issue = try #require(response.issues.first)
         #expect(issue.number == 7)
         #expect(issue.title == "Bug")
-        #expect(issue.labels == ["bug", "p1"])
+        #expect(issue.labels == [GitHubLabel(name: "bug", color: "d73a4a"), GitHubLabel(name: "p1")])
+        #expect(issue.labels.first?.rgb == 0xD73A4A)
+        #expect(issue.labels.last?.rgb == nil)
         #expect(issue.assignee == "octocat")
         #expect(issue.htmlUrl == "https://github.com/owner/name/issues/7")
         #expect(issue.bodyExcerpt == "first 200 chars")
+    }
+
+    @Test func issueLabelsTolerateTheLegacyBareStringShape() throws {
+        // An older self-host server still sends plain names — one list, both shapes,
+        // must decode (the pre-fix `[String]` decoder failed the WHOLE issue list on
+        // the first labeled issue from a current server).
+        let response = try decode(GitHubIssuesResponse.self, """
+        {"available": true, "repo": "o/n", "issues": [
+            {"number": 1, "title": "Old", "labels": ["bug", "p1"]},
+            {"number": 2, "title": "New", "labels": [{"name": "bug", "color": "#d73a4a"}]},
+            {"number": 3, "title": "Mixed", "labels": ["legacy", {"name": "typed", "color": "  "}]}
+        ]}
+        """)
+        #expect(response.issues.map { $0.labels.map(\.name) } == [["bug", "p1"], ["bug"], ["legacy", "typed"]])
+        #expect(response.issues[0].labels.allSatisfy { $0.color == nil })
+        #expect(response.issues[1].labels.first?.rgb == 0xD73A4A)   // leading '#' tolerated
+        #expect(response.issues[2].labels.last?.color == nil)        // blank color → nil
+    }
+
+    @Test(arguments: ["zzzzzz", "d73a4", "d73a4a00", ""])
+    func malformedLabelColorFallsBackToNoTint(color: String) throws {
+        let label = try decode(GitHubLabel.self, #"{"name": "x", "color": "\#(color)"}"#)
+        #expect(label.name == "x")
+        #expect(label.rgb == nil)
     }
 
     @Test func issueRowToleratesNullAndAbsentOptionalFields() throws {
@@ -278,7 +308,8 @@ import Testing
         {"available": true, "repo": "o/n", "issue": {
             "number": 7, "title": "Bug: crash", "state": "open",
             "body_markdown": "steps to repro", "author_login": "reporter",
-            "labels": ["bug", "p1"], "assignee": "octocat",
+            "labels": [{"name": "bug", "color": "d73a4a"}, {"name": "p1", "color": "0075ca"}],
+            "assignee": "octocat",
             "assignees": ["octocat", "hubot"],
             "updated_at": "2026-07-03T00:00:00Z", "created_at": "2026-07-01T00:00:00Z",
             "html_url": "https://github.com/o/n/issues/7",
@@ -290,7 +321,8 @@ import Testing
         """)
         let issue = try #require(response.issue)
         #expect(issue.bodyMarkdown == "steps to repro")
-        #expect(issue.labels == ["bug", "p1"])
+        #expect(issue.labels.map(\.name) == ["bug", "p1"])
+        #expect(issue.labels.map(\.color) == ["d73a4a", "0075ca"])
         #expect(issue.assignee == "octocat")
         #expect(issue.assignees == ["octocat", "hubot"])
         #expect(issue.comments.map(\.bodyMarkdown) == ["first (older)", "second (newer)"])
@@ -731,4 +763,60 @@ private func makePull(number: Int) -> GitHubPullDetail {
      "body_markdown": "", "checks": {"total": 0}, "files": {"count": 0, "items": []}}
     """
     return try! JSONDecoder().decode(GitHubPullDetail.self, from: Data(json.utf8))
+}
+
+
+// MARK: - checks progressive fill (PR #223 audit)
+
+/// The PR list route ships `checks: null` on every row and the batch
+/// `…/github/checks?numbers=` call fills them in — without this fill the phone never
+/// showed a CI chip on any PR row (the portal did).
+@Suite struct GitHubChecksFillTests {
+    @Test func batchResponseDecodesNumberKeyedRollups() throws {
+        let response = try JSONDecoder().decode(GitHubChecksBatchResponse.self, from: Data("""
+        {"available": true, "checks": {
+            "12": {"passed": 3, "failing": 1, "pending": 0, "total": 4},
+            "15": {"passed": 0, "failing": 0, "pending": 2, "total": 2}
+        }}
+        """.utf8))
+        #expect(response.available)
+        #expect(response.checks["12"]?.failing == 1)
+        #expect(response.checks["15"]?.pending == 2)
+        #expect(response.checks["99"] == nil)
+    }
+
+    @Test func batchResponseToleratesTheOffStateAndAbsentChecks() throws {
+        let off = try JSONDecoder().decode(GitHubChecksBatchResponse.self,
+            from: Data(#"{"available": false, "reason": "rate_limited"}"#.utf8))
+        #expect(off.available == false && off.checks.isEmpty && off.reason == "rate_limited")
+        let empty = try JSONDecoder().decode(GitHubChecksBatchResponse.self,
+            from: Data(#"{"available": true, "checks": {}}"#.utf8))
+        #expect(empty.available && empty.checks.isEmpty)
+    }
+
+    @Test func mergeFillsOnlyTheRowsTheBatchAnswered() {
+        let rows = [
+            GitHubPullRow(number: 12, title: "a"),
+            GitHubPullRow(number: 15, title: "b", checks: GitHubChecks(passed: 1, total: 1)),
+            GitHubPullRow(number: 20, title: "c"),
+        ]
+        let merged = GitHubHubUx.mergeChecks(rows, [
+            "12": GitHubChecks(passed: 3, failing: 1, total: 4),
+            "77": GitHubChecks(passed: 9, total: 9),   // not on screen — ignored
+        ])
+        #expect(merged.map(\.number) == [12, 15, 20])   // order + membership untouched
+        #expect(merged[0].checks == GitHubChecks(passed: 3, failing: 1, total: 4))
+        #expect(merged[1].checks == GitHubChecks(passed: 1, total: 1))  // kept what it had
+        #expect(merged[2].checks == GitHubChecks())                    // still "not loaded"
+        #expect(GitHubHubUx.mergeChecks(rows, [:]) == rows)
+    }
+
+    @Test func batchesSplitAtTheServerCapInOrder() {
+        let numbers = Array(1...65)
+        let batches = GitHubHubUx.checksBatches(numbers)
+        #expect(batches.map(\.count) == [30, 30, 5])
+        #expect(batches.flatMap { $0 } == numbers)
+        #expect(GitHubHubUx.checksBatches([]).isEmpty)
+        #expect(GitHubHubUx.checksBatches([1, 2, 3], max: 2) == [[1, 2], [3]])
+    }
 }

@@ -120,6 +120,19 @@ data class GitHubPullRow(
     @SerialName("author_login") val authorLogin: String? = null,
 )
 
+/** `GET …/github/checks?numbers=1,2,3` — the PR list's progressive-fill follow-up. The
+ *  list route deliberately ships `checks: null` on every row (one GitHub call per PR is
+ *  too slow inline — the server's lazy split), and this batch call fills them in. Keys
+ *  are PR numbers as strings (JSON object keys); a number the server couldn't resolve
+ *  (e.g. a search-sourced row outside its open-PR cache) is simply absent. */
+@Serializable
+data class GitHubChecksBatchResponse(
+    val available: Boolean = false,
+    val reason: String? = null,
+    val detail: String? = null,
+    val checks: Map<String, GitHubChecks> = emptyMap(),
+)
+
 // ---------- list responses (the `available:false` clean-error contract) ----------
 
 @Serializable
@@ -316,6 +329,15 @@ suspend fun OrchaApiClient.githubPulls(
     ).joinToString("&").let { if (it.isEmpty()) "" else "?$it" }
     client.get("${baseUrl.endpoint()}/api/containers/$containerId/github/pulls$params").body()
 }
+
+/** `GET …/github/checks?numbers=` — see [GitHubChecksBatchResponse]. Callers split
+ *  through [io.openorcha.mobile.domain.GitHubHubUx.checksBatches]: the server caps one
+ *  call at 30 numbers. */
+suspend fun OrchaApiClient.githubChecks(baseUrl: String, containerId: String, numbers: List<Int>): GitHubChecksBatchResponse =
+    withTimeout(8_000) {
+        val joined = numbers.joinToString(",").encodeURLParameter()
+        client.get("${baseUrl.endpoint()}/api/containers/$containerId/github/checks?numbers=$joined").body()
+    }
 
 suspend fun OrchaApiClient.githubIssueDetail(baseUrl: String, containerId: String, number: Int): GitHubIssueDetailResponse =
     withTimeout(8_000) { client.get("${baseUrl.endpoint()}/api/containers/$containerId/github/issues/$number").body() }

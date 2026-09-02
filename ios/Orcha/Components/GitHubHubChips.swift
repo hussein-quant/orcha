@@ -91,16 +91,27 @@ struct MergeStateChip: View {
 /// A single GitHub label chip (issue/PR label names).
 struct GitHubLabelChip: View {
     @Environment(\.palette) private var p
-    let label: String
+    let label: GitHubLabel
 
     var body: some View {
-        Text(label)
+        // Real repo label colors when the server sends them (Android parity);
+        // the house violet is the fallback for colorless labels / older servers.
+        if let rgb = label.rgb {
+            let tint = Color(hex: rgb)
+            chip(text: tint, fill: tint.opacity(0.15), line: tint.opacity(0.4))
+        } else {
+            chip(text: p.violet, fill: p.violetSoft, line: p.violetLine)
+        }
+    }
+
+    private func chip(text: Color, fill: Color, line: Color) -> some View {
+        Text(label.name)
             .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(p.violet)
+            .foregroundStyle(text)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(p.violetSoft, in: Capsule())
-            .overlay(Capsule().strokeBorder(p.violetLine, lineWidth: 1))
+            .background(fill, in: Capsule())
+            .overlay(Capsule().strokeBorder(line, lineWidth: 1))
             .lineLimit(1)
     }
 }

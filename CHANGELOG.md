@@ -10,6 +10,32 @@ missing.
 
 ## [Unreleased]
 
+### Fixed
+- PR #223 review + audit pass (cloud unification):
+  - Container reset (`POST /api/containers/{cid}/reset`) now wipes the
+    unification tables too (device tokens, Code Space threads/messages, wake
+    backoff, push outbox, roster analysis) in FK-safe order — it previously
+    failed with a ForeignKeyViolation once a device token or code thread existed.
+  - Access model gaps closed: `GET /api/github/repos?cid=` is a member read of
+    that project (it unlocked the project's saved PAT for any signed-in user);
+    Code Space thread/message writes bind the proxy identity (viewers refused,
+    claimed actors overridden); worktree file PUT / commit / push and GitHub
+    propose refuse the viewer role; the wake-backoff listing is project-isolated.
+  - Re-inviting a removed member reactivates their retired row instead of a
+    permanent 409 lockout.
+  - Auto-wake "Off" from the phones (which omit null keys) is now a disable,
+    not a 422.
+  - Worktree file read/write refuse a symlinked path that resolves outside the
+    repo. Migration 045 is re-run tolerant (`IF NOT EXISTS`).
+  - iOS: GitHub labels decode the `{name, color}` shape (real repo colors, legacy
+    strings still accepted); Connect-repository passes the selected project so a
+    saved PAT lists repos; the first message to an agent no longer fails to
+    decode. Android: bearer tokens are keyed by origin (scheme+host+port), and
+    the close-task blast radius decodes the server's real shape. Both phones now
+    fill PR-row CI chips through the batch `…/github/checks` call.
+  - Restored `.github/dependabot.yml`; added a shipping-path test for the React
+    notification center.
+
 ### Added
 - Downgrade guard on `orcha upgrade` (CLI and desktop app): the migration-chain
   tip is compared between the installed templates and the project's

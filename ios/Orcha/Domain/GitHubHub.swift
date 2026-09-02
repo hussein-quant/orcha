@@ -77,13 +77,56 @@ struct GitHubCheckRun: Decodable, Equatable, Identifiable {
     }
 }
 
+// MARK: - labels
+
+/// One issue label. The server moved from plain name strings to `{name, color}`
+/// (GitHub's own label hex, no leading '#', e.g. "d73a4a") so the UI can render real
+/// repo colors — this decoder accepts BOTH shapes (Android `GitHubLabelSerializer`
+/// parity), so a labeled issue can never again fail the whole list decode.
+/// `color` is nil for a colorless label, an older server's bare string, or junk.
+struct GitHubLabel: Decodable, Hashable {
+    var name: String
+    var color: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, color
+    }
+
+    init(name: String, color: String? = nil) {
+        self.name = name
+        self.color = color
+    }
+
+    init(from decoder: Decoder) throws {
+        if let single = try? decoder.singleValueContainer(), let bare = try? single.decode(String.self) {
+            name = bare
+            color = nil
+            return
+        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        let raw = try c.decodeIfPresent(String.self, forKey: .color)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        color = (raw?.isEmpty == false) ? raw : nil
+    }
+
+    /// `color` as a 24-bit RGB value when it is a well-formed 6-digit hex (with or
+    /// without a leading '#'); nil otherwise, so the chip falls back to the house tint.
+    var rgb: UInt32? {
+        guard var hex = color else { return nil }
+        if hex.hasPrefix("#") { hex.removeFirst() }
+        guard hex.count == 6, let value = UInt32(hex, radix: 16) else { return nil }
+        return value
+    }
+}
+
 // MARK: - list rows
 
 /// `GET …/github/issues` → one open issue row.
 struct GitHubIssueRow: Decodable, Equatable, Identifiable {
     let number: Int
     var title = ""
-    var labels: [String] = []
+    var labels: [GitHubLabel] = []
     /// Primary assignee login, or nil.
     var assignee: String?
     var updatedAt: String?
@@ -104,14 +147,14 @@ struct GitHubIssueRow: Decodable, Equatable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         number = try c.decode(Int.self, forKey: .number)
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
-        labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? []
+        labels = try c.decodeIfPresent([GitHubLabel].self, forKey: .labels) ?? []
         assignee = try c.decodeIfPresent(String.self, forKey: .assignee)
         updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
         htmlUrl = try c.decodeIfPresent(String.self, forKey: .htmlUrl)
         bodyExcerpt = try c.decodeIfPresent(String.self, forKey: .bodyExcerpt)
     }
 
-    init(number: Int, title: String = "", labels: [String] = [], assignee: String? = nil,
+    init(number: Int, title: String = "", labels: [GitHubLabel] = [], assignee: String? = nil,
          updatedAt: String? = nil, htmlUrl: String? = nil, bodyExcerpt: String? = nil) {
         self.number = number
         self.title = title
@@ -261,6 +304,37 @@ struct GitHubPullsResponse: Decodable {
         self.perPage = perPage
         self.totalCount = totalCount
         self.hasMore = hasMore
+    }
+}
+
+/// `GET …/github/checks?numbers=1,2,3` — the PR list's progressive-fill follow-up.
+/// The list route deliberately ships `checks: null` on every row (one GitHub call
+/// per PR is too slow inline — the server's lazy split), and this batch call fills
+/// them in. Keys are PR numbers as strings (JSON object keys); a number the server
+/// couldn't resolve (e.g. a search-sourced row outside its open-PR cache) is absent.
+struct GitHubChecksBatchResponse: Decodable {
+    var available = false
+    var reason: String?
+    var detail: String?
+    var checks: [String: GitHubChecks] = [:]
+
+    enum CodingKeys: String, CodingKey {
+        case available, reason, detail, checks
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        available = try c.decodeIfPresent(Bool.self, forKey: .available) ?? false
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+        detail = try c.decodeIfPresent(String.self, forKey: .detail)
+        checks = try c.decodeIfPresent([String: GitHubChecks].self, forKey: .checks) ?? [:]
+    }
+
+    init(available: Bool, reason: String? = nil, detail: String? = nil, checks: [String: GitHubChecks] = [:]) {
+        self.available = available
+        self.reason = reason
+        self.detail = detail
+        self.checks = checks
     }
 }
 
@@ -441,7 +515,7 @@ struct GitHubIssueDetail: Decodable, Equatable {
     /// RAW markdown — render client-side.
     var bodyMarkdown = ""
     var authorLogin: String?
-    var labels: [String] = []
+    var labels: [GitHubLabel] = []
     var assignee: String?
     var assignees: [String] = []
     var updatedAt: String?
@@ -468,7 +542,7 @@ struct GitHubIssueDetail: Decodable, Equatable {
         state = try c.decodeIfPresent(String.self, forKey: .state) ?? "open"
         bodyMarkdown = try c.decodeIfPresent(String.self, forKey: .bodyMarkdown) ?? ""
         authorLogin = try c.decodeIfPresent(String.self, forKey: .authorLogin)
-        labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? []
+        labels = try c.decodeIfPresent([GitHubLabel].self, forKey: .labels) ?? []
         assignee = try c.decodeIfPresent(String.self, forKey: .assignee)
         assignees = try c.decodeIfPresent([String].self, forKey: .assignees) ?? []
         updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)

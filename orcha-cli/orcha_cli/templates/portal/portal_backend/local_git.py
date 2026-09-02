@@ -174,6 +174,21 @@ def _safe_rel_path(path) -> bool:
     return True
 
 
+def _contained_path(repo_dir: str, rel_path: str) -> "str | None":
+    """`os.path.join(repo_dir, rel_path)` — or None when the RESOLVED target (symlinks
+    followed, `os.path.realpath`) lands outside the repo. `_safe_rel_path` only inspects
+    the lexical path; a symlinked directory inside the working tree that points outside
+    it (agent-created or committed) would otherwise let the worktree file read/write
+    escape the mount. Both sides are realpath'd so a bind mount that is itself a symlink
+    (Docker-for-Mac) compares equal to its resolved form."""
+    root = os.path.realpath(repo_dir)
+    full = os.path.join(repo_dir, rel_path)
+    real = os.path.realpath(full)
+    if real != root and not real.startswith(root + os.sep):
+        return None
+    return full
+
+
 def _run(args: list, *, binary: bool = False):
     """Run `git -C <ORCHA_LOCAL_REPO_DIR> <args>`, returning stdout (bytes if
     binary=True, else text) on success or None on ANY failure (non-zero exit, git
@@ -545,7 +560,9 @@ def _read_worktree_file(rel_path: str) -> "bytes | None":
     repo_dir = _env_dir()
     if not repo_dir:
         return None
-    full_path = os.path.join(repo_dir, rel_path)
+    full_path = _contained_path(repo_dir, rel_path)
+    if full_path is None:
+        return None
     try:
         with open(full_path, "rb") as fh:
             return fh.read()
@@ -769,7 +786,9 @@ def write_worktree_file(rel_path: str, content: bytes) -> bool:
     repo_dir = _env_dir()
     if not repo_dir:
         return False
-    full_path = os.path.join(repo_dir, rel_path)
+    full_path = _contained_path(repo_dir, rel_path)
+    if full_path is None:
+        return False
     parent_dir = os.path.dirname(full_path)
     try:
         if parent_dir:

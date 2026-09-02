@@ -110,6 +110,7 @@ from portal_backend.guards import (
     valid_uuid as _valid_uuid,
 )
 from portal_backend.identity_routes import require_member_read as _require_member_read
+from portal_backend.identity_routes import trusted_actor
 from portal_backend.limits import MAX_PAYLOAD_LEN
 from portal_backend.schemas.code_space import (
     CodeThreadCreate,
@@ -262,6 +263,12 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
         raise HTTPException(400, "start_line/end_line must satisfy 1 <= start_line <= end_line")
     with db_cursor() as (conn, cur):
         _require_container(cur, cid)
+        # Per-project identity: under proxy trust the signed-in login IS the actor
+        # (a claimed actor_agent_id is overridden, a viewer / trusted non-member is
+        # 403) — the same seam every other agent-authored write uses
+        # (task_message_routes, request_creation_routes). Trust off / no header (an
+        # AI agent calling from inside the stack) keeps the claimed actor unchanged.
+        body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         creator = _require_actor_in_container(cur, cid, body.actor_agent_id)
 
         # An untagged question-like thread (question | why | teach — NOT note) is a
@@ -561,7 +568,7 @@ def get_code_thread(tid: str, request: Request):
 
 
 @app.post("/api/code/threads/{tid}/messages", status_code=201)
-def post_code_thread_message(tid: str, body: CodeThreadMessageCreate):
+def post_code_thread_message(tid: str, body: CodeThreadMessageCreate, request: Request):
     if not _valid_uuid(tid):
         raise HTTPException(400, "thread_id is not a valid UUID")
     with db_cursor() as (conn, cur):
@@ -570,6 +577,8 @@ def post_code_thread_message(tid: str, body: CodeThreadMessageCreate):
         if not thread:
             raise HTTPException(404, f"code thread {tid} not found")
         cid = str(thread["container_id"])
+        # Same identity binding as create_code_thread above.
+        body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
         _require_actor_in_container(cur, cid, body.actor_agent_id)
 
         if thread["status"] == "resolved" and not body.resolve:

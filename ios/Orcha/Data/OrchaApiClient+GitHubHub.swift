@@ -35,6 +35,15 @@ extension OrchaApiClient {
         ]))
     }
 
+    /// `GET …/github/checks?numbers=` — the list's checks progressive fill (see
+    /// `GitHubChecksBatchResponse`). Callers split through `GitHubHubUx.checksBatches`:
+    /// the server caps one call at 30 numbers.
+    func githubChecks(_ base: String, _ cid: String, numbers: [Int]) async throws -> GitHubChecksBatchResponse {
+        try await get(base, "/api/containers/\(cid)/github/checks" + query([
+            "numbers": numbers.map(String.init).joined(separator: ","),
+        ]))
+    }
+
     func githubIssueDetail(_ base: String, _ cid: String, _ number: Int) async throws -> GitHubIssueDetailResponse {
         try await get(base, "/api/containers/\(cid)/github/issues/\(number)")
     }

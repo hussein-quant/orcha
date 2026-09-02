@@ -116,9 +116,17 @@ struct OrchaApiClient {
 
     /// The GitHub App installation's repo list for the Connect-repo sheet
     /// (portal `home-github.js` parity). `available:false` rides a 200 — a
-    /// graceful off state, never thrown.
-    func githubRepos(_ base: String) async throws -> GithubReposResponse {
-        try await get(base, "/api/github/repos")
+    /// graceful off state, never thrown. `cid` scopes the listing to the selected
+    /// project so the server can fall back to that project's saved PAT (the React
+    /// client sends it too); without it a PAT-only local project lists nothing.
+    func githubRepos(_ base: String, cid: String? = nil) async throws -> GithubReposResponse {
+        try await get(base, githubReposPath(cid: cid))
+    }
+
+    /// `/api/github/repos` (+ `?cid=` when a project is selected) — split out so the
+    /// query contract is unit-testable without a network.
+    func githubReposPath(cid: String?) -> String {
+        "/api/github/repos" + query(["cid": cid])
     }
 
     func conversation(_ base: String, _ aid: String, limit: Int? = nil) async throws -> ConversationResponse {

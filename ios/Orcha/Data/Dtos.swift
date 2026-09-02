@@ -489,7 +489,26 @@ struct ConversationDto: Decodable {
 
 struct ConversationResponse: Decodable {
     var conversation: ConversationDto?
+    /// Only `GET …/conversation` carries turns; the `POST …/conversations` (start)
+    /// response is `{conversation, created}` with NO `turns` key. A synthesized
+    /// decoder ignores the default and throws `keyNotFound` on that POST — which made
+    /// the FIRST message to any agent land in the failed-send bubble. Tolerant here.
     var turns: [TurnDto] = []
+
+    enum CodingKeys: String, CodingKey {
+        case conversation, turns
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        conversation = try c.decodeIfPresent(ConversationDto.self, forKey: .conversation)
+        turns = try c.decodeIfPresent([TurnDto].self, forKey: .turns) ?? []
+    }
+
+    init(conversation: ConversationDto?, turns: [TurnDto] = []) {
+        self.conversation = conversation
+        self.turns = turns
+    }
 }
 
 struct TurnDto: Decodable, Identifiable {

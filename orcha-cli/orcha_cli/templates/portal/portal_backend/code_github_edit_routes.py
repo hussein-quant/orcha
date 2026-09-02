@@ -110,7 +110,7 @@ from portal_backend.github_repo_browse_routes import (
     LOCAL_REPO,
     _load_binding,
 )
-from portal_backend.identity_routes import require_member_read
+from portal_backend.identity_routes import require_member_read, trusted_actor
 from portal_backend.schemas.code_space import GithubProposeCreate
 
 # Per-file content cap (UTF-8-encoded bytes) — a 400, not a degrade (see module
@@ -381,6 +381,12 @@ def post_github_propose(cid: str, body: GithubProposeCreate, request: Request):
             # provenance footer — never for authorization (membership was already
             # checked by _load_editable_binding above, via the same _load_binding).
             member = require_member_read(cur, request, cid)
+            # Access model (mig 039): the read gate above admits the viewer role by
+            # design; opening a branch + commit + PR with the project's token is a
+            # WRITE, so bind through the same seam every other human write uses —
+            # a viewer (or trusted non-member) is refused here with a 403 before any
+            # GitHub call. Trust off / no header ⇒ no-op.
+            trusted_actor(cur, request, cid, None)
     if degrade:
         return degrade
     login = member.get("github_login") if member else None

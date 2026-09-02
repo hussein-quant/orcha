@@ -199,6 +199,33 @@ enum GitHubHubUx {
         return (merged, info)
     }
 
+    // MARK: checks progressive fill
+
+    /// The server caps one `…/github/checks` call at this many PR numbers
+    /// (`github_hub_routes.CHECKS_BATCH_MAX_NUMBERS`); a longer request is a 400.
+    static let checksBatchMax = 30
+
+    /// Split a page's PR numbers into server-sized batches, order preserved.
+    static func checksBatches(_ numbers: [Int], max: Int = checksBatchMax) -> [[Int]] {
+        guard max > 0, !numbers.isEmpty else { return [] }
+        return stride(from: 0, to: numbers.count, by: max).map { start in
+            Array(numbers[start..<min(start + max, numbers.count)])
+        }
+    }
+
+    /// Fill list rows' checks from one batch response. Rows are matched by PR number
+    /// (the batch is keyed by the number as a string); a row the batch didn't answer
+    /// for keeps what it had, so a filter change mid-flight can't misattribute a rollup.
+    static func mergeChecks(_ pulls: [GitHubPullRow], _ checks: [String: GitHubChecks]) -> [GitHubPullRow] {
+        guard !checks.isEmpty else { return pulls }
+        return pulls.map { row in
+            guard let rollup = checks[String(row.number)] else { return row }
+            var filled = row
+            filled.checks = rollup
+            return filled
+        }
+    }
+
     static func phase(from response: GitHubPullDetailResponse) -> GitHubPullDetailPhase {
         if response.available, let pull = response.pull {
             return .loaded(repo: response.repo, pull: pull)

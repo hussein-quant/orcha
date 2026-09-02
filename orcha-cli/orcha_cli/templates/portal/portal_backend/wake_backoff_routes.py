@@ -14,12 +14,12 @@ from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_agent, require_container, require_kind, valid_uuid
-from portal_backend.identity_routes import enforce_grant, trusted_actor
+from portal_backend.identity_routes import enforce_grant, require_member_read, trusted_actor
 from portal_backend.schemas.agent_state import WakeBackoffRelease
 
 
 @app.get("/api/containers/{cid}/wake-backoff")
-def list_wake_backoff(cid: str):
+def list_wake_backoff(cid: str, request: Request):
     """Every active/historical breaker row for this container (agent alias joined in for
     display) — the UI's "wakes paused" listing. Ordered by strikes desc, then most recently
     struck, so the noisiest/most-recent trigger surfaces first."""
@@ -27,6 +27,9 @@ def list_wake_backoff(cid: str):
         raise HTTPException(400, "container_id is not a valid UUID")
     with db_cursor() as (_, cur):
         require_container(cur, cid)
+        # Access model: project-isolated read (a trusted non-member 403s), like every
+        # other cid-scoped GET — the sibling DELETE below was already gated.
+        require_member_read(cur, request, cid)
         cur.execute(
             """SELECT wb.agent_id, a.alias, wb.wake_key, wb.strikes, wb.suppressed_until,
                       wb.first_strike_at, wb.last_strike_at, wb.notified_at

@@ -54,6 +54,7 @@ from portal_backend import local_git
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.github_repo_browse_routes import LOCAL_REPO, _load_binding, is_vendored_path
+from portal_backend.identity_routes import trusted_actor
 from portal_backend.schemas.code_space import WorktreeCommitCreate, WorktreeFileWrite
 
 # Unified diff text is capped the same spirit as browse/file's FILE_CONTENT_CAP_BYTES —
@@ -137,6 +138,17 @@ _BRANCH_TTL_SECONDS = 30.0
 _STALE_MAX_SECONDS = 600.0
 _REFRESH_IN_FLIGHT: set = set()
 _REFRESH_LOCK = threading.Lock()
+
+
+def _require_write_actor(cur, cid: str, request: Request) -> None:
+    """Access model (mig 039) for this module's WRITE routes (PUT file / commit /
+    push). `_require_local_binding` reuses the READ gate the GETs share, and that gate
+    admits the viewer role by design (viewing is the one thing the role is for) — so a
+    write must additionally bind the proxy identity through the same seam every other
+    human write uses (`trusted_actor`), which refuses a viewer and a trusted
+    non-member with a 403. Trust off / no header ⇒ no-op: the self-host convention
+    is unchanged."""
+    trusted_actor(cur, request, cid, None)
 
 
 def _cache_get(kind: str, cid: str, ttl: float, refresh=None):
@@ -410,6 +422,7 @@ def put_worktree_file(cid: str, body: WorktreeFileWrite, request: Request):
         raise HTTPException(400, f"path {body.path!r} is not a safe repository-relative path")
     with db_cursor() as (_, cur):
         is_local, degrade = _require_local_binding(cur, cid, request)
+        _require_write_actor(cur, cid, request)
     if not is_local:
         return degrade
     encoded = body.content.encode("utf-8", errors="ignore")
@@ -457,6 +470,7 @@ def post_worktree_commit(cid: str, body: WorktreeCommitCreate, request: Request)
         raise HTTPException(400, "message must not be blank")
     with db_cursor() as (_, cur):
         is_local, degrade = _require_local_binding(cur, cid, request)
+        _require_write_actor(cur, cid, request)
     if not is_local:
         return degrade
     result = local_git.stage_and_commit(
@@ -480,6 +494,7 @@ def post_worktree_push(cid: str, request: Request):
     this module has. Local-binding only."""
     with db_cursor() as (_, cur):
         is_local, degrade = _require_local_binding(cur, cid, request)
+        _require_write_actor(cur, cid, request)
     if not is_local:
         return degrade
     result = local_git.push_current_branch()

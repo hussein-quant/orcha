@@ -185,7 +185,7 @@ def _local_repo_entry() -> Optional[dict]:
 
 
 @app.get("/api/github/repos")
-def list_github_repos(cid: Optional[str] = None):
+def list_github_repos(request: Request, cid: Optional[str] = None):
     """List repos reachable for the Connect-repo modal, App installs first.
 
     Multi-org: when the token map (ORCHA_GITHUB_TOKENS_FILE) is present, every
@@ -215,6 +215,17 @@ def list_github_repos(cid: Optional[str] = None):
     "which GitHub path fed the GitHub half of the list" unchanged; it says nothing
     about the prepended local entry.
     """
+    if cid is not None:
+        # Access model: a `cid` unlocks THAT project's sealed PAT (`_read_pat` →
+        # `pat_for_container`), so the caller must be able to read that project — a
+        # trusted non-member is refused (403) exactly like every cid-scoped GET
+        # (require_member_read); trust off / no header is unchanged. Without this any
+        # authenticated user could list another project's PAT owner's private repos.
+        if not valid_uuid(cid):
+            raise HTTPException(400, "cid is not a valid UUID")
+        with db_cursor() as (_, cur):
+            require_container(cur, cid)
+            require_member_read(cur, request, cid)
     local_entry = _local_repo_entry()
 
     token_map = _read_token_map()

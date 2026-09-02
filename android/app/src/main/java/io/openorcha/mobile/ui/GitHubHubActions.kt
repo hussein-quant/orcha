@@ -11,6 +11,8 @@ package io.openorcha.mobile.ui
 
 import io.ktor.client.plugins.ClientRequestException
 import kotlinx.coroutines.flow.update
+import io.openorcha.mobile.data.GitHubPullRow
+import io.openorcha.mobile.data.githubChecks
 import io.openorcha.mobile.data.githubIssueDetail
 import io.openorcha.mobile.data.githubIssues
 import io.openorcha.mobile.data.githubPullDetail
@@ -89,8 +91,34 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
                     page = 1,
                 )
             }
-                .onSuccess { response -> _uiState.update { it.copy(githubPullsPhase = GitHubHubUx.phase(response, filter.involvement)) } }
+                .onSuccess { response ->
+                    _uiState.update { it.copy(githubPullsPhase = GitHubHubUx.phase(response, filter.involvement)) }
+                    fillGithubChecks(response.pulls)
+                }
                 .onFailure { err -> _uiState.update { it.copy(githubPullsPhase = githubPullsFailure(err)) } }
+        }
+    }
+
+    /** Progressive fill of the list's checks chips. The PR list ships `checks: null` on
+     *  every row (the server's lazy split — one GitHub call per PR is too slow inline; the
+     *  portal fills the same way), so once a page lands, batch its PR numbers through
+     *  `…/github/checks` and merge the rollups into the current [GitHubPullsPhase.Loaded].
+     *  Fire-and-forget: a failed batch (or an older server's 404) just leaves those chips
+     *  hidden, exactly as before this fill existed. */
+    fun fillGithubChecks(pulls: List<GitHubPullRow>) {
+        val selected = _uiState.value.selectedContainer ?: return
+        val numbers = pulls.map { it.number }
+        if (numbers.isEmpty()) return
+        scope.launch {
+            GitHubHubUx.checksBatches(numbers).forEach { batch ->
+                val response = runCatching { api.githubChecks(selected.baseUrl, selected.id, batch) }.getOrNull()
+                    ?: return@forEach
+                if (!response.available || response.checks.isEmpty()) return@forEach
+                _uiState.update { st ->
+                    val current = st.githubPullsPhase as? GitHubPullsPhase.Loaded ?: return@update st
+                    st.copy(githubPullsPhase = current.copy(pulls = GitHubHubUx.mergeChecks(current.pulls, response.checks)))
+                }
+            }
         }
     }
 
@@ -122,6 +150,7 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
                         val next = GitHubHubUx.phase(response, filter.involvement) as? GitHubPullsPhase.Loaded ?: return@update st
                         st.copy(githubPullsPhase = next.copy(pulls = GitHubHubUx.appendPulls(current.pulls, next.pulls), loadingMore = false))
                     }
+                    fillGithubChecks(response.pulls)
                 }
                 .onFailure {
                     // Load-more failures stay quiet in place (keep the current rows, drop the

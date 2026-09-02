@@ -152,7 +152,15 @@ def reset_container(cid: str, body: ContainerReset, request: Request):
     Returns per-table deleted-row counts.
 
     NB: every container-scoped table must be listed below; a NEW such table added to the
-    schema must be added here too, or reset will leave orphan rows.
+    schema must be added here too, or reset will leave orphan rows — or, for a table whose
+    agent/request FK has no ON DELETE CASCADE (device_tokens, code_threads), fail the
+    whole reset with a ForeignKeyViolation. `tests/test_container_reset.py::_seed` seeds
+    one row per table as the regression fixture.
+
+    KEPT on purpose (project *configuration*, not data — like the github_repo binding,
+    provider keys and model settings that reset has always preserved): the sealed
+    per-project GitHub PAT (container_github_pat). Wiping it while keeping the repo
+    binding would leave a half-configured project.
     """
     if not valid_uuid(cid):
         raise HTTPException(404, "container not found")
@@ -204,6 +212,35 @@ def reset_container(cid: str, body: ContainerReset, request: Request):
             (cid,),
         )
         delete_rows("decisions", "DELETE FROM decisions WHERE container_id=%s", (cid,))
+        # Code Space threads (mig 045) reference requests AND agents without cascade:
+        # they must go before `requests` and `agents` below.
+        delete_rows(
+            "code_thread_messages",
+            "DELETE FROM code_thread_messages WHERE thread_id IN "
+            "(SELECT id FROM code_threads WHERE container_id=%s)",
+            (cid,),
+        )
+        delete_rows(
+            "code_threads", "DELETE FROM code_threads WHERE container_id=%s", (cid,)
+        )
+        # Per-phone bearer tokens (mig 038) reference agents without cascade — every
+        # paired device of a wiped human is revoked outright (its human no longer exists).
+        delete_rows(
+            "device_tokens", "DELETE FROM device_tokens WHERE container_id=%s", (cid,)
+        )
+        # Wake-loop circuit breaker state (mig 048) — cascades on agents, but listed so
+        # the wipe is explicit and counted.
+        delete_rows(
+            "wake_backoff", "DELETE FROM wake_backoff WHERE container_id=%s", (cid,)
+        )
+        # Push outbox rows (mig 041) point at task/request ids that are about to vanish.
+        delete_rows(
+            "push_outbox", "DELETE FROM push_outbox WHERE container_id=%s", (cid,)
+        )
+        # The LLM roster analysis (mig 047) describes the agents being wiped.
+        delete_rows(
+            "roster_analysis", "DELETE FROM roster_analysis WHERE container_id=%s", (cid,)
+        )
         delete_rows(
             "agent_memory_digests",
             "DELETE FROM agent_memory_digests WHERE container_id=%s",
