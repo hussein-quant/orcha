@@ -189,6 +189,22 @@ object GitHubHubUx {
         return pulls.map { row -> checks[row.number.toString()]?.let { row.copy(checks = it) } ?: row }
     }
 
+    /** PR #223 review: the checks fill's merge decision as a pure step — a batch
+     *  response merges ONLY when the workspace it was requested for is still the
+     *  selected one (rows are matched by PR number alone, so a delayed response from
+     *  project A must never land on project B's same-numbered PRs after a switch).
+     *  Any non-Loaded phase (the list was reloaded / errored meanwhile) stays put. */
+    fun checksFillResult(
+        phase: GitHubPullsPhase,
+        checks: Map<String, GitHubChecks>,
+        requestContainerId: String,
+        currentContainerId: String?,
+    ): GitHubPullsPhase {
+        if (requestContainerId != currentContainerId) return phase
+        val loaded = phase as? GitHubPullsPhase.Loaded ?: return phase
+        return loaded.copy(pulls = mergeChecks(loaded.pulls, checks))
+    }
+
     fun phase(response: GitHubPullDetailResponse): GitHubPullDetailPhase {
         val pull = response.pull
         return if (response.available && pull != null) {

@@ -109,14 +109,20 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
         val selected = _uiState.value.selectedContainer ?: return
         val numbers = pulls.map { it.number }
         if (numbers.isEmpty()) return
+        val requestContainerId = selected.id
         scope.launch {
             GitHubHubUx.checksBatches(numbers).forEach { batch ->
                 val response = runCatching { api.githubChecks(selected.baseUrl, selected.id, batch) }.getOrNull()
                     ?: return@forEach
                 if (!response.available || response.checks.isEmpty()) return@forEach
                 _uiState.update { st ->
-                    val current = st.githubPullsPhase as? GitHubPullsPhase.Loaded ?: return@update st
-                    st.copy(githubPullsPhase = current.copy(pulls = GitHubHubUx.mergeChecks(current.pulls, response.checks)))
+                    // PR #223 review: discard a delayed batch once the selected workspace
+                    // changed — same guard as iOS `applyGithubChecks(_:from:)`.
+                    st.copy(
+                        githubPullsPhase = GitHubHubUx.checksFillResult(
+                            st.githubPullsPhase, response.checks, requestContainerId, st.selectedContainer?.id,
+                        ),
+                    )
                 }
             }
         }

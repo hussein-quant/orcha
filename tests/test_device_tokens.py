@@ -185,6 +185,40 @@ async def test_check_retired_member_token_401(
     assert r.status_code == 401, r.text
 
 
+async def test_check_reinvited_member_old_token_stays_revoked(
+    client, container, make_agent, trust_proxy, db
+):
+    """PR #223 review: removal is a PERMANENT credential boundary. Re-inviting the
+    same login reactivates the retired agent row — the pre-removal token must NOT
+    come back to life with it (revoked at removal, not merely masked by
+    terminated_at). A token minted AFTER the re-invite works normally."""
+    await _bind_owner(client, container, make_agent)
+    friend = await _invite(client, container["id"], "friend")
+    old_token = (await _mint(client, FRIEND))["token"]
+    hdr = {"Authorization": f"Bearer {old_token}"}
+    assert (await client.get("/api/auth/check", headers=hdr)).status_code == 202
+
+    r = await client.delete(
+        f"/api/containers/{container['id']}/members/{friend['agent_id']}",
+        headers=OCTO,
+    )
+    assert r.status_code == 200, r.text
+    assert (await client.get("/api/auth/check", headers=hdr)).status_code == 401
+    # the removal itself revoked the row — not just masked it via terminated_at
+    assert db.execute("SELECT revoked_at FROM device_tokens")[0]["revoked_at"]
+
+    reinvited = await _invite(client, container["id"], "friend")
+    assert reinvited["agent_id"] == friend["agent_id"]  # same reactivated row
+    assert (await client.get("/api/auth/check", headers=hdr)).status_code == 401
+
+    fresh = (await _mint(client, FRIEND))["token"]
+    r = await client.get(
+        "/api/auth/check", headers={"Authorization": f"Bearer {fresh}"}
+    )
+    assert r.status_code == 202, r.text
+    assert r.headers["X-Auth-Request-User"] == "friend"
+
+
 async def test_check_touch_throttled(client, container, make_agent, trust_proxy, db):
     """last_used_at advances at most once per 60s — a polling phone is one UPDATE a
     minute, not one per request."""

@@ -820,3 +820,61 @@ private func makePull(number: Int) -> GitHubPullDetail {
         #expect(GitHubHubUx.checksBatches([1, 2, 3], max: 2) == [[1, 2], [3]])
     }
 }
+
+
+// MARK: - checks fill: delayed cross-project response guard (PR #223 review)
+
+/// A delayed `…/github/checks` batch from project A must never merge into project
+/// B's list after a workspace switch — rows are matched by PR number alone, so two
+/// repos both having a PR #12 would show A's CI rollup on B's row. The guard lives
+/// in `AppModel.applyGithubChecks(_:from:)`; these tests drive it with the exact
+/// delayed-response-after-switch sequence.
+@MainActor
+@Suite struct GitHubChecksFillGuardTests {
+    private func container(_ id: String) -> StoredContainer {
+        StoredContainer(
+            id: id, displayName: id, baseUrl: "http://\(id).local",
+            humanAgentId: nil, humanAlias: nil, pairingToken: nil, remoteBaseUrl: nil
+        )
+    }
+
+    /// Rows/rollups come through the real decoders (the row types are decode-only).
+    private func rows(_ json: String) throws -> [GitHubPullRow] {
+        try JSONDecoder().decode([GitHubPullRow].self, from: Data(json.utf8))
+    }
+
+    private func rollups(_ json: String) throws -> [String: GitHubChecks] {
+        try JSONDecoder().decode([String: GitHubChecks].self, from: Data(json.utf8))
+    }
+
+    @Test func delayedBatchFromAnotherProjectIsDiscarded() throws {
+        let model = AppModel()
+        model.selectedContainer = container("project-b")
+        let bRows = try rows(#"[{"number": 12, "title": "B's PR 12"}]"#)
+        model.githubPullsPhase = .loaded(repo: "b/repo", pulls: bRows, page: .init())
+
+        // Project A's checks call returns AFTER the switch to B — same PR number.
+        let aChecks = try rollups(#"{"12": {"passed": 3, "failing": 1, "total": 4}}"#)
+        model.applyGithubChecks(aChecks, from: "project-a")
+
+        #expect(model.githubPullsPhase == .loaded(repo: "b/repo", pulls: bRows, page: .init()))
+    }
+
+    @Test func batchForTheStillSelectedProjectMerges() throws {
+        let model = AppModel()
+        model.selectedContainer = container("project-b")
+        let bRows = try rows(#"[{"number": 12, "title": "B's PR 12"}]"#)
+        model.githubPullsPhase = .loaded(repo: "b/repo", pulls: bRows, page: .init())
+
+        let bChecks = try rollups(#"{"12": {"passed": 2, "pending": 1, "total": 3}}"#)
+        model.applyGithubChecks(bChecks, from: "project-b")
+
+        guard case let .loaded(_, pulls, _) = model.githubPullsPhase else {
+            Issue.record("expected .loaded, got \(model.githubPullsPhase)")
+            return
+        }
+        #expect(pulls[0].checks.passed == 2)
+        #expect(pulls[0].checks.pending == 1)
+        #expect(pulls[0].checks.total == 3)
+    }
+}

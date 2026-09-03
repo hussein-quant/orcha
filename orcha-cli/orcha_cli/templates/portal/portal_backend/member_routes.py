@@ -157,6 +157,14 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
         )
         retired = cur.fetchone()
         if retired:
+            # Belt-and-braces twin of the remove-side revocation: a row retired
+            # BEFORE that revocation shipped may still carry live token rows —
+            # reactivation must never bring a credential back to life.
+            cur.execute(
+                """UPDATE device_tokens SET revoked_at=now()
+                   WHERE agent_id=%s AND revoked_at IS NULL""",
+                (retired["id"],),
+            )
             cur.execute(
                 f"""UPDATE agents
                        SET terminated_at=NULL, status='idle', member_role=%s,
@@ -292,6 +300,16 @@ def remove_member(
             if not _other_owner_exists(cur, cid, aid):
                 raise HTTPException(400, "cannot remove the last owner")
         released = retire_agent_record(cur, aid)  # ISS-51 mechanics, reused
+        # PR #223 review: removal is a PERMANENT credential boundary — revoke the
+        # member's device tokens NOW, not just mask them behind terminated_at.
+        # Without this, a later re-invite (which reactivates this same row) would
+        # resurrect every unrevoked phone token minted before the removal.
+        cur.execute(
+            "UPDATE device_tokens SET revoked_at=now() "
+            "WHERE agent_id=%s AND revoked_at IS NULL",
+            (aid,),
+        )
+        revoked_device_tokens = cur.rowcount
         cur.execute(
             "UPDATE tasks SET reviewer_agent_id=NULL "
             "WHERE container_id=%s AND reviewer_agent_id=%s RETURNING id",
@@ -310,6 +328,7 @@ def remove_member(
                 "github_login": member["github_login"],
                 "released_tasks": released,
                 "cleared_reviewer_on": cleared_reviews,
+                "revoked_device_tokens": revoked_device_tokens,
             },
         )
         conn.commit()

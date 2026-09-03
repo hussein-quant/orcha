@@ -112,18 +112,25 @@ extension AppModel {
         guard let sel = selectedContainer else { return }
         let numbers = pulls.map(\.number)
         guard !numbers.isEmpty else { return }
+        let containerId = sel.id
         Task { [weak self] in
             guard let self else { return }
             for batch in GitHubHubUx.checksBatches(numbers) {
                 guard let response = try? await self.api.githubChecks(sel.baseUrl, sel.id, numbers: batch),
                       response.available, !response.checks.isEmpty
                 else { continue }
-                self.applyGithubChecks(response.checks)
+                self.applyGithubChecks(response.checks, from: containerId)
             }
         }
     }
 
-    private func applyGithubChecks(_ checks: [String: GitHubChecks]) {
+    /// Merge a checks batch into the current phase — but ONLY if the workspace the
+    /// batch was requested for is still the selected one. PR #223 review: rows are
+    /// matched by PR number alone, so a delayed response from project A must never
+    /// land on project B's same-numbered PRs after a switch. Internal (not private)
+    /// so the delayed-switch regression test can drive it directly.
+    func applyGithubChecks(_ checks: [String: GitHubChecks], from containerId: String) {
+        guard selectedContainer?.id == containerId else { return }
         switch githubPullsPhase {
         case let .loaded(repo, pulls, page):
             githubPullsPhase = .loaded(repo: repo, pulls: GitHubHubUx.mergeChecks(pulls, checks), page: page)
