@@ -11,7 +11,11 @@ package io.openorcha.mobile.ui
 
 import io.ktor.client.plugins.ClientRequestException
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.updateAndGet
+import io.openorcha.mobile.data.GitHubChecksBatchResponse
+import io.openorcha.mobile.data.GitHubIssuesResponse
 import io.openorcha.mobile.data.GitHubPullRow
+import io.openorcha.mobile.data.GitHubPullsResponse
 import io.openorcha.mobile.data.githubChecks
 import io.openorcha.mobile.data.githubIssueDetail
 import io.openorcha.mobile.data.githubIssues
@@ -42,6 +46,27 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
     fun githubLogin(): String? =
         _uiState.value.snapshot?.agents?.firstOrNull { it.id == _uiState.value.selectedContainer?.humanAgentId }?.githubLogin
 
+    // ---- fetch seam (PR #223 round 3) ----
+
+    /** The hub's raw fetches as overridable members so the delayed-response races are
+     *  drivable through the REAL load callbacks in unit tests. Production overrides
+     *  nothing — these delegate straight to the api extensions. */
+    suspend fun fetchGithubIssues(baseUrl: String, containerId: String): GitHubIssuesResponse =
+        api.githubIssues(baseUrl, containerId)
+
+    suspend fun fetchGithubPulls(
+        baseUrl: String,
+        containerId: String,
+        author: String?,
+        involvement: String?,
+        q: String?,
+        page: Int,
+    ): GitHubPullsResponse =
+        api.githubPulls(baseUrl, containerId, author = author, involvement = involvement, q = q, page = page)
+
+    suspend fun fetchGithubChecks(baseUrl: String, containerId: String, numbers: List<Int>): GitHubChecksBatchResponse =
+        api.githubChecks(baseUrl, containerId, numbers)
+
     fun showGithubHub() {
         _uiState.update { it.copy(route = AppRoute.GitHubHub, error = null) }
         loadGithubIssues()
@@ -64,11 +89,28 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
             _uiState.update { it.copy(githubIssuesPhase = GitHubIssuesPhase.Failed("No workspace is open — close this and try again.")) }
             return
         }
-        _uiState.update { it.copy(githubIssuesPhase = GitHubIssuesPhase.Loading) }
+        // PR #223 round 3: capture workspace + a fresh generation; the completion
+        // (success or failure) applies only while that generation is still current.
+        val gen = _uiState.updateAndGet {
+            it.copy(
+                githubIssuesPhase = GitHubIssuesPhase.Loading,
+                githubIssuesLoadGeneration = it.githubIssuesLoadGeneration + 1,
+            )
+        }.githubIssuesLoadGeneration
         scope.launch {
-            runCatching { api.githubIssues(selected.baseUrl, selected.id) }
-                .onSuccess { response -> _uiState.update { it.copy(githubIssuesPhase = GitHubHubUx.phase(response)) } }
-                .onFailure { err -> _uiState.update { it.copy(githubIssuesPhase = githubIssuesFailure(err)) } }
+            runCatching { fetchGithubIssues(selected.baseUrl, selected.id) }
+                .onSuccess { response ->
+                    _uiState.update { st ->
+                        if (st.githubIssuesLoadGeneration != gen || st.selectedContainer?.id != selected.id) st
+                        else st.copy(githubIssuesPhase = GitHubHubUx.phase(response))
+                    }
+                }
+                .onFailure { err ->
+                    _uiState.update { st ->
+                        if (st.githubIssuesLoadGeneration != gen || st.selectedContainer?.id != selected.id) st
+                        else st.copy(githubIssuesPhase = githubIssuesFailure(err))
+                    }
+                }
         }
     }
 
@@ -80,10 +122,20 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
             return
         }
         val filter = _uiState.value.githubPullsFilter.copy(page = 1)
-        _uiState.update { it.copy(githubPullsPhase = GitHubPullsPhase.Loading, githubPullsFilter = filter) }
+        // PR #223 round 3: capture workspace + a fresh generation; the completion
+        // (success or failure, incl. the checks fill) applies only while that
+        // generation is still current — a delayed response from a previous project
+        // or an out-of-order same-project reload can never overwrite a newer list.
+        val gen = _uiState.updateAndGet {
+            it.copy(
+                githubPullsPhase = GitHubPullsPhase.Loading,
+                githubPullsFilter = filter,
+                githubPullsLoadGeneration = it.githubPullsLoadGeneration + 1,
+            )
+        }.githubPullsLoadGeneration
         scope.launch {
             runCatching {
-                api.githubPulls(
+                fetchGithubPulls(
                     selected.baseUrl, selected.id,
                     author = filter.author.takeIf { it.isNotBlank() },
                     involvement = filter.involvement.wire,
@@ -92,10 +144,23 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
                 )
             }
                 .onSuccess { response ->
-                    _uiState.update { it.copy(githubPullsPhase = GitHubHubUx.phase(response, filter.involvement)) }
-                    fillGithubChecks(response.pulls)
+                    var applied = false
+                    _uiState.update { st ->
+                        if (st.githubPullsLoadGeneration != gen || st.selectedContainer?.id != selected.id) {
+                            st
+                        } else {
+                            applied = true
+                            st.copy(githubPullsPhase = GitHubHubUx.phase(response, filter.involvement))
+                        }
+                    }
+                    if (applied) fillGithubChecks(response.pulls, selected.id, gen)
                 }
-                .onFailure { err -> _uiState.update { it.copy(githubPullsPhase = githubPullsFailure(err)) } }
+                .onFailure { err ->
+                    _uiState.update { st ->
+                        if (st.githubPullsLoadGeneration != gen || st.selectedContainer?.id != selected.id) st
+                        else st.copy(githubPullsPhase = githubPullsFailure(err))
+                    }
+                }
         }
     }
 
@@ -105,19 +170,22 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
      *  `…/github/checks` and merge the rollups into the current [GitHubPullsPhase.Loaded].
      *  Fire-and-forget: a failed batch (or an older server's 404) just leaves those chips
      *  hidden, exactly as before this fill existed. */
-    fun fillGithubChecks(pulls: List<GitHubPullRow>) {
+    fun fillGithubChecks(pulls: List<GitHubPullRow>, requestContainerId: String, generation: Int) {
         val selected = _uiState.value.selectedContainer ?: return
+        if (selected.id != requestContainerId) return
         val numbers = pulls.map { it.number }
         if (numbers.isEmpty()) return
-        val requestContainerId = selected.id
         scope.launch {
             GitHubHubUx.checksBatches(numbers).forEach { batch ->
-                val response = runCatching { api.githubChecks(selected.baseUrl, selected.id, batch) }.getOrNull()
+                val response = runCatching { fetchGithubChecks(selected.baseUrl, selected.id, batch) }.getOrNull()
                     ?: return@forEach
                 if (!response.available || response.checks.isEmpty()) return@forEach
                 _uiState.update { st ->
-                    // PR #223 review: discard a delayed batch once the selected workspace
-                    // changed — same guard as iOS `applyGithubChecks(_:from:)`.
+                    // PR #223 rounds 2+3: a batch merges only while the load that
+                    // requested it is still the CURRENT pulls load (generation) of the
+                    // still-selected workspace — a delayed batch from a previous project
+                    // or an out-of-order reload can never misattribute rollups.
+                    if (st.githubPullsLoadGeneration != generation) return@update st
                     st.copy(
                         githubPullsPhase = GitHubHubUx.checksFillResult(
                             st.githubPullsPhase, response.checks, requestContainerId, st.selectedContainer?.id,
@@ -137,12 +205,15 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
         val loaded = _uiState.value.githubPullsPhase as? GitHubPullsPhase.Loaded ?: return
         if (!loaded.hasMore || loaded.loadingMore) return
         val filter = _uiState.value.githubPullsFilter.copy(page = loaded.page + 1)
+        // NOT bumped: a load-more belongs to the current primary load's generation, so
+        // a NEW primary load (filter change / project switch) invalidates this page.
+        val gen = _uiState.value.githubPullsLoadGeneration
         _uiState.update {
             it.copy(githubPullsPhase = loaded.copy(loadingMore = true), githubPullsFilter = filter)
         }
         scope.launch {
             runCatching {
-                api.githubPulls(
+                fetchGithubPulls(
                     selected.baseUrl, selected.id,
                     author = filter.author.takeIf { it.isNotBlank() },
                     involvement = filter.involvement.wire,
@@ -151,17 +222,21 @@ internal interface GitHubHubActions : OrchaViewModelAccess {
                 )
             }
                 .onSuccess { response ->
+                    var applied = false
                     _uiState.update { st ->
+                        if (st.githubPullsLoadGeneration != gen || st.selectedContainer?.id != selected.id) return@update st
                         val current = st.githubPullsPhase as? GitHubPullsPhase.Loaded ?: return@update st
                         val next = GitHubHubUx.phase(response, filter.involvement) as? GitHubPullsPhase.Loaded ?: return@update st
+                        applied = true
                         st.copy(githubPullsPhase = next.copy(pulls = GitHubHubUx.appendPulls(current.pulls, next.pulls), loadingMore = false))
                     }
-                    fillGithubChecks(response.pulls)
+                    if (applied) fillGithubChecks(response.pulls, selected.id, gen)
                 }
                 .onFailure {
                     // Load-more failures stay quiet in place (keep the current rows, drop the
                     // spinner) — the user can just tap "load more" again, same as any list.
                     _uiState.update { st ->
+                        if (st.githubPullsLoadGeneration != gen || st.selectedContainer?.id != selected.id) return@update st
                         val current = st.githubPullsPhase as? GitHubPullsPhase.Loaded ?: return@update st
                         st.copy(githubPullsPhase = current.copy(loadingMore = false))
                     }

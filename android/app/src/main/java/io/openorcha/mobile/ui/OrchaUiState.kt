@@ -144,6 +144,10 @@ data class OrchaUiState(
     /** PR list's author/involvement/q/page filter — Android extension of the frozen
      *  filter+pagination contract (issue: PR-list filtering + pagination). */
     val githubPullsFilter: GitHubPullsFilterState = GitHubPullsFilterState(),
+    /** PR #223 round 3: stale-completion guards — bumped at the start of every primary
+     *  list load; a completion applies only while its captured generation is current. */
+    val githubIssuesLoadGeneration: Int = 0,
+    val githubPullsLoadGeneration: Int = 0,
     val githubIssueNumber: Int? = null,
     val githubIssueDetailPhase: GitHubIssueDetailPhase = GitHubIssueDetailPhase.Loading,
     val githubPullNumber: Int? = null,

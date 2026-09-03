@@ -105,6 +105,16 @@ final class AppModel {
     /// GitHub login (the involvement chips' disabled-footnote copy) — cleared on
     /// every successful fetch that isn't that exact off-state.
     var githubInvolvementUnavailableDetail: String?
+    /// GitHub hub — stale-completion guards (PR #223 round 3): a generation per list
+    /// surface, bumped at the START of every primary load. A completion (success OR
+    /// failure, including the follow-up checks fill) applies only while its captured
+    /// generation is still current, so a delayed response from a previous project or
+    /// an out-of-order same-project reload can never overwrite a newer list.
+    var githubIssuesLoadGeneration = 0
+    var githubPullsLoadGeneration = 0
+    /// Test seam: the hub's fetch surface, overridable so the delayed-response races
+    /// are drivable through the REAL load paths. Nil in production (falls back to `api`).
+    var githubFetchOverride: (any GitHubHubFetching)?
     var containerHealth: [String: ContainerHealth] = [:]
     var taskMessages: [TaskMessageDto] = []
     var taskRuns: [RunDto] = []

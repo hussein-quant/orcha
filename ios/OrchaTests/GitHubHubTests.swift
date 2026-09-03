@@ -855,7 +855,22 @@ private func makePull(number: Int) -> GitHubPullDetail {
 
         // Project A's checks call returns AFTER the switch to B — same PR number.
         let aChecks = try rollups(#"{"12": {"passed": 3, "failing": 1, "total": 4}}"#)
-        model.applyGithubChecks(aChecks, from: "project-a")
+        model.applyGithubChecks(aChecks, from: "project-a", generation: model.githubPullsLoadGeneration)
+
+        #expect(model.githubPullsPhase == .loaded(repo: "b/repo", pulls: bRows, page: .init()))
+    }
+
+    @Test func staleGenerationBatchIsDiscardedEvenForTheSameProject() throws {
+        // Round 3: an out-of-order same-project reload — the batch belongs to a
+        // superseded load (older generation), so it must not merge.
+        let model = AppModel()
+        model.selectedContainer = container("project-b")
+        model.githubPullsLoadGeneration = 4
+        let bRows = try rows(#"[{"number": 12, "title": "B's PR 12"}]"#)
+        model.githubPullsPhase = .loaded(repo: "b/repo", pulls: bRows, page: .init())
+
+        let staleChecks = try rollups(#"{"12": {"passed": 3, "total": 3}}"#)
+        model.applyGithubChecks(staleChecks, from: "project-b", generation: 3)
 
         #expect(model.githubPullsPhase == .loaded(repo: "b/repo", pulls: bRows, page: .init()))
     }
@@ -867,7 +882,7 @@ private func makePull(number: Int) -> GitHubPullDetail {
         model.githubPullsPhase = .loaded(repo: "b/repo", pulls: bRows, page: .init())
 
         let bChecks = try rollups(#"{"12": {"passed": 2, "pending": 1, "total": 3}}"#)
-        model.applyGithubChecks(bChecks, from: "project-b")
+        model.applyGithubChecks(bChecks, from: "project-b", generation: model.githubPullsLoadGeneration)
 
         guard case let .loaded(_, pulls, _) = model.githubPullsPhase else {
             Issue.record("expected .loaded, got \(model.githubPullsPhase)")
@@ -876,5 +891,193 @@ private func makePull(number: Int) -> GitHubPullDetail {
         #expect(pulls[0].checks.passed == 2)
         #expect(pulls[0].checks.pending == 1)
         #expect(pulls[0].checks.total == 3)
+    }
+}
+
+
+// MARK: - primary list loads: delayed-response races through the REAL load paths (PR #223 round 3)
+
+/// A gated `GitHubHubFetching` fake: every pulls/checks call suspends until the test
+/// releases it, so the exact delayed-response orderings from the review are driven
+/// through the REAL `loadGithubPulls` / `fillGithubChecks` code, not helper calls.
+actor GatedHubFetcher: GitHubHubFetching {
+    private var pendingPulls: [(cid: String, cont: CheckedContinuation<GitHubPullsResponse, Never>)] = []
+    private var pendingChecks: [(cid: String, cont: CheckedContinuation<GitHubChecksBatchResponse, Never>)] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var gateChecks = false
+
+    func setGateChecks(_ on: Bool) { gateChecks = on }
+
+    private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
+        try JSONDecoder().decode(type, from: Data(json.utf8))
+    }
+
+    private func notifyWaiters() {
+        waiters.forEach { $0.resume() }
+        waiters.removeAll()
+    }
+
+    func githubIssues(_ base: String, _ cid: String) async throws -> GitHubIssuesResponse {
+        try decode(GitHubIssuesResponse.self, #"{"available": false}"#)
+    }
+
+    func githubPulls(
+        _ base: String, _ cid: String,
+        author: String?, involvement: String?, q: String?,
+        page: Int?, perPage: Int?
+    ) async throws -> GitHubPullsResponse {
+        await withCheckedContinuation { cont in
+            pendingPulls.append((cid, cont))
+            notifyWaiters()
+        }
+    }
+
+    func githubChecks(_ base: String, _ cid: String, numbers: [Int]) async throws -> GitHubChecksBatchResponse {
+        if gateChecks {
+            return await withCheckedContinuation { cont in
+                pendingChecks.append((cid, cont))
+                notifyWaiters()
+            }
+        }
+        return try decode(GitHubChecksBatchResponse.self, #"{"available": false}"#)
+    }
+
+    func waitForPulls(count: Int) async {
+        while pendingPulls.count < count {
+            await withCheckedContinuation { waiters.append($0) }
+        }
+    }
+
+    func pendingChecksCount() -> Int { pendingChecks.count }
+
+    func waitForChecks(count: Int) async {
+        while pendingChecks.count < count {
+            await withCheckedContinuation { waiters.append($0) }
+        }
+    }
+
+    func releasePulls(at index: Int, json: String) throws {
+        let pending = pendingPulls.remove(at: index)
+        pending.cont.resume(returning: try decode(GitHubPullsResponse.self, json))
+    }
+
+    func releaseChecks(at index: Int, json: String) throws {
+        let pending = pendingChecks.remove(at: index)
+        pending.cont.resume(returning: try decode(GitHubChecksBatchResponse.self, json))
+    }
+}
+
+@MainActor
+@Suite struct GitHubHubListRaceTests {
+    private func container(_ id: String) -> StoredContainer {
+        StoredContainer(
+            id: id, displayName: id, baseUrl: "http://\(id).local",
+            humanAgentId: nil, humanAlias: nil, pairingToken: nil, remoteBaseUrl: nil
+        )
+    }
+
+    private func pullsJson(repo: String, title: String, number: Int = 12) -> String {
+        #"{"available": true, "repo": "\#(repo)", "pulls": [{"number": \#(number), "title": "\#(title)"}], "items": [{"number": \#(number), "title": "\#(title)"}]}"#
+    }
+
+    private func loadedTitles(_ phase: GitHubPullsPhase) -> (repo: String?, titles: [String])? {
+        guard case let .loaded(repo, pulls, _) = phase else { return nil }
+        return (repo, pulls.map(\.title))
+    }
+
+    @Test func delayedListFromAnotherProjectIsDiscarded() async throws {
+        let model = AppModel()
+        let gate = GatedHubFetcher()
+        model.githubFetchOverride = gate
+
+        // A's list request goes out…
+        model.selectedContainer = container("project-a")
+        let loadA = Task { await model.loadGithubPulls() }
+        await gate.waitForPulls(count: 1)
+
+        // …the user switches to B, whose list loads fine…
+        model.selectedContainer = container("project-b")
+        let loadB = Task { await model.loadGithubPulls() }
+        await gate.waitForPulls(count: 2)
+        try await gate.releasePulls(at: 1, json: pullsJson(repo: "b/repo", title: "B PR"))
+        await loadB.value
+        #expect(loadedTitles(model.githubPullsPhase)?.repo == "b/repo")
+
+        // …then A's stale response finally arrives. It must be discarded.
+        try await gate.releasePulls(at: 0, json: pullsJson(repo: "a/repo", title: "A PR"))
+        await loadA.value
+        let result = try #require(loadedTitles(model.githubPullsPhase))
+        #expect(result.repo == "b/repo")
+        #expect(result.titles == ["B PR"])
+    }
+
+    @Test func outOfOrderSameProjectLoadsKeepTheNewest() async throws {
+        // Two rapid loads within ONE project (a filter change): the SECOND request
+        // resolves first; the first (now stale) resolves after and must be discarded.
+        let model = AppModel()
+        let gate = GatedHubFetcher()
+        model.githubFetchOverride = gate
+        model.selectedContainer = container("project-a")
+
+        let firstLoad = Task { await model.loadGithubPulls() }
+        await gate.waitForPulls(count: 1)
+        let secondLoad = Task { await model.loadGithubPulls() }
+        await gate.waitForPulls(count: 2)
+
+        try await gate.releasePulls(at: 1, json: pullsJson(repo: "a/repo", title: "newest"))
+        await secondLoad.value
+        try await gate.releasePulls(at: 0, json: pullsJson(repo: "a/repo", title: "stale"))
+        await firstLoad.value
+
+        #expect(loadedTitles(model.githubPullsPhase)?.titles == ["newest"])
+    }
+
+    @Test func staleChecksBatchAfterReloadIsDiscardedAndCurrentOneMerges() async throws {
+        // The checks fill rides the load's generation: a batch requested by a
+        // superseded load must not merge; the current load's batch must. This also
+        // proves the fill runs through the REAL load path (a no-op fill fails it).
+        let model = AppModel()
+        let gate = GatedHubFetcher()
+        await gate.setGateChecks(true)
+        model.githubFetchOverride = gate
+        model.selectedContainer = container("project-a")
+
+        let firstLoad = Task { await model.loadGithubPulls() }
+        await gate.waitForPulls(count: 1)
+        try await gate.releasePulls(at: 0, json: pullsJson(repo: "a/repo", title: "first"))
+        await firstLoad.value
+        await gate.waitForChecks(count: 1) // first load's fill is now in flight
+
+        let secondLoad = Task { await model.loadGithubPulls() }
+        await gate.waitForPulls(count: 1)
+        try await gate.releasePulls(at: 0, json: pullsJson(repo: "a/repo", title: "second"))
+        await secondLoad.value
+        await gate.waitForChecks(count: 2) // second load's fill is in flight too
+
+        // The FIRST (stale-generation) batch resolves — it must not touch the list.
+        try await gate.releaseChecks(at: 0, json: #"{"available": true, "checks": {"12": {"passed": 9, "total": 9}}}"#)
+        while (await gateChecksPending(gate)) > 1 { await Task.yield() }
+        await Task.yield()
+        let afterStale = try #require(loadedTitles(model.githubPullsPhase))
+        #expect(afterStale.titles == ["second"])
+        if case let .loaded(_, pulls, _) = model.githubPullsPhase {
+            #expect(pulls[0].checks.total == 0) // stale rollup did NOT merge
+        }
+
+        // The CURRENT batch resolves — it must merge (kills a no-op fill mutation).
+        try await gate.releaseChecks(at: 0, json: #"{"available": true, "checks": {"12": {"passed": 2, "failing": 1, "total": 3}}}"#)
+        var merged = false
+        for _ in 0..<1000 {
+            if case let .loaded(_, pulls, _) = model.githubPullsPhase, pulls[0].checks.total == 3 {
+                merged = true
+                break
+            }
+            await Task.yield()
+        }
+        #expect(merged, "the current load's checks batch never merged")
+    }
+
+    private func gateChecksPending(_ gate: GatedHubFetcher) async -> Int {
+        await gate.pendingChecksCount()
     }
 }

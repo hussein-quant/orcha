@@ -7,7 +7,36 @@ import Foundation
 /// resolve to `.unavailable` — never the app-wide error banner. Start rides the
 /// shared `humanAction` guard and returns the task so the view can navigate.
 
+/// The hub's list/checks fetch surface. `OrchaApiClient` is the production witness;
+/// tests inject a gated fake via `AppModel.githubFetchOverride` so the delayed
+/// cross-project / out-of-order races are driven through the REAL load paths
+/// (PR #223 review round 3).
+protocol GitHubHubFetching {
+    func githubIssues(_ base: String, _ cid: String) async throws -> GitHubIssuesResponse
+    func githubPulls(
+        _ base: String, _ cid: String,
+        author: String?, involvement: String?, q: String?,
+        page: Int?, perPage: Int?
+    ) async throws -> GitHubPullsResponse
+    func githubChecks(_ base: String, _ cid: String, numbers: [Int]) async throws -> GitHubChecksBatchResponse
+}
+
+extension OrchaApiClient: GitHubHubFetching {}
+
 extension AppModel {
+
+    /// The fetch surface the loaders use — the injected test fake, or the real client.
+    private var githubFetcher: any GitHubHubFetching { githubFetchOverride ?? api }
+
+    /// True while a completion still belongs to the CURRENT pulls load of the
+    /// still-selected workspace (PR #223 round 3) — stale completions return here.
+    private func isCurrentGithubPullsLoad(_ generation: Int, from containerId: String) -> Bool {
+        generation == githubPullsLoadGeneration && selectedContainer?.id == containerId
+    }
+
+    private func isCurrentGithubIssuesLoad(_ generation: Int, from containerId: String) -> Bool {
+        generation == githubIssuesLoadGeneration && selectedContainer?.id == containerId
+    }
 
     /// The container's currently-bound repo ("owner/name"), or nil — drives the
     /// hub entry point's visibility (no repo ⇒ the friendly connect state).
@@ -38,13 +67,19 @@ extension AppModel {
             githubIssuesPhase = .failed("No workspace is open — close this and try again.")
             return
         }
+        githubIssuesLoadGeneration &+= 1
+        let gen = githubIssuesLoadGeneration
         githubIssuesPhase = .loading
         do {
-            githubIssuesPhase = GitHubHubUx.phase(from: try await api.githubIssues(sel.baseUrl, sel.id))
+            let response = try await githubFetcher.githubIssues(sel.baseUrl, sel.id)
+            guard isCurrentGithubIssuesLoad(gen, from: sel.id) else { return }
+            githubIssuesPhase = GitHubHubUx.phase(from: response)
         } catch let error as OrchaApiError where error.status == 404 {
             // Older self-host server without the hub surface — degrade, don't error.
+            guard isCurrentGithubIssuesLoad(gen, from: sel.id) else { return }
             githubIssuesPhase = .unavailable(reason: "repo_not_connected", detail: nil)
         } catch {
+            guard isCurrentGithubIssuesLoad(gen, from: sel.id) else { return }
             githubIssuesPhase = .failed(friendly(error))
         }
     }
@@ -58,16 +93,21 @@ extension AppModel {
             githubPullsPhase = .failed("No workspace is open — close this and try again.")
             return
         }
+        githubPullsLoadGeneration &+= 1
+        let gen = githubPullsLoadGeneration
         githubPullsFilter = githubPullsFilter.resetToFirstPage()
         githubPullsPhase = .loading
         do {
             let response = try await fetchGithubPulls(sel, filter: filter, page: 1)
+            guard isCurrentGithubPullsLoad(gen, from: sel.id) else { return }
             githubInvolvementUnavailableDetail = GitHubHubUx.involvementUnavailableDetail(response)
             githubPullsPhase = GitHubHubUx.phase(from: response)
-            fillGithubChecks(for: response.pulls)
+            fillGithubChecks(for: response.pulls, containerId: sel.id, generation: gen)
         } catch let error as OrchaApiError where error.status == 404 {
+            guard isCurrentGithubPullsLoad(gen, from: sel.id) else { return }
             githubPullsPhase = .unavailable(reason: "repo_not_connected", detail: nil)
         } catch {
+            guard isCurrentGithubPullsLoad(gen, from: sel.id) else { return }
             githubPullsPhase = .failed(friendly(error))
         }
     }
@@ -82,21 +122,27 @@ extension AppModel {
               page.hasMore
         else { return }
         let nextPage = page.page + 1
+        // NOT bumped: a load-more belongs to the current primary load's generation, so
+        // a NEW primary load (filter change / project switch) invalidates this page.
+        let gen = githubPullsLoadGeneration
         githubPullsPhase = .loadingMore(repo: repo, pulls: pulls, page: page)
         do {
             let response = try await fetchGithubPulls(sel, filter: filter, page: nextPage)
+            guard isCurrentGithubPullsLoad(gen, from: sel.id) else { return }
             githubInvolvementUnavailableDetail = GitHubHubUx.involvementUnavailableDetail(response)
             let (merged, info) = GitHubHubUx.accumulate(existing: pulls, incoming: response)
             githubPullsFilter.page = info.page
             githubPullsPhase = response.available
                 ? .loaded(repo: response.repo ?? repo, pulls: merged, page: info)
                 : .unavailable(reason: response.reason, detail: response.detail)
-            fillGithubChecks(for: response.pulls)
+            fillGithubChecks(for: response.pulls, containerId: sel.id, generation: gen)
         } catch let error as OrchaApiError where error.status == 404 {
             // Restore the page the user was already looking at rather than
             // dropping it behind a friendly-off screen for a load-more hiccup.
+            guard isCurrentGithubPullsLoad(gen, from: sel.id) else { return }
             githubPullsPhase = .loaded(repo: repo, pulls: pulls, page: page)
         } catch {
+            guard isCurrentGithubPullsLoad(gen, from: sel.id) else { return }
             githubPullsPhase = .loaded(repo: repo, pulls: pulls, page: page)
             self.error = friendly(error) // surfaces via the app-wide error banner, list stays put
         }
@@ -108,29 +154,29 @@ extension AppModel {
     /// numbers through `…/github/checks` and merge the rollups into whatever phase is
     /// current. Fire-and-forget: a failed batch (or an older server's 404) just leaves
     /// those chips hidden, exactly as before this fill existed.
-    func fillGithubChecks(for pulls: [GitHubPullRow]) {
-        guard let sel = selectedContainer else { return }
+    func fillGithubChecks(for pulls: [GitHubPullRow], containerId: String, generation: Int) {
+        guard let sel = selectedContainer, sel.id == containerId else { return }
         let numbers = pulls.map(\.number)
         guard !numbers.isEmpty else { return }
-        let containerId = sel.id
         Task { [weak self] in
             guard let self else { return }
             for batch in GitHubHubUx.checksBatches(numbers) {
-                guard let response = try? await self.api.githubChecks(sel.baseUrl, sel.id, numbers: batch),
+                guard let response = try? await self.githubFetcher.githubChecks(sel.baseUrl, sel.id, numbers: batch),
                       response.available, !response.checks.isEmpty
                 else { continue }
-                self.applyGithubChecks(response.checks, from: containerId)
+                self.applyGithubChecks(response.checks, from: containerId, generation: generation)
             }
         }
     }
 
-    /// Merge a checks batch into the current phase — but ONLY if the workspace the
-    /// batch was requested for is still the selected one. PR #223 review: rows are
-    /// matched by PR number alone, so a delayed response from project A must never
-    /// land on project B's same-numbered PRs after a switch. Internal (not private)
-    /// so the delayed-switch regression test can drive it directly.
-    func applyGithubChecks(_ checks: [String: GitHubChecks], from containerId: String) {
-        guard selectedContainer?.id == containerId else { return }
+    /// Merge a checks batch into the current phase — but ONLY while the load that
+    /// requested it is still the CURRENT pulls load (generation) of the still-selected
+    /// workspace. PR #223 rounds 2+3: rows are matched by PR number alone, so a delayed
+    /// batch from a previous project OR an out-of-order same-project reload must never
+    /// land on the newer list. Internal (not private) so the regression tests can
+    /// drive it directly.
+    func applyGithubChecks(_ checks: [String: GitHubChecks], from containerId: String, generation: Int) {
+        guard generation == githubPullsLoadGeneration, selectedContainer?.id == containerId else { return }
         switch githubPullsPhase {
         case let .loaded(repo, pulls, page):
             githubPullsPhase = .loaded(repo: repo, pulls: GitHubHubUx.mergeChecks(pulls, checks), page: page)
@@ -146,7 +192,7 @@ extension AppModel {
         _ sel: StoredContainer, filter: GitHubHubFilter, page: Int
     ) async throws -> GitHubPullsResponse {
         let params = GitHubHubUx.pullsQueryParams(filter: filter, state: githubPullsFilter, login: githubLogin)
-        return try await api.githubPulls(
+        return try await githubFetcher.githubPulls(
             sel.baseUrl, sel.id,
             author: params.author,
             involvement: params.involvement,
