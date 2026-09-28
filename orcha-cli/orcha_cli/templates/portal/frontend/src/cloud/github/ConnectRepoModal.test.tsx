@@ -49,13 +49,13 @@ describe("ConnectRepoModal", () => {
       available: true,
       source: "pat",
       repos: [
-        { full_name: "local", name: "quantal-ehr", source_kind: "local" },
+        { full_name: "local", name: "acme-ehr", source_kind: "local" },
         { full_name: "acme/app", private: false, description: "the app" },
       ],
     });
     mount();
     expect(await screen.findByText("This machine")).toBeInTheDocument();
-    expect(screen.getByText("quantal-ehr")).toBeInTheDocument();
+    expect(screen.getByText("acme-ehr")).toBeInTheDocument();
     expect(screen.getByText("Local git repository — works offline, no GitHub needed")).toBeInTheDocument();
     // GitHub section renders the rest of the list, local entry excluded from it
     expect(screen.getByText("GitHub")).toBeInTheDocument();
@@ -65,16 +65,16 @@ describe("ConnectRepoModal", () => {
 
   it("falls back to a generic local row when the backend hasn't shipped the prepended entry yet", async () => {
     stubFetch({ available: false, repos: [] });
-    mount({ fallbackLocalName: "quantal-ehr" });
+    mount({ fallbackLocalName: "acme-ehr" });
     expect(await screen.findByText("This machine")).toBeInTheDocument();
-    expect(screen.getByText("quantal-ehr")).toBeInTheDocument();
+    expect(screen.getByText("acme-ehr")).toBeInTheDocument();
   });
 
   it("choosing the local entry PUTs {repo: 'local'} and reports the binding", async () => {
     const calls = stubFetch({ available: false, repos: [] });
-    const { onBound, onClose } = mount({ fallbackLocalName: "quantal-ehr" });
+    const { onBound, onClose } = mount({ fallbackLocalName: "acme-ehr" });
     await screen.findByText("This machine");
-    fireEvent.click(screen.getByText("quantal-ehr"));
+    fireEvent.click(screen.getByText("acme-ehr"));
     await waitFor(() => expect(onBound).toHaveBeenCalledWith("local"));
     const put = calls.find((c) => c.url === "/api/containers/c1/github" && c.method === "PUT");
     expect(put).toBeTruthy();

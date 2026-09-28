@@ -1,6 +1,6 @@
 /* ============================================================================
    Orcha portal — design tokens + component system
-   Product: Orcha (teal orca).  Maker: Quantal Labs AI (amber dot).
+   Product: Orcha (teal orca).
    Both light + dark are first-class, driven entirely by CSS custom properties.
    A single [data-theme] switch on <html> flips everything.
    ========================================================================== */
@@ -36,7 +36,7 @@
   --accent-line: rgba(31, 199, 205, .34);
   --accent-glow: rgba(31, 199, 205, .22);
 
-  /* maker accent — Quantal amber. Only the dot + tiny footer wordmark. */
+  /* amber accent — human identity (avatar ring, kind badge, chat bubbles). */
   --amber:       #f2a83c;
 
   /* semantic state — each has fg / soft bg / border so pills read in 2 themes */
@@ -240,18 +240,6 @@ svg.gl  { width: 13px; height: 13px; flex: none; }
 .attn-card a.go { display: inline-flex; align-items: center; gap: 5px; margin-top: 9px;
   font-size: 12.5px; font-weight: 650; color: var(--text); }
 .attn-card a.go:hover { color: var(--accent); }
-
-/* maker footer */
-.maker { display: flex; flex-direction: column; gap: 8px; padding: 13px 8px 2px;
-  border-top: 1px solid var(--border); margin-top: 4px; }
-.maker .dev { font-size: 10px; letter-spacing: .11em; text-transform: uppercase; color: var(--faint); font-weight: 650; }
-.ql-logo { display: flex; align-items: center; gap: 9px; color: var(--text); }
-.ql-mark { width: 23px; height: 23px; flex: none; }
-.ql-word { font-size: 14.5px; font-weight: 500; letter-spacing: -.02em; line-height: 1; }
-.ql-word b { font-weight: 760; }
-.ql-labs { color: var(--muted); }
-.ql-ai { font-family: "JetBrains Mono", monospace; font-size: 9.5px; font-weight: 600; letter-spacing: .04em;
-  color: var(--muted); border: 1px solid var(--border-2); border-radius: 5px; padding: 2px 5px; line-height: 1; }
 
 /* ---- collapsible sidebar (icon rail) ----
  * Ported from the cloud vanilla portal (app-shell.js / shell.css): state

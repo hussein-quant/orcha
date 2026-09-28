@@ -23,7 +23,7 @@ end-to-end proof for the seams the unit suites fake:
 Cleanup discipline: every container the module creates is named orcha-run-*
 and its name is recorded in _CREATED; per-test finally blocks and the module
 teardown force-remove ONLY those. Live orcha stacks on this host
-(orcha-quantal-ehr-*, orcha-orcha-live-demo-*) are never touched. The stub
+(orcha-<project>-*, orcha-orcha-live-demo-*) are never touched. The stub
 image is left in place (cheap; speeds re-runs).
 """
 import json

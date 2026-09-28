@@ -1,6 +1,6 @@
 """ISS-22 round 3 — the "unstuck" incident: self-heal fooled by a dead daemon.
 
-Field failure: the quantal-health notifier died (likely OOM); the provisioner's
+Field failure: a production notifier died (likely OOM); the provisioner's
 2-minute `orcha notifier --ensure` self-heal never revived it because liveness
 was pid-identity only — a recycled pid passed `os.kill(pid, 0)`, and `ps`
 failing open (`_ps_inspect` → None ⇒ "alive") masked the death indefinitely.

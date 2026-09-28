@@ -15,16 +15,16 @@ class DeviceAuthTest {
     @Test
     fun startUrlAppendsAuthDevicePath() {
         assertEquals(
-            "https://orcha.quantallabs.ai/auth/device",
-            DeviceAuth.startUrl("https://orcha.quantallabs.ai"),
+            "https://orcha.example.com/auth/device",
+            DeviceAuth.startUrl("https://orcha.example.com"),
         )
     }
 
     @Test
     fun startUrlTrimsTrailingSlash() {
         assertEquals(
-            "https://orcha.quantallabs.ai/auth/device",
-            DeviceAuth.startUrl("https://orcha.quantallabs.ai/"),
+            "https://orcha.example.com/auth/device",
+            DeviceAuth.startUrl("https://orcha.example.com/"),
         )
     }
 
@@ -47,13 +47,13 @@ class DeviceAuthTest {
 
     @Test
     fun parseCallbackReadsHostAndToken() {
-        val callback = DeviceAuth.parseCallback("orcha://auth/callback?host=orcha.quantallabs.ai&token=abc123")
-        assertEquals(DeviceAuth.Callback("orcha.quantallabs.ai", "abc123"), callback)
+        val callback = DeviceAuth.parseCallback("orcha://auth/callback?host=orcha.example.com&token=abc123")
+        assertEquals(DeviceAuth.Callback("orcha.example.com", "abc123"), callback)
     }
 
     @Test
     fun parseCallbackDecodesPercentEncoding() {
-        val callback = DeviceAuth.parseCallback("orcha://auth/callback?host=orcha.quantallabs.ai&token=a%2Bb%2Fc")
+        val callback = DeviceAuth.parseCallback("orcha://auth/callback?host=orcha.example.com&token=a%2Bb%2Fc")
         assertEquals("a+b/c", callback?.token)
     }
 
@@ -90,37 +90,37 @@ class DeviceAuthTest {
 
     @Test
     fun callbackMatchesBareHost() {
-        val callback = DeviceAuth.Callback(host = "orcha.quantallabs.ai", token = "t")
-        assertTrue(DeviceAuth.callbackMatchesBase(callback, "https://orcha.quantallabs.ai"))
+        val callback = DeviceAuth.Callback(host = "orcha.example.com", token = "t")
+        assertTrue(DeviceAuth.callbackMatchesBase(callback, "https://orcha.example.com"))
     }
 
     @Test
     fun callbackMatchesHostPort() {
-        val callback = DeviceAuth.Callback(host = "orcha.quantallabs.ai:443", token = "t")
-        assertTrue(DeviceAuth.callbackMatchesBase(callback, "https://orcha.quantallabs.ai"))
+        val callback = DeviceAuth.Callback(host = "orcha.example.com:443", token = "t")
+        assertTrue(DeviceAuth.callbackMatchesBase(callback, "https://orcha.example.com"))
     }
 
     @Test
     fun callbackMatchesFullUrlForm() {
-        val callback = DeviceAuth.Callback(host = "https://orcha.quantallabs.ai", token = "t")
-        assertTrue(DeviceAuth.callbackMatchesBase(callback, "https://orcha.quantallabs.ai"))
+        val callback = DeviceAuth.Callback(host = "https://orcha.example.com", token = "t")
+        assertTrue(DeviceAuth.callbackMatchesBase(callback, "https://orcha.example.com"))
     }
 
     @Test
     fun callbackIsCaseInsensitive() {
-        val callback = DeviceAuth.Callback(host = "ORCHA.QuantalLabs.ai", token = "t")
-        assertTrue(DeviceAuth.callbackMatchesBase(callback, "https://orcha.quantallabs.ai"))
+        val callback = DeviceAuth.Callback(host = "ORCHA.Example.com", token = "t")
+        assertTrue(DeviceAuth.callbackMatchesBase(callback, "https://orcha.example.com"))
     }
 
     @Test
     fun callbackDoesNotMatchDifferentHost() {
         val callback = DeviceAuth.Callback(host = "evil.example.com", token = "t")
-        assertFalse(DeviceAuth.callbackMatchesBase(callback, "https://orcha.quantallabs.ai"))
+        assertFalse(DeviceAuth.callbackMatchesBase(callback, "https://orcha.example.com"))
     }
 
     @Test
     fun callbackDoesNotMatchWhenBaseIsUnparseable() {
-        val callback = DeviceAuth.Callback(host = "orcha.quantallabs.ai", token = "t")
+        val callback = DeviceAuth.Callback(host = "orcha.example.com", token = "t")
         assertFalse(DeviceAuth.callbackMatchesBase(callback, ""))
     }
 }

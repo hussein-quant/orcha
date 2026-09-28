@@ -212,7 +212,7 @@ can close it). The human must be able to abandon a stale request or force-close 
 
 ## PHASE 3.5 — PORTAL REDESIGN (design-system adoption)  (Frame; NEW — kedar 2026-06-03)
 Source artifact: **`docs/portal-redesign-ref/`** — a Claude-Design handoff (evolved teal-orca brand,
-Quantal amber-dot maker mark, dense operational dashboard, full light/dark via tokens). Vanilla
+dense operational dashboard, full light/dark via tokens). Vanilla
 HTML/CSS/JS, built to lift straight into the static portal. **NOTES.md** has the rationale; **chat** has intent.
 
 > **This is a cohesive replacement, not a bolt-on.** It SUBSUMES the bespoke per-page CSS and several open

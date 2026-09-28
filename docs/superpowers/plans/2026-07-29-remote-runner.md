@@ -117,7 +117,7 @@ def test_sandbox_api_config_rewrites_base_url(tmp_path):
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/orcha-open && python -m pytest tests/test_sandbox_builders.py -v`
+Run: `cd /Users/husseinmohamed/Desktop/projects/orcha-open && python -m pytest tests/test_sandbox_builders.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'orcha_cli.sandbox'` (or ImportError via conftest path).
 
 - [ ] **Step 3: Write the module**

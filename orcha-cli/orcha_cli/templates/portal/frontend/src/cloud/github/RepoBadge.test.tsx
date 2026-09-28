@@ -16,8 +16,8 @@ describe("RepoBadge", () => {
   });
 
   it("local binding: workspace name + Local chip, no anchor at all", () => {
-    render(<RepoBadge repo="local" workspaceName="quantal-ehr" />);
-    expect(screen.getByText("quantal-ehr")).toBeInTheDocument();
+    render(<RepoBadge repo="local" workspaceName="acme-ehr" />);
+    expect(screen.getByText("acme-ehr")).toBeInTheDocument();
     expect(screen.getByText("Local")).toBeInTheDocument();
     expect(document.querySelector("a")).toBeNull();
   });
@@ -42,7 +42,7 @@ describe("RepoBadge", () => {
   });
 
   it("never builds a github.com/local link even when link=true", () => {
-    render(<RepoBadge repo="local" workspaceName="quantal-ehr" link />);
+    render(<RepoBadge repo="local" workspaceName="acme-ehr" link />);
     expect(document.querySelector("a")).toBeNull();
   });
 
@@ -50,14 +50,14 @@ describe("RepoBadge", () => {
   // GitHub hub): the Local badge can ALSO show the detected origin repo as a
   // muted suffix — both truths visible at once.
   it("local binding + originRepo: shows the Local chip AND a muted origin suffix", () => {
-    render(<RepoBadge repo="local" workspaceName="quantal-ehr" originRepo="acme/site" />);
-    expect(screen.getByText("quantal-ehr")).toBeInTheDocument();
+    render(<RepoBadge repo="local" workspaceName="acme-ehr" originRepo="acme/site" />);
+    expect(screen.getByText("acme-ehr")).toBeInTheDocument();
     expect(screen.getByText("Local")).toBeInTheDocument();
     expect(screen.getByText("· acme/site")).toBeInTheDocument();
   });
 
   it("local binding with no originRepo shows no suffix at all", () => {
-    render(<RepoBadge repo="local" workspaceName="quantal-ehr" />);
+    render(<RepoBadge repo="local" workspaceName="acme-ehr" />);
     expect(document.querySelector(".repo-badge-origin")).toBeNull();
   });
 

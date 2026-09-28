@@ -245,7 +245,7 @@ working/idle dots, model chips, current-task lines; medium/large),
 **Orcha Pipeline** (ready→working→verify flow bars; medium), **Orcha
 Attention** (pending-item list with kind chips; large). Gallery previews
 render sample data; stale data (>2 min) renders an OFFLINE state. Provider
-logs diagnostics under subsystem `ai.quantal.orcha.widget` (query with
+logs diagnostics under subsystem `io.openorcha.widget` (query with
 `/usr/bin/log` — zsh shadows `log`).
 
 **Operational rules learned:** chronod caches widget descriptors per appex

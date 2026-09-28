@@ -150,7 +150,7 @@ struct WorkspaceScreen: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     // Icon-only: the title label ("My Orchas") crowded the inline
-                    // title into truncating ("Ship Quantal…"). VoiceOver keeps the name.
+                    // title into truncating ("Ship the new…"). VoiceOver keeps the name.
                     Button("My Orchas", systemImage: "chevron.backward") { model.closeWorkspace() }
                         .labelStyle(.iconOnly)
                 }

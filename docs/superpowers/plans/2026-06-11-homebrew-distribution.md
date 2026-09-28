@@ -18,7 +18,7 @@
 **One-time local setup for build steps (Tasks 1, 11):**
 
 ```bash
-cd /Users/husseinmohamed/Desktop/quantal-projects/Orcha
+cd /Users/husseinmohamed/Desktop/projects/Orcha
 python3 -m venv .plan-venv
 ./.plan-venv/bin/pip install --upgrade pip build twine pytest
 ```

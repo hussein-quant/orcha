@@ -4,7 +4,7 @@ import WidgetKit
 import os
 
 private let appGroupId = "N2597TV587.orcha"
-private let logger = Logger(subsystem: "ai.quantal.orcha.widget", category: "provider")
+private let logger = Logger(subsystem: "io.openorcha.widget", category: "provider")
 
 struct OrchaStatus: Codable {
   struct AgentRow: Codable {
@@ -93,7 +93,7 @@ extension OrchaStatus {
       totalAttention: 2,
       stacks: [
         .init(
-          projectShort: "quantal-ehr", running: true, attention: 2, working: 1,
+          projectShort: "acme-ehr", running: true, attention: 2, working: 1,
           agents: [
             .init(
               alias: "Plum", kind: "ai", status: "working", model: "opus-4-8",
@@ -104,16 +104,16 @@ extension OrchaStatus {
           tasks: .init(inProgress: 1, needsVerification: 1, ready: 2)
         ),
         .init(
-          projectShort: "quantallabs-web", running: true, attention: 0, working: 0,
+          projectShort: "acme-web", running: true, attention: 0, working: 0,
           agents: [], tasks: .init(inProgress: 0, needsVerification: 0, ready: 1)
         ),
       ],
       attention: [
         .init(
-          projectShort: "quantal-ehr", kind: "request_answer",
+          projectShort: "acme-ehr", kind: "request_answer",
           title: "[Atlas → operator] Which auth provider for the portal?"),
         .init(
-          projectShort: "quantal-ehr", kind: "task_verify",
+          projectShort: "acme-ehr", kind: "task_verify",
           title: "Verify: patient search API pagination"),
       ]
     )

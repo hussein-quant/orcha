@@ -71,8 +71,8 @@ pause banner, attachment lightbox.
 - Borders `#232d3d/#e4eaf2`; text `#e8edf6/#0e1722`; muted `#8b98ae/#5a6678`.
 - **Brand accent: teal `#1fc7cd` / `#0c9aa0`** — primary actions, focus, links, live/working
   pulses. Never decorative fills.
-- **Maker accent: amber `#f2a83c`** — reserved for the Quantal Labs footer mark and the
-  human identity (human avatar ring, human kind badge, human chat bubbles).
+- **Amber accent `#f2a83c`** — reserved for the human identity (human avatar ring,
+  human kind badge, human chat bubbles).
 - Semantic set (each with fg / soft-bg / border variants): `--ok` green `#38d39a` (success/done),
   `--info` blue `#5aa6ff` (ready/info/Build-to-PR), `--warn` amber `#f5b13d` (needs-attention/
   Plan-only/"Needs you"), `--danger` red `#f6757e` (failure/paused/destructive), `--violet`
@@ -132,7 +132,6 @@ pause banner, attachment lightbox.
 3. **Nav — "Live":** Run feed → `/agents`.
 4. **"Needs you" attention card** (bottom, warn-tinted): bell + "Needs you", a large count,
    "`N` to verify · `M` escalation(s)", link "**Open action queue →**" → `/#needs`.
-5. **Maker footer:** "Developed by" + Quantal Labs logo (ring + amber dot) + "AI" mono pill.
 
 ### 4.2 Topbar (sticky, blurred translucent)
 Left→right: **page title** + context sub-crumb (e.g. "3 tasks · Harden the payments module") ·

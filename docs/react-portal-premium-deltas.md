@@ -704,8 +704,8 @@ called by `src/cloud/members/MembersPage.tsx`.)
    needed". Deep links 404 on deploy unless the server grows a fallback. Deploy-breaking.
 5. **`path="*"` routes to HomePage** (`main.tsx:50`) — typos silently render the dashboard
    (in an arbitrary project, per §B.1) instead of a not-found state.
-6. **"Developed by Quantal Labs" maker block** (`Shell.tsx:387-397`) exists only in the React
-   base (no vanilla source, no vanilla styles). Explicit keep-or-drop decision.
+6. **Maker attribution block** (formerly at the bottom of the sidebar in `Shell.tsx`) — dropped
+   2026-09-28; neither the React base nor vanilla renders a third-party maker footer now.
 7. **Autonomy/notifier copy** — "Autonomy · Paused" toast and "⏸ Autonomy paused" pausebar
    vs vanilla's "Notifier · …" (§C.6).
 

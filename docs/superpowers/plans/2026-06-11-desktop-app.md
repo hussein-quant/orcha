@@ -14,8 +14,8 @@
 - Branch `feat/desktop-app` (verify `git branch --show-current` before every commit; never switch).
 - Everything in this plan lives under `desktop/` except a root `.gitignore` addition. NO HTTP routes or DB shapes change ⇒ `docs/orcha.postman_collection.json` must NOT be touched.
 - Commit messages: conventional prefix, ending with `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
-- All npm commands run from `/Users/husseinmohamed/Desktop/quantal-projects/Orcha/desktop` unless stated otherwise.
-- A REAL stack exists on this machine for fixtures/manual tests: compose project `orcha-quantal-ehr`, containers `orcha-quantal-ehr-portal-1` (8001→8000) and `orcha-quantal-ehr-db-1` (5435→5432).
+- All npm commands run from `/Users/husseinmohamed/Desktop/projects/Orcha/desktop` unless stated otherwise.
+- A REAL stack exists on this machine for fixtures/manual tests: compose project `orcha-acme-ehr`, containers `orcha-acme-ehr-portal-1` (8001→8000) and `orcha-acme-ehr-db-1` (5435→5432).
 
 ---
 
@@ -24,7 +24,7 @@
 **Files:**
 - Create: `desktop/package.json` (via npm + edits), `desktop/electron.vite.config.ts`, `desktop/tsconfig.json`, `desktop/tsconfig.node.json`, `desktop/tsconfig.web.json`, `desktop/vitest.config.ts`, `desktop/.gitignore`
 - Create (minimal entries so the build passes): `desktop/src/main/index.ts`, `desktop/src/preload/index.ts`, `desktop/src/renderer/index.html`, `desktop/src/renderer/src/main.tsx`, `desktop/src/renderer/src/App.tsx`, `desktop/src/renderer/src/env.d.ts`, `desktop/src/renderer/test-setup.ts`
-- Modify: `/Users/husseinmohamed/Desktop/quantal-projects/Orcha/.gitignore` (root)
+- Modify: `/Users/husseinmohamed/Desktop/projects/Orcha/.gitignore` (root)
 
 - [ ] **Step 1: Create the directory and install dependencies** (resolves current versions at install time — do not hand-pin):
 
@@ -251,7 +251,7 @@ out/
 dist/
 ```
 
-Append to the ROOT `/Users/husseinmohamed/Desktop/quantal-projects/Orcha/.gitignore` (read it first; add only if absent):
+Append to the ROOT `/Users/husseinmohamed/Desktop/projects/Orcha/.gitignore` (read it first; add only if absent):
 
 ```
 desktop/node_modules/
@@ -370,10 +370,10 @@ import { parseHostPort, parseDockerPs, listStacks } from './discovery'
 
 // Real output shape from this machine (docker ps -a --format with tab separators).
 const REAL_OUTPUT = [
-  'orcha-quantal-ehr-portal-1\tUp 4 hours\t0.0.0.0:8001->8000/tcp\torcha-quantal-ehr',
+  'orcha-acme-ehr-portal-1\tUp 4 hours\t0.0.0.0:8001->8000/tcp\torcha-acme-ehr',
   'kan69-plan-localstack\tUp 18 hours (healthy)\t4510-4559/tcp, 5678/tcp, 0.0.0.0:4567->4566/tcp\t',
-  'orcha-quantal-ehr-db-1\tUp 21 hours (healthy)\t0.0.0.0:5435->5432/tcp\torcha-quantal-ehr',
-  'quantal-backend\tUp 20 hours (healthy)\t0.0.0.0:8103->8103/tcp\tintegration-all-prs',
+  'orcha-acme-ehr-db-1\tUp 21 hours (healthy)\t0.0.0.0:5435->5432/tcp\torcha-acme-ehr',
+  'acme-backend\tUp 20 hours (healthy)\t0.0.0.0:8103->8103/tcp\tintegration-all-prs',
   ''
 ].join('\n')
 
@@ -403,8 +403,8 @@ describe('parseDockerPs', () => {
     const stacks = parseDockerPs(REAL_OUTPUT)
     expect(stacks).toEqual([
       {
-        project: 'orcha-quantal-ehr',
-        projectShort: 'quantal-ehr',
+        project: 'orcha-acme-ehr',
+        projectShort: 'acme-ehr',
         apiPort: 8001,
         dbPort: 5435,
         portalStatus: 'Up 4 hours',
@@ -864,8 +864,8 @@ import StackCard from './StackCard'
 import type { Stack } from '../../../shared/types'
 
 const runningStack: Stack = {
-  project: 'orcha-quantal-ehr',
-  projectShort: 'quantal-ehr',
+  project: 'orcha-acme-ehr',
+  projectShort: 'acme-ehr',
   apiPort: 8001,
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
@@ -892,7 +892,7 @@ beforeEach(() => {
 describe('StackCard', () => {
   it('shows name, running pill, ports, and a Stop button when running', () => {
     render(<StackCard stack={runningStack} onChanged={vi.fn()} />)
-    expect(screen.getByText('quantal-ehr')).toBeInTheDocument()
+    expect(screen.getByText('acme-ehr')).toBeInTheDocument()
     expect(screen.getByText('running')).toBeInTheDocument()
     expect(screen.getByText(/API :8001/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Stop' })).toBeEnabled()
@@ -911,13 +911,13 @@ describe('StackCard', () => {
     render(<StackCard stack={runningStack} onChanged={onChanged} />)
     await userEvent.click(screen.getByRole('button', { name: 'Stop' }))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
-    expect(window.orchaDesktop.stopStack).toHaveBeenCalledWith('orcha-quantal-ehr')
+    expect(window.orchaDesktop.stopStack).toHaveBeenCalledWith('orcha-acme-ehr')
   })
 
   it('calls openPortal with the project on Open portal click', async () => {
     render(<StackCard stack={runningStack} onChanged={vi.fn()} />)
     await userEvent.click(screen.getByRole('button', { name: 'Open portal' }))
-    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-quantal-ehr')
+    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-acme-ehr')
   })
 
   it('shows the stderr tail inline when an action fails', async () => {
@@ -1329,7 +1329,7 @@ cd desktop && npm run dev
 ```
 
 Run in the background and report to the human what to check:
-- The window lists the real stack `quantal-ehr` with a green "running" pill and `API :8001 · DB :5435`.
+- The window lists the real stack `acme-ehr` with a green "running" pill and `API :8001 · DB :5435`.
 - "Open portal" opens the dashboard window (the portal at localhost:8001).
 - "Stop" flips the card to stopped (give the 5 s poll a beat); "Start" brings it back. ⚠️ Only do the stop/start round-trip with the human's OK — it briefly interrupts the live stack.
 - Quitting Docker Desktop (optional) shows the banner.
@@ -1346,7 +1346,7 @@ v1 of the desktop app (#237): an Electron + React + TypeScript window app in `de
 - Discovery ports the CLI's `_discover_stacks` to TS over `docker ps -a` (stopped stacks appear).
 - All privileged work in the main process behind a 4-method typed IPC bridge (`IpcResult` discriminated results; sandboxed renderer, contextIsolation on).
 - Vitest: discovery/lifecycle unit tests + StackCard/App component tests (jsdom).
-- Verified locally against the real `orcha-quantal-ehr` stack (cards, start/stop, portal window, Docker-down banner).
+- Verified locally against the real `orcha-acme-ehr` stack (cards, start/stop, portal window, Docker-down banner).
 
 Spec: `docs/superpowers/specs/2026-06-11-desktop-app-design.md`
 Plan: `docs/superpowers/plans/2026-06-11-desktop-app.md`
@@ -1415,8 +1415,8 @@ import { computeAttention, fetchStackAttention } from './attention'
 import type { Stack } from '../shared/types'
 
 const stack: Stack = {
-  project: 'orcha-quantal-ehr',
-  projectShort: 'quantal-ehr',
+  project: 'orcha-acme-ehr',
+  projectShort: 'acme-ehr',
   apiPort: 8001,
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
@@ -1436,8 +1436,8 @@ describe('computeAttention', () => {
     ], [])
     expect(items).toEqual([
       {
-        project: 'orcha-quantal-ehr',
-        projectShort: 'quantal-ehr',
+        project: 'orcha-acme-ehr',
+        projectShort: 'acme-ehr',
         kind: 'request_answer',
         id: 'r1',
         title: 'Need a decision'
@@ -1481,8 +1481,8 @@ describe('computeAttention', () => {
     ])
     expect(items).toEqual([
       {
-        project: 'orcha-quantal-ehr',
-        projectShort: 'quantal-ehr',
+        project: 'orcha-acme-ehr',
+        projectShort: 'acme-ehr',
         kind: 'task_verify',
         id: 't1',
         title: 'Ship the feature'
@@ -2068,16 +2068,16 @@ import TrayPanel from './TrayPanel'
 import type { AttentionItem, Stack } from '../../../shared/types'
 
 const stack: Stack = {
-  project: 'orcha-quantal-ehr',
-  projectShort: 'quantal-ehr',
+  project: 'orcha-acme-ehr',
+  projectShort: 'acme-ehr',
   apiPort: 8001,
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
   running: true
 }
 const items: AttentionItem[] = [
-  { project: 'orcha-quantal-ehr', projectShort: 'quantal-ehr', kind: 'task_verify', id: 't1', title: 'Verify foundation layer' },
-  { project: 'orcha-quantal-ehr', projectShort: 'quantal-ehr', kind: 'request_answer', id: 'r1', title: 'Need a decision' }
+  { project: 'orcha-acme-ehr', projectShort: 'acme-ehr', kind: 'task_verify', id: 't1', title: 'Verify foundation layer' },
+  { project: 'orcha-acme-ehr', projectShort: 'acme-ehr', kind: 'request_answer', id: 'r1', title: 'Need a decision' }
 ]
 
 beforeEach(() => {
@@ -2097,7 +2097,7 @@ describe('TrayPanel', () => {
     render(<TrayPanel />)
     expect(await screen.findByText('2')).toBeInTheDocument()
     expect(screen.getByText('NEEDS ATTENTION')).toBeInTheDocument()
-    expect(screen.getByText('quantal-ehr')).toBeInTheDocument()
+    expect(screen.getByText('acme-ehr')).toBeInTheDocument()
   })
 
   it('shows ALL CLEAR when nothing needs attention', async () => {
@@ -2108,8 +2108,8 @@ describe('TrayPanel', () => {
 
   it('clicking a stack row opens its portal', async () => {
     render(<TrayPanel />)
-    await userEvent.click(await screen.findByText('quantal-ehr'))
-    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-quantal-ehr')
+    await userEvent.click(await screen.findByText('acme-ehr'))
+    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-acme-ehr')
   })
 
   it('the gear opens the manager window', async () => {
@@ -2121,7 +2121,7 @@ describe('TrayPanel', () => {
   it('the primary button opens the most-urgent stack portal', async () => {
     render(<TrayPanel />)
     await userEvent.click(await screen.findByRole('button', { name: 'Open portal' }))
-    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-quantal-ehr')
+    expect(window.orchaDesktop.openPortal).toHaveBeenCalledWith('orcha-acme-ehr')
   })
 })
 ```

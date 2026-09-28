@@ -6,8 +6,8 @@ import TrayPanel from './TrayPanel'
 import type { AttentionItem, Stack } from '../../../shared/types'
 
 const stack: Stack = {
-  project: 'orcha-quantal-ehr',
-  projectShort: 'quantal-ehr',
+  project: 'orcha-acme-ehr',
+  projectShort: 'acme-ehr',
   apiPort: 8001,
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
@@ -15,8 +15,8 @@ const stack: Stack = {
   folder: null
 }
 const items: AttentionItem[] = [
-  { project: 'orcha-quantal-ehr', projectShort: 'quantal-ehr', kind: 'task_verify', id: 't1', title: 'Verify foundation layer', path: '/tasks?task=t1' },
-  { project: 'orcha-quantal-ehr', projectShort: 'quantal-ehr', kind: 'request_answer', id: 'r1', title: '[Atlas → operator] Need a decision on PR #90.', path: '/requests?req=r1' }
+  { project: 'orcha-acme-ehr', projectShort: 'acme-ehr', kind: 'task_verify', id: 't1', title: 'Verify foundation layer', path: '/tasks?task=t1' },
+  { project: 'orcha-acme-ehr', projectShort: 'acme-ehr', kind: 'request_answer', id: 'r1', title: '[Atlas → operator] Need a decision on PR #90.', path: '/requests?req=r1' }
 ]
 
 beforeEach(() => {
@@ -63,7 +63,7 @@ describe('TrayPanel', () => {
     render(<TrayPanel />)
     expect(await screen.findByText('2')).toBeInTheDocument()
     expect(screen.getByText('NEEDS ATTENTION')).toBeInTheDocument()
-    expect(screen.getByText('quantal-ehr')).toBeInTheDocument()
+    expect(screen.getByText('acme-ehr')).toBeInTheDocument()
   })
 
   it('shows ALL CLEAR when nothing needs attention', async () => {
@@ -74,8 +74,8 @@ describe('TrayPanel', () => {
 
   it('clicking a stack row opens its portal', async () => {
     render(<TrayPanel />)
-    await userEvent.click(await screen.findByText('quantal-ehr'))
-    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-quantal-ehr')
+    await userEvent.click(await screen.findByText('acme-ehr'))
+    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-acme-ehr')
   })
 
   it('the gear opens the manager window', async () => {
@@ -87,7 +87,7 @@ describe('TrayPanel', () => {
   it('the primary button opens the most-urgent stack portal', async () => {
     render(<TrayPanel />)
     await userEvent.click(await screen.findByRole('button', { name: 'Open portal' }))
-    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-quantal-ehr')
+    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-acme-ehr')
   })
 
   it('lists each attention item under its stack with a kind chip', async () => {
@@ -101,6 +101,6 @@ describe('TrayPanel', () => {
   it('clicking an attention item deep-links into the portal', async () => {
     render(<TrayPanel />)
     await userEvent.click(await screen.findByText('[Atlas → operator] Need a decision on PR #90.'))
-    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-quantal-ehr', '/requests?req=r1')
+    expect(window.orchaDesktop.portalShow).toHaveBeenCalledWith('orcha-acme-ehr', '/requests?req=r1')
   })
 })

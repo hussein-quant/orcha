@@ -8,7 +8,7 @@
 
 **Tech Stack:** Electron 42, React 19, TypeScript 6, electron-vite, Vitest 4, Tailwind CSS v4, `@tailwindcss/vite`, `clsx`, `tailwind-merge`, `class-variance-authority`, `lucide-react`, `@radix-ui/react-progress`, `@radix-ui/react-slot`.
 
-**Working dir:** `/Users/husseinmohamed/Desktop/quantal-projects/orcha-open/desktop`, branch `feat/desktop-onboarding`. Paths below are relative to `desktop/`. Run commands from `desktop/`.
+**Working dir:** `/Users/husseinmohamed/Desktop/projects/orcha-open/desktop`, branch `feat/desktop-onboarding`. Paths below are relative to `desktop/`. Run commands from `desktop/`.
 
 **Spec:** `docs/superpowers/specs/2026-06-18-onboarding-ux-redesign-design.md`.
 

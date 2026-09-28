@@ -1,4 +1,4 @@
-"""No-progress wake circuit breaker (INCIDENT: quantal-health, 2026-08-03 — ~4,300 wakes
+"""No-progress wake circuit breaker (INCIDENT: a production container, 2026-08-03 — ~4,300 wakes
 over 3 days for a `task_created_unassigned` candidate the orchestrator kept receiving and
 never acting on, billed invisibly against the operator's Claude subscription).
 

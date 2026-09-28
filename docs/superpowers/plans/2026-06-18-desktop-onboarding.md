@@ -8,7 +8,7 @@
 
 **Tech Stack:** Electron 42, React 19, TypeScript 6, electron-vite, Vitest 4, electron-builder. Repo conventions: co-located `*.test.ts(x)`, `node` test env with per-file `// @vitest-environment jsdom` for renderer, dependency injection (`exec`/`fetchJson`/`fs` passed in), structured `BridgeError` over `IpcResult<T>`.
 
-**Working directory:** `/Users/husseinmohamed/Desktop/quantal-projects/orcha-open`, branch `feat/desktop-onboarding`. All paths below are relative to `desktop/` unless noted. Run commands from `desktop/`.
+**Working directory:** `/Users/husseinmohamed/Desktop/projects/orcha-open`, branch `feat/desktop-onboarding`. All paths below are relative to `desktop/` unless noted. Run commands from `desktop/`.
 
 **Spec:** `docs/superpowers/specs/2026-06-18-desktop-onboarding-design.md`.
 

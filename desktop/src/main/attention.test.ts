@@ -3,8 +3,8 @@ import { computeAttention, fetchStackAttention, type StackAttention } from './at
 import type { Stack } from '../shared/types'
 
 const stack: Stack = {
-  project: 'orcha-quantal-ehr',
-  projectShort: 'quantal-ehr',
+  project: 'orcha-acme-ehr',
+  projectShort: 'acme-ehr',
   apiPort: 8001,
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
@@ -28,8 +28,8 @@ describe('computeAttention', () => {
     ], [])
     expect(items).toEqual([
       {
-        project: 'orcha-quantal-ehr',
-        projectShort: 'quantal-ehr',
+        project: 'orcha-acme-ehr',
+        projectShort: 'acme-ehr',
         kind: 'request_answer',
         id: 'r1',
         title: '[Atlas → operator] Need a decision on PR #90.',
@@ -81,8 +81,8 @@ describe('computeAttention', () => {
     ])
     expect(items).toEqual([
       {
-        project: 'orcha-quantal-ehr',
-        projectShort: 'quantal-ehr',
+        project: 'orcha-acme-ehr',
+        projectShort: 'acme-ehr',
         kind: 'task_verify',
         id: 't1',
         title: 'Ship the feature',

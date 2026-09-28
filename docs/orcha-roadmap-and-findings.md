@@ -55,7 +55,7 @@ live so its own pain points surfaced.
   server-side per-consumer ack; mutation endpoints 409 on repeat (safe, not idempotent). Directions:
   consumer-offset/ack table; make respond/close/accept return 200-on-repeat; idempotency keys.
 - **Shared machine-state isolation** — agents share the machine `gh` active account; it flipped from
-  kedar1607→nazuka-quantal mid-session and broke repo access. Same class as the worktree tangle.
+  kedar1607→a second shared account mid-session and broke repo access. Same class as the worktree tangle.
 - **task-message body 422 cap** — silent failure on long /orcha-post bodies; add clear error + client guard.
 
 ## Findings (surfaced live by dogfooding)

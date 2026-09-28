@@ -4,8 +4,8 @@ import type { StackAttention } from './attention'
 import type { AttentionItem, Stack } from '../shared/types'
 
 const stack: Stack = {
-  project: 'orcha-quantal-ehr',
-  projectShort: 'quantal-ehr',
+  project: 'orcha-acme-ehr',
+  projectShort: 'acme-ehr',
   apiPort: 8001,
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
@@ -13,8 +13,8 @@ const stack: Stack = {
   folder: null
 }
 const item: AttentionItem = {
-  project: 'orcha-quantal-ehr',
-  projectShort: 'quantal-ehr',
+  project: 'orcha-acme-ehr',
+  projectShort: 'acme-ehr',
   kind: 'request_answer',
   id: 'r1',
   title: 'Need a decision',
@@ -34,7 +34,7 @@ describe('buildStatus', () => {
     const status = buildStatus(
       [stack, { ...stack, project: 'orcha-idle', projectShort: 'idle', running: false, apiPort: null }],
       [item, { ...item, id: 'r2', title: 'Second ask' }],
-      new Map([['orcha-quantal-ehr', stackDetail]]), // stopped stack absent (poller skips it)
+      new Map([['orcha-acme-ehr', stackDetail]]), // stopped stack absent (poller skips it)
       new Date('2026-06-11T22:00:00Z')
     )
     expect(status).toEqual({
@@ -43,7 +43,7 @@ describe('buildStatus', () => {
       totalAttention: 2,
       stacks: [
         {
-          projectShort: 'quantal-ehr',
+          projectShort: 'acme-ehr',
           running: true,
           attention: 2,
           working: 1,
@@ -63,8 +63,8 @@ describe('buildStatus', () => {
         }
       ],
       attention: [
-        { projectShort: 'quantal-ehr', kind: 'request_answer', title: 'Need a decision' },
-        { projectShort: 'quantal-ehr', kind: 'request_answer', title: 'Second ask' }
+        { projectShort: 'acme-ehr', kind: 'request_answer', title: 'Need a decision' },
+        { projectShort: 'acme-ehr', kind: 'request_answer', title: 'Second ask' }
       ]
     })
   })
@@ -74,7 +74,7 @@ describe('buildStatus', () => {
     const status = buildStatus([stack], items, new Map(), new Date('2026-06-11T22:00:00Z'))
     expect(status.totalAttention).toBe(10)
     expect(status.attention).toHaveLength(8)
-    expect(status.attention[0]).toEqual({ projectShort: 'quantal-ehr', kind: 'request_answer', title: 'ask 0' })
+    expect(status.attention[0]).toEqual({ projectShort: 'acme-ehr', kind: 'request_answer', title: 'ask 0' })
     expect(status.attention[7].title).toBe('ask 7')
   })
 })
@@ -86,7 +86,7 @@ describe('writeStatusFile', () => {
       writeFile: vi.fn().mockResolvedValue(undefined),
       rename: vi.fn().mockResolvedValue(undefined)
     }
-    const status = buildStatus([stack], [item], new Map([['orcha-quantal-ehr', stackDetail]]), new Date('2026-06-11T22:00:00Z'))
+    const status = buildStatus([stack], [item], new Map([['orcha-acme-ehr', stackDetail]]), new Date('2026-06-11T22:00:00Z'))
     await writeStatusFile(status, fs)
     expect(fs.mkdir).toHaveBeenCalledWith(STATUS_DIR, { recursive: true })
     const [tmpPath, body] = fs.writeFile.mock.calls[0]

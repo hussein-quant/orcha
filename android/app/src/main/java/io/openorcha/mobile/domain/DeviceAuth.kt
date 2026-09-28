@@ -25,7 +25,7 @@ object DeviceAuth {
 
     /**
      * The browser entry point for a protected deployment: its device-token sign-in
-     * page. `base` is the pairing base URL, e.g. `https://orcha.quantallabs.ai`.
+     * page. `base` is the pairing base URL, e.g. `https://orcha.example.com`.
      */
     fun startUrl(base: String): String? {
         val trimmed = base.trim().trimEnd('/')

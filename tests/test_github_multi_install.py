@@ -175,15 +175,15 @@ def _load_minter():
 
 
 INSTALLS = [
-    {"id": 101, "account": {"login": "quantal-health"}},
-    {"id": 202, "account": {"login": "Quantal-Labs-AI"}},
+    {"id": 101, "account": {"login": "acme-health"}},
+    {"id": 202, "account": {"login": "Acme-Corp"}},
 ]
 
 
 def test_pick_installation_matches_owner_case_insensitively():
     minter = _load_minter()
-    assert minter.pick_installation(INSTALLS, "quantal-labs-ai")["id"] == 202
-    assert minter.pick_installation(INSTALLS, "QUANTAL-HEALTH")["id"] == 101
+    assert minter.pick_installation(INSTALLS, "acme-corp")["id"] == 202
+    assert minter.pick_installation(INSTALLS, "ACME-HEALTH")["id"] == 101
 
 
 def test_pick_installation_defaults_to_first_without_owner():
@@ -197,7 +197,7 @@ def test_pick_installation_unknown_owner_lists_available():
         minter.pick_installation(INSTALLS, "someone-else")
     message = str(exc.value)
     assert "someone-else" in message
-    assert "quantal-health" in message and "Quantal-Labs-AI" in message
+    assert "acme-health" in message and "Acme-Corp" in message
 
 
 def test_pick_installation_no_installs_is_a_clear_error():
@@ -211,8 +211,8 @@ def test_pick_installation_no_installs_is_a_clear_error():
 def test_installations_summary_shape():
     minter = _load_minter()
     assert minter.installations_summary(INSTALLS) == [
-        {"id": 101, "owner": "quantal-health"},
-        {"id": 202, "owner": "Quantal-Labs-AI"},
+        {"id": 101, "owner": "acme-health"},
+        {"id": 202, "owner": "Acme-Corp"},
     ]
     # a broken/absent account never crashes the summary
     assert minter.installations_summary([{"id": 7}]) == [{"id": 7, "owner": ""}]

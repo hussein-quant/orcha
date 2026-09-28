@@ -25,9 +25,9 @@ describe("isLocalRepo / repoDisplayName", () => {
   });
 
   it("shows the local dirname (or a fallback) for a local binding, the raw owner/name otherwise", () => {
-    expect(repoDisplayName("local", "quantal-ehr")).toBe("quantal-ehr");
+    expect(repoDisplayName("local", "acme-ehr")).toBe("acme-ehr");
     expect(repoDisplayName("local", null)).toBe("This machine");
-    expect(repoDisplayName("acme/app", "quantal-ehr")).toBe("acme/app");
+    expect(repoDisplayName("acme/app", "acme-ehr")).toBe("acme/app");
     expect(repoDisplayName(null)).toBe("");
   });
 });
@@ -35,11 +35,11 @@ describe("isLocalRepo / repoDisplayName", () => {
 describe("splitRepoEntries", () => {
   it("pulls the prepended local entry out of the GitHub list", () => {
     const { local, github } = splitRepoEntries([
-      { full_name: "local", name: "quantal-ehr", source_kind: "local" },
+      { full_name: "local", name: "acme-ehr", source_kind: "local" },
       { full_name: "acme/app", private: false },
       { full_name: "acme/lib", private: true },
     ]);
-    expect(local).toEqual({ full_name: "local", name: "quantal-ehr", source_kind: "local" });
+    expect(local).toEqual({ full_name: "local", name: "acme-ehr", source_kind: "local" });
     expect(github.map((r) => r.full_name)).toEqual(["acme/app", "acme/lib"]);
   });
 

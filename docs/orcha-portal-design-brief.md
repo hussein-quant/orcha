@@ -10,7 +10,7 @@
 You are designing the operator console for **Orcha**. Produce **hi-fi HTML/CSS mockups** (self-contained
 files, one per screen, sharing a common stylesheet) for the screens in §5. Aesthetic: a **dense, fast-scan
 operational dashboard** (think Linear / Vercel dashboard / Datadog — not a marketing site). Full **light +
-dark theming** via CSS custom properties. Honor the **Quantal Labs / Orcha brand** in §7 (assets provided
+dark theming** via CSS custom properties. Honor the **Orcha brand** in §7 (assets provided
 there; a greenfield fallback is given if they're blank). Ask me anything ambiguous before diving in.
 
 ## 1. What Orcha is (the mental model — design to this)
@@ -141,9 +141,9 @@ Design real components for each. These are the live entities:
 - **Theming:** ship **both light and dark** as first-class, driven entirely by **CSS custom properties**
   (a token layer: bg/surface/border/text/muted + semantic state colors success/warn/danger/info + an accent).
   A single `data-theme` switch flips everything.
-- **Brand — honor Quantal Labs / Orcha:**
+- **Brand — honor Orcha:**
   ```
-  [FILL IN — paste the Orcha/Quantal brand here, or leave blank for the greenfield fallback below]
+  [FILL IN — paste the Orcha brand here, or leave blank for the greenfield fallback below]
   - Logo / wordmark: …
   - Primary palette (hex): …
   - Accent(s): …

@@ -29,8 +29,8 @@ mints a short-lived **installation token** from the App's PEM and writes it to
 `<project>/.orcha/github-token`. The PEM stays on the host, always; only the 1-hour
 token ever reaches a container.
 
-**Multi-org**: the App can be installed on several orgs/users (e.g. `quantal-health`
-and `Quantal-Labs-AI`). The refresh timer discovers every installation and writes a
+**Multi-org**: the App can be installed on several orgs/users (e.g. `acme-health`
+and `Acme-Corp`). The refresh timer discovers every installation and writes a
 second, portal-facing file `<project>/.orcha/github-tokens.json` — a JSON map
 `{"<owner-lowercase>": "<token>", ...}` with one installation token per owner —
 which `ORCHA_GITHUB_TOKENS_FILE` points the portal at. When that map is present and

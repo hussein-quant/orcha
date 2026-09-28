@@ -4,10 +4,10 @@
 #   - /opt/orcha-secrets/github-app.pem   (scp once from deploy/auth/, chmod 600)
 #   - /opt/orcha-secrets/github-app.json  (from deploy/auth/, has the app "id")
 #   - the app INSTALLED on the repo (app page → Install App → select repos)
-# Usage:  sh bootstrap-clone.sh [owner/repo] [dest]
+# Usage:  sh bootstrap-clone.sh <owner/repo> [dest]     (owner/repo is required)
 set -eu
 
-REPO="${1:-Quantal-Labs-AI/orcha-cloud}"
+REPO="${1:?usage: sh bootstrap-clone.sh <owner/repo> [dest]}"
 DEST="${2:-/opt/orcha-cloud}"
 SECRETS="${ORCHA_SECRETS_DIR:-/opt/orcha-secrets}"
 APP_ID=$(python3 -c "import json;print(json.load(open('$SECRETS/github-app.json'))['id'])")

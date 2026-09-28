@@ -24,7 +24,7 @@ import Testing
     ) -> String {
         """
         {
-          "container": {"id": "c1", "name": "quantal-health", "status": "active"},
+          "container": {"id": "c1", "name": "acme-health", "status": "active"},
           "agents": [],
           "tasks": \(tasks),
           "requests": \(requests),
@@ -63,7 +63,7 @@ import Testing
         // pre-fix server), not merely null — proves decoding tolerates the key's absence.
         let json = """
         {
-          "container": {"id": "c1", "name": "quantal-health", "status": "active"},
+          "container": {"id": "c1", "name": "acme-health", "status": "active"},
           "agents": [],
           "tasks": [
             {"id": "t1", "title": "a", "status": "in_progress"},
@@ -82,7 +82,7 @@ import Testing
     @Test func requestOpenTotalFallsBackToFilteringTheLoadedArrayWhenFieldIsAbsent() throws {
         let json = """
         {
-          "container": {"id": "c1", "name": "quantal-health", "status": "active"},
+          "container": {"id": "c1", "name": "acme-health", "status": "active"},
           "agents": [],
           "tasks": [],
           "requests": [

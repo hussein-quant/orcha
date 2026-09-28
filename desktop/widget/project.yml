@@ -1,6 +1,6 @@
 name: OrchaWidgets
 options:
-  bundleIdPrefix: ai.quantal
+  bundleIdPrefix: io.openorcha
   deploymentTarget:
     macOS: "14.0"
 settings:
@@ -34,7 +34,7 @@ targets:
     platform: macOS
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.quantal.OrchaWidgets.OrchaStatusWidget
+        PRODUCT_BUNDLE_IDENTIFIER: io.openorcha.OrchaWidgets.OrchaStatusWidget
     sources: [Widget]
     info:
       path: Widget/Info.plist

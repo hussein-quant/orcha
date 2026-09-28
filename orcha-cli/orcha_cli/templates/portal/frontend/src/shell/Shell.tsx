@@ -591,17 +591,6 @@ export function Shell({ page, title, ctx, children }: { page: string; title: str
         <Link className="attn-mini" to="/" title={`Needs you · ${attnN.total} — open action queue`}>
           <Icon name="bell" cls="" /><span className="n tnum">{attnN.total}</span>
         </Link>
-        <div className="maker">
-          <div className="dev">Developed by</div>
-          <div className="ql-logo">
-            <svg className="ql-mark" viewBox="0 0 40 40" width={23} height={23} fill="none" aria-hidden="true">
-              <circle cx="19" cy="20" r="14.6" stroke="currentColor" strokeWidth={4} />
-              <circle cx="27.2" cy="31.2" r="5" fill="#ffbf00" />
-            </svg>
-            <span className="ql-word"><b>Quantal</b> <span className="ql-labs">Labs</span></span>
-            <span className="ql-ai">AI</span>
-          </div>
-        </div>
       </aside>
       <div className="main">
         <header className={"topbar" + (paused ? " paused" : "")} id="topbar">

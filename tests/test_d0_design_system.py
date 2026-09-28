@@ -103,13 +103,15 @@ def test_react_run_feed_folds_in_the_real_sse_client():
 
 
 def test_shell_brand_and_needs_you():
-    """The shell (frontend/src/shell/Shell.tsx) keeps the D0 brand + action-queue
-    affordances: the Quantal maker dot is amber #ffbf00 (not the old red) and the
-    'Needs you' queue renders from the shared attnItems. (Mounted-shell behaviour —
-    acting-as, counts — is covered in frontend/src/state/snapshot.test.ts.)"""
+    """The shell (frontend/src/shell/Shell.tsx) keeps the D0 action-queue affordances:
+    the 'Needs you' queue renders from the shared attnItems, and no third-party maker
+    attribution block (the old "Developed by" footer + .ql-* mark) is rendered.
+    (Mounted-shell behaviour — acting-as, counts — is covered in
+    frontend/src/state/snapshot.test.ts.)"""
     shell = (FRONTEND / "shell" / "Shell.tsx").read_text()
-    assert 'fill="#ffbf00"' in shell, "Quantal maker dot not amber"
-    assert "ef3b43" not in shell.lower(), "maker dot still the old red"
+    assert 'className="maker"' not in shell, "maker attribution block is back in the shell"
+    assert "ql-" not in shell, "maker mark classes are back in the shell"
+    assert "ef3b43" not in shell.lower(), "old red brand dot is back"
     assert "Needs you" in shell, "no Needs-you action queue in the shell"
     assert "attnItems" in shell, "shell doesn't count via the shared attnItems"
     assert "Dario" not in shell, "shell still references the mock name"

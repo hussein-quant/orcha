@@ -1,6 +1,6 @@
 """No-progress wake circuit breaker: strike accounting, backoff ladder, filtering.
 
-INCIDENT this closes (2026-08-03, quantal-health): a container with 6 ready-unassigned
+INCIDENT this closes (2026-08-03, a production container): a container with 6 ready-unassigned
 tasks kept emitting the `task_created_unassigned` wake candidate for its orchestrator;
 every spawned worker ran ~5-80s, changed nothing, and exited — ~4,300 wakes over 3 days
 at ~40s cadence, billed invisibly against the operator's Claude subscription ($0 recorded

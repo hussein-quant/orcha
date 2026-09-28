@@ -126,7 +126,7 @@ describe("usePaneWidths", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/usePaneWidths.test.ts`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/usePaneWidths.test.ts`
 Expected: FAIL — `usePaneWidths.ts` doesn't exist yet (module not found).
 
 - [ ] **Step 3: Write the implementation**
@@ -243,13 +243,13 @@ export function usePaneWidths(): UsePaneWidthsResult {
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/usePaneWidths.test.ts`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/usePaneWidths.test.ts`
 Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels
+cd /Users/husseinmohamed/Desktop/projects/ocs-panels
 git add orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/usePaneWidths.ts orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/usePaneWidths.test.ts
 git commit -m "cloud: usePaneWidths hook — pure width state + persistence for resizable panes
 
@@ -364,7 +364,7 @@ describe("CodeSpacePage — resizable panes", () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "resizable panes"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "resizable panes"`
 Expected: FAIL — no `.cs-divider-tree`/`.cs-divider-rail` elements exist yet.
 
 - [ ] **Step 3: Implement — add divider elements + pointer wiring to `CodeSpacePage.tsx`**
@@ -551,18 +551,18 @@ Add the divider styling (append near the end of the "middle: code viewer" sectio
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "resizable panes"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "resizable panes"`
 Expected: PASS, 6 tests.
 
 - [ ] **Step 6: Full-suite sanity check (nothing else in CodeSpacePage.test.tsx broke)**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx`
 Expected: PASS, all tests (baseline + 6 new).
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels
+cd /Users/husseinmohamed/Desktop/projects/ocs-panels
 git add orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/CodeSpacePage.tsx orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/codespace.css orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/CodeSpacePage.test.tsx
 git commit -m "cloud: resizable tree/code/rail panes via pointer-drag dividers
 
@@ -654,7 +654,7 @@ describe("CodeSpacePage — bug 3: no stale content while switching files", () =
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "bug 3"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "bug 3"`
 Expected: FAIL — the first test fails because `a.ts`'s stale content (3 lines, `.rb-file-path` text "a.ts") is still on screen when `b.ts` is mid-load.
 
 - [ ] **Step 3: Implement the fix**
@@ -699,18 +699,18 @@ This is the root-cause fix: `fileLoading` alone (not `fileLoading && !filePayloa
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "bug 3"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "bug 3"`
 Expected: PASS, 2 tests.
 
 - [ ] **Step 5: Run the FULL CodeSpacePage test file to confirm no regressions**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx`
 Expected: PASS, all tests (this guard change touches the render path every existing test exercises, so this is the critical regression checkpoint).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels
+cd /Users/husseinmohamed/Desktop/projects/ocs-panels
 git add orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/CodeSpacePage.tsx orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/CodeSpacePage.test.tsx
 git commit -m "cloud: fix BUG 3 root cause — stale file content rendered during file-switch loading
 
@@ -775,7 +775,7 @@ Append to `src/cloud/codespace/ThreadRail.test.tsx`, inside (or right after) the
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadRail.test.tsx -t "BUG 3"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadRail.test.tsx -t "BUG 3"`
 Expected: FAIL — after `rerender` with `path="b.ts"`, `showRecent` is still `true` from the earlier click, so "back to a.ts" (or the repo-wide Recent list) is still showing.
 
 - [ ] **Step 3: Implement the fix**
@@ -801,12 +801,12 @@ Add a reset effect right after the other `useEffect`s that key on `path` (place 
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadRail.test.tsx -t "BUG 3"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadRail.test.tsx -t "BUG 3"`
 Expected: PASS.
 
 - [ ] **Step 5: Run the full ThreadRail test file**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadRail.test.tsx`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadRail.test.tsx`
 Expected: PASS, all tests (the reset effect must not break the "no file open" landing behavior — `wantsRecent = !path || showRecent` still correctly shows Recent when `path` is empty regardless of this new effect, since an empty `path` never fires a false reset that matters: `showRecent` being forced `false` when `path` is falsy is a no-op for the `!path` branch of `wantsRecent`).
 
 - [ ] **Step 6: Also add the CodeSpacePage-level end-to-end version of both bug-3 flows**
@@ -850,13 +850,13 @@ Append to the `describe("CodeSpacePage — bug 3: ...")` block from Task 3 (same
 
 - [ ] **Step 7: Run these two tests**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "flow"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "flow"`
 Expected: PASS, 2 tests.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels
+cd /Users/husseinmohamed/Desktop/projects/ocs-panels
 git add orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/ThreadRail.tsx orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/ThreadRail.test.tsx orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/CodeSpacePage.test.tsx
 git commit -m "cloud: fix BUG 3 second half — rail stuck on repo-wide Recent after file switch
 
@@ -918,7 +918,7 @@ Append to `src/cloud/codespace/symbols/SymbolSearch.test.tsx`:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/symbols/SymbolSearch.test.tsx -t "BUG 4"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/symbols/SymbolSearch.test.tsx -t "BUG 4"`
 Expected: FAIL — `path` prop doesn't exist on `SymbolSearchProps` yet (TS error surfaces as a runtime prop simply being ignored, and the panel stays open in both new tests).
 
 - [ ] **Step 3: Implement the fix**
@@ -1045,23 +1045,23 @@ Add the `path` prop:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/symbols/SymbolSearch.test.tsx`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/symbols/SymbolSearch.test.tsx`
 Expected: PASS, all tests (baseline + 3 new). Note: `getBoundingClientRect` in jsdom returns `{top:0,left:0,width:0,...}` by default — the existing tests that don't mock it will get `anchorRect = {top:6, left:0, width:0}`, which still renders (a 0-width fixed panel is valid, if visually odd only in jsdom); confirm no test asserts on the panel's pixel position, only its presence/content, so this is safe. If any test unexpectedly fails on this, inspect whether it was asserting DOM structure that the `style` attribute now affects (none currently do, per the read of this file above).
 
 - [ ] **Step 6: Run the identifier-click integration test (CodeSpacePage.tsx wiring)**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "identifier token"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/CodeSpacePage.test.tsx -t "identifier token"`
 Expected: PASS — confirms the `path` prop wiring didn't break the existing identifier-click-prefills-search flow.
 
 - [ ] **Step 7: Full regression run for this task's touched files**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/symbols/SymbolSearch.test.tsx src/cloud/codespace/CodeSpacePage.test.tsx`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/symbols/SymbolSearch.test.tsx src/cloud/codespace/CodeSpacePage.test.tsx`
 Expected: PASS, all tests.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels
+cd /Users/husseinmohamed/Desktop/projects/ocs-panels
 git add orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/symbols/SymbolSearch.tsx orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/symbols/SymbolSearch.test.tsx orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/CodeSpacePage.tsx
 git commit -m "cloud: fix BUG 4 — SymbolSearch popover closes on file-change/scroll, hardened positioning
 
@@ -1116,7 +1116,7 @@ describe("ThreadView — chat-feel animation + auto-scroll (panel improvements i
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadView.test.tsx -t "chat-feel"`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadView.test.tsx -t "chat-feel"`
 Expected: FAIL — no element carries `.cs-message-mount` yet.
 
 - [ ] **Step 3: Implement — add the mount class + auto-scroll in `ThreadView.tsx`**
@@ -1216,13 +1216,13 @@ Replace with:
 
 - [ ] **Step 5: Run the tests to verify they pass**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadView.test.tsx`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run src/cloud/codespace/ThreadView.test.tsx`
 Expected: PASS, all tests (baseline + 2 new).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels
+cd /Users/husseinmohamed/Desktop/projects/ocs-panels
 git add orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/ThreadView.tsx orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/codespace.css orcha-cli/orcha_cli/templates/portal/frontend/src/cloud/codespace/ThreadView.test.tsx
 git commit -m "cloud: chat-feel message animation + bottom-follow auto-scroll (item 2)
 
@@ -1242,19 +1242,19 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Typecheck clean**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx tsc --noEmit`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx tsc --noEmit`
 Expected: no output, exit code 0.
 
 - [ ] **Step 2: Full Vitest suite green**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels/orcha-cli/orcha_cli/templates/portal/frontend && npx vitest run`
 Expected: all test files pass. Baseline was 530 tests across 68 files; this plan adds roughly 10 (usePaneWidths) + 6 (resize integration) + 2 (bug 3 stale-content) + 2 (bug 3 flows a/b) + 1 (ThreadRail showRecent) + 3 (bug 4 SymbolSearch) + 2 (chat animation) = ~26 new tests, so expect ~556 passed, 0 failed.
 
 - [ ] **Step 3: If anything fails, stop and re-run systematic-debugging on that specific failure — do not proceed to sign-off with red tests.**
 
 - [ ] **Step 4: Final commit check — confirm branch state**
 
-Run: `cd /Users/husseinmohamed/Desktop/quantal-projects/ocs-panels && git log --oneline fix/codespace-panels -8 && git status`
+Run: `cd /Users/husseinmohamed/Desktop/projects/ocs-panels && git log --oneline fix/codespace-panels -8 && git status`
 Expected: 6 commits on `fix/codespace-panels` (Tasks 1,2,3,4,5,6 each committed separately), working tree clean, branch NOT pushed (per the task brief: "do NOT push").
 
 ---

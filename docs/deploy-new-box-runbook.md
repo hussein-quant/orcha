@@ -42,9 +42,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh   # installs to ~/.local/bin
 mkdir -p /opt/orcha-secrets && chmod 700 /opt/orcha-secrets
 # restore github-app.pem / github-app.json from the backup, chmod 600
 scp deploy/github-app-token.py deploy/bootstrap-clone.sh <box>:/tmp/
-sh /tmp/bootstrap-clone.sh        # App-token clone → /opt/orcha-cloud, installs orcha-cli
+sh /tmp/bootstrap-clone.sh <owner>/orcha-cloud   # App-token clone → /opt/orcha-cloud, installs orcha-cli
 # (equivalent manual form: mint an installation token with github-app-token.py,
-#  git clone https://x-access-token:<tok>@github.com/Quantal-Labs-AI/orcha-cloud
+#  git clone https://x-access-token:<tok>@github.com/<owner>/orcha-cloud
 #  /opt/orcha-cloud, then: uv tool install --from /opt/orcha-cloud/orcha-cli orcha-cli)
 ```
 

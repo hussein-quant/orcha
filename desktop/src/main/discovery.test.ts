@@ -4,10 +4,10 @@ import { parseHostPort, parseDockerPs, listStacks } from './discovery'
 // Real output shape from this machine (docker ps -a --format with tab separators).
 // 5th column is the compose working_dir label (<project>/.orcha).
 const REAL_OUTPUT = [
-  'orcha-quantal-ehr-portal-1\tUp 4 hours\t0.0.0.0:8001->8000/tcp\torcha-quantal-ehr\t/Users/me/quantal-ehr/.orcha',
+  'orcha-acme-ehr-portal-1\tUp 4 hours\t0.0.0.0:8001->8000/tcp\torcha-acme-ehr\t/Users/me/acme-ehr/.orcha',
   'kan69-plan-localstack\tUp 18 hours (healthy)\t4510-4559/tcp, 5678/tcp, 0.0.0.0:4567->4566/tcp\t\t',
-  'orcha-quantal-ehr-db-1\tUp 21 hours (healthy)\t0.0.0.0:5435->5432/tcp\torcha-quantal-ehr\t/Users/me/quantal-ehr/.orcha',
-  'quantal-backend\tUp 20 hours (healthy)\t0.0.0.0:8103->8103/tcp\tintegration-all-prs\t/Users/me/x',
+  'orcha-acme-ehr-db-1\tUp 21 hours (healthy)\t0.0.0.0:5435->5432/tcp\torcha-acme-ehr\t/Users/me/acme-ehr/.orcha',
+  'acme-backend\tUp 20 hours (healthy)\t0.0.0.0:8103->8103/tcp\tintegration-all-prs\t/Users/me/x',
   ''
 ].join('\n')
 
@@ -44,13 +44,13 @@ describe('parseDockerPs', () => {
     const stacks = parseDockerPs(REAL_OUTPUT)
     expect(stacks).toEqual([
       {
-        project: 'orcha-quantal-ehr',
-        projectShort: 'quantal-ehr',
+        project: 'orcha-acme-ehr',
+        projectShort: 'acme-ehr',
         apiPort: 8001,
         dbPort: 5435,
         portalStatus: 'Up 4 hours',
         running: true,
-        folder: '/Users/me/quantal-ehr'
+        folder: '/Users/me/acme-ehr'
       }
     ])
   })
@@ -92,7 +92,7 @@ describe('listStacks', () => {
       '{{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Label "com.docker.compose.project"}}\t{{.Label "com.docker.compose.project.working_dir"}}'
     ])
     expect(stacks).toHaveLength(1)
-    expect(stacks[0].project).toBe('orcha-quantal-ehr')
+    expect(stacks[0].project).toBe('orcha-acme-ehr')
     expect(stacks[0].running).toBe(true)
   })
   it('maps exec failure to DOCKER_UNAVAILABLE', async () => {

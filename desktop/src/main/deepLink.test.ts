@@ -10,8 +10,8 @@ describe('parseDeepLink', () => {
   })
 
   it('defaults the path to / when none is supplied', () => {
-    expect(parseDeepLink('orcha://open?project=orcha-quantal-ehr')).toEqual({
-      project: 'orcha-quantal-ehr',
+    expect(parseDeepLink('orcha://open?project=orcha-acme-ehr')).toEqual({
+      project: 'orcha-acme-ehr',
       path: '/'
     })
   })
