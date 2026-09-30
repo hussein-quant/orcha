@@ -9,7 +9,12 @@ from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
 from portal_backend.identity_routes import require_member_read
 from portal_backend.list_sorting import sort_clause, validate_sort
-from portal_backend.request_ownership import _annotate_request_ownership
+from portal_backend.request_ownership import (
+    REQUEST_CLOSE_COLUMNS,
+    REQUEST_ESCALATION_COLUMNS,
+    REQUEST_ESCALATION_JOIN,
+    _annotate_request_ownership,
+)
 
 REQUEST_STATUSES = {
     "open",
@@ -96,8 +101,11 @@ def list_container_requests(
                        (SELECT a.alias FROM agents a
                           WHERE a.id = CASE requests.status WHEN 'open' THEN requests.target_id
                                                             WHEN 'answered' THEN requests.requester_id END)
-                         AS owner_alias
-                FROM requests WHERE {where} {order} LIMIT %s OFFSET %s""",
+                         AS owner_alias,
+                       {REQUEST_ESCALATION_COLUMNS},
+                       {REQUEST_CLOSE_COLUMNS}
+                FROM requests {REQUEST_ESCALATION_JOIN}
+                WHERE {where} {order} LIMIT %s OFFSET %s""",
             (*params, limit, offset),
         )
         rows = _annotate_request_ownership(cur.fetchall())

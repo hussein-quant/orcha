@@ -50,6 +50,8 @@ APP_TABLES = [
     "device_tokens", "user_prefs", "push_devices", "push_outbox",
     "wake_backoff",
     "agents", "containers",
+    # mig 063 — FK'd to agents/containers, so listed last (the CASCADE lock order)
+    "notification_prefs", "notification_pref_defaults",
 ]
 
 

@@ -83,7 +83,7 @@ def require_feature(feature: str) -> None:
         {
             "premium": feature,
             "message": f"{label.capitalize()} is a Team plan feature — "
-            "upgrade to Orcha Cloud Team to use it.",
+            "upgrade to Quorate Cloud Team to use it.",
             "upgrade_url": resolve_upgrade_url(),
         },
     )

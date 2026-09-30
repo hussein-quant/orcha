@@ -152,7 +152,7 @@ def assign_task(tid: str, body: AssignTask, request: Request):
         cur.execute(
             """SELECT 1 FROM task_dependencies td
                JOIN tasks dep ON dep.id = td.depends_on_id
-               WHERE td.task_id=%s AND dep.status <> 'completed' LIMIT 1""",
+               WHERE td.task_id=%s AND dep.status NOT IN ('completed','cancelled') LIMIT 1""",
             (tid,),
         )
         new_status = "pending" if cur.fetchone() else "ready"

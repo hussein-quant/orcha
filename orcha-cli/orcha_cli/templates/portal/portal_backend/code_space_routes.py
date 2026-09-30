@@ -91,7 +91,7 @@ from portal_backend import local_git, request_creation_routes
 from portal_backend.agent_status import bump_agent, log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
-from portal_backend.github_hub_routes import _detail_error_payload, _error_payload
+from portal_backend.github_hub_routes import _browse_error_payload, _error_payload, _no_token
 from portal_backend.github_repo_browse_routes import (
     LOCAL_REPO,
     _fetch_full_tree,
@@ -227,7 +227,32 @@ def _resolve_commit_sha(repo: str, token: str, cid: str, ref) -> str:
     return sha
 
 
-def _render_wake_payload(thread_id: str, anchor: dict, kind: str, body: str) -> str:
+# Learn-mode kinds: a `teach` / `why` thread is rendered by the portal's Learn tab as a
+# stepped LESSON (LessonCard.tsx / lesson.ts parse this exact shape: title, one-line
+# summary, numbered steps citing line refs, key concepts, follow-up questions). The
+# guide below is appended to those kinds' wake payload ONLY — question/note payloads
+# are byte-identical to before — and it is a nudge, not a contract: the portal falls
+# back to paragraph-by-paragraph stepping for a plain-prose answer, so an agent that
+# ignores it (or predates it) still renders fine.
+LESSON_KINDS = ("teach", "why")
+LESSON_FORMAT_GUIDE = (
+    "answer as a short lesson in markdown so the portal can walk the reader through it:\n"
+    "# <lesson title>\n"
+    "> <one-line summary>\n"
+    "## Steps\n"
+    "1. **<step title>** (L<start>-<end>) <what those lines do, and why>\n"
+    "2. ... one step per idea, in reading order; cite the lines each step covers as "
+    "L12-18 (or other/file.ts:12-18 for another file)\n"
+    "## Key concepts\n"
+    "- <concept>\n"
+    "## Follow-ups\n"
+    "- <a question the reader could ask next>\n"
+    "plain prose is still accepted; this structure just turns it into a guided walkthrough."
+)
+
+
+def _render_wake_payload(thread_id: str, anchor: dict, kind: str, body: str,
+                         max_len: int = MAX_PAYLOAD_LEN) -> str:
     """The directed request's `payload` text — the ONLY thing the tagged agent's wake
     prompt actually renders (request_nudge_routes / the wake manifest surface a
     request's payload preview verbatim). Carries the anchor (repo/sha/path/lines),
@@ -240,15 +265,26 @@ def _render_wake_payload(thread_id: str, anchor: dict, kind: str, body: str) -> 
     not portal-relative paths, so this renders as copyable plain text there — the
     reverse direction (thread -> request) is a clickable chip in ThreadView instead
     (see ThreadView.tsx's "via request <id>" chip), giving bidirectional linking
-    without inventing a second portal-relative-link renderer."""
+    without inventing a second portal-relative-link renderer.
+
+    `teach` / `why` threads additionally carry LESSON_FORMAT_GUIDE (between the
+    question and the reply instruction). The result never exceeds `max_len`: when it
+    would, the QUESTION BODY is shortened (with an ellipsis) — the anchor header, the
+    lesson guide and the reply/deep-link lines always survive, so a long question can
+    never truncate away the instructions the agent needs to answer."""
     location = f"{anchor['path']}:{anchor['start_line']}-{anchor['end_line']}"
     deep_link = f"/code?path={urllib.parse.quote(anchor['path'])}&thread={thread_id}"
-    return (
-        f"[code thread — {kind}] {anchor['repo']}@{anchor['sha'][:7]} {location}\n"
-        f"{body}\n\n"
+    header = f"[code thread — {kind}] {anchor['repo']}@{anchor['sha'][:7]} {location}\n"
+    guide = f"{LESSON_FORMAT_GUIDE}\n\n" if kind in LESSON_KINDS else ""
+    trailer = (
+        f"\n\n{guide}"
         f"reply via POST /api/code/threads/{thread_id}/messages with your agent id as actor_agent_id\n"
         f"view/reply in the portal: {deep_link}"
     )
+    room = max_len - len(header) - len(trailer)
+    if room < len(body):
+        body = body[: max(room - 1, 0)] + "…" if room > 0 else ""
+    return (header + body + trailer)[:max_len]
 
 
 @app.post("/api/containers/{cid}/code/threads")
@@ -292,11 +328,11 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
             return _not_connected()
         token = _resolve_token_for(repo, cid)
         if not token:
-            return _not_connected()
+            return _no_token(repo)
         try:
             resolved_sha = _resolve_commit_sha(repo, token, cid, body.ref)
         except RuntimeError as exc:
-            return {**_detail_error_payload(exc), "repo": repo}
+            return {**_browse_error_payload(exc), "repo": repo}
 
         clean_path = (body.path or "").strip("/")
         if not clean_path:
@@ -354,6 +390,7 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
                 payload=payload_text,
                 type="info",
             ),
+            request,  # RQ-16 / PS-05: same trusted-actor resolution as the HTTP route
         )
         request_id = req_result["request_id"]
         with db_cursor() as (conn, cur):
@@ -471,10 +508,24 @@ def list_code_threads(
         query += " ORDER BY created_at ASC"
         cur.execute(query, params)
         thread_rows = cur.fetchall()
+        # C14b: the file's thread rows say what each thread is about — the same
+        # first-message snippet the recent= branch returns (one DISTINCT ON query).
+        first_body_by_thread: dict = {}
+        if thread_rows:
+            cur.execute(
+                """SELECT DISTINCT ON (thread_id) thread_id, body
+                     FROM code_thread_messages
+                    WHERE thread_id = ANY(%s)
+                    ORDER BY thread_id, created_at ASC""",
+                ([r["id"] for r in thread_rows],),
+            )
+            first_body_by_thread = {str(r["thread_id"]): r["body"] for r in cur.fetchall()}
 
     threads = [_thread_row_to_dict(r) for r in thread_rows]
     if not threads:
         return {"threads": []}
+    for t in threads:
+        t["first_message"] = first_body_by_thread.get(t["id"])
 
     if not repo:
         for t in threads:
@@ -691,6 +742,44 @@ def _symbol_cache_put(cid: str, ref: str, payload) -> None:
     _SYMBOL_TREE_CACHE[(cid, ref)] = (time.monotonic() + SYMBOL_CACHE_TTL_SECONDS, payload)
 
 
+# C08: outline-only languages — a file OUTLINE (headings) but never part of the
+# workspace symbol index (README headings are not code symbols).
+OUTLINE_ONLY_LANGUAGE_BY_EXTENSION = {".md": "markdown", ".markdown": "markdown"}
+_MD_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
+_MD_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def _outline_language_for_path(path: str):
+    for ext, lang in OUTLINE_ONLY_LANGUAGE_BY_EXTENSION.items():
+        if path.lower().endswith(ext):
+            return lang
+    return _language_for_path(path)
+
+
+def _markdown_outline(text: str) -> list:
+    """ATX headings (`# Title` … `###### Title`) as outline entries {name, kind:'heading',
+    line, level}, skipping fenced code blocks (a `# comment` in a code sample is not a
+    heading)."""
+    out = []
+    fence = None
+    for i, raw in enumerate(text.split("\n"), start=1):
+        m = _MD_FENCE_RE.match(raw)
+        if m:
+            mark = m.group(1)
+            if fence is None:
+                fence = mark[0] * 3
+            elif mark.startswith(fence):
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        h = _MD_HEADING_RE.match(raw)
+        if h:
+            out.append({"name": h.group(2).strip(), "kind": "heading", "line": i,
+                        "level": len(h.group(1))})
+    return out
+
+
 def _language_for_path(path: str):
     for ext, lang in LANGUAGE_BY_EXTENSION.items():
         if path.endswith(ext):
@@ -825,7 +914,9 @@ def _extract_definitions(text: str, language: str) -> list:
     for pattern, kind in patterns:
         for match in pattern.finditer(text):
             name = match.group(1)
-            line = text.count("\n", 0, match.start()) + 1
+            # C11/C12: count lines up to the NAME, not the match start — the patterns'
+            # leading `^\s*` also swallows blank lines above a definition.
+            line = text.count("\n", 0, match.start(1)) + 1
             key = (name, line)
             if key in seen:
                 continue
@@ -930,11 +1021,11 @@ def search_code_symbols(cid: str, request: Request, ref: str = Query(default="")
         return _not_connected()
     token = _resolve_token_for(repo, cid)
     if not token:
-        return _not_connected()
+        return _no_token(repo)
     try:
         resolved_ref = _resolve_ref(repo, token, cid, ref)
     except RuntimeError as exc:
-        return {**_detail_error_payload(exc), "repo": repo}
+        return {**_browse_error_payload(exc), "repo": repo}
 
     # Cold-start indexing. Snapshot-first (docs/code-space-indexing-research.md §3 Phase
     # A): a single tarball fetch + in-memory extraction can index the WHOLE repo within
@@ -1048,13 +1139,13 @@ def get_code_outline(cid: str, request: Request, ref: str = Query(default=""), p
         return _not_connected()
     token = _resolve_token_for(repo, cid)
     if not token:
-        return _not_connected()
+        return _no_token(repo)
     try:
         resolved_ref = _resolve_ref(repo, token, cid, ref)
     except RuntimeError as exc:
-        return {**_detail_error_payload(exc), "repo": repo}
+        return {**_browse_error_payload(exc), "repo": repo}
 
-    language = _language_for_path(clean_path)
+    language = _outline_language_for_path(clean_path)  # C08: markdown outlines too
     if language is None:
         return {
             "available": True, "repo": repo, "ref": resolved_ref, "path": clean_path,
@@ -1063,13 +1154,16 @@ def get_code_outline(cid: str, request: Request, ref: str = Query(default=""), p
     try:
         text = _fetch_source_file(repo, resolved_ref, token, clean_path)
     except RuntimeError as exc:
-        return {**_detail_error_payload(exc), "repo": repo}
+        return {**_browse_error_payload(exc), "repo": repo}
     if text is None:
         return {
             "available": True, "repo": repo, "ref": resolved_ref, "path": clean_path,
             "language": language, "symbols": [],
         }
-    symbols = _extract_definitions(text, language)
+    if language == "markdown":
+        symbols = _markdown_outline(text)
+    else:
+        symbols = _extract_definitions(text, language)
     return {
         "available": True, "repo": repo, "ref": resolved_ref, "path": clean_path,
         "language": language, "symbols": symbols,
