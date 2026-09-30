@@ -144,4 +144,50 @@ describe('AttentionPoller', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(poller.current()).toEqual([item('r1')])
   })
+
+  it('snapshot() reports per-stack availability: ok with container counts, or failed (not zero)', async () => {
+    let fail = false
+    const { poller } = makePoller({
+      fetchStackAttention: vi.fn(async () => {
+        if (fail) throw new Error('down')
+        return { ...detail([item('a')]), containers: [
+            {
+              cid: 'c1',
+              name: 'Demo',
+              count: 1,
+              partial: false,
+              live: [{ alias: 'lead', state: 'working' as const, task: 'Fix it', lastActive: null, branch: 'main' }],
+              liveTotal: 1,
+              checkouts: [{ branch: 'main', primary: true, detached: false, repo: 'acme/web' }]
+            }
+          ],
+          unavailable: []
+        }
+      })
+    })
+    await poller.tick()
+    const first = poller.snapshot()
+    expect(first.items.map((i) => i.id)).toEqual(['a'])
+    expect(first.projects).toHaveLength(1)
+    expect(first.projects[0]).toMatchObject({ project: 'orcha-demo', ok: true, containers: [{ cid: 'c1', count: 1 }] })
+    // D11: the container's live agents ride the same typed snapshot to the host sidebar.
+    expect(first.projects[0].containers[0].live).toEqual([{ alias: 'lead', state: 'working', task: 'Fix it', lastActive: null, branch: 'main' }])
+    expect(first.projects[0].containers[0].liveTotal).toBe(1)
+    // D14: the real checkouts ride the same typed snapshot too.
+    expect(first.projects[0].containers[0].checkouts).toEqual([{ branch: 'main', primary: true, detached: false, repo: 'acme/web' }])
+    const okAt = first.projects[0].fetchedAt
+    expect(okAt).not.toBeNull()
+
+    fail = true
+    await poller.tick()
+    const second = poller.snapshot()
+    expect(second.projects[0]).toMatchObject({ project: 'orcha-demo', ok: false, containers: [] }) // unreachable → no (stale or fake) agents
+    expect(second.projects[0].fetchedAt).toBe(okAt) // last GOOD fetch time is kept
+  })
+
+  it('snapshot() omits stopped stacks (the UI shows them as stopped, not as zero)', async () => {
+    const { poller } = makePoller({ listStacks: vi.fn(async () => [stackDown]) })
+    await poller.tick()
+    expect(poller.snapshot().projects).toEqual([])
+  })
 })

@@ -1,0 +1,493 @@
+/* ---------------------------------------------------------------------------------------
+ * Desktop onboarding — V2 "Linear" styling (docs/orcha-v2-design-system.md; directives
+ * D2 compact controls, D3 no colored stripes, D5 inset raised panel, D6 Display type,
+ * D7 circular avatars, D8 status glyphs). Scoped to the wizard with the `ob-` prefix so it
+ * never collides with the shared stylesheet. Consumes the shared @theme tokens only.
+ * ------------------------------------------------------------------------------------- */
+
+/* D5 frame: the wizard sits in an inset raised panel on the darkest canvas. */
+.ob-window {
+  height: 100%;
+  padding: 8px;
+  background: var(--color-bg);
+  box-sizing: border-box;
+}
+.ob-panel {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-card) 55%, var(--color-bg));
+}
+.ob-panel-head {
+  display: flex;
+  height: 44px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+.ob-panel-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.ob-scroll {
+  flex: 1;
+  overflow-y: auto;
+}
+.ob-col {
+  display: flex;
+  width: 100%;
+  max-width: 600px;
+  flex-direction: column;
+  gap: 24px;
+  margin: 0 auto;
+  padding: clamp(28px, 8vh, 88px) 24px 56px;
+  box-sizing: border-box;
+}
+
+/* D6 typography. Inter's optical-size axis turns on automatically at Display sizes. */
+.ob-display {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
+  color: var(--color-text);
+  font-optical-sizing: auto;
+  font-feature-settings: 'cv01', 'ss03';
+}
+.ob-display[data-size='xl'] {
+  font-size: 32px;
+}
+.ob-sub {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-text-2);
+}
+.ob-meta {
+  font-size: 12px;
+  color: var(--color-text-3);
+}
+.ob-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-2);
+}
+.ob-section-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-3);
+}
+.ob-code {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  padding: 1px 5px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+/* Step indicator — same shape as the portal onboarding stepper ("✓ Name — ③ Create"). */
+.ob-stepper-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+.ob-steps {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ob-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  padding: 2px 4px;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text-3);
+}
+.ob-step[data-state='done'] {
+  color: var(--color-text-2);
+}
+.ob-step[data-state='current'] {
+  color: var(--color-text);
+  font-weight: 500;
+}
+button.ob-step:not(:disabled) {
+  cursor: pointer;
+}
+button.ob-step:not(:disabled):hover {
+  background: var(--color-hover);
+}
+.ob-step-num {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.ob-step[data-state='current'] .ob-step-num {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.ob-step[data-state='done'] .ob-step-num {
+  border-color: color-mix(in srgb, var(--color-ok) 55%, transparent);
+  color: var(--color-ok);
+}
+.ob-step[data-state='skipped'] {
+  color: var(--color-text-3);
+  opacity: 0.7;
+}
+.ob-step[data-state='skipped'] .ob-step-num {
+  border-style: dashed;
+}
+.ob-step-sep {
+  width: 12px;
+  height: 1px;
+  background: var(--color-border-strong);
+}
+
+/* One bordered list; rows separated by hairlines (no cards inside cards). */
+.ob-list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-card);
+}
+.ob-row {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  font-size: 13px;
+  color: var(--color-text);
+}
+.ob-list > * + * {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-border) 70%, transparent);
+}
+.ob-row[data-align='start'] {
+  align-items: flex-start;
+}
+button.ob-row,
+label.ob-row {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) ease-out;
+}
+button.ob-row:hover,
+label.ob-row:hover {
+  background: var(--color-hover);
+}
+.ob-row[data-selected='true'] {
+  background: var(--color-selected);
+}
+.ob-row-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+}
+.ob-row-title {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ob-row-sub {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-text-3);
+}
+.ob-row-aside {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-text-3);
+}
+.ob-row-extra {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px 38px;
+}
+
+/* Quiet notice rows: icon carries the tone; text stays muted (D3: no colored boxes). */
+.ob-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-text-2);
+}
+.ob-notice > svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+.ob-notice-title {
+  color: var(--color-text);
+  font-weight: 500;
+}
+.ob-notice-cause {
+  color: var(--color-text-2);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+/* Metadata chips (D8): rounded-full, 1px border, optional dot. */
+.ob-chip {
+  display: inline-flex;
+  height: 20px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-text-2);
+  white-space: nowrap;
+}
+.ob-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+/* D7 avatars: circles only. */
+.ob-avatar {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: #eeeff2;
+}
+.ob-avatar-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--color-card);
+  color: var(--color-accent);
+}
+
+/* Footer: Back on the left, the single primary on the right. */
+/* Sticky: on a short window the step's actions stay reachable while the content scrolls. */
+.ob-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: -24px;
+  padding: 16px 0 24px;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 70%, transparent);
+  background: color-mix(in srgb, var(--color-card) 55%, var(--color-bg));
+}
+.ob-footer-right {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Provisioning log. */
+.ob-log {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ob-disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-3);
+  cursor: pointer;
+}
+.ob-disclosure:hover {
+  color: var(--color-text-2);
+}
+.ob-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+.ob-link:hover {
+  text-decoration: underline;
+}
+
+/* Keyboard hint chip (↵). */
+.ob-kbd {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--color-text-3);
+}
+
+/* Confirm dialog (plain dim scrim — V2 prohibits blur). */
+.ob-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+.ob-dialog {
+  display: flex;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  background: var(--color-raised);
+  padding: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+/* Motion: one calm entrance per step + a spinner. Both freeze under reduced motion. */
+@keyframes ob-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes ob-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ob-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.ob-enter {
+  animation: ob-enter 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ob-rotate {
+  animation: ob-rotate 900ms linear infinite;
+  transform-origin: 50% 50%;
+}
+.ob-breathe {
+  animation: ob-breathe 1.8s ease-in-out infinite;
+}
+
+@media (max-width: 720px) {
+  .ob-col {
+    padding: 24px 16px 40px;
+  }
+  .ob-display {
+    font-size: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-enter {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .ob-rotate {
+    animation: none;
+  }
+  .ob-breathe {
+    animation: none;
+    opacity: 1;
+  }
+}

@@ -1,3 +1,17 @@
+import type { TermApi } from './terminal'
+import type { AgentsApi } from './agents'
+import type { UsageApi } from './usage'
+import type { EmbedEvent, EmbedMode, HostToPortal, PortalToHost } from './embed'
+import type { ProjectIcon } from './projectIcon'
+
+/** What main broadcasts on `orcha:portalActive`. `embed`/`route` are V2 additions; an
+ *  older main omits them (treated as legacy by the renderer only if explicitly 'legacy'). */
+export interface PortalActive {
+  project: string | null
+  embed?: EmbedMode | null
+  route?: Extract<PortalToHost, { type: 'route' }> | null
+}
+
 /** Fixed height (CSS px) of the renderer's top bar, shown above the embedded portal view
  *  once a project is open ("← Projects" + name + status dot). Shared between main (embedded
  *  portal view bounds — see main/viewBounds.ts) and the renderer (the TopBar component's own
@@ -41,13 +55,25 @@ export interface ProjectContainer {
   tasks: number
   needs_you: number
   member_count: number | null
+  /** D14 (additive): the project's shared icon (portal `containers.icon`, mig 050), validated
+   *  on read. `undefined` = the portal predates the store; `null` = unset (default glyph). */
+  icon?: ProjectIcon | null
 }
 
 export type BridgeError =
-  | { code: 'DOCKER_UNAVAILABLE' }
+  /** `unresponsive`: the docker CLI timed out (Docker Desktop wedged) rather than refusing
+   *  the connection — "isn't responding, quit and reopen", not "isn't running". */
+  | { code: 'DOCKER_UNAVAILABLE'; unresponsive?: boolean }
   | { code: 'COMPOSE_FAILED'; stderr: string }
   | { code: 'UNKNOWN_STACK' }
+  /** Terminal: the requested branch is not a checkout of the project's repo (any more). */
+  | { code: 'UNKNOWN_BRANCH' }
   | { code: 'INTERNAL' }
+  /** Terminal tabs: the request was refused (FORBIDDEN sender / INVALID payload) or the pty
+   *  could not start (SPAWN_FAILED, with node-pty's message for the tab to show). */
+  | { code: 'TERMINAL_FAILED'; reason: 'FORBIDDEN' | 'INVALID' | 'SPAWN_FAILED'; message?: string }
+  | { code: 'AGENTS_FAILED'; reason: 'FORBIDDEN' | 'INVALID' }
+  | { code: 'USAGE_FAILED'; reason: 'FORBIDDEN' | 'INVALID' }
   // ---- onboarding / provisioning ----
   | { code: 'DOCKER_NOT_INSTALLED' }
   | { code: 'DOCKER_START_TIMEOUT' }
@@ -128,6 +154,9 @@ export interface PreflightReport {
   autoStarted: boolean
   /** Human-readable next-step hint when docker !== 'ok'. */
   hint: string | null
+  /** True when the Docker CLI hung (probe timed out) rather than refused — Docker Desktop is
+   *  wedged, so the UI should offer "restart Docker" instead of waiting longer. */
+  unresponsive?: boolean
 }
 
 // ---- Prerequisites / auto-install ----
@@ -293,8 +322,35 @@ export interface OrchaDesktopApi {
   onNavigate(cb: (nav: { target: 'onboarding' | 'manager'; variant?: WizardVariant }) => void): () => void
   /** Subscribe to which stack's embedded portal view is active (main is the source of
    *  truth — a notification click or deep link can change it without any renderer click).
-   *  `project` is null when no view is showing (home/manager or the wizard is on screen). */
-  onPortalActive(cb: (active: { project: string | null }) => void): () => void
+   *  `project` is null when no view is showing (home/manager or the wizard is on screen).
+   *  V2 (additive): `embed` is that view's embed mode and `route` its last reported route. */
+  onPortalActive(cb: (active: PortalActive) => void): () => void
+  /** Pull the current active-view state (a reloaded manager renderer asks on mount). */
+  getPortalActive?(): Promise<PortalActive | null>
+  // ---- V2 host (desktop embedded mode, docs/orcha-v2-architecture.md §7) ----
+  /** Attention items plus per-stack availability (unavailable ≠ zero). */
+  listAttentionStatus(): Promise<AttentionSnapshot>
+  /** Report the host sidebar geometry; main re-lays out the active portal view.
+   *  `stripHeight`: the session tab strip at the top of the panel (the view starts under it);
+   *  `terminalShown`: a terminal session fills the panel — main hides the portal view. */
+  setHostLayout(layout: { sidebarWidth: number; collapsed: boolean; stripHeight?: number; terminalShown?: boolean }): Promise<void>
+  /** A host DOM dialog opened/closed — main hides/restores the native view under it. On
+   *  close, `focus: 'host'` keeps keyboard focus in the host (default: back to the view). */
+  setHostModal(open: boolean, opts?: { focus?: 'host' | 'view' }): Promise<void>
+  /** JPEG still of the active portal view (painted under a host overlay while the view is
+   *  hidden), or null when no view is showing. */
+  portalSnapshot?(): Promise<Uint8Array | null>
+  /** Terminal tabs (host renderer only; absent on an older preload). */
+  term?: TermApi
+  /** Settings › Agents (host renderer only; absent on an older preload). */
+  agents?: AgentsApi
+  /** Usage & spend (Stats & Usage, the status indicator, the tray popover). */
+  usage?: UsageApi
+  /** Forward a host → portal message (navigate / openSearch) to the ACTIVE portal view.
+   *  Resolves false when there is nothing to deliver to. */
+  embedSend(msg: HostToPortal): Promise<boolean>
+  /** Validated portal → host messages, tagged with the sending stack (main-derived). */
+  onEmbedEvent(cb: (event: EmbedEvent) => void): () => void
   // fleet (post-provision):
   /** GET a JSON path on a stack's own localhost portal (port + path validated in main —
    *  the renderer can't reach localhost directly under sandbox:true). Rejects with
@@ -352,14 +408,101 @@ export type AnalyzeProjectResult =
   | { ok: true; summary: string; agents: AnalyzeAgentSuggestion[] }
   | { ok: false; reason: string }
 
-/** One thing waiting on the human, surfaced in tray/popover/notifications/cards. */
+/** One thing waiting on the human, surfaced in tray/popover/notifications/cards.
+ *
+ *  Kinds follow the canonical V2 attention definition (docs/orcha-v2-architecture.md §3.1):
+ *  - task_plan      — plan awaiting approval (in_progress, plan posted, no decision) — only
+ *                     when the project's autonomy level is `plan`;
+ *  - task_verify    — task at needs_verification — unless autonomy is `full`;
+ *  - request_answer — request open to a human (or untargeted) OR status `escalated`;
+ *  - request_close  — FOLLOW-UP (informational): an answered request a human raised. Listed
+ *                     in the tray, but NOT counted in any "needs you" badge;
+ *  - health         — stack up/down notification only (never in the polled list). */
 export interface AttentionItem {
   project: string
   projectShort: string
-  kind: 'request_answer' | 'request_close' | 'task_verify' | 'health'
+  kind: 'task_plan' | 'request_answer' | 'request_close' | 'task_verify' | 'health'
   /** Stable id for dedup (request/task uuid, or health:<project>:<up|down>). */
   id: string
   title: string
-  /** Portal path for this item (e.g. /requests?req=<id>); '/' for health items. */
+  /** Portal path for this item (e.g. /requests?req=<id>&cid=<cid>); '/' for health items.
+   *  Carries `cid` whenever the container is known so a multi-project stack opens the
+   *  right project (GAP-07). */
   path: string
+  /** Container (project) id inside the stack, when known. Additive (V2). */
+  cid?: string
+}
+
+/** True for items that count toward a "needs you" badge (decisions), false for follow-ups
+ *  and health notices. The single rule shared by tray title, tray panel, status file and the
+ *  host sidebar (arch §3.3, desktop). */
+export function isDecisionItem(item: Pick<AttentionItem, 'kind'>): boolean {
+  return item.kind === 'task_plan' || item.kind === 'task_verify' || item.kind === 'request_answer'
+}
+
+/** Per-project availability of the host's attention poll, so the UI can tell
+ *  "unavailable/unknown" apart from "zero" (brief §3). */
+export interface AttentionProjectStatus {
+  project: string
+  /** Containers successfully fetched this tick, with their decision counts and (additive,
+   *  D11) the agents live in them right now. */
+  containers: Array<{
+    cid: string
+    name: string
+    count: number
+    partial: boolean
+    /** Live agents (working / needs review / blocked — never idle), capped; absent from
+     *  older hosts' snapshots. */
+    live?: HostLiveAgent[]
+    /** How many live agents the container has in total (≥ live.length). */
+    liveTotal?: number
+    /** D14 (additive): the project's real git checkouts (primary first), read on the host
+     *  from the stack folder; absent/null = no branch data (agents nest under the project). */
+    checkouts?: HostCheckout[] | null
+  }>
+  /** Container ids listed by the stack whose snapshot fetch failed this tick. */
+  unavailable: string[]
+  /** ISO time of the last successful fetch of this stack, or null if never. */
+  fetchedAt: string | null
+  /** False when the last attempt for this (running) stack failed entirely. */
+  ok: boolean
+}
+
+export interface AttentionSnapshot {
+  items: AttentionItem[]
+  projects: AttentionProjectStatus[]
+}
+
+/** Why an agent is shown under its project in the host sidebar (D11). Idle agents never are.
+ *  `waiting` = the agent has an open outgoing request (portal status `awaiting_request`); it is
+ *  NEUTRAL, the portal's "Waiting" everywhere (VD-09) — never red, never "needs review".
+ *  `blocked` is no longer produced by main (kept so older renderer code still type-checks). */
+export type HostLiveAgentState = 'working' | 'needs_review' | 'waiting' | 'blocked'
+
+/** One live agent of a project, as the host attention poller derives it from the project's
+ *  snapshot (`GET /api/containers/{cid}`) — real data only, nothing inferred beyond it. */
+export interface HostLiveAgent {
+  alias: string
+  state: HostLiveAgentState
+  /** The task the agent is on (working/blocked), or the task awaiting review. Clipped. */
+  task: string | null
+  /** ISO time of the agent's last heartbeat / run start, when reported. */
+  lastActive: string | null
+  /** D14 (additive): the checkout branch this agent verifiably works on (matches a
+   *  HostCheckout.branch of its container), null/absent when not known. */
+  branch?: string | null
+  /** D13 (additive): the agent's palette slot from the portal's canonical assignment (the
+   *  project's full snapshot roster, snapshot order); absent/null = hash it locally. */
+  palette?: number | null
+}
+
+/** D14: one real git checkout of a project (host `git worktree list` of the stack folder). */
+export interface HostCheckout {
+  /** Short branch name ("main", "orcha/task-lead-3f2a…"), or "detached @ <sha7>". */
+  branch: string
+  /** The main working tree (the project root the agents' daemon runs from). */
+  primary: boolean
+  detached: boolean
+  /** Muted second line: "owner/name" for a GitHub-bound project, else the folder name. */
+  repo: string | null
 }

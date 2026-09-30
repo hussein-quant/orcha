@@ -8,7 +8,7 @@ struct OrchaStatusWidget: Widget {
       OrchaWidgetView(entry: entry)
         .widgetURL(deepLink(status: entry.status))
     }
-    .configurationDisplayName("Orcha")
+    .configurationDisplayName("Quorate")
     .description("Stacks and what needs your attention.")
     .supportedFamilies([.systemSmall, .systemMedium])
   }

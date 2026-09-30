@@ -1,7 +1,46 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import type { EmbedEvent, HostToPortal } from '../shared/embed'
+import type { TERM_CHANNELS, TermCommand, TermEvent, TermInfo, TermRestoreResult } from '../shared/terminal'
+import type { AGENT_CHANNELS, AgentsSnapshot } from '../shared/agents'
+import type { USAGE_CHANNELS, UsageSnapshot } from '../shared/usage'
+
+/** Terminal channel names, inlined: this sandboxed preload imports shared/* for TYPES only
+ *  (no shared runtime chunk). `satisfies` keeps them identical to shared/terminal.ts. */
+const TERM = {
+  create: 'orcha:term:create',
+  write: 'orcha:term:write',
+  resize: 'orcha:term:resize',
+  kill: 'orcha:term:kill',
+  list: 'orcha:term:list',
+  focus: 'orcha:term:focus',
+  data: 'orcha:term:data',
+  exit: 'orcha:term:exit',
+  meta: 'orcha:term:meta',
+  command: 'orcha:term:command',
+  layout: 'orcha:term:layout',
+  restore: 'orcha:term:restore'
+} as const satisfies typeof TERM_CHANNELS
+/** Agents settings channels, inlined for the same reason (identical to shared/agents.ts). */
+const AGENTS = {
+  get: 'orcha:agents:get',
+  refresh: 'orcha:agents:refresh',
+  update: 'orcha:agents:update',
+  openDocs: 'orcha:agents:openDocs',
+  copyInstall: 'orcha:agents:copyInstall',
+  changed: 'orcha:agents:changed'
+} as const satisfies typeof AGENT_CHANNELS
+/** Usage channels, inlined for the same reason (identical to shared/usage.ts). */
+const USAGE = {
+  get: 'orcha:usage:get',
+  refresh: 'orcha:usage:refresh',
+  update: 'orcha:usage:update',
+  changed: 'orcha:usage:changed',
+  openStats: 'orcha:usage:openStats'
+} as const satisfies typeof USAGE_CHANNELS
 import type {
   AnalyzeProjectResult,
   AttentionItem,
+  AttentionSnapshot,
   CloneAndProvisionOptions,
   CloneDestSuggestion,
   FolderChoice,
@@ -13,6 +52,7 @@ import type {
   InstallResult,
   IpcResult,
   OrchaDesktopApi,
+  PortalActive,
   PreflightReport,
   PrereqProbe,
   ProgressEvent,
@@ -76,10 +116,80 @@ const api: OrchaDesktopApi = {
     ipcRenderer.on('orcha:navigate', listener)
     return () => ipcRenderer.removeListener('orcha:navigate', listener)
   },
+  getPortalActive: () => invoke<PortalActive | null>('orcha:getPortalActive'),
   onPortalActive: (cb) => {
-    const listener = (_e: IpcRendererEvent, active: { project: string | null }): void => cb(active)
+    const listener = (_e: IpcRendererEvent, active: PortalActive): void => cb(active)
     ipcRenderer.on('orcha:portalActive', listener)
     return () => ipcRenderer.removeListener('orcha:portalActive', listener)
+  },
+  // V2 host (embedded mode):
+  listAttentionStatus: () => invoke<AttentionSnapshot>('orcha:listAttentionStatus'),
+  setHostLayout: (layout) => invoke<void>('orcha:setHostLayout', layout),
+  setHostModal: (open, opts) => invoke<void>('orcha:setHostModal', open, opts),
+  portalSnapshot: () => invoke<Uint8Array | null>('orcha:portalSnapshot'),
+  // Terminal tabs: typed channels only — never a generic invoke/send (main re-validates
+  // every payload and refuses any sender but this window's main frame).
+  term: {
+    create: (req) => invoke<TermInfo>(TERM.create, req),
+    write: (id, data) => ipcRenderer.send(TERM.write, { id, data }),
+    resize: (id, cols, rows) => ipcRenderer.send(TERM.resize, { id, cols, rows }),
+    kill: (id) => invoke<void>(TERM.kill, id),
+    list: () => invoke<TermInfo[]>(TERM.list),
+    setFocus: (focused) => ipcRenderer.send(TERM.focus, focused === true),
+    saveLayout: (layout) => ipcRenderer.send(TERM.layout, layout),
+    restore: (req) => invoke<TermRestoreResult>(TERM.restore, req ?? {}),
+    onEvent: (cb) => {
+      const onData = (_e: IpcRendererEvent, ev: TermEvent): void => cb(ev)
+      ipcRenderer.on(TERM.data, onData)
+      ipcRenderer.on(TERM.exit, onData)
+      ipcRenderer.on(TERM.meta, onData)
+      return () => {
+        ipcRenderer.removeListener(TERM.data, onData)
+        ipcRenderer.removeListener(TERM.exit, onData)
+        ipcRenderer.removeListener(TERM.meta, onData)
+      }
+    },
+    onCommand: (cb) => {
+      const listener = (_e: IpcRendererEvent, command: TermCommand): void => cb(command)
+      ipcRenderer.on(TERM.command, listener)
+      return () => ipcRenderer.removeListener(TERM.command, listener)
+    }
+  },
+  // Settings › Agents: typed channels; ids only (main looks up paths, URLs and commands).
+  agents: {
+    get: () => invoke<AgentsSnapshot>(AGENTS.get),
+    refresh: () => invoke<AgentsSnapshot>(AGENTS.refresh),
+    update: (u) => invoke<AgentsSnapshot>(AGENTS.update, u),
+    openDocs: (id) => invoke<void>(AGENTS.openDocs, id),
+    copyInstall: (id) => invoke<void>(AGENTS.copyInstall, id),
+    onChanged: (cb) => {
+      const listener = (_e: IpcRendererEvent, s: AgentsSnapshot): void => cb(s)
+      ipcRenderer.on(AGENTS.changed, listener)
+      return () => ipcRenderer.removeListener(AGENTS.changed, listener)
+    }
+  },
+  // Usage & spend: typed channels; main validates every update.
+  usage: {
+    get: () => invoke<UsageSnapshot>(USAGE.get),
+    refresh: () => invoke<UsageSnapshot>(USAGE.refresh),
+    update: (u) => invoke<UsageSnapshot>(USAGE.update, u),
+    openStats: (target) => invoke<void>(USAGE.openStats, target ?? 'stats'),
+    onChanged: (cb) => {
+      const listener = (_e: IpcRendererEvent, s: UsageSnapshot): void => cb(s)
+      ipcRenderer.on(USAGE.changed, listener)
+      return () => ipcRenderer.removeListener(USAGE.changed, listener)
+    },
+    onOpenStats: (cb) => {
+      const listener = (_e: IpcRendererEvent, target: 'stats' | 'accounts'): void => cb(target === 'accounts' ? 'accounts' : 'stats')
+      ipcRenderer.on(USAGE.openStats, listener)
+      return () => ipcRenderer.removeListener(USAGE.openStats, listener)
+    }
+  },
+  embedSend: (msg: HostToPortal) => invoke<boolean>('orcha:embedSend', msg),
+  onEmbedEvent: (cb) => {
+    const listener = (_e: IpcRendererEvent, event: EmbedEvent): void => cb(event)
+    ipcRenderer.on('orcha:embed:event', listener)
+    return () => ipcRenderer.removeListener('orcha:embed:event', listener)
   },
   // fleet:
   portalGet: (apiPort: number, path: string) => invoke<unknown>('orcha:portalGet', apiPort, path),

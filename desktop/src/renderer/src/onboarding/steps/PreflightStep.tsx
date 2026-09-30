@@ -1,9 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { InstallProgress, PreflightReport, PrereqProbe } from '../../../../shared/types'
-import { Button } from '../../ui/Button'
-import { Card } from '../../ui/Card'
-import ShowcaseCarousel from '../showcase/ShowcaseCarousel'
-import { AlertCircle, Check, Circle, Copy, ExternalLink, Loader2 } from 'lucide-react'
+import { Check, Copy, ExternalLink, RotateCw } from 'lucide-react'
+import { InlineText, Notice, ObButton, StatusGlyph, StepFooter, StepHeader, type GlyphState } from '../ui'
 
 const LINKS = {
   homebrew: 'https://brew.sh',
@@ -12,103 +10,148 @@ const LINKS = {
   codexDocs: 'https://developers.openai.com/codex/cli'
 }
 
-/** A copy-able Terminal command shown for a requirement the user installs themselves. */
-type InstallCommand = { name: string; cmd: string; doc: string }
-
-/** Tools the user must install themselves before Orcha can run agents. Orcha does NOT install
- *  these — each has its own installer / sign-in — it just checks for them and gates Continue.
- *  The one thing Orcha installs is its own CLI helper (handled separately, on Continue).
- *
- *  `url` → a single "get it" link (Homebrew, Docker). `commands` → copy-able CLI install lines
- *  shown inline (the AI coding agent), so the user installs the CLI directly instead of being
- *  sent to a marketing/download page. */
-const REQUIREMENTS: {
-  key: 'homebrew' | 'docker' | 'ai'
-  label: string
-  how?: string
-  url?: string
-  commands?: InstallCommand[]
-}[] = [
-  { key: 'homebrew', label: 'Homebrew', how: 'Get Homebrew (brew.sh)', url: LINKS.homebrew },
+const AI_COMMANDS = [
   {
-    key: 'docker',
-    label: 'Docker',
-    how: 'Get Docker Desktop (or OrbStack) and start it',
-    url: LINKS.docker
+    name: 'Claude Code',
+    cmd: 'npm install -g @anthropic-ai/claude-code',
+    doc: LINKS.claudeCodeDocs
   },
-  {
-    key: 'ai',
-    label: 'Claude Code or Codex (install one)',
-    commands: [
-      {
-        name: 'Claude Code',
-        cmd: 'npm install -g @anthropic-ai/claude-code',
-        doc: LINKS.claudeCodeDocs
-      },
-      { name: 'Codex', cmd: 'npm install -g @openai/codex', doc: LINKS.codexDocs }
-    ]
-  }
+  { name: 'Codex', cmd: 'npm install -g @openai/codex', doc: LINKS.codexDocs }
 ]
 
-/** One CLI install line: tool name, a copy-able command, and a docs link. */
-function CommandLine({ name, cmd, doc }: InstallCommand): React.JSX.Element {
+/** After this long, a still-pending check explains itself (preflight may be starting
+ *  Docker, which can take up to a minute). */
+const SLOW_MS = 6000
+
+/** After this long without an answer, Docker is treated as not responding: the row says so,
+ *  counts the wait honestly and offers what to do. Preflight keeps waiting in the background
+ *  (it may be starting Docker, up to about a minute), so the row still turns green by itself
+ *  if Docker comes up. */
+const STUCK_MS = 15000
+
+const UNRESPONSIVE_HINT =
+  'Docker isn’t responding. Quit and reopen Docker Desktop (or choose Restart from its menu), then re-check.'
+
+/** One CLI install line: a copy-able command and a docs link. */
+function CommandLine({ name, cmd, doc }: { name: string; cmd: string; doc: string }) {
   const [copied, setCopied] = useState(false)
   const copy = (): void => {
-    void navigator.clipboard.writeText(cmd).then(() => {
+    void navigator.clipboard?.writeText(cmd).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     })
   }
   return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs text-text/70">{name}</span>
-      <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 truncate rounded bg-text/5 px-2 py-1 font-mono text-xs text-text">
-          {cmd}
-        </code>
-        <button
-          type="button"
-          title="Copy command"
-          className="flex items-center gap-1 text-xs text-accent hover:underline"
-          onClick={copy}
-        >
-          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-        <button
-          type="button"
-          className="flex items-center gap-1 text-xs text-text/50 hover:underline"
-          onClick={() => void window.orchaDesktop.openExternal(doc)}
-        >
-          Docs <ExternalLink className="h-3 w-3" />
-        </button>
-      </div>
+    <div className="flex items-center gap-2">
+      <span className="w-[84px] shrink-0 text-xs text-text-3">{name}</span>
+      <code className="ob-code min-w-0 flex-1 truncate py-1" title={cmd}>
+        {cmd}
+      </code>
+      <button type="button" className="ob-link" aria-label={`Copy the ${name} install command`} onClick={copy}>
+        {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+      <button
+        type="button"
+        className="ob-disclosure"
+        aria-label={`${name} docs`}
+        onClick={() => void window.orchaDesktop.openExternal(doc)}
+      >
+        Docs <ExternalLink className="h-3 w-3" />
+      </button>
     </div>
   )
 }
 
+function ExternalAction({ label, url }: { label: string; url: string }) {
+  return (
+    <button type="button" className="ob-link" onClick={() => void window.orchaDesktop.openExternal(url)}>
+      {label} <ExternalLink className="h-3 w-3" />
+    </button>
+  )
+}
+
+interface Row {
+  key: string
+  label: string
+  glyph: GlyphState
+  aside: string
+  action?: React.ReactNode
+  extra?: React.ReactNode
+}
+
+/** Setup: checks what Orcha needs on this Mac (Docker running, Homebrew, an AI coding CLI,
+ *  and the Orcha helper, which is the one thing Orcha installs itself — on Continue). Every
+ *  row says its real state and offers the action that fits THAT state. */
 export default function PreflightStep({ onContinue }: { onContinue: () => void }) {
   const [report, setReport] = useState<PreflightReport | null>(null)
   const [probe, setProbe] = useState<PrereqProbe | null>(null)
   const [checking, setChecking] = useState(true)
+  const [probeLoading, setProbeLoading] = useState(true)
+  const [slow, setSlow] = useState(false)
+  const [stuck, setStuck] = useState(false)
+  const [waitedS, setWaitedS] = useState(0)
+  const [checkError, setCheckError] = useState(false)
   const [installing, setInstalling] = useState(false)
   const [lastLine, setLastLine] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [installError, setInstallError] = useState<string | null>(null)
+  const generation = useRef(0)
 
   const check = (): void => {
+    const gen = ++generation.current
     setChecking(true)
-    setError(null)
-    void Promise.all([window.orchaDesktop.preflight(), window.orchaDesktop.probePrereqs()]).then(
-      ([r, p]) => {
-        setReport(r)
+    setSlow(false)
+    setStuck(false)
+    setWaitedS(0)
+    setCheckError(false)
+    setInstallError(null)
+    const started = Date.now()
+    const slowTimer = setTimeout(() => gen === generation.current && setSlow(true), SLOW_MS)
+    const tick = setInterval(() => {
+      if (gen !== generation.current) return clearInterval(tick)
+      const ms = Date.now() - started
+      setWaitedS(Math.floor(ms / 1000))
+      if (ms >= STUCK_MS) setStuck(true)
+    }, 1000)
+    setProbeLoading(true)
+    setReport(null)
+    // The two checks resolve independently: the tool probe is instant, while preflight may
+    // spend up to a minute starting Docker — rows fill in as soon as their own answer lands.
+    const probeP = window.orchaDesktop.probePrereqs().then((p) => {
+      if (gen === generation.current) {
         setProbe(p)
-        setChecking(false)
+        setProbeLoading(false)
       }
-    )
+    })
+    const reportP = window.orchaDesktop
+      .preflight()
+      .then((r) => {
+        if (gen === generation.current) setReport(r)
+      })
+      .finally(() => clearInterval(tick))
+    Promise.all([probeP, reportP])
+      .catch(() => {
+        if (gen === generation.current) setCheckError(true)
+      })
+      .finally(() => {
+        clearTimeout(slowTimer)
+        clearInterval(tick)
+        if (gen === generation.current) {
+          setChecking(false)
+          setProbeLoading(false)
+          setSlow(false)
+          setStuck(false)
+        }
+      })
   }
-  useEffect(() => check(), [])
+  useEffect(() => {
+    check()
+    return () => {
+      generation.current += 1
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  // Live install progress (only the Orcha helper install streams here).
   useEffect(
     () =>
       window.orchaDesktop.onInstallProgress((e: InstallProgress) => {
@@ -117,136 +160,226 @@ export default function PreflightStep({ onContinue }: { onContinue: () => void }
     []
   )
 
-  // Is a given requirement satisfied? Docker uses the daemon-up preflight (it also auto-starts
-  // Docker); the AI agent is satisfied by EITHER Claude Code or Codex.
-  const have = (key: 'homebrew' | 'docker' | 'ai'): boolean => {
-    if (key === 'docker') return report?.docker === 'ok'
-    if (key === 'ai') return !!probe && (probe.claude || probe.codex)
-    return !!probe?.homebrew
-  }
-  const ready = !!probe && !!report && REQUIREMENTS.every((r) => have(r.key))
+  const dockerOk = report?.docker === 'ok'
+  const aiOk = !!probe && (probe.claude || probe.codex)
+  const brewOk = !!probe?.homebrew
+  const ready = !!probe && !!report && dockerOk && aiOk && brewOk
 
-  // Continue installs the Orcha helper (the only thing we install) if it's missing, then moves
-  // on. If it's already present we go straight through.
   async function continueOn(): Promise<void> {
     if (probe?.orcha) return onContinue()
     setInstalling(true)
-    setError(null)
+    setInstallError(null)
     setLastLine('')
     try {
       const res = await window.orchaDesktop.installPrereqs()
       if (!res.ok) {
-        setError(`Couldn’t install the Orcha helper (${res.detail}). You can try again.`)
+        setInstallError(`The Orcha helper didn’t install: ${res.detail}`)
         return
       }
       onContinue()
     } catch {
-      setError('Couldn’t install the Orcha helper. Please try again.')
+      setInstallError('The Orcha helper didn’t install. Check your connection and try again.')
     } finally {
       setInstalling(false)
     }
   }
 
-  return (
-    <div className="onb-two-col grid grid-cols-1 items-center gap-10 lg:grid-cols-2">
-      <div className="flex flex-col gap-5 animate-slide-in">
-        <div className="flex flex-col gap-1">
-          <span className="onb-eyebrow">Setup</span>
-          <h2 className="onb-title text-2xl">What Orcha needs</h2>
-          <p className="onb-body">
-            A few free tools have to be on your Mac before agents can run. Install anything
-            that isn’t checked off, then click Re-check.
-          </p>
-        </div>
+  const pending = checking && (!probe || !report)
+  const dockerPending = !report
+  const probePending = probeLoading || !probe
+  const pendingRow = (key: string, label: string, aside = 'Checking…'): Row => ({ key, label, glyph: 'running', aside })
 
-        <Card className="onb-checklist flex flex-col gap-4 p-5 text-[15px]">
-          {checking && !probe ? (
-            <span className="flex items-center gap-2 text-text/70">
-              <span className="onb-spin flex h-4 w-4 items-center justify-center">
-                <Loader2 className="h-4 w-4 text-accent" />
+  const dockerRow: Row = dockerPending
+    ? stuck
+      ? {
+          key: 'docker',
+          label: 'Docker',
+          glyph: 'warning',
+          aside: `Not responding · ${waitedS}s`,
+          extra: (
+            <span className="ob-row-sub" data-testid="docker-stuck">
+              Docker hasn’t answered yet. If Docker Desktop looks frozen, quit it from the menu bar and open it
+              again, or Re-check. Quorate keeps waiting and updates this row by itself once Docker answers.
+            </span>
+          )
+        }
+      : pendingRow('docker', 'Docker', slow ? 'Waiting for Docker…' : 'Checking…')
+    : report?.docker === 'ok'
+      ? {
+          key: 'docker',
+          label: 'Docker',
+          glyph: 'done',
+          aside: report.autoStarted ? 'Started' : 'Running'
+        }
+      : report?.docker === 'not-installed'
+        ? {
+            key: 'docker',
+            label: 'Docker',
+            glyph: 'todo',
+            aside: 'Not installed',
+            action: <ExternalAction label="Get Docker" url={LINKS.docker} />,
+            extra: (
+              <span className="ob-row-sub">
+                Docker Desktop, OrbStack or Colima all work. Install one, start it, then re-check.
               </span>
-              Checking what’s installed…
-            </span>
-          ) : (
-            REQUIREMENTS.map((r) => {
-              const ok = have(r.key)
-              return (
-                <div key={r.key} className="flex items-start gap-3">
-                  {ok ? (
-                    <span className="onb-check-pop onb-check-badge mt-0.5">
-                      <Check className="h-3.5 w-3.5" />
-                    </span>
-                  ) : (
-                    <Circle className="mt-0.5 h-5 w-5 shrink-0 text-text/30" />
-                  )}
-                  <div className="flex min-w-0 flex-1 flex-col gap-1">
-                    <span className={ok ? 'text-text' : 'text-text/70'}>{r.label}</span>
-                    {!ok && r.commands && (
-                      <div className="flex flex-col gap-2">
-                        <span className="text-xs text-text/50">
-                          Run one of these in Terminal, then click Re-check:
-                        </span>
-                        {r.commands.map((c) => (
-                          <CommandLine key={c.name} {...c} />
-                        ))}
-                      </div>
-                    )}
-                    {!ok && r.url && (
-                      <button
-                        type="button"
-                        className="flex w-fit items-center gap-1 text-xs text-accent hover:underline"
-                        onClick={() => void window.orchaDesktop.openExternal(r.url!)}
-                      >
-                        {r.how} <ExternalLink className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
-                </div>
+            )
+          }
+        : report?.unresponsive
+          ? {
+              // Docker is installed but its CLI stopped answering: starting it again won't
+              // help, so there's no "Start Docker" link here — only the restart advice.
+              key: 'docker',
+              label: 'Docker',
+              glyph: 'warning',
+              aside: 'Not responding',
+              extra: (
+                <span className="ob-row-sub" data-testid="docker-unresponsive">
+                  <InlineText text={report.hint ?? UNRESPONSIVE_HINT} />
+                </span>
               )
-            })
-          )}
-        </Card>
+            }
+          : {
+            key: 'docker',
+            label: 'Docker',
+            glyph: 'warning',
+            aside: report?.docker === 'app-translocated' ? 'Can’t start' : 'Not running',
+            action: (
+              <button type="button" className="ob-link" onClick={check} disabled={checking}>
+                <RotateCw className="h-3 w-3" /> Start Docker
+              </button>
+            ),
+            extra: report?.hint ? (
+              <span className="ob-row-sub">
+                <InlineText text={report.hint} />
+              </span>
+            ) : undefined
+          }
 
-        {installing && (
-          <p className="flex items-center gap-2 text-sm text-text/70">
-            <span className="onb-spin flex h-4 w-4 items-center justify-center">
-              <Loader2 className="h-4 w-4 text-accent" />
+  const brewRow: Row = probePending
+    ? pendingRow('homebrew', 'Homebrew')
+    : brewOk
+      ? {
+          key: 'homebrew',
+          label: 'Homebrew',
+          glyph: 'done',
+          aside: 'Installed'
+        }
+      : {
+          key: 'homebrew',
+          label: 'Homebrew',
+          glyph: 'todo',
+          aside: 'Not found',
+          action: <ExternalAction label="Get Homebrew" url={LINKS.homebrew} />
+        }
+
+  const aiRow: Row = probePending
+    ? pendingRow('ai', 'AI coding agent')
+    : aiOk
+      ? {
+          key: 'ai',
+          label: 'AI coding agent',
+          glyph: 'done',
+          aside: probe!.claude && probe!.codex ? 'Claude Code, Codex' : probe!.claude ? 'Claude Code' : 'Codex'
+        }
+      : {
+          key: 'ai',
+          label: 'AI coding agent',
+          glyph: 'todo',
+          aside: 'Not found',
+          extra: (
+            <>
+              <span className="ob-row-sub">Install Claude Code or Codex in Terminal, then re-check:</span>
+              {AI_COMMANDS.map((c) => (
+                <CommandLine key={c.name} {...c} />
+              ))}
+            </>
+          )
+        }
+
+  const helperRow: Row = probePending
+    ? pendingRow('orcha', 'Orcha helper')
+    : installing
+      ? {
+          key: 'orcha',
+          label: 'Orcha helper',
+          glyph: 'running',
+          aside: 'Installing…',
+          extra: lastLine ? (
+            <span className="truncate font-mono text-[11.5px] text-text-3" title={lastLine}>
+              {lastLine}
             </span>
-            Installing the Orcha helper…
-          </p>
-        )}
-        {installing && lastLine && (
-          <p className="truncate font-mono text-xs text-text/50" title={lastLine}>
-            {lastLine}
-          </p>
-        )}
-        {error && (
-          <p className="flex items-start gap-2 text-sm text-danger">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {error}
-          </p>
-        )}
-        {!ready && !checking && report?.docker !== 'ok' && report?.hint && (
-          <p className="text-sm text-text/70">{report.hint}</p>
-        )}
+          ) : undefined
+        }
+      : probe?.orcha
+        ? {
+            key: 'orcha',
+            label: 'Orcha helper',
+            glyph: 'done',
+            aside: 'Installed'
+          }
+        : {
+            key: 'orcha',
+            label: 'Orcha helper',
+            glyph: installError ? 'failed' : 'todo',
+            aside: installError ? 'Didn’t install' : 'Installs when you continue'
+          }
 
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={checking || installing} onClick={check}>
-            Re-check
-          </Button>
-          <Button
-            data-onb-primary="true"
-            disabled={!ready || checking || installing}
-            onClick={() => void continueOn()}
-          >
-            {installing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Continue
-          </Button>
+  const rows = [dockerRow, brewRow, aiRow, helperRow]
+
+  return (
+    <>
+      <StepHeader
+        title="Check your Mac"
+        subtitle="Quorate runs your agents with a few free tools. Anything missing is listed with how to get it."
+      />
+
+      {checkError ? (
+        <Notice tone="danger" title="Couldn’t check this Mac" action={<ObButton onClick={check}>Re-check</ObButton>}>
+          The check didn’t finish. If Docker is starting or busy, wait a moment and re-check.
+        </Notice>
+      ) : (
+        <div className="ob-list" aria-busy={pending}>
+          {rows.map((r) => (
+            <div key={r.key} className="flex flex-col" data-row={r.key}>
+              <div className="ob-row">
+                <StatusGlyph state={r.glyph} />
+                <span className="ob-row-title flex-1">{r.label}</span>
+                {r.action}
+                <span className="ob-row-aside">{r.aside}</span>
+              </div>
+              {r.extra && <div className="ob-row-extra">{r.extra}</div>}
+            </div>
+          ))}
         </div>
-      </div>
+      )}
 
-      <div className="hidden lg:block">
-        <ShowcaseCarousel />
-      </div>
-    </div>
+      {installError && <Notice tone="danger" title={installError} />}
+
+      <StepFooter
+        left={
+          <ObButton variant="ghost" disabled={(checking && !slow) || installing} onClick={check}>
+            Re-check
+          </ObButton>
+        }
+        hint={
+          pending || ready || checkError
+            ? undefined
+            : brewOk && aiOk && report?.unresponsive
+              ? 'Restart Docker, then re-check'
+              : brewOk && aiOk && report?.docker !== 'not-installed'
+                ? 'Start Docker, then re-check'
+              : 'Install what’s missing, then re-check'
+        }
+      >
+        <ObButton
+          variant="primary"
+          data-onb-primary="true"
+          disabled={!ready || checking || installing}
+          onClick={() => void continueOn()}
+        >
+          {installing ? 'Installing…' : installError ? 'Try again' : 'Continue'}
+        </ObButton>
+      </StepFooter>
+    </>
   )
 }
