@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 import pathlib
+import sys
 import tempfile
+import time
 from typing import Any
 
 NESTED_WORKTREES_PREFIX = ".orcha-worktrees/"
@@ -21,8 +23,36 @@ DIFF_EXCLUDES = (
 )
 
 
-def _full_patch(cwd, services: Any, *, include_ignored: bool = False):
-    """Return the complete binary-safe patch without changing the checkout index."""
+# Building a patch spawns one ``git diff --no-index`` per untracked file, and it runs on
+# the notifier's single loop thread, so every file is time the daemon is not reaping
+# finished workers or renewing leases. Field bug: a handoff out of a developer's main
+# checkout enumerated 262k ignored files (node_modules, ios/Pods, build output) and
+# froze the daemon for over an hour; finished workers were left as zombies, their runs
+# stayed 'running', and the agents' wakes were blocked. An exact patch that would need
+# more files or time than this is refused (callers already fail closed on None).
+MAX_PATCH_UNTRACKED_FILES = 5000
+PATCH_BUILD_BUDGET_SECS = 120.0
+
+
+def _full_patch(
+    cwd,
+    services: Any,
+    *,
+    include_ignored: bool = False,
+    max_bytes: int | None = None,
+):
+    """Return the complete binary-safe patch without changing the checkout index.
+
+    With ``max_bytes`` (a preview such as the run diff) building stops once the
+    patch passes that size; the caller truncates. Without it the patch must be
+    exact, so it is refused (None) when it would be unreasonably large to build.
+
+    Ignored files are listed with ``--directory``: an ignored file on its own (an
+    ``.env``) is carried, but a wholly ignored directory (``node_modules/``,
+    ``ios/Pods/``, ``build/``, ``.venv/``) is dependency or build output that is
+    regenerated, never hand-made state, and is skipped as a unit.
+    """
+    deadline = time.monotonic() + PATCH_BUILD_BUDGET_SECS
     return_code, tracked = services._run_git(
         ["diff", "--binary", "--full-index", "origin/main", "--", *DIFF_EXCLUDES],
         cwd=cwd,
@@ -45,6 +75,8 @@ def _full_patch(cwd, services: Any, *, include_ignored: bool = False):
                 "--others",
                 "--ignored",
                 "--exclude-standard",
+                "--directory",
+                "--no-empty-directory",
                 "-z",
                 "--",
                 *DIFF_EXCLUDES,
@@ -61,11 +93,24 @@ def _full_patch(cwd, services: Any, *, include_ignored: bool = False):
         if untracked_code != 0:
             return None
         for relative_path in filter(None, untracked.split("\0")):
+            if relative_path.endswith("/"):
+                continue  # a wholly ignored directory (see docstring)
             if relative_path not in seen_paths:
                 seen_paths.add(relative_path)
                 untracked_paths.append(relative_path)
 
+    if max_bytes is None and len(untracked_paths) > MAX_PATCH_UNTRACKED_FILES:
+        _patch_refused(cwd, f"{len(untracked_paths)} untracked files")
+        return None
+    size = len(tracked)
     for relative_path in untracked_paths:
+        if max_bytes is not None and size > max_bytes:
+            break
+        if time.monotonic() > deadline:
+            if max_bytes is not None:
+                break
+            _patch_refused(cwd, f"over {PATCH_BUILD_BUDGET_SECS:.0f}s")
+            return None
         file_code, file_patch = services._run_git(
             [
                 "diff",
@@ -83,7 +128,16 @@ def _full_patch(cwd, services: Any, *, include_ignored: bool = False):
         if file_code not in (0, 1):
             return None
         patches.append(file_patch)
+        size += len(file_patch)
     return "".join(patches)
+
+
+def _patch_refused(cwd, why: str) -> None:
+    print(
+        f"[notifier] checkout patch for {cwd} refused ({why}) — too large to build "
+        "safely on the daemon loop; the handoff fails closed",
+        file=sys.stderr,
+    )
 
 
 def _branch_patch(base_cwd, branch: str, services: Any):
@@ -281,7 +335,7 @@ def capture_diff(worktree, services: Any, cap: int = 200_000):
     """Return the worker's net diff from main, including untracked files."""
     if not worktree:
         return None
-    output = _full_patch(worktree, services)
+    output = _full_patch(worktree, services, max_bytes=cap)
     if output is None:
         return None
     if len(output) > cap:
@@ -331,13 +385,37 @@ def _status_paths(cwd, services: Any):
         if entry[0] in "RC":
             # Rename/copy entries carry the original path as the next NUL field.
             index += 1
+    # Wholly ignored directories (node_modules/, build/) never enter a patch (see
+    # _full_patch), so they are not checkout state here either.
+    ignored_dirs = _ignored_directories(cwd, services)
+    if ignored_dirs is None:
+        return None
     # Older Git (e.g. 2.39 on Debian) still reports a nested linked worktree as
     # "!! .orcha-worktrees/<name>/" despite the exclude pathspec above.
-    return {
-        path
-        for path in paths
-        if not path.startswith(NESTED_WORKTREES_PREFIX)
-    }
+    skipped = (NESTED_WORKTREES_PREFIX, *ignored_dirs)
+    return {path for path in paths if not path.startswith(skipped)}
+
+
+def _ignored_directories(cwd, services: Any):
+    """Wholly ignored directories of ``cwd`` (each ending in ``/``), or None."""
+    return_code, output = services._run_git(
+        [
+            "ls-files",
+            "--others",
+            "--ignored",
+            "--exclude-standard",
+            "--directory",
+            "--no-empty-directory",
+            "-z",
+            "--",
+            *DIFF_EXCLUDES,
+        ],
+        cwd=cwd,
+        timeout=60,
+    )
+    if return_code != 0:
+        return None
+    return tuple(path for path in output.split("\0") if path.endswith("/"))
 
 
 def _patch_paths(patch: str):

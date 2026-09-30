@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+from . import notifier_deliverables
+
 
 def _save_task_result(api_base, aid, worker, diff, failed_drains, services):
     task_id = (worker.get("respawn_ctx") or {}).get("task_id")
@@ -90,6 +92,10 @@ def handle_exited(
         diff,
     ):
         services._reap_sandbox_artifacts(worker)  # I4: clean completion — reap once stamped
+    if is_task_bound:
+        # Non-code deliverables: upload <cwd>/.orcha/outputs/* to the task (no-op when the
+        # folder is absent; best-effort, never raises; before the checkpoint commit).
+        notifier_deliverables.collect_for_worker(api_base, worker, quiet=quiet)
     if is_task_worktree:
         _save_task_result(api_base, aid, worker, diff, failed_drains, services)
         _release_worker(api_base, aid, worker, lane, "released", services, task=True)

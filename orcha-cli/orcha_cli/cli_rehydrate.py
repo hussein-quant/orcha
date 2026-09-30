@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import pathlib
 
+from . import personal_session
+
 
 def format_brief(brief: dict) -> str:
     """Render an agent rehydration response as compact plain text."""
@@ -83,6 +85,8 @@ def format_brief(brief: dict) -> str:
 
 def rehydrate(args, services) -> None:
     """Best-effort fetch and print of the bound agent's continuity brief."""
+    if personal_session.active():  # a personal desktop tab never becomes an agent
+        return
     if services._skip_managed_embodiment_hook("rehydrate"):
         return
     try:

@@ -6,6 +6,8 @@ import json
 import os
 import pathlib
 
+from . import personal_session
+
 def cmd_watch(args: argparse.Namespace, services) -> None:
     """Orcha#33: per-session background watcher (polls every 10s by default).
 
@@ -23,6 +25,8 @@ def cmd_watch(args: argparse.Namespace, services) -> None:
     Silent no-op for: no .claude/orcha.json, no resolvable binding, kind='human'
     (humans don't get the automated nag), an existing live watcher for this alias.
     """
+    if personal_session.active():  # never bind a personal desktop tab to an agent's inbox
+        return
     if services._skip_managed_embodiment_hook("watch"):   # ISS-21: the poller would wedge a one-shot worker
         return
     import signal
@@ -76,6 +80,16 @@ def cmd_watch(args: argparse.Namespace, services) -> None:
         # gracefully (we still rely on parent_pid watch to actually exit).
         try:
             os.setsid()
+        except OSError:
+            pass
+        # Release the hook's stdio: the child inherited Claude's hook pipes, and while
+        # any process holds them open Claude keeps waiting on the SessionStart hook.
+        try:
+            devnull = os.open(os.devnull, os.O_RDWR)
+            for fd in (0, 1, 2):
+                os.dup2(devnull, fd)
+            if devnull > 2:
+                os.close(devnull)
         except OSError:
             pass
 
@@ -172,6 +186,8 @@ def cmd_unwatch(_: argparse.Namespace) -> None:
     Targets the per-alias PID files written by `orcha watch`. Silent no-op if
     no PID file exists or the pid is stale.
     """
+    if personal_session.active():  # it started no watcher; don't kill the agents'
+        return
     import signal
     cwd = pathlib.Path.cwd()
     claude_dir = cwd / ".claude"
