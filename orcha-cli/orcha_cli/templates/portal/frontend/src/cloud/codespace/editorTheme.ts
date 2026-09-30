@@ -1,14 +1,13 @@
 /**
  * CM6 theme for the Code Space editors (EditorPane + DraftEditorPane), built
  * from the V2 design tokens (docs/orcha-v2-design-system.md §1 —
- * static/styles/v2-tokens.css). V2 is dark-only, so this is registered as a
- * DARK theme (`{ dark: true }` — CM picks dark-aware defaults for anything not
- * overridden, e.g. the search panel and tooltips).
+ * static/styles/v2-tokens.css), for BOTH themes.
  *
- * Values are read from the live `--v2-*` custom properties at construction
- * time (once per editor mount) so a token change in v2-tokens.css re-themes the
- * editor without touching this file; the fallbacks are the same §1 values, used
- * only where computed styles aren't available (jsdom / SSR).
+ * Every colour is a live `var(--v2-*)` reference, so the editor re-tones with
+ * the rest of the page the instant <html data-theme> flips. The only thing CM
+ * needs to be told is light vs dark (its `dark` flag picks the defaults for
+ * anything not overridden — search panel, tooltips, autocomplete): that part
+ * lives in a Compartment that is reconfigured on THEME_CHANGED_EVENT.
  *
  * Syntax colours reuse the read-only viewer's token mapping
  * (browse.css `.rb-tok-*`: comment → tertiary text, string → diff-add green,
@@ -17,47 +16,67 @@
  * reflows either.
  */
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import type { Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { Compartment, type Extension } from "@codemirror/state";
+import { EditorView, ViewPlugin } from "@codemirror/view";
+import { currentTheme, THEME_CHANGED_EVENT, type ResolvedTheme } from "../../shell/theme";
 import { tags as t } from "@lezer/highlight";
 import { THREAD_LINE_CLASS } from "./editorThreadMarks";
 
 /** Disables ligatures/contextual alternates — shared with the read view (codespace.css .rb-code). */
 export const MONO_FEATURES = '"liga" 0, "calt" 0';
 
-function cssVar(name: string, fallback: string): string {
-  if (typeof window === "undefined" || typeof getComputedStyle !== "function") return fallback;
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return v || fallback;
-}
+const v = (name: string, fallback: string) => `var(${name}, ${fallback})`;
 
-/** The resolved V2 palette the editor uses — exported for tests. */
+/** The V2 palette the editor uses (live CSS variable references) — exported for tests. */
 export function editorPalette() {
   return {
-    text: cssVar("--v2-text", "#EEEFF2"),
-    text2: cssVar("--v2-text-2", "#AAADB7"),
-    text3: cssVar("--v2-text-3", "#959AA4"),
-    surface: cssVar("--v2-surface", "#191A1D"),
-    panel: cssVar("--v2-panel", "#151618"),
-    canvas: cssVar("--v2-canvas", "#101113"),
-    raised: cssVar("--v2-raised", "#202126"),
-    hover: cssVar("--v2-hover", "#25262B"),
-    border: cssVar("--v2-border", "#2B2D33"),
-    accent: cssVar("--v2-accent", "#8D93F7"),
-    accentSoft: cssVar("--v2-accent-soft", "rgba(141, 147, 247, 0.14)"),
-    selection: "rgba(141, 147, 247, 0.32)", // same as v2-tokens.css ::selection
-    info: cssVar("--v2-info", "#4EA7FC"),
-    warn: cssVar("--v2-warn", "#E2A336"),
-    danger: cssVar("--v2-danger", "#EE7070"),
-    diffAdd: cssVar("--diff-add", "#8FD9AE"),
-    fontMono: cssVar("--v2-font-mono", '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace'),
+    text: v("--v2-text", "#EEEFF2"),
+    text2: v("--v2-text-2", "#AAADB7"),
+    text3: v("--v2-text-3", "#959AA4"),
+    surface: v("--v2-surface", "#191A1D"),
+    panel: v("--v2-panel", "#151618"),
+    canvas: v("--v2-canvas", "#101113"),
+    raised: v("--v2-raised", "#202126"),
+    hover: v("--v2-hover", "#25262B"),
+    border: v("--v2-border", "#2B2D33"),
+    accent: v("--v2-accent", "#8D93F7"),
+    accentSoft: v("--v2-accent-soft", "rgba(141, 147, 247, 0.14)"),
+    selection: v("--v2-selection", "rgba(141, 147, 247, 0.32)"), // same as ::selection
+    info: v("--v2-info", "#4EA7FC"),
+    warn: v("--v2-warn", "#E2A336"),
+    danger: v("--v2-danger", "#EE7070"),
+    diffAdd: v("--diff-add", "#8FD9AE"),
+    fontMono: v("--v2-font-mono", '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace'),
   };
 }
 
-export function buildEditorTheme(): Extension {
-  const p = editorPalette();
+/** Light/dark flag for CM's own defaults, swapped live on a theme change. */
+const themeKind = new Compartment();
 
-  const theme = EditorView.theme({
+/** The CM extensions for one theme kind (colours are theme-agnostic var()s). */
+export function editorThemeFor(resolved: ResolvedTheme): Extension {
+  const dark = resolved === "dark";
+  return [baseTheme(dark), syntaxHighlighting(highlightStyle(dark))];
+}
+
+/** Reconfigures the compartment whenever the app theme changes. */
+const followAppTheme = ViewPlugin.define((view) => {
+  const on = (e: Event) => {
+    const d = (e as CustomEvent).detail;
+    const r: ResolvedTheme = d === "light" || d === "dark" ? d : currentTheme();
+    view.dispatch({ effects: themeKind.reconfigure(editorThemeFor(r)) });
+  };
+  window.addEventListener(THEME_CHANGED_EVENT, on);
+  return { destroy: () => window.removeEventListener(THEME_CHANGED_EVENT, on) };
+});
+
+export function buildEditorTheme(): Extension {
+  return [themeKind.of(editorThemeFor(currentTheme())), followAppTheme];
+}
+
+function baseTheme(dark: boolean): Extension {
+  const p = editorPalette();
+  return EditorView.theme({
     "&": {
       color: p.text,
       backgroundColor: p.panel,
@@ -119,9 +138,12 @@ export function buildEditorTheme(): Extension {
     },
     ".cm-tooltip": { backgroundColor: p.raised, color: p.text, border: "1px solid " + p.border },
     ".cm-matchingBracket, &.cm-focused .cm-matchingBracket": { backgroundColor: p.accentSoft, outline: "none" },
-  }, { dark: true });
+  }, { dark });
+}
 
-  const highlight = HighlightStyle.define([
+function highlightStyle(dark: boolean): HighlightStyle {
+  const p = editorPalette();
+  return HighlightStyle.define([
     { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: p.text3, fontStyle: "italic" },
     { tag: [t.string, t.special(t.string), t.regexp, t.character], color: p.diffAdd },
     { tag: [t.number, t.bool, t.null, t.atom], color: p.accent },
@@ -133,7 +155,5 @@ export function buildEditorTheme(): Extension {
     { tag: [t.link, t.url], color: p.accent, textDecoration: "underline" },
     { tag: [t.invalid], color: p.danger },
     { tag: [t.meta, t.processingInstruction], color: p.text3 },
-  ], { themeType: "dark" });
-
-  return [theme, syntaxHighlighting(highlight)];
+  ], { themeType: dark ? "dark" : "light" });
 }

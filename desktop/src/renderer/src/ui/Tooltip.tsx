@@ -51,7 +51,7 @@ export function Tooltip({
           role="tooltip"
           id={id}
           style={{ left: at.x, top: at.y }}
-          className="pointer-events-none fixed z-50 -translate-y-1/2 whitespace-nowrap rounded-md border border-border-strong bg-raised px-2 py-1 text-xs text-text shadow-[0_4px_16px_rgba(0,0,0,0.45)]"
+          className="pointer-events-none fixed z-50 -translate-y-1/2 whitespace-nowrap rounded-md border border-border-strong bg-raised px-2 py-1 text-xs text-text shadow-[var(--shadow-pop)]"
         >
           {content ?? text}
         </span>

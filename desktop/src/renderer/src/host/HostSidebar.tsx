@@ -371,7 +371,7 @@ function RowMenu({
       role="menu"
       aria-label={`Actions for ${row.name}`}
       onKeyDown={onKeyDown}
-      className="absolute left-2 right-2 top-full z-20 mt-1 rounded-[10px] border border-border-strong bg-raised p-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+      className="absolute left-2 right-2 top-full z-20 mt-1 rounded-[10px] border border-border-strong bg-raised p-1 shadow-[var(--shadow-pop)]"
     >
       {actions.onLaunchKind && (
         <>

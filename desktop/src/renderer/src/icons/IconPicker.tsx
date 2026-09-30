@@ -165,7 +165,7 @@ export function IconPicker({
       onKeyDown={onKeyDown}
       style={style}
       className={cn(
-        'flex flex-col rounded-[10px] border border-border-strong bg-raised p-2 shadow-[0_12px_32px_rgba(0,0,0,0.5)]',
+        'flex flex-col rounded-[10px] border border-border-strong bg-raised p-2 shadow-[var(--shadow-pop)]',
         className
       )}
     >

@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ToastProvider } from "./components/ui";
 import { SnapshotProvider } from "./state/SnapshotProvider";
-import { initTheme } from "./shell/Shell";
+import { initTheme } from "./shell/theme";
 import { AppRoutes } from "./shell/routes";
 
 // Routing: react-router BrowserRouter over clean URLs (/tasks?task=…). Every
@@ -19,8 +19,8 @@ if (!document.querySelector('link[href="/assets/styles.css"]')) {
   l.href = "/assets/styles.css";
   document.head.appendChild(l);
 }
-// V2 is dark-only: pin <html data-theme="dark"> before the first React render
-// (index.html already did it pre-paint; this covers any other entry).
+// Appearance (System / Light / Dark): apply the resolved theme before the first
+// React render and keep it live (index.html already did it pre-paint).
 initTheme();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

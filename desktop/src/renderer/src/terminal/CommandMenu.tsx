@@ -96,7 +96,7 @@ export default function CommandMenu({
           // header must not blur it, or Escape/arrows would stop working.
           if (e.target !== inputRef.current) e.preventDefault()
         }}
-        className="absolute top-14 flex max-h-[min(460px,calc(100vh-120px))] flex-col overflow-hidden rounded-xl border border-border-strong bg-raised shadow-[0_24px_64px_rgba(0,0,0,0.55),0_2px_8px_rgba(0,0,0,0.3)] animate-fade-in"
+        className="absolute top-14 flex max-h-[min(460px,calc(100vh-120px))] flex-col overflow-hidden rounded-xl border border-border-strong bg-raised shadow-[var(--shadow-menu)] animate-fade-in"
         style={{ left: left + Math.max(0, (width - menuWidth) / 2), width: menuWidth }}
       >
         <div className="flex h-11 shrink-0 items-center gap-2.5 border-b border-border px-3.5">

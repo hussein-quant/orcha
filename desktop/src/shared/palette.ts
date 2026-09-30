@@ -17,10 +17,13 @@ export interface AvatarColors {
   color: string
 }
 
-/** Palette slot → flat fill + tinted initial (≥ 4.5:1 for every slot). */
+/** Palette slot → flat fill + tinted initial (≥ 4.5:1 for every slot, both themes). Saturation
+ *  + lightness come from the renderer's theme tokens (styles.css --avatar-bg-sl /
+ *  --avatar-fg-sl: dark fill + pale initial on dark, pale fill + deep initial on light); the
+ *  fallbacks are the dark values, byte-identical to the portal's. */
 export function paletteColor(index: number): AvatarColors {
   const h = AVATAR_HUES[((index % AVATAR_HUES.length) + AVATAR_HUES.length) % AVATAR_HUES.length]
-  return { background: `hsl(${h} 34% 28%)`, color: `hsl(${h} 72% 86%)` }
+  return { background: `hsl(${h} var(--avatar-bg-sl, 34% 28%))`, color: `hsl(${h} var(--avatar-fg-sl, 72% 86%))` }
 }
 
 /** Stable palette slot for a key (FNV-1a — spreads short, similar names better than ×31). The

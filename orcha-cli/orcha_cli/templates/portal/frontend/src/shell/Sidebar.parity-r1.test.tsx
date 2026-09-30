@@ -234,8 +234,9 @@ describe("D13: the footer's acting human uses the roster palette slot", () => {
     const slot = agentPaletteSlots(snapshot() as unknown as Snapshot).get(actorKey("kedar"))!;
     const av = sidebar().querySelector(".v2-sb-acct .v2-av") as HTMLElement;
     const d = document.createElement("div");
-    d.style.backgroundColor = paletteColor(slot).background;
-    expect(av.style.backgroundColor).toBe(d.style.backgroundColor);
+    // shorthand: the tone is var()-driven, so the longhand reads "" until substitution
+    d.style.background = paletteColor(slot).background;
+    expect(av.style.background).toBe(d.style.background);
   });
 });
 

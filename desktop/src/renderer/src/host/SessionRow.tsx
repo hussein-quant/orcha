@@ -139,7 +139,7 @@ export function PopMenu({
       onKeyDown={onKeyDown}
       style={style}
       className={cn(
-        'absolute left-2 right-2 top-full z-20 mt-1 rounded-[10px] border border-border-strong bg-raised p-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]',
+        'absolute left-2 right-2 top-full z-20 mt-1 rounded-[10px] border border-border-strong bg-raised p-1 shadow-[var(--shadow-pop)]',
         className
       )}
     >

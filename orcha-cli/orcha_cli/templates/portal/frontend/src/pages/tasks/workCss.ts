@@ -118,8 +118,8 @@ export const workCss = String.raw`
     background:
       linear-gradient(to right, var(--v2-canvas) 40%, transparent) left center / 32px 100% no-repeat local,
       linear-gradient(to left, var(--v2-canvas) 40%, transparent) right center / 32px 100% no-repeat local,
-      linear-gradient(to right, rgba(0, 0, 0, .45), transparent) left center / 14px 100% no-repeat scroll,
-      linear-gradient(to left, rgba(0, 0, 0, .45), transparent) right center / 14px 100% no-repeat scroll;
+      linear-gradient(to right, var(--v2-scroll-shadow), transparent) left center / 14px 100% no-repeat scroll,
+      linear-gradient(to left, var(--v2-scroll-shadow), transparent) right center / 14px 100% no-repeat scroll;
     background-color: var(--v2-canvas); }
   .wk-board:focus-visible { box-shadow: inset var(--v2-focus-ring); }
   .wk-col { flex: 0 0 272px; display: flex; flex-direction: column; gap: 6px; scroll-snap-align: start; min-width: 0; }

@@ -309,7 +309,7 @@ label.ob-row:hover {
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
-  color: #eeeff2;
+  color: var(--color-text);
 }
 .ob-avatar-badge {
   position: absolute;
@@ -417,7 +417,7 @@ label.ob-row:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--scrim);
 }
 .ob-dialog {
   display: flex;
@@ -429,7 +429,7 @@ label.ob-row:hover {
   border-radius: 10px;
   background: var(--color-raised);
   padding: 16px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-dialog);
 }
 
 /* Motion: one calm entrance per step + a spinner. Both freeze under reduced motion. */

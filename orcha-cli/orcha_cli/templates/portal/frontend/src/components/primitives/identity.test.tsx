@@ -141,7 +141,8 @@ describe("D13 avatar palette parity with the desktop", () => {
       return h % 10;
     };
     for (const k of ["lead", "backend-dev", "frontend-dev", "qa-bot", "docs", "reviewer"]) expect(paletteIndex(k)).toBe(fnv(k));
-    expect(paletteColor(0)).toEqual({ background: "hsl(4 34% 28%)", color: "hsl(4 72% 86%)" });
+    // hue per slot; the tone is theme-driven (dark fallbacks = the D13 34%/28% + 72%/86%)
+    expect(paletteColor(0)).toEqual({ background: "hsl(4 var(--v2-av-fill-s, 34%) var(--v2-av-fill-l, 28%))", color: "hsl(4 var(--v2-av-ink-s, 72%) var(--v2-av-ink-l, 86%))" });
   });
 
   it("assignPalette never repeats a slot inside one list (until the palette is exhausted)", () => {

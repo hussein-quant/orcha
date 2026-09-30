@@ -91,7 +91,7 @@ export function CommandPalette({ onClose, embedded, openExecutionControls, openC
 
   const execute = (r: SearchResult, newTab: boolean) => {
     if (r.disabledReason) { setNotice(r.disabledReason); return; }
-    if (r.run) { r.run(); return; }
+    if (r.run) { r.run(); if (r.closeOnRun) onClose(); return; }
     if (r.hardHref) {
       if (newTab) window.open(r.hardHref, "_blank", "noopener");
       else window.location.assign(r.hardHref);

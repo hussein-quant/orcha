@@ -18,8 +18,11 @@ export const EMBED_TO_PORTAL_CHANNEL = 'orcha:embed:toPortal'
 export const EMBED_ORIGIN_ARG = '--orcha-embed-origin='
 export const EMBED_PROJECT_ARG = '--orcha-embed-project='
 
-export type HostCapability = 'sidebar' | 'notifications' | 'stackControl'
-export const HOST_CAPABILITIES: readonly HostCapability[] = ['sidebar', 'notifications', 'stackControl']
+/** `theme`: the host owns the colour theme. The desktop drives nativeTheme.themeSource from
+ *  Settings › Appearance, so the portal ignores its own stored theme preference and follows
+ *  `prefers-color-scheme` (which Electron keeps equal to the desktop's choice, live). */
+export type HostCapability = 'sidebar' | 'notifications' | 'stackControl' | 'theme'
+export const HOST_CAPABILITIES: readonly HostCapability[] = ['sidebar', 'notifications', 'stackControl', 'theme']
 
 /** How long main waits for a portal's `ready` before falling back to the legacy
  *  (pre-V2 portal) layout: slim TopBar above the view, no host sidebar. */

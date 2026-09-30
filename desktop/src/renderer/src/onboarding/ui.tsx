@@ -171,6 +171,7 @@ export function Avatar({ name, size = 24, badge }: { name: string; size?: 16 | 2
         width: size,
         height: size,
         background: avatarColor(name),
+        color: identityColor(name).color,
         fontSize: size >= 32 ? 13.5 : size >= 24 ? 11 : size >= 20 ? 9.5 : 8.5
       }}
     >

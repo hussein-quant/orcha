@@ -12,8 +12,8 @@
 
 const DEBOUNCE_MS = 800;
 /** Fired on window after a server bag was applied to localStorage / <html>, so
- *  live UI holding a copy in React state (the sidebar rail) re-reads it and
- *  never disagrees with <html data-sidebar>. */
+ *  live UI holding a copy in React state (the sidebar rail, the theme) re-reads
+ *  it and never disagrees with <html data-sidebar> / <html data-theme>. */
 export const PREFS_APPLIED_EVENT = "orcha:prefs-applied";
 const DEF_CID_KEY = "orcha:defaultCid";
 
@@ -42,9 +42,9 @@ export function localPrefs(): Record<string, string> {
 }
 
 // SERVER WINS: mirror into localStorage for the next load and apply the
-// sidebar attribute now. V2 is DARK-ONLY: theme / skin are still mirrored
-// (read-tolerant — the endpoint, the bag and rollback builds keep their
-// values) but never applied to <html>; initTheme()/index.html pin dark.
+// sidebar attribute now. The theme is applied by shell/theme.ts, which
+// listens for PREFS_APPLIED_EVENT (no import cycle). The retired skin is
+// still mirrored (read-tolerant) but never applied.
 function applyServer(prefs: Record<string, string>): void {
   const d = document.documentElement;
   if (prefs.theme) lsSet("orcha:theme", prefs.theme);

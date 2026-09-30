@@ -38,14 +38,14 @@ export function CloseTabsDialog({
     return () => window.removeEventListener('keydown', onKey)
   }, [onCancel])
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onCancel}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)]" onClick={onCancel}>
       <div
         role="alertdialog"
         aria-modal="true"
         aria-labelledby="close-tabs-title"
         aria-describedby="close-tabs-body"
         data-testid="close-tabs-dialog"
-        className="mx-4 w-full max-w-[400px] rounded-[10px] border border-border-strong bg-raised p-5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        className="mx-4 w-full max-w-[400px] rounded-[10px] border border-border-strong bg-raised p-5 shadow-[var(--shadow-dialog)]"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="close-tabs-title" className="text-[15px] font-semibold text-text">

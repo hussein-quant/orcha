@@ -521,7 +521,7 @@ function ExitBar({ tab, onRestart, onClose }: { tab: TermTab; onRestart(): void;
     <div
       role="status"
       data-testid="terminal-exit"
-      className="absolute inset-x-3 bottom-3 flex items-center gap-2 rounded-lg border border-border-strong bg-raised px-3 py-1.5 text-[12.5px] shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
+      className="absolute inset-x-3 bottom-3 flex items-center gap-2 rounded-lg border border-border-strong bg-raised px-3 py-1.5 text-[12.5px] shadow-[var(--shadow-toast)]"
     >
       <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', bad ? 'bg-danger' : 'bg-text-3')} />
       <span className="min-w-0 flex-1 truncate text-text-2">

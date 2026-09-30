@@ -14,7 +14,9 @@
  * is shape-checked here too; navigation only accepts same-origin safe paths.
  */
 
-export type HostCapability = "sidebar" | "notifications" | "stackControl";
+/** "theme": the host owns the colour theme (it drives prefers-color-scheme via
+ *  Electron nativeTheme) — shell/theme.ts then follows System. */
+export type HostCapability = "sidebar" | "notifications" | "stackControl" | "theme";
 
 export type HostToPortal =
   | { type: "navigate"; path: string }

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, WebContentsView } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, WebContentsView } from 'electron'
 import path from 'node:path'
 import os from 'node:os'
 import { accessSync, chmodSync, constants as fsConstants, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
@@ -46,6 +46,8 @@ import { readWorktrees } from './checkouts'
 import { applyHostModal, resyncActiveView, showInManagerWindow } from './hostView'
 import { readAppearance, isEmpty } from './appearanceStore'
 import { buildApplyAppearanceScript } from './appearanceScripts'
+import { createThemeController, readThemeMode, writeThemeMode, type ThemeController } from './themeMode'
+import { canvasFor, THEME_CHANNELS, type ThemeState } from '../shared/theme'
 import { EmbedTracker } from './embedTracker'
 import { PtyHost, type PtyProcess } from './ptyHost'
 import { acceptTermSender as acceptTermSenderFacts, closeAction, createTermController, TermRequestError, type SenderFacts, type TermControllerHooks } from './terminalIpc'
@@ -616,9 +618,27 @@ function sendTermCommand(command: TermCommand): void {
   sendToManager(TERM_CHANNELS.command, command)
 }
 
-/** Canvas token (docs/orcha-v2-design-system.md --v2-canvas): every native surface paints
- *  this before first paint so nothing flashes white (brief §6). */
-const CANVAS = '#101113'
+/** Settings › Appearance. Created at the top of whenReady — BEFORE any window — so
+ *  nativeTheme.themeSource (and with it prefers-color-scheme in every WebContents) and each
+ *  native backgroundColor already match the stored mode on first paint. */
+let theme: ThemeController | null = null
+
+/** Canvas token (--color-bg / --v2-window for the resolved theme): every native surface
+ *  paints this before first paint so nothing flashes the wrong tone (brief §6). */
+function canvas(): string {
+  return canvasFor(theme?.resolved() ?? (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'))
+}
+
+/** A theme change (preference or OS flip under System): repaint native backgrounds and tell
+ *  the manager + tray popovers. Portal views need nothing — they follow prefers-color-scheme. */
+function publishTheme(s: ThemeState): void {
+  const bg = canvasFor(s.resolved)
+  if (managerWindow && !managerWindow.isDestroyed()) managerWindow.setBackgroundColor(bg)
+  for (const w of popoverWindows) if (!w.isDestroyed()) w.setBackgroundColor(bg)
+  for (const v of portalViews.values()) if (!v.webContents.isDestroyed()) v.setBackgroundColor(bg)
+  sendToManager(THEME_CHANNELS.changed, s)
+  for (const w of popoverWindows) if (!w.isDestroyed()) w.webContents.send(THEME_CHANNELS.changed, s)
+}
 
 function createManagerWindow(): void {
   managerWindow = new BrowserWindow({
@@ -627,7 +647,7 @@ function createManagerWindow(): void {
     // Keep room for the host sidebar (≤ 360 px) plus a usable portal area.
     minWidth: 760,
     minHeight: 480,
-    backgroundColor: CANVAS,
+    backgroundColor: canvas(),
     title: PRODUCT_NAME,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -736,7 +756,8 @@ function applyLegacyAppearance(project: string): void {
   const view = portalViews.get(project)
   if (!view || view.webContents.isDestroyed()) return
   const stored = readAppearance(app.getPath('userData'))
-  const appearance = isEmpty(stored) ? { theme: 'dark', skin: 'gold' } : stored
+  // Never set: follow the desktop's resolved Appearance (was hard-coded dark).
+  const appearance = isEmpty(stored) ? { theme: theme?.resolved() ?? 'dark', skin: 'gold' } : stored
   view.webContents.executeJavaScript(buildApplyAppearanceScript(appearance)).catch(() => {
     // Best-effort — a view mid-navigation can reject this harmlessly.
   })
@@ -782,7 +803,7 @@ function getOrCreatePortalView(stack: Stack): WebContentsView {
       additionalArguments: portalPreloadArgs(portalOrigin, stack.project)
     }
   })
-  view.setBackgroundColor(CANVAS)
+  view.setBackgroundColor(canvas())
   const webContentsId = view.webContents.id
   portalProjectByWebContentsId.set(webContentsId, stack.project)
   portalOrigins.set(stack.project, portalOrigin)
@@ -920,7 +941,7 @@ function createPopoverWindow(): BrowserWindow {
     width: 360,
     height: 480,
     show: false,
-    backgroundColor: CANVAS,
+    backgroundColor: canvas(),
     frame: false,
     resizable: false,
     skipTaskbar: true,
@@ -1069,6 +1090,32 @@ async function portalRequest(
 }
 
 app.whenReady().then(() => {
+  // Appearance first: every window below is created with the right canvas.
+  const userDataDir = app.getPath('userData')
+  theme = createThemeController({
+    nativeTheme,
+    read: () => readThemeMode(userDataDir),
+    write: (mode) => writeThemeMode(userDataDir, mode),
+    onChange: publishTheme
+  })
+  const themeCtl = theme
+  /** Appearance IPC: only our own index-preload windows (manager, tray popovers). */
+  const themeSender = (event: Electron.IpcMainInvokeEvent): boolean =>
+    (!!managerWindow && !managerWindow.isDestroyed() && event.sender === managerWindow.webContents) ||
+    [...popoverWindows].some((w) => !w.isDestroyed() && w.webContents === event.sender)
+  ipcMain.handle(THEME_CHANNELS.get, (event) =>
+    asResult(async () => {
+      if (!themeSender(event)) throw { code: 'INVALID_THEME' } satisfies BridgeError
+      return themeCtl.state()
+    })
+  )
+  ipcMain.handle(THEME_CHANNELS.set, (event, raw: unknown) =>
+    asResult(async () => {
+      if (!themeSender(event)) throw { code: 'INVALID_THEME' } satisfies BridgeError
+      return themeCtl.set(raw)
+    })
+  )
+
   // Make a saved API key visible to any worker we spawn this session.
   loadApiKeyIntoEnv()
 

@@ -135,7 +135,7 @@ function RowMenu({
           els[e.key === 'ArrowDown' ? (i + 1) % els.length : (i - 1 + els.length) % els.length]?.focus()
         }
       }}
-      className="absolute right-2 top-full z-30 mt-1 w-52 rounded-[10px] border border-border-strong bg-raised p-1 shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+      className="absolute right-2 top-full z-30 mt-1 w-52 rounded-[10px] border border-border-strong bg-raised p-1 shadow-[var(--shadow-pop)]"
     >
       {items.map((it, i) =>
         it === 'sep' ? (

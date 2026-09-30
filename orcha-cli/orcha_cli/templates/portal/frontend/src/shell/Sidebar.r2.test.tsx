@@ -49,9 +49,11 @@ function stub(snap = snapshot()) {
 }
 const mount = () => render(<ToastProvider><SnapshotProvider><HashRouter><HomePage /></HashRouter></SnapshotProvider></ToastProvider>);
 const sidebar = () => document.getElementById("sidebar") as HTMLElement;
-const bg = (el: Element | null) => (el as HTMLElement | null)?.style.backgroundColor || "";
+// the `background` shorthand: the palette tone is var()-driven (theme tokens), so
+// the backgroundColor longhand reads "" (pending substitution) in jsdom and browsers
+const bg = (el: Element | null) => (el as HTMLElement | null)?.style.background || "";
 /** jsdom serialises hsl() as rgb(): normalise the expected colour the same way */
-const norm = (c: string) => { const d = document.createElement("div"); d.style.backgroundColor = c; return d.style.backgroundColor; };
+const norm = (c: string) => { const d = document.createElement("div"); d.style.background = c; return d.style.background; };
 
 beforeEach(() => { localStorage.clear(); _resetProjectsForTests(); document.documentElement.removeAttribute("data-sidebar"); window.location.hash = ""; stub(); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });

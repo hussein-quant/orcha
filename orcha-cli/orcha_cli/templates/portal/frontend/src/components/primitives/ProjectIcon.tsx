@@ -62,7 +62,7 @@ export const GLYPH_WORDS: Partial<Record<GlyphName, string>> = {
 export function glyphColor(slot: number | null | undefined): string | undefined {
   if (slot == null) return undefined;
   const n = AVATAR_HUES.length;
-  return `hsl(${AVATAR_HUES[((slot % n) + n) % n]} 70% 70%)`;
+  return `hsl(${AVATAR_HUES[((slot % n) + n) % n]} var(--v2-hue-glyph-s, 70%) var(--v2-hue-glyph-l, 70%))`; // tone per theme (v2-tokens.css)
 }
 
 /** Subscribe to the shared project-icon map (re-renders on any pick, local or from the server sync). */

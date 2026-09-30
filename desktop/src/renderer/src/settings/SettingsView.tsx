@@ -1,23 +1,25 @@
 /** Desktop Settings (⌘, / sidebar footer "Settings"): fills the inset content panel while
- *  open (main hides the portal view, like a terminal session). Sections — Agents and
- *  Notifications — in a Linear-style left section list.
+ *  open (main hides the portal view, like a terminal session). Sections — Agents, Appearance,
+ *  Notifications and Usage — in a Linear-style left section list.
  *
  *  Notifications has no settings of its own: desktop alerts follow the same per-person
  *  rules as every other channel (portal Settings › Notifications, mig 063). The section
  *  says so and opens those preferences in the running project's portal. */
 import { useEffect, useRef, useState } from 'react'
-import { BarChart3, Bell, Bot, Settings as SettingsIcon, X } from 'lucide-react'
+import { BarChart3, Bell, Bot, Settings as SettingsIcon, SunMoon, X } from 'lucide-react'
 import type { AgentId } from '../../../shared/agents'
 import AgentsSettings from './AgentsSettings'
+import AppearanceSettings from './AppearanceSettings'
 import type { UsageValue } from '../usage/useUsage'
 
 /** Portal section the desktop's Notifications entry opens (SettingsPage `#tab=notifications`). */
 export const NOTIFICATION_SETTINGS_PATH = '/settings#tab=notifications'
 
-type Section = 'agents' | 'notifications' | 'usage'
+type Section = 'agents' | 'appearance' | 'notifications' | 'usage'
 
 const SECTIONS: { key: Section; label: string; Icon: typeof Bot }[] = [
   { key: 'agents', label: 'Agents', Icon: Bot },
+  { key: 'appearance', label: 'Appearance', Icon: SunMoon },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
   { key: 'usage', label: 'Usage', Icon: BarChart3 }
 ]
@@ -43,6 +45,8 @@ export default function SettingsView({
   onOpenStats?: () => void
 }) {
   const [section, setSection] = useState<Section>(initialSection)
+  /** Settings › Appearance needs the theme bridge (absent on an older preload: hidden). */
+  const hasTheme = !!window.orchaDesktop?.theme
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     ref.current?.focus()
@@ -81,7 +85,7 @@ export default function SettingsView({
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Settings sections" className="w-[188px] shrink-0 border-r border-border p-2">
           <div className="px-2 pb-1 pt-1.5 text-[11.5px] font-medium text-text-3">Desktop</div>
-          {SECTIONS.filter((x) => x.key !== 'usage' || usage?.available).map(({ key, label, Icon }) => (
+          {SECTIONS.filter((x) => (x.key !== 'usage' || usage?.available) && (x.key !== 'appearance' || hasTheme)).map(({ key, label, Icon }) => (
             <button
               key={key}
               type="button"
@@ -106,6 +110,8 @@ export default function SettingsView({
                 </p>
                 <AgentsSettings onTestLaunch={onTestLaunch} />
               </>
+            ) : section === 'appearance' && hasTheme ? (
+              <AppearanceSettings />
             ) : section === 'usage' && usage ? (
               <section data-testid="settings-usage">
                 <h2 className="text-[24px] font-semibold tracking-[-0.01em] text-text">Usage</h2>
@@ -135,7 +141,7 @@ export default function SettingsView({
                             disabled={!usage.snapshot}
                             onClick={() => !on && void usage.update({ op: 'trayTitle', on: v })}
                             className={`h-[22px] rounded-[5px] px-2.5 text-[12.5px] font-medium leading-none transition-colors ${
-                              on ? 'bg-selected text-text shadow-[0_1px_2px_rgba(0,0,0,0.35)]' : 'text-text-3 hover:text-text-2'
+                              on ? 'bg-selected text-text shadow-[var(--shadow-seg)]' : 'text-text-3 hover:text-text-2'
                             }`}
                           >
                             {v ? 'On' : 'Off'}

@@ -123,13 +123,14 @@ describe("SettingsPage V2 sections (open Orcha, no extension sections)", () => {
     expect(window.location.hash).toBe("#tab=pairing");
   });
 
-  it("legacy #tab=appearance opens Interface (dark-only)", async () => {
+  it("legacy #tab=appearance opens Interface (Appearance + sidebar + keys)", async () => {
     setHash("#tab=appearance");
     renderPage();
     expect(await screen.findByRole("tab", { name: "Interface" })).toHaveAttribute("aria-selected", "true");
-    // dark-only is not a setting: no Appearance group (review r2), just sidebar + keys
+    // the Appearance group holds the System / Light / Dark picker
     expect(await screen.findByText("Keyboard shortcuts")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Appearance" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Theme" })).toBeInTheDocument();
   });
 
   it("arrow keys move between sections (roving focus) and select them", async () => {

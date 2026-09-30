@@ -6,8 +6,10 @@ import '@xterm/xterm/css/xterm.css'
 import { chunkWrite, type TermApi } from '../../../shared/terminal'
 import type { TermClient } from './termClient'
 import { terminalShouldSkip } from './commandModel'
+import type { ResolvedTheme } from '../../../shared/theme'
+import { currentResolvedTheme, useResolvedTheme } from '../theme/useResolvedTheme'
 
-/** V2 dark tokens (styles.css @theme) mapped onto the terminal palette. The background is the
+/** V2 dark tokens (styles.css @theme) mapped onto the terminal palette (Appearance → Dark). The background is the
  *  dock surface (--color-card) so the terminal reads as part of the raised panel. */
 export const TERMINAL_THEME: ITheme = {
   background: '#191a1d',
@@ -35,6 +37,47 @@ export const TERMINAL_THEME: ITheme = {
   brightMagenta: '#cbb8fa',
   brightCyan: '#74d6d9',
   brightWhite: '#eeeff2'
+}
+
+/** Light terminal (Settings › Appearance → Light): the terminal follows the app theme rather
+ *  than staying a dark island in a light panel. White background = the light --color-card, so
+ *  it still reads as part of the panel. ANSI hues are the light semantic tokens (AA as text on
+ *  white); "white"/"brightWhite" are mid greys because TUIs use them for dim/secondary text and
+ *  a literal white would vanish. xterm's minimumContrastRatio (terminalOptionsFor) is the
+ *  safety net for programs that hard-code 256-colour / truecolor foregrounds tuned for dark. */
+export const TERMINAL_THEME_LIGHT: ITheme = {
+  background: '#ffffff',
+  foreground: '#1c1d1f',
+  cursor: '#5561cc',
+  cursorAccent: '#ffffff',
+  selectionBackground: 'rgba(85, 97, 204, 0.20)',
+  selectionInactiveBackground: 'rgba(85, 97, 204, 0.12)',
+  scrollbarSliderBackground: 'rgba(16, 17, 19, 0.12)',
+  scrollbarSliderHoverBackground: 'rgba(16, 17, 19, 0.2)',
+  scrollbarSliderActiveBackground: 'rgba(16, 17, 19, 0.28)',
+  black: '#1c1d1f',
+  red: '#bf3535',
+  green: '#177a4b',
+  yellow: '#8a5a00',
+  blue: '#1b66b6',
+  magenta: '#8a3fb8',
+  cyan: '#0f7481',
+  white: '#6a6f78',
+  brightBlack: '#5f636c',
+  brightRed: '#cf4040',
+  brightGreen: '#187f4f',
+  brightYellow: '#955600',
+  brightBlue: '#2471c4',
+  brightMagenta: '#9a4dc9',
+  brightCyan: '#12808e',
+  brightWhite: '#8a8f98'
+}
+
+/** The xterm theme + contrast floor for the resolved app theme (pure, tested). */
+export function terminalOptionsFor(resolved: ResolvedTheme): { theme: ITheme; minimumContrastRatio: number } {
+  return resolved === 'light'
+    ? { theme: TERMINAL_THEME_LIGHT, minimumContrastRatio: 4.5 }
+    : { theme: TERMINAL_THEME, minimumContrastRatio: 1 }
 }
 
 /** Monospace only inside the terminal (D15). SF Mono / Menlo ship with macOS. */
@@ -68,7 +111,7 @@ export default function TerminalView({
     const el = hostRef.current
     if (!el) return
     const term = new Terminal({
-      theme: TERMINAL_THEME,
+      ...terminalOptionsFor(currentResolvedTheme()),
       fontFamily: TERMINAL_FONT,
       fontSize: 12.5,
       lineHeight: 1.25,
@@ -79,8 +122,7 @@ export default function TerminalView({
       macOptionIsMeta: true,
       macOptionClickForcesSelection: true,
       scrollback: 5000,
-      drawBoldTextInBrightColors: false,
-      minimumContrastRatio: 1
+      drawBoldTextInBrightColors: false
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
@@ -133,6 +175,16 @@ export default function TerminalView({
       fitRef.current = null
     }
   }, [ptyId, api, client])
+
+  // Appearance flips (a Settings change, or macOS under System) repaint the live terminal.
+  const resolved = useResolvedTheme()
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    const o = terminalOptionsFor(resolved)
+    term.options.theme = o.theme
+    term.options.minimumContrastRatio = o.minimumContrastRatio
+  }, [resolved])
 
   // A finished process leaves no live cursor behind (the exit bar says what happened).
   useEffect(() => {

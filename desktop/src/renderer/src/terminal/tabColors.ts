@@ -28,5 +28,5 @@ export function tabColorName(color: TabColor): string {
  *  is too dark for a 2px line). */
 export function tabColorCss(color: TabColor): string {
   if (color === 'grey') return 'var(--color-text-3)'
-  return `hsl(${AVATAR_HUES[SLOT[color]]} 62% 62%)`
+  return `hsl(${AVATAR_HUES[SLOT[color]]} var(--marker-sl, 62% 62%))`
 }

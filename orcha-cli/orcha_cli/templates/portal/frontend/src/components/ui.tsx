@@ -166,9 +166,10 @@ export function OrcaMark() {
   // intrinsic size: downstream stylesheets may not carry .brand .mark rules
   return (
     <svg viewBox="0 0 100 100" width={34} height={34} style={{ maxWidth: "100%", maxHeight: "100%" }} aria-label="Quorate">
-      <path fill="#9695F2" d="M72.39 5.29A50 50 0 0 1 99.02 40.13L82.72 50.98A32.74 32.74 0 0 0 60.07 18.85Z" />
-      <path fill="#F9F4EB" d="M99.84 46.01A50 50 0 0 1 14.4 85.11L26.92 73.22A32.74 32.74 0 0 0 81.73 58.06Z" />
-      <path fill="#F9F4EB" d="M10.86 81.11A50 50 0 0 1 67.2 3.05L54.06 17.51A32.74 32.74 0 0 0 23.45 69.15Z" />
+      {/* ink = the cream arcs on dark, near-black on light (--v2-logo-*, v2-tokens.css) */}
+      <path fill="#9695F2" style={{ fill: "var(--v2-logo-accent, #9695F2)" }} d="M72.39 5.29A50 50 0 0 1 99.02 40.13L82.72 50.98A32.74 32.74 0 0 0 60.07 18.85Z" />
+      <path fill="#F9F4EB" style={{ fill: "var(--v2-logo-ink, #F9F4EB)" }} d="M99.84 46.01A50 50 0 0 1 14.4 85.11L26.92 73.22A32.74 32.74 0 0 0 81.73 58.06Z" />
+      <path fill="#F9F4EB" style={{ fill: "var(--v2-logo-ink, #F9F4EB)" }} d="M10.86 81.11A50 50 0 0 1 67.2 3.05L54.06 17.51A32.74 32.74 0 0 0 23.45 69.15Z" />
     </svg>
   );
 }

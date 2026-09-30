@@ -54,8 +54,8 @@ body.v2-resizing { cursor: col-resize; user-select: none; }
 .v2-btn-ghost:active:not(:disabled) { background: var(--v2-selected); }
 
 .v2-btn-danger { background: var(--v2-btn-secondary-bg); color: var(--v2-danger); border-color: var(--v2-border); }
-.v2-btn-danger:hover:not(:disabled) { background: var(--v2-danger-soft); border-color: rgba(238, 112, 112, 0.32); }
-.v2-btn-danger:active:not(:disabled) { background: rgba(238, 112, 112, 0.22); }
+.v2-btn-danger:hover:not(:disabled) { background: var(--v2-danger-soft); border-color: var(--v2-danger-line); }
+.v2-btn-danger:active:not(:disabled) { background: var(--v2-danger-press); }
 
 .v2-btn-link {
   height: auto; min-height: 0; padding: 0; border: 0; background: none; color: var(--v2-accent);
@@ -287,7 +287,7 @@ body.v2-resizing { cursor: col-resize; user-select: none; }
 /* ---- dialog ------------------------------------------------------------------ */
 .v2-overlay {
   position: fixed; inset: 0; z-index: var(--v2-z-dialog); display: grid; place-items: center;
-  background: rgba(6, 7, 9, 0.62); padding: var(--v2-space-4);
+  background: var(--v2-scrim-strong); padding: var(--v2-space-4);
 }
 .v2-dialog {
   width: 100%; max-width: 520px; max-height: calc(100vh - 32px); overflow: auto;
@@ -400,7 +400,7 @@ body.v2-resizing { cursor: col-resize; user-select: none; }
 .md .md-num { display: inline-block; min-width: 1.4em; color: var(--v2-text-3); font-variant-numeric: tabular-nums; margin-right: 4px; }
 
 /* ---- legacy primitives re-skinned (until each page migrates) -------------------- */
-.overlay { background: rgba(6, 7, 9, 0.62) !important; backdrop-filter: none !important; }
+.overlay { background: var(--v2-scrim-strong) !important; backdrop-filter: none !important; }
 .modal { background: var(--v2-raised); border: 1px solid var(--v2-border-strong); border-radius: var(--v2-radius-panel); box-shadow: var(--v2-shadow-pop); }
 /* Legacy .btn family → the same Linear-style metrics as <Button> (D2) so
    unmigrated screens stop rendering oversized/solid-colour buttons:
@@ -425,7 +425,7 @@ body.v2-resizing { cursor: col-resize; user-select: none; }
 .btn.ghost:hover, .btn.subtle:hover { background: var(--v2-hover); color: var(--v2-text); border-color: var(--v2-border-strong); filter: none; }
 .btn.ghost svg, .btn.subtle svg { color: var(--v2-text-2); }
 .btn.danger, .btn.stop { background: var(--v2-btn-secondary-bg); color: var(--v2-danger); border-color: var(--v2-border); }
-.btn.danger:hover, .btn.stop:hover { background: var(--v2-danger-soft); color: var(--v2-danger); border-color: rgba(238, 112, 112, 0.32); filter: none; }
+.btn.danger:hover, .btn.stop:hover { background: var(--v2-danger-soft); color: var(--v2-danger); border-color: var(--v2-danger-line); filter: none; }
 .btn.stop:disabled, .btn.stop:disabled:hover { background: var(--v2-btn-secondary-bg); color: var(--v2-text-3); border-color: var(--v2-border); }
 /* composer Send reads secondary until there is something to send, so it never
    competes with the page's one primary action (MessageComposer adds .is-idle) */
@@ -485,7 +485,7 @@ body.v2-resizing { cursor: col-resize; user-select: none; }
 .av.v2-av {
   position: relative; flex: none; display: inline-grid; place-items: center;
   width: 24px; height: 24px; border-radius: 50%; box-shadow: none; border: 0;
-  color: #EEEFF2; font-family: var(--v2-font-sans); font-weight: 600; font-size: 11px;
+  color: var(--v2-avatar-fg); font-family: var(--v2-font-sans); font-weight: 600; font-size: 11px;
   letter-spacing: 0; line-height: 1; vertical-align: middle; user-select: none;
 }
 .av.v2-av.human, .dlink .av.v2-av, .dlink .av.v2-av.human { border-radius: 50%; box-shadow: none; }

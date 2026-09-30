@@ -13,7 +13,7 @@
  * update) · persistent Paused indicator · "Execution controls" popover holding
  * the TWO independent controls — Notifier (wakes) and Autonomy (level), each
  * with its existing confirm copy (GH #148/#149) · notifications bell.
- * V2 is dark-only: no theme toggle.
+ * The theme toggle lives in Settings › Interface and the ⌘K palette.
  */
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -50,20 +50,12 @@ import { payloadTitle as payloadSummary } from "../components/primitives/Payload
 import { HealthChip } from "../components/primitives/HealthChip";
 import { projectPauseLine, useContainerBudgets } from "../pages/agents/budget/budgetModel";
 
-/* ---- theme: V2 is DARK-ONLY ----------------------------------------------
- * The legacy preference (orcha:theme — "auto" | "dark" | "light") is still
- * READ so rollback builds and the /api/prefs bag keep a coherent value, but it
- * is never applied: <html data-theme> is always "dark" and any legacy skin
- * attribute is dropped. Nothing is deleted from storage. index.html applies
- * the same before first paint; main.tsx calls initTheme() before render. */
-export function legacyThemePreference(): string {
-  try { return localStorage.getItem("orcha:theme") || "auto"; } catch { return "auto"; }
-}
-export function initTheme() {
-  const d = document.documentElement;
-  d.setAttribute("data-theme", "dark");
-  d.removeAttribute("data-skin");
-}
+/* ---- theme ----------------------------------------------------------------
+ * System / Light / Dark lives in ./theme (Settings › Interface › Appearance,
+ * the ⌘K palette). Re-exported here for existing importers. */
+export { initTheme } from "./theme";
+/** The stored preference ("auto" | "light" | "dark"), default applied. */
+export { readThemePref as legacyThemePreference } from "./theme";
 
 /* ---- GH #148/#149: two orthogonal topbar controls ------------------------
  * NOT one fused 4-rung slider. NOTIFIER is the LIVE binary kill-switch

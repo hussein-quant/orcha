@@ -25,6 +25,8 @@ export interface SearchResult {
   hardHref?: string;
   /** imperative action (no URL) */
   run?: () => void;
+  /** close the palette after `run` (actions that do not open their own UI) */
+  closeOnRun?: boolean;
   icon?: string;
   /** project rows: name for a round initial avatar (distinct from section icons) */
   avatar?: string;

@@ -300,10 +300,10 @@ describe("pairing card", () => {
 });
 
 /* ====================================================================== *
- *  FEATURE 3 — Interface (V2 dark-only; the skin picker is retired)      *
+ *  FEATURE 3 — Interface (theme picker; the skin picker is retired)      *
  * ====================================================================== */
-describe("interface section (dark-only)", () => {
-  it("#tab=appearance resolves to Interface: no skin tiles, no theme switch, data-skin untouched", async () => {
+describe("interface section (skins retired)", () => {
+  it("#tab=appearance resolves to Interface: no skin tiles, data-skin untouched", async () => {
     localStorage.setItem("orcha:skin", "swiss");
     renderPage("appearance");
     expect(await screen.findByText(/Swiss design\) is kept on file/)).toBeInTheDocument();

@@ -3,6 +3,7 @@ import type { EmbedEvent, HostToPortal } from '../shared/embed'
 import type { TERM_CHANNELS, TermCommand, TermEvent, TermInfo, TermRestoreResult } from '../shared/terminal'
 import type { AGENT_CHANNELS, AgentsSnapshot } from '../shared/agents'
 import type { USAGE_CHANNELS, UsageSnapshot } from '../shared/usage'
+import type { THEME_CHANNELS, ThemeState } from '../shared/theme'
 
 /** Terminal channel names, inlined: this sandboxed preload imports shared/* for TYPES only
  *  (no shared runtime chunk). `satisfies` keeps them identical to shared/terminal.ts. */
@@ -37,6 +38,12 @@ const USAGE = {
   changed: 'orcha:usage:changed',
   openStats: 'orcha:usage:openStats'
 } as const satisfies typeof USAGE_CHANNELS
+/** Appearance channels, inlined for the same reason (identical to shared/theme.ts). */
+const THEME = {
+  get: 'orcha:theme:get',
+  set: 'orcha:theme:set',
+  changed: 'orcha:theme:changed'
+} as const satisfies typeof THEME_CHANNELS
 import type {
   AnalyzeProjectResult,
   AttentionItem,
@@ -183,6 +190,16 @@ const api: OrchaDesktopApi = {
       const listener = (_e: IpcRendererEvent, target: 'stats' | 'accounts'): void => cb(target === 'accounts' ? 'accounts' : 'stats')
       ipcRenderer.on(USAGE.openStats, listener)
       return () => ipcRenderer.removeListener(USAGE.openStats, listener)
+    }
+  },
+  // Settings › Appearance: main validates the mode and drives nativeTheme.themeSource.
+  theme: {
+    get: () => invoke<ThemeState>(THEME.get),
+    set: (mode) => invoke<ThemeState>(THEME.set, mode),
+    onChanged: (cb) => {
+      const listener = (_e: IpcRendererEvent, s: ThemeState): void => cb(s)
+      ipcRenderer.on(THEME.changed, listener)
+      return () => ipcRenderer.removeListener(THEME.changed, listener)
     }
   },
   embedSend: (msg: HostToPortal) => invoke<boolean>('orcha:embedSend', msg),

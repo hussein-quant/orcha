@@ -65,11 +65,11 @@ export const GLYPHS: Record<GlyphName, LucideIcon> = {
 }
 
 /** A glyph colour from the shared avatar palette (same hues as the avatars, D13), tuned
- *  for a stroke on the dark canvas. */
+ *  per theme for a stroke on the canvas (styles.css --glyph-sl). */
 export function glyphColor(slot: number | null): string | undefined {
   if (slot === null) return undefined
   const h = AVATAR_HUES[((slot % AVATAR_HUES.length) + AVATAR_HUES.length) % AVATAR_HUES.length]
-  return `hsl(${h} 70% 70%)`
+  return `hsl(${h} var(--glyph-sl, 70% 70%))`
 }
 
 const BOX = { 16: 'h-4 w-4', 20: 'h-5 w-5', 24: 'h-6 w-6' } as const

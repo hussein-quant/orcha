@@ -16,7 +16,7 @@ export default function PortalSnapshot({ image }: { image: ImageBitmap }) {
   return (
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-20 bg-card">
       <canvas ref={ref} className="h-full w-full" />
-      <div className="absolute inset-0 bg-black/25" />
+      <div className="absolute inset-0 bg-[var(--scrim-soft)]" />
     </div>
   )
 }

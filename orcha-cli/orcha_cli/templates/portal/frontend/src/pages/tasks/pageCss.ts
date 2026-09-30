@@ -66,7 +66,7 @@ export const tasksPageCss = String.raw`
   .msg-atts .att-file svg { width: 15px; height: 15px; color: var(--muted); flex: 0 0 auto; }
   .msg-atts .att-file .sz { color: var(--faint); font-size: 10.5px; }
   /* lightbox */
-  .att-lightbox { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.82); display: flex;
+  .att-lightbox { position: fixed; inset: 0; z-index: 2000; background: var(--v2-lightbox-bg); display: flex;
     align-items: center; justify-content: center; padding: 32px; cursor: zoom-out; }
-  .att-lightbox img { max-width: 95vw; max-height: 92vh; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+  .att-lightbox img { max-width: 95vw; max-height: 92vh; border-radius: 10px; box-shadow: var(--v2-shadow-lightbox); }
 `;

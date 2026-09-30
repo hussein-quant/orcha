@@ -10,6 +10,28 @@ import { HAS_NEEDS_PAGE, NEEDS_HREF } from "../optionalPages";
 import { projectSwitchHref } from "../../lib/scope";
 import { projectModeState, sectionsForMode } from "../../lib/projectMode";
 import { statusMeta } from "../../lib/status";
+import { currentTheme, effectivePref, hostThemeMode, setThemePref } from "../theme";
+
+/** The ⌘K theme rows (pure over the current theme state; tested). Switching
+ *  sets an explicit Light/Dark choice; "Use system theme" is offered unless it
+ *  is already the choice. Inside the desktop app the host owns the theme. */
+export function themeActions(): SearchResult[] {
+  const managed = hostThemeMode();
+  const reason = managed === "managed"
+    ? "The Quorate app sets the theme — change it in the app's Settings › Appearance"
+    : managed === "dark" ? "This version of the Quorate app is dark only" : undefined;
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  const rows: SearchResult[] = [{
+    id: "theme-toggle", group: "Actions", label: `Switch to ${next} theme`,
+    detail: "Appearance · theme", icon: next === "light" ? "sun" : "moon",
+    run: () => { setThemePref(next); }, closeOnRun: true, disabledReason: reason,
+  }];
+  if (effectivePref() !== "auto") {
+    rows.push({ id: "theme-system", group: "Actions", label: "Use system theme", detail: "Appearance · follow your device's light or dark setting",
+      icon: "settings", run: () => { setThemePref("auto"); }, closeOnRun: true, disabledReason: reason });
+  }
+  return rows;
+}
 
 function byScore<T>(items: T[], score: (x: T) => number, limit: number): T[] {
   return items
@@ -76,6 +98,7 @@ const actions: SearchProvider = {
       { id: "new-task", group: "Actions", label: "New task", detail: "Create a task in " + (ctx.projectName || "this project"), ...(ctx.openCompose ? { run: ctx.openCompose } : { href: COMPOSE_HREF }), icon: "plus", shortcut: CREATE_TASK_KEY, disabledReason: noHuman },
       { id: "needs", group: "Actions", label: "Go to Needs you", detail: HAS_NEEDS_PAGE ? "Decisions waiting on you" : "Overview action queue", href: NEEDS_HREF, icon: NEEDS_ICON },
       { id: "exec", group: "Actions", label: "Execution controls", detail: "Wakes on/off and autonomy level", run: ctx.openExecutionControls, icon: "execution", disabledReason: ctx.snap?.container ? undefined : "No project loaded" },
+      ...themeActions(),
       ...SETTINGS_TABS.map((t) => ({ id: "settings-" + t.key, group: "Actions" as const, label: "Settings: " + t.label, href: "/settings#tab=" + t.key, icon: "settings" })),
     ];
     if (!q.trim()) return all.slice(0, 3);

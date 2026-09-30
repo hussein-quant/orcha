@@ -22,7 +22,7 @@
     U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
-/* Orcha V2 — dark-only tokens. Values mirror docs/orcha-v2-design-system.md §1 (the
+/* Orcha V2 — tokens (dark values; the light set is the prefers-color-scheme block below). Values mirror docs/orcha-v2-design-system.md §1 (the
  * portal's --v2-* custom properties); the desktop consumes EQUIVALENT values through its own
  * Tailwind theme (runtimes are not merged — §1.8 legacy mapping):
  *   --color-bg → --v2-canvas, --color-card → --v2-surface, --color-text → --v2-text,
@@ -53,6 +53,68 @@
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* Non-colour-token surfaces that differ per theme (shadows, scrims, identity-palette
+ * lightness). Dark values here; the light block below overrides them. Consumed as
+ * arbitrary values, e.g. shadow-[var(--shadow-pop)] / bg-[var(--scrim)]. */
+:root {
+  --scheme: dark;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-dialog: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --shadow-menu: 0 24px 64px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-seg: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --scrim-soft: rgba(0, 0, 0, 0.25);
+  /* D13 identity palette (shared/palette.ts, ProjectIcon, tabColors): "S% L%" pairs. */
+  --avatar-bg-sl: 34% 28%;
+  --avatar-fg-sl: 72% 86%;
+  --glyph-sl: 70% 70%;
+  --marker-sl: 62% 62%;
+}
+
+/* Settings › Appearance → Light (or System while macOS is light). Main drives
+ * nativeTheme.themeSource, so this media query is the ONE switch for the manager window and
+ * the tray popover alike — no attribute, no JS. Warm-neutral Linear light; every text token
+ * is ≥ 4.5:1 on bg, card and hover (text-3 5.2:1 on hover; accent 4.6:1). Surfaces match the
+ * portal's light set (window #F4F4F5, panel/surface #FFFFFF) so chrome and the embedded portal
+ * read as one app; the semantic hues are a step deeper than the portal's so they stay AA as
+ * TEXT on the #F4F4F5 window tone the desktop chrome sits on. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --color-bg: #f4f4f5;
+    --color-sidebar: #f4f4f5;
+    --color-card: #ffffff;
+    --color-raised: #ffffff;
+    --color-hover: #efeff1;
+    --color-selected: #eaeaed;
+    --color-text: #1c1d1f;
+    --color-text-2: #4e525a;
+    --color-text-3: #5f636c;
+    --color-border: #e6e6e9;
+    --color-border-strong: #d5d6da;
+    --color-accent: #5561cc;
+    --color-accent-hover: #4955c2;
+    --color-ok: #177a4b;
+    --color-warning: #955600;
+    --color-danger: #bf3535;
+    --color-info: #1b66b6;
+
+    --scheme: light;
+    --shadow-pop: 0 8px 24px rgba(16, 17, 19, 0.1), 0 0 0 1px rgba(16, 17, 19, 0.02);
+    --shadow-dialog: 0 16px 48px rgba(16, 17, 19, 0.14);
+    --shadow-menu: 0 24px 64px rgba(16, 17, 19, 0.14), 0 2px 8px rgba(16, 17, 19, 0.06);
+    --shadow-toast: 0 8px 24px rgba(16, 17, 19, 0.1);
+    --shadow-seg: 0 1px 2px rgba(16, 17, 19, 0.12);
+    --scrim: rgba(16, 17, 19, 0.28);
+    --scrim-soft: rgba(16, 17, 19, 0.08);
+    /* pale fill + deep initial (≥ 4.5:1 for every hue) */
+    --avatar-bg-sl: 62% 90%;
+    --avatar-fg-sl: 55% 30%;
+    --glyph-sl: 55% 42%;
+    --marker-sl: 60% 50%;
+  }
+}
+
 html,
 body,
 #root {
@@ -64,11 +126,12 @@ body,
   overflow: hidden;
 }
 
-/* Dark before first paint: the html background is set here AND by BrowserWindow's
- * backgroundColor (main), so neither the manager nor the tray ever flashes white. */
+/* Canvas before first paint: the html background is set here AND by BrowserWindow's
+ * backgroundColor (main, per resolved theme), so neither the manager nor the tray ever
+ * flashes the wrong tone. color-scheme flips to light in the block above. */
 html {
   background: var(--color-bg);
-  color-scheme: dark;
+  color-scheme: var(--scheme);
 }
 
 body {
@@ -77,7 +140,7 @@ body {
   font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.5;
-  color-scheme: dark;
+  color-scheme: var(--scheme);
   /* Linear-like Inter alternates (D6): single-storey-ish "a" off, open digits, etc. */
   font-feature-settings: 'cv01', 'ss03';
   font-optical-sizing: auto;
@@ -513,7 +576,7 @@ body {
 .onb-scrim {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--scrim);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -80,8 +80,8 @@
   background:
     linear-gradient(to right, var(--v2-canvas) 30%, transparent) left center / 40px 100%,
     linear-gradient(to left, var(--v2-canvas) 30%, transparent) right center / 40px 100%,
-    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, #000 55%, transparent), transparent) left center / 16px 100%,
-    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, #000 55%, transparent), transparent) right center / 16px 100%;
+    radial-gradient(farthest-side at 0 50%, var(--v2-scroll-shadow), transparent) left center / 16px 100%,
+    radial-gradient(farthest-side at 100% 50%, var(--v2-scroll-shadow), transparent) right center / 16px 100%;
   background-repeat: no-repeat;
   background-attachment: local, local, scroll, scroll;
 }

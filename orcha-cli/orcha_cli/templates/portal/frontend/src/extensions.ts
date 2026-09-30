@@ -16,10 +16,10 @@ import { CodeSpacePage } from "./cloud/codespace/CodeSpacePage";
 import { codeOnly } from "./cloud/shared/CodeOnlyGate";
 import { DevicePage } from "./cloud/device/DevicePage";
 import { MembersPage, MembersSection } from "./cloud/members/MembersPage";
-// Importing the appearance module also runs its module-level boot hook, which
-// now ONLY runs the /api/prefs sync. V2 is dark-only: bootAppearance() never
-// sets data-skin/data-theme; the stored theme/skin values are kept (not
-// applied, not deleted) for rollback and disclosed in Settings › Interface.
+// Importing the appearance module also runs its module-level boot hook: the
+// once-per-load /api/prefs sync. The theme (System / Light / Dark) is applied by
+// shell/theme.ts, which re-applies when the server bag lands; the retired skin
+// is kept (not applied, not deleted) and disclosed in Settings › Interface.
 import { AppearanceSection } from "./cloud/settings/AppearanceSection";
 import { GitHubAccessSection } from "./cloud/settings/GitHubAccessSection";
 import { ProviderKeysSection } from "./cloud/settings/ProviderKeysSection";

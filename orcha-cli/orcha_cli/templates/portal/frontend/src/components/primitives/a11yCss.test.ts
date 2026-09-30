@@ -88,14 +88,18 @@ describe("finding 27: letter avatars are AA against the avatar text for every hu
     expect(avatarsSrc).toMatch(/paletteColor|avatarColors/);
     expect(avatarsSrc).not.toMatch(/hsl\(\$\{h\}/);
   });
-  for (const [name, src] of [["primitives/Avatar.tsx", avatarSrc]] as const) {
-    it(name, () => {
-      const m = src.match(/hsl\(\$\{h\}\s+(\d+)%\s+(\d+)%\)/);
-      expect(m).toBeTruthy();
-      const [s, l] = [Number(m![1]), Number(m![2])];
-      const text = token("v2-text");
+  it("primitives/Avatar.tsx: fill + initial come from the theme tone tokens", () => {
+    expect(avatarSrc).toMatch(/hsl\(\$\{h\} var\(--v2-av-fill-s, 34%\) var\(--v2-av-fill-l, 28%\)\)/);
+    expect(avatarSrc).toMatch(/hsl\(\$\{h\} var\(--v2-av-ink-s, 72%\) var\(--v2-av-ink-l, 86%\)\)/);
+  });
+  // every hue, both themes: the initial is AA on its own fill
+  const lightBlock = tokens.slice(tokens.indexOf(':root[data-theme="light"]'));
+  const pct = (css: string, name: string) => Number(css.match(new RegExp(`--${name}:\\s*(\\d+)%`))![1]);
+  for (const [theme, css] of [["dark", tokens], ["light", lightBlock]] as const) {
+    it(`initials are >= 4.5:1 on their fill for every hue (${theme})`, () => {
+      const [fs, fl, is, il] = ["v2-av-fill-s", "v2-av-fill-l", "v2-av-ink-s", "v2-av-ink-l"].map((n) => pct(css, n));
       let worst = Infinity;
-      for (let h = 0; h < 360; h++) worst = Math.min(worst, contrast(hsl(h, s, l), text));
+      for (let h = 0; h < 360; h++) worst = Math.min(worst, contrast(hsl(h, fs, fl), hsl(h, is, il)));
       expect(worst).toBeGreaterThanOrEqual(4.5);
     });
   }

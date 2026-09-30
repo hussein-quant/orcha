@@ -80,7 +80,7 @@ export function Segmented<T extends string>({
             onClick={() => !on && onChange(o.value)}
             className={cn(
               'h-[22px] rounded-[5px] px-2.5 text-[12.5px] font-medium leading-none transition-colors',
-              on ? 'bg-selected text-text shadow-[0_1px_2px_rgba(0,0,0,0.35)]' : 'text-text-3 hover:text-text-2'
+              on ? 'bg-selected text-text shadow-[var(--shadow-seg)]' : 'text-text-3 hover:text-text-2'
             )}
           >
             {o.label}
@@ -114,7 +114,7 @@ function InfoTip({ text, label }: { text: string; label: string }) {
         <span
           role="tooltip"
           id={id}
-          className="absolute left-1/2 top-6 z-30 w-[320px] -translate-x-1/2 rounded-lg border border-border-strong bg-raised px-3 py-2 text-[12px] font-normal leading-[18px] text-text-2 shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+          className="absolute left-1/2 top-6 z-30 w-[320px] -translate-x-1/2 rounded-lg border border-border-strong bg-raised px-3 py-2 text-[12px] font-normal leading-[18px] text-text-2 shadow-[var(--shadow-pop)]"
         >
           {text}
         </span>

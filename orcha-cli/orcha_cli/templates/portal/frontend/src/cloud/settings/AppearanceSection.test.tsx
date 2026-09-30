@@ -1,17 +1,17 @@
 /**
- * AppearanceSection (legacy settings key `appearance`) — Orcha V2 is
- * dark-only (parity P-12, intentional change):
- *  - the section renders the Interface content: no theme radios, no skin tiles;
- *  - bootAppearance() still runs the once-per-load /api/prefs sync but never
- *    applies data-skin / data-theme;
- *  - stored preferences (localStorage + server bag) are kept, never deleted,
- *    and are disclosed as "kept on file" when they differ from the V2 look.
+ * AppearanceSection (legacy settings key `appearance`) — renders Settings ›
+ * Interface, whose Appearance group is the System / Light / Dark picker:
+ *  - bootAppearance() runs the once-per-load /api/prefs sync; a server theme
+ *    WINS and is applied (shell/theme.ts listens for the prefs-applied event);
+ *  - the retired skin is never applied: data-skin stays off, the stored value
+ *    is kept (never deleted) and disclosed as "kept on file".
  */
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as prefs from "../projects/prefs";
 import { AppearanceSection, bootAppearance } from "./AppearanceSection";
 import { legacyNote } from "../../pages/settings/InterfaceSection";
+import { _resetThemeForTests, initTheme } from "../../shell/theme";
 
 interface Call { url: string; method: string }
 
@@ -24,60 +24,61 @@ function stubFetch(serverPrefs: Record<string, string> | null): Call[] {
   return calls;
 }
 
-describe("AppearanceSection — dark-only Interface (V2)", () => {
+describe("AppearanceSection — Interface with the Appearance picker", () => {
   beforeEach(() => {
     localStorage.clear();
     prefs._resetForTests();
+    _resetThemeForTests();
     document.documentElement.removeAttribute("data-skin");
     document.documentElement.setAttribute("data-theme", "dark");
   });
-  afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); _resetThemeForTests(); });
 
-  it("renders no theme or skin pickers and no Appearance non-setting group", () => {
+  it("renders the Theme radiogroup (System / Light / Dark) and no skin picker", () => {
     stubFetch(null);
     render(<AppearanceSection />);
-    expect(screen.queryByText(/Orcha uses one dark appearance everywhere/)).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Appearance" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    const group = screen.getByRole("radiogroup", { name: "Theme" });
+    expect(Array.from(group.querySelectorAll('[role="radio"]')).map((r) => r.textContent)).toEqual(["System", "Light", "Dark"]);
+    expect(screen.getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true"); // default
     expect(document.querySelector("#legacyAppearance")).toBeNull(); // nothing stored → no note
-    expect(screen.queryByRole("radiogroup", { name: "Theme" })).toBeNull();
     expect(document.querySelector("#skinGrid")).toBeNull();
     expect(document.querySelector(".skin-tile")).toBeNull();
     expect(document.querySelector('.set-keys[aria-label="Keyboard shortcuts"]')).not.toBeNull();
-    // no decorative swatches that read as unchecked checkboxes
-    expect(document.querySelector(".set-swatch")).toBeNull();
-    // dark-only is not a setting: no fake "Theme" row with a value
-    expect(screen.queryByText("Dark (the only theme)")).toBeNull();
   });
 
-  it("bootAppearance syncs /api/prefs but never applies a stored skin or theme", async () => {
+  it("bootAppearance syncs /api/prefs: the server theme wins and applies; the skin never does", async () => {
     localStorage.setItem("orcha:skin", "gold");
-    localStorage.setItem("orcha:theme", "light");
+    localStorage.setItem("orcha:theme", "dark");
+    initTheme();
     const calls = stubFetch({ theme: "light", skin: "swiss" });
     bootAppearance();
-    await prefs.sync();
+    await act(async () => { await prefs.sync(); });
     expect(calls.some((c) => c.url === "/api/prefs" && c.method === "GET")).toBe(true);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
     expect(document.documentElement.hasAttribute("data-skin")).toBe(false);
-    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     // stored values are kept (server wins on sync), not deleted
     expect(localStorage.getItem("orcha:skin")).toBe("swiss");
     expect(localStorage.getItem("orcha:theme")).toBe("light");
   });
 
-  it("discloses a stored non-default choice as kept on file", () => {
+  it("discloses a stored retired skin as kept on file (the theme is live, so not disclosed)", () => {
     stubFetch(null);
     localStorage.setItem("orcha:theme", "light");
     localStorage.setItem("orcha:skin", "gold");
     render(<AppearanceSection />);
-    expect(screen.getByText(/light theme, Gold design\) is kept on file but no longer changes the look/)).toBeInTheDocument();
+    expect(screen.getByText(/\(Gold design\) is kept on file but no longer changes the look/)).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Light" })).toHaveAttribute("aria-checked", "true");
     // reading it did not mutate storage
     expect(localStorage.getItem("orcha:theme")).toBe("light");
     expect(localStorage.getItem("orcha:skin")).toBe("gold");
   });
 
-  it("legacyNote: dark + classic (or nothing) needs no disclosure", () => {
+  it("legacyNote: only a non-classic skin needs disclosure", () => {
     expect(legacyNote({ theme: "dark", skin: null })).toBeNull();
     expect(legacyNote({ theme: "dark", skin: "classic" })).toBeNull();
-    expect(legacyNote({ theme: "auto", skin: null })).toMatch(/auto theme/);
+    expect(legacyNote({ theme: "auto", skin: null })).toBeNull();
+    expect(legacyNote({ theme: "light", skin: null })).toBeNull();
     expect(legacyNote({ theme: "dark", skin: "swiss" })).toMatch(/Swiss design/);
   });
 });

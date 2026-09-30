@@ -385,3 +385,50 @@ select.sc-inp:hover, .uc-sel select:hover:not(:disabled) { border-color: var(--v
 @media (max-width: 600px) and (pointer: coarse) { .mem-role-sel.is-compact { height: var(--v2-control-h-sm); } }
 .dev-revoke.v2-btn { color: var(--v2-text-2); }
 .dev-revoke.v2-btn:hover:not(:disabled) { color: var(--v2-danger); background: var(--v2-danger-soft); }
+
+/* ---- Appearance: System / Light / Dark preview tiles (InterfaceSection ThemePicker) ----
+   Each thumbnail paints ITS theme regardless of the live one, so the preview
+   palettes are fixed custom properties here (mirroring --v2-window / panel /
+   border / text / accent of each theme block in v2-tokens.css). */
+.set-theme-wrap { display: flex; flex-direction: column; gap: var(--v2-space-2); padding-top: var(--v2-space-1); }
+.set-theme { display: flex; flex-wrap: wrap; gap: var(--v2-space-3); }
+.set-theme-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 0; margin: 0;
+  background: none; border: 0; color: var(--v2-text-2); font: inherit; font-size: var(--v2-fs-body); cursor: pointer;
+  border-radius: var(--v2-radius-card);
+}
+.set-theme-opt:hover:not(:disabled) { color: var(--v2-text); }
+.set-theme-opt[aria-checked="true"] { color: var(--v2-text); font-weight: var(--v2-fw-medium); }
+.set-theme-opt:disabled { cursor: not-allowed; opacity: .6; }
+.set-theme-opt:focus-visible { box-shadow: none; }
+.set-theme-opt:focus-visible .set-theme-pv, .set-theme-opt:focus-visible .set-theme-split { box-shadow: var(--v2-focus-ring); }
+.set-theme-l { padding-left: 2px; }
+.set-theme-pv[data-pv="light"] { --pv-win: #F4F4F5; --pv-panel: #FFFFFF; --pv-line: #E4E4E7; --pv-ink: #C9CACF; --pv-ink-2: #1C1D1F; --pv-acc: #5E6AD2; }
+.set-theme-pv[data-pv="dark"]  { --pv-win: #0E0F10; --pv-panel: #151618; --pv-line: #232427; --pv-ink: #34363B; --pv-ink-2: #EEEFF1; --pv-acc: #8D93F7; }
+.set-theme-pv, .set-theme-split {
+  position: relative; display: flex; width: 112px; height: 70px; box-sizing: border-box; overflow: hidden;
+  border-radius: var(--v2-radius-card); border: 1px solid var(--v2-border-strong);
+  transition: border-color var(--v2-dur-fast) var(--v2-ease), box-shadow var(--v2-dur-fast) var(--v2-ease);
+}
+.set-theme-pv { background: var(--pv-win); gap: 4px; padding: 6px 0 0 6px; }
+.set-theme-opt:hover:not(:disabled) .set-theme-pv, .set-theme-opt:hover:not(:disabled) .set-theme-split { border-color: var(--v2-text-3); }
+.set-theme-opt[aria-checked="true"] > .set-theme-pv,
+.set-theme-opt[aria-checked="true"] > .set-theme-split { border-color: var(--v2-accent); box-shadow: 0 0 0 1px var(--v2-accent); }
+.set-theme-pv .pv-side { display: flex; flex-direction: column; gap: 4px; width: 22px; padding-top: 2px; }
+.set-theme-pv .pv-side i { display: block; height: 3px; border-radius: 2px; background: var(--pv-ink); }
+.set-theme-pv .pv-side i:first-child { width: 14px; background: var(--pv-acc); }
+.set-theme-pv .pv-panel {
+  flex: 1; display: flex; flex-direction: column; gap: 5px; padding: 7px 8px;
+  background: var(--pv-panel); border: 1px solid var(--pv-line); border-right: 0; border-bottom: 0; border-radius: 5px 0 0 0;
+}
+.set-theme-pv .pv-panel i { display: block; height: 3px; border-radius: 2px; background: var(--pv-ink); }
+.set-theme-pv .pv-panel i.pv-title { width: 46%; height: 4px; background: var(--pv-ink-2); opacity: .85; }
+.set-theme-pv .pv-panel i.pv-short { width: 55%; }
+.set-theme-pv .pv-panel b { display: block; margin-top: auto; width: 22px; height: 7px; border-radius: 3px; background: var(--pv-acc); }
+/* System = light and dark split on the diagonal */
+.set-theme-split > .set-theme-pv { position: absolute; inset: 0; width: auto; height: auto; border: 0; border-radius: 0; }
+.set-theme-split > .set-theme-pv[data-pv="dark"] { clip-path: polygon(62% 0, 100% 0, 100% 100%, 38% 100%); }
+@media (max-width: 720px) {
+  .set-theme { gap: var(--v2-space-2); }
+  .set-theme-pv, .set-theme-split { width: 96px; height: 62px; }
+}

@@ -48,7 +48,7 @@ export default function ConfirmStopDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)]"
       onClick={busy ? undefined : onCancel}
     >
       <div
@@ -56,7 +56,7 @@ export default function ConfirmStopDialog({
         aria-modal="true"
         aria-labelledby="stop-stack-title"
         aria-describedby="stop-stack-body"
-        className="mx-4 w-full max-w-[440px] rounded-[10px] border border-border-strong bg-raised p-5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        className="mx-4 w-full max-w-[440px] rounded-[10px] border border-border-strong bg-raised p-5 shadow-[var(--shadow-dialog)]"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="stop-stack-title" className="text-[15px] font-semibold text-text">

@@ -1859,7 +1859,7 @@ export function buildSettingsGroups(cid: string | null, ext = extensions): Setti
   });
 
   const app = byKey("appearance");
-  groups.push({ key: "interface", title: "Interface", sub: "Sidebar and keyboard.", render: () => (app ? el(app) : <InterfaceSection />) });
+  groups.push({ key: "interface", title: "Interface", sub: "Theme, sidebar and keyboard.", render: () => (app ? el(app) : <InterfaceSection />) });
 
   // any other downstream section keeps its own place, after the V2 groups
   sections.filter((s) => !KNOWN_EXT.has(s.key)).forEach((s) => {

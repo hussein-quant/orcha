@@ -1,10 +1,15 @@
 /* ============================================================================
-   Orcha V2 — design tokens (DARK ONLY). Source of truth for values:
-   docs/orcha-v2-design-system.md §1. Imported AFTER the legacy layers so the
-   legacy custom properties (--bg, --surface, --accent, …) are re-pointed at
-   the V2 palette and unmigrated class names render in V2 colours.
-   [data-theme] / [data-skin] attributes are ignored: the selectors below win
-   over the legacy light/auto/skin blocks by specificity AND order.
+   Orcha V2 — design tokens: DARK (default) + LIGHT. Source of truth for
+   values: docs/orcha-v2-design-system.md §1. Imported AFTER the legacy layers
+   so the legacy custom properties (--bg, --surface, --accent, …) are
+   re-pointed at the V2 palette and unmigrated class names render in V2
+   colours. <html data-theme> holds the RESOLVED theme (src/shell/theme.ts):
+   the base block below is dark; the [data-theme="light"] block after it
+   re-declares every colour token. Both win over the legacy light/auto/skin
+   blocks by specificity AND order. [data-skin] stays retired.
+
+   COLOUR RULE: v2 CSS never hard-codes a colour outside these token blocks —
+   add a token (in BOTH blocks) instead. themeTokens.test.ts enforces it.
 
    "Linear pop" retune (D5/D6/D8): the window + sidebar sit on the darkest
    tone (--v2-window); page content lives in an inset raised PANEL
@@ -107,6 +112,9 @@
   --v2-info-soft: rgba(78, 167, 252, 0.14);
   --v2-neutral: #8A8F98;
   --v2-neutral-soft: rgba(138, 143, 152, 0.14);
+  --v2-danger-line: rgba(238, 112, 112, 0.32);  /* danger button hover outline */
+  --v2-danger-press: rgba(238, 112, 112, 0.22); /* danger button :active fill */
+  --v2-danger-text: #F2A3A3;                     /* error copy on a danger-soft fill */
 
   /* ---- 1.3b task status glyph colours (D8 — one glyph set everywhere) ---- */
   --v2-status-todo: #8A8F98;         /* empty circle */
@@ -149,6 +157,43 @@
      The old --v2-avatar-bg-1…8 tokens were unused and diverged from desktop;
      removed in r2 so nobody paints an avatar from them. */
   --v2-avatar-fg: #EEEFF1;           /* initials on non-identity (system) avatars */
+  /* identity avatar = hsl(<hue> <fill-s> <fill-l>) with hsl(<hue> <ink-s> <ink-l>)
+     initials; the hue comes from AVATAR_HUES, the tone from the theme */
+  --v2-av-fill-s: 34%; --v2-av-fill-l: 28%;
+  --v2-av-ink-s: 72%;  --v2-av-ink-l: 86%;
+  /* hue-driven marks (label chips, project glyphs): hsl(<hue> <s> <l>) */
+  --v2-hue-mark-s: 62%; --v2-hue-mark-l: 62%;
+  --v2-hue-glyph-s: 70%; --v2-hue-glyph-l: 70%;
+
+  /* ---- 1.3e section hues (project tab icons: hover / current) ---- */
+  --v2-hue-home: #7AA2F7;
+  --v2-hue-tasks: #A78BFA;
+  --v2-hue-routines: #2DD4BF;
+  --v2-hue-agents: #F472B6;
+  --v2-hue-org: #FBBF24;
+  --v2-hue-requests: #FB923C;
+  --v2-hue-code: #4ADE80;
+  --v2-hue-github: #E5E7EB;
+  --v2-hue-activity: #22D3EE;
+  --v2-hue-metrics: #A3E635;
+  --v2-pr-color: var(--v2-hue-tasks); /* pull-request glyph */
+
+  /* ---- 1.3f overlays, selection, inverse controls ---- */
+  --v2-selection: rgba(141, 147, 247, 0.32);
+  --v2-scrim: rgba(6, 7, 9, 0.55);          /* palette / sheet backdrop */
+  --v2-scrim-strong: rgba(6, 7, 9, 0.62);   /* modal dialog backdrop */
+  --v2-lightbox-bg: rgba(0, 0, 0, 0.82);    /* image lightbox: dark in both themes */
+  --v2-veil: rgba(16, 17, 19, 0.92);        /* "saving…" veil over a pane */
+  --v2-inverse-hover: #FFFFFF;              /* hover of a filled --v2-text control (composer send/stop) */
+  --v2-inverse-text: var(--v2-window);      /* glyph on a filled --v2-text control */
+  --v2-scroll-shadow: rgba(0, 0, 0, 0.45);  /* horizontal scroll affordance shadows */
+  --v2-shadow-seg: 0 1px 0 rgba(0, 0, 0, 0.25); /* selected segment lift */
+  --v2-shadow-palette: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --v2-shadow-lightbox: 0 20px 60px rgba(0, 0, 0, 0.5);
+  --v2-live-pulse: rgba(76, 183, 130, 0.5);
+  --v2-live-pulse-0: rgba(76, 183, 130, 0);
+  --v2-logo-ink: #F9F4EB;                   /* Quorate mark: cream arcs */
+  --v2-logo-accent: #9695F2;                /* Quorate mark: indigo arc */
 
   /* ---- 1.4 typography (D6) ---- */
   --v2-font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -305,6 +350,139 @@
   --ring: var(--v2-focus-ring);
 }
 
+/* ---- LIGHT (Linear light: warm-neutral window, white panel, same indigo) ----
+   <html data-theme="light"> (resolved by src/shell/theme.ts). Re-declares
+   every COLOUR token of the base block; sizes/type/motion are shared.
+   Contrast (WCAG 2.x, measured on --v2-window #F4F4F5 / --v2-panel #FFFFFF /
+   --v2-selected-solid #EDEDEF): text 15.4:1, text-2 7.1:1, text-3 5.2:1
+   (4.9:1 on selected), accent 5.2:1, ok 4.9:1, warn 5.3:1, danger 5.0:1,
+   info 5.1:1, and each semantic on its own -soft tint >= 4.6:1. White on the
+   primary fill #5E6AD2 is 4.7:1 (hover 5.6:1). Status glyphs (non-text) are
+   >= 3:1 on the panel. */
+:root[data-theme="light"],
+:root[data-theme="light"][data-skin] {
+  color-scheme: light;
+
+  --v2-window: #F4F4F5;
+  --v2-panel: #FFFFFF;
+  --v2-panel-border: #E4E4E7;
+  --v2-surface: #FFFFFF;
+  --v2-raised: #FFFFFF;
+  --v2-band: #F7F7F8;
+  --v2-hover: rgba(24, 25, 28, 0.045);
+  --v2-selected: rgba(24, 25, 28, 0.07);
+  --v2-hover-solid: #F4F4F5;
+  --v2-selected-solid: #EDEDEF;
+  --v2-border: #E6E6E9;
+  --v2-border-subtle: #EFEFF1;
+  --v2-border-strong: #D5D6DA;
+
+  --v2-text: #1C1D1F;
+  --v2-text-2: #4E525A;
+  --v2-text-3: #62666E;
+  --v2-text-disabled: #A3A6AD;
+  --v2-text-on-accent: #FFFFFF;
+
+  --v2-accent: #505AC9;
+  --v2-accent-hover: #434CB8;
+  --v2-accent-soft: rgba(80, 90, 201, 0.10);
+  --v2-primary-bg: #5E6AD2;
+  --v2-primary-bg-hover: #525DC7;
+  --v2-primary-text: #FFFFFF;
+  --v2-ok: #187A4C;
+  --v2-ok-soft: rgba(24, 122, 76, 0.10);
+  --v2-warn: #955500;
+  --v2-warn-soft: rgba(149, 85, 0, 0.10);
+  --v2-danger: #C23434;
+  --v2-danger-soft: rgba(194, 52, 52, 0.09);
+  --v2-info: #1A68BA;
+  --v2-info-soft: rgba(26, 104, 186, 0.10);
+  --v2-neutral: #62666E;
+  --v2-neutral-soft: rgba(98, 102, 110, 0.10);
+  --v2-danger-line: rgba(194, 52, 52, 0.30);
+  --v2-danger-press: rgba(194, 52, 52, 0.15);
+  --v2-danger-text: #A82B2B;
+
+  --v2-status-todo: #8A8E96;
+  --v2-status-pending: #8A8E96;
+  --v2-status-progress: #B07D00;
+  --v2-status-review: #23905E;
+  --v2-status-verify: #B86E00;
+  --v2-status-done: #23905E;
+  --v2-status-blocked: #C23434;
+  --v2-status-failed: #C23434;
+  --v2-status-cancelled: #8A8E96;
+  /* primitives-a status palette (v2-primitives.css :root block) */
+  --v2-st-todo: #8A8E96;
+  --v2-st-faint: #A3A6AD;
+  --v2-st-progress: #B07D00;
+  --v2-st-muted: #8A8E96;
+
+  --v2-prio-bar-empty: #D5D6DA;
+  --v2-prio-urgent: #DE6414;
+  --v2-label-1: #1A68BA;
+  --v2-label-2: #187A4C;
+  --v2-label-3: #9A6B00;
+  --v2-label-4: #C2570C;
+  --v2-label-5: #C23434;
+  --v2-label-6: #505AC9;
+  --v2-label-7: #B0409A;
+  --v2-label-8: #13808C;
+
+  --v2-avatar-fg: #1C1D1F;
+  --v2-av-fill-s: 62%; --v2-av-fill-l: 90%;
+  --v2-av-ink-s: 48%;  --v2-av-ink-l: 30%;
+  --v2-hue-mark-s: 58%; --v2-hue-mark-l: 42%;
+  --v2-hue-glyph-s: 55%; --v2-hue-glyph-l: 42%;
+
+  --v2-hue-home: #3569D8;
+  --v2-hue-tasks: #7447D6;
+  --v2-hue-routines: #0F8577;
+  --v2-hue-agents: #C4317F;
+  --v2-hue-org: #A06A00;
+  --v2-hue-requests: #C2570C;
+  --v2-hue-code: #1F8A4C;
+  --v2-hue-github: #1C1D1F;
+  --v2-hue-activity: #0E7C95;
+  --v2-hue-metrics: #4D7C0F;
+
+  --v2-selection: rgba(80, 90, 201, 0.20);
+  --v2-scrim: rgba(24, 25, 28, 0.24);
+  --v2-scrim-strong: rgba(24, 25, 28, 0.32);
+  --v2-veil: rgba(255, 255, 255, 0.92);
+  --v2-inverse-hover: #000000;
+  --v2-inverse-text: #FFFFFF;
+  --v2-scroll-shadow: rgba(24, 25, 28, 0.10);
+  --v2-shadow-seg: 0 1px 2px rgba(24, 25, 28, 0.10);
+  --v2-shadow-palette: 0 16px 48px rgba(24, 25, 28, 0.16), 0 0 0 1px rgba(24, 25, 28, 0.06);
+  --v2-shadow-lightbox: 0 20px 60px rgba(0, 0, 0, 0.35);
+  --v2-live-pulse: rgba(24, 122, 76, 0.40);
+  --v2-live-pulse-0: rgba(24, 122, 76, 0);
+  --v2-logo-ink: #1C1D1F;
+  --v2-logo-accent: #6E6CE6;
+
+  --v2-chip-border: #E1E1E5;
+  --v2-pill-bg-selected: #EDEDEF;
+  --v2-pill-border-selected: #DCDCE0;
+  --v2-btn-secondary-bg: #FFFFFF;
+
+  --v2-shadow-panel: 0 1px 2px rgba(24, 25, 28, 0.05), 0 0 0 0.5px rgba(24, 25, 28, 0.02);
+  --v2-shadow-card: 0 1px 1px rgba(24, 25, 28, 0.04);
+  --v2-shadow-pop: 0 8px 28px rgba(24, 25, 28, 0.14), 0 0 0 1px rgba(24, 25, 28, 0.06);
+
+  --accent-line: rgba(80, 90, 201, 0.30);
+  --accent-glow: rgba(80, 90, 201, 0.16);
+  --ok-line: rgba(24, 122, 76, 0.30);
+  --info-line: rgba(26, 104, 186, 0.30);
+  --warn-line: rgba(149, 85, 0, 0.30);
+  --danger-line: rgba(194, 52, 52, 0.30);
+  --violet-line: rgba(80, 90, 201, 0.30);
+  --idle-line: rgba(98, 102, 110, 0.26);
+  --diff-add: #17754A; --diff-add-bg: rgba(24, 122, 76, 0.09);
+  --diff-del: #B8342A; --diff-del-bg: rgba(194, 52, 52, 0.08);
+  --diff-hunk-bg: rgba(26, 104, 186, 0.07);
+}
+
 /* Panel scope: everything inside the D5 inset panel treats the panel tone as
    its canvas (sticky headers, focus-ring gap, avatar rings, legacy --bg). */
 [data-v2-surface="panel"],
@@ -365,7 +543,7 @@ code, kbd, pre, .mono { font-family: var(--v2-font-mono); font-feature-settings:
 /* No programming ligatures anywhere code is shown — the viewer and the editor
    must render "=>", "===" identically (r1 Code Space: edit mode showed ⇒ ≡). */
 code, kbd, pre, .mono, .cm-editor, .cm-content, .cm-gutters { font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0; }
-::selection { background: rgba(141, 147, 247, 0.32); }
+::selection { background: var(--v2-selection); }
 :focus-visible { outline: none; box-shadow: var(--v2-focus-ring); border-radius: var(--v2-radius-control); }
 .tnum, .v2-count, time { font-variant-numeric: tabular-nums; }
 

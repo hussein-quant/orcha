@@ -52,7 +52,7 @@ export default function ConfirmResetModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] animate-fade-in"
       onClick={busy ? undefined : onCancel}
     >
       <div
@@ -60,7 +60,7 @@ export default function ConfirmResetModal({
         aria-modal="true"
         aria-labelledby="delete-stack-title"
         aria-describedby="delete-stack-body"
-        className="mx-4 w-full max-w-[440px] rounded-[10px] border border-border-strong bg-raised p-5 shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        className="mx-4 w-full max-w-[440px] rounded-[10px] border border-border-strong bg-raised p-5 shadow-[var(--shadow-dialog)]"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="delete-stack-title" className="text-[15px] font-semibold text-text">

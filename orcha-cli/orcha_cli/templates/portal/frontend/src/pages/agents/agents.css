@@ -494,8 +494,8 @@
    the #1E1F23 composer is ~14:1 for the control boundary, the glyph ~17:1 on its fill.
    The old hover-solid fill + 1px border was ~1.1:1 against the composer (invisible). */
 .conv .conv-composer .conv-stop { grid-area: send; width: 28px; height: 28px; border: 0; border-radius: var(--v2-radius-full);
-  background: var(--v2-text); color: var(--v2-window, #0E0F10); box-shadow: none; }
-.conv .conv-composer .conv-stop:hover:not(:disabled) { background: #fff; color: var(--v2-window, #0E0F10); }
+  background: var(--v2-text); color: var(--v2-inverse-text); box-shadow: none; }
+.conv .conv-composer .conv-stop:hover:not(:disabled) { background: var(--v2-inverse-hover); color: var(--v2-inverse-text); }
 .conv .conv-composer .conv-stop:focus-visible { outline: none; box-shadow: var(--v2-focus-ring); }
 /* requested: muted but still a visible ring (--v2-text-2 #B4B7BE on the composer ≈ 8:1) */
 .conv .conv-composer .conv-stop:disabled { opacity: 1; background: transparent; color: var(--v2-text-2);
@@ -508,10 +508,10 @@
 .conv .conv-composer .conv-attach:focus-visible { outline: none; box-shadow: var(--v2-focus-ring); }
 .conv-attach svg { width: 15px; height: 15px; }
 .conv .conv-composer .conv-send { grid-area: send; position: relative; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
-  padding: 0; border: 0; border-radius: var(--v2-radius-full); background: var(--v2-text); color: var(--v2-window, #0E0F10); cursor: pointer; }
+  padding: 0; border: 0; border-radius: var(--v2-radius-full); background: var(--v2-text); color: var(--v2-inverse-text); cursor: pointer; }
 .conv .conv-composer .conv-send svg { width: 15px; height: 15px; transform: rotate(-90deg); }
 .conv .conv-composer .conv-send.is-idle { background: var(--v2-hover-solid, var(--v2-surface)); color: var(--v2-text-3); box-shadow: inset 0 0 0 1px var(--v2-border); }
-.conv .conv-composer .conv-send:hover:not(:disabled):not(.is-idle) { background: #fff; }
+.conv .conv-composer .conv-send:hover:not(:disabled):not(.is-idle) { background: var(--v2-inverse-hover); }
 .conv .conv-composer .conv-send:disabled { cursor: not-allowed; opacity: .6; }
 .conv .conv-composer .conv-send:focus-visible { outline: none; box-shadow: var(--v2-focus-ring); }
 .conv .conv-composer .conv-send.busy { background: var(--v2-surface); color: var(--v2-text-2); }
@@ -565,7 +565,7 @@
 .msg-atts .att-file .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-atts .att-file .sz { flex: none; color: var(--v2-text-3); font-size: 11px; }
 /* lightbox */
-.att-lightbox { position: fixed; inset: 0; z-index: var(--v2-z-dialog); background: rgba(0,0,0,.82); display: flex;
+.att-lightbox { position: fixed; inset: 0; z-index: var(--v2-z-dialog); background: var(--v2-lightbox-bg); display: flex;
   align-items: center; justify-content: center; padding: 32px; cursor: zoom-out; }
 .att-lightbox img { max-width: 95vw; max-height: 92vh; border-radius: var(--v2-radius-panel); }
 
@@ -663,7 +663,7 @@
 .term-body { flex: 1; min-height: 0; overflow: hidden; padding: 10px 12px; background: var(--v2-canvas); }
 .term-body .term-xterm { height: 100%; }
 .term-body .xterm { height: 100%; }
-.term-saving { position: absolute; inset: 0; background: rgba(16,17,19,.92); display: flex;
+.term-saving { position: absolute; inset: 0; background: var(--v2-veil); display: flex;
   flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--v2-text); }
 .term-saving .ring { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--v2-border); border-top-color: var(--v2-accent); animation: spin 0.8s linear infinite; }
 .term-saving .st { font-size: var(--v2-fs-body); font-weight: var(--v2-fw-semibold); } .term-saving .sub { font-size: var(--v2-fs-meta); color: var(--v2-text-2); }
@@ -702,7 +702,7 @@
 /* ISS-65: maximize the Conversation or the Embedded Terminal into a large overlay.
    We toggle a class on the EXISTING panel (never reparent the live xterm / composer),
    so all wiring + the open websocket survive. A backdrop + Escape restore the dock. */
-.max-backdrop { position: fixed; inset: 0; z-index: var(--v2-z-dock); background: rgba(8,9,10,.72); }
+.max-backdrop { position: fixed; inset: 0; z-index: var(--v2-z-dock); background: var(--v2-scrim-strong); }
 .conv.maximized, .term.maximized { position: fixed; inset: 3vh 3vw; z-index: calc(var(--v2-z-dock) + 1); margin: 0;
   height: auto; max-height: none; box-shadow: var(--v2-shadow-pop); }
 .conv.maximized { display: flex; flex-direction: column; }

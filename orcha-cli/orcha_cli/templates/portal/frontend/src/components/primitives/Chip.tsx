@@ -38,9 +38,9 @@ export interface ChipProps {
   "aria-label"?: string;
 }
 
-/** Stable label-dot colour from a name (bright enough to read as a dot on dark surfaces). */
+/** Stable label-dot colour from a name — tone from theme tokens (--v2-hue-mark-*), so it reads on dark and light. */
 export function labelDotColor(key: string): string {
-  return `hsl(${hue(key)} 62% 62%)`;
+  return `hsl(${hue(key)} var(--v2-hue-mark-s, 62%) var(--v2-hue-mark-l, 62%))`;
 }
 
 export function Chip({ children, dot, dotKey, icon, trailing, title, selected, size = "md", href, to, onClick, disabled, className, ...rest }: ChipProps) {

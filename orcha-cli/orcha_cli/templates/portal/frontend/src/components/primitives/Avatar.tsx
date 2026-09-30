@@ -63,11 +63,17 @@ export const AVATAR_HUES = [4, 30, 50, 95, 145, 178, 208, 238, 272, 318] as cons
 
 export interface AvatarColors { background: string; color: string }
 
-/** Palette slot → flat fill + tinted initial (≥ 4.5:1 for every slot). */
+/** Palette slot → flat fill + tinted initial (≥ 4.5:1 for every slot, both themes).
+ *  The hue is the slot's; saturation/lightness come from theme tokens
+ *  (--v2-av-fill-* / --v2-av-ink-*, v2-tokens.css) so avatars re-tone live on a
+ *  theme switch without a re-render. Fallbacks = the dark values. */
 export function paletteColor(index: number): AvatarColors {
   const n = AVATAR_HUES.length;
   const h = AVATAR_HUES[((index % n) + n) % n];
-  return { background: `hsl(${h} 34% 28%)`, color: `hsl(${h} 72% 86%)` };
+  return {
+    background: `hsl(${h} var(--v2-av-fill-s, 34%) var(--v2-av-fill-l, 28%))`,
+    color: `hsl(${h} var(--v2-av-ink-s, 72%) var(--v2-av-ink-l, 86%))`,
+  };
 }
 
 /** Stable slot for a key (FNV-1a, same offset basis as the desktop). */
