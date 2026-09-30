@@ -14,8 +14,9 @@
  * instead of RepoBrowser's plain line-number gutter.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useToast } from "../../components/ui";
+import { isEditingTarget } from "../../components/primitives";
 import { Button, ButtonLink, IconButton, Segmented } from "../../components/primitives";
 import { CircleIconButton, PageToolbar } from "../../shell/Shell";
 import { withCid } from "../../lib/scope";
@@ -157,6 +158,13 @@ export function CodeSpacePage() {
   const path = searchParams.get("path") || "";
   const lineParam = searchParams.get("line");
   const threadParam = searchParams.get("thread");
+  // Learn deep link: ?lesson=<threadId> (the lesson open in the rail),
+  // &view=full (full-page lesson mode) and &step=N (1-based; omitted = step 1).
+  const openLessonId = searchParams.get("lesson");
+  const lessonFull = !!openLessonId && searchParams.get("view") === "full";
+  const stepParam = Number(searchParams.get("step"));
+  const lessonInitialStep = Number.isFinite(stepParam) && stepParam >= 1 ? Math.floor(stepParam) - 1 : 0;
+  const routerNavigate = useNavigate();
 
   const { widths, dragTree, dragRail, resetTree, resetRail } = usePaneWidths();
   const dragStateRef = useRef<{ pane: "tree" | "rail"; startX: number } | null>(null);
@@ -262,7 +270,6 @@ export function CodeSpacePage() {
   // lesson markers and the floating Teach · Why lens can open one), a seed for a
   // lesson just created here, the current step's cited lines (glow + dim), and
   // the latest text selection (sticky per file) for the quick starts.
-  const [openLessonId, setOpenLessonId] = useState<string | null>(null);
   const [lessonSeed, setLessonSeed] = useState<CodeThreadDetailPayload | null>(null);
   const [lessonFocus, setLessonFocus] = useState<{ path: string; ranges: FocusRange[] } | null>(null);
   const [textSel, setTextSel] = useState<LensRange | null>(null);
@@ -495,15 +502,28 @@ export function CodeSpacePage() {
     setRecentFilesToken((n) => n + 1);
   }, [cid, path]);
 
-  const navigate = useCallback((next: { ref?: string; path?: string; line?: number | null; thread?: string | null }, replace = false) => {
-    setSearchParams((prev) => {
-      const p = new URLSearchParams(prev);
+  // Several URL writes can land in ONE commit (a lesson step mirrors ?step=
+  // while full page follows it to another ?path=); setSearchParams' updater
+  // sees the render's params, so each write builds on the latest one instead.
+  const latestParamsRef = useRef(searchParams);
+  const seenParamsRef = useRef(searchParams);
+  if (seenParamsRef.current !== searchParams) { seenParamsRef.current = searchParams; latestParamsRef.current = searchParams; }
+  const navigate = useCallback((next: {
+    ref?: string; path?: string; line?: number | null; thread?: string | null;
+    lesson?: string | null; view?: "full" | null; step?: string | null;
+  }, replace = false) => {
+    {
+      const p = new URLSearchParams(latestParamsRef.current);
       if (next.ref !== undefined) { if (next.ref) p.set("ref", next.ref); else p.delete("ref"); }
       if (next.path !== undefined) { if (next.path) p.set("path", next.path); else p.delete("path"); }
       if (next.line !== undefined) { if (next.line != null) p.set("line", String(next.line)); else p.delete("line"); }
       if (next.thread !== undefined) { if (next.thread) p.set("thread", next.thread); else p.delete("thread"); }
-      return p;
-    }, { replace });
+      if (next.lesson !== undefined) { if (next.lesson) p.set("lesson", next.lesson); else p.delete("lesson"); }
+      if (next.view !== undefined) { if (next.view) p.set("view", next.view); else p.delete("view"); }
+      if (next.step !== undefined) { if (next.step) p.set("step", next.step); else p.delete("step"); }
+      latestParamsRef.current = p;
+      setSearchParams(p, { replace });
+    }
   }, [setSearchParams]);
 
   const openDraftFile = useCallback((p: string) => {
@@ -556,14 +576,92 @@ export function CodeSpacePage() {
     scrollLineIntoView(line);
   }, [navigate]);
 
-  // Learn — open a lesson in the rail (navigating to its file when needed).
-  const openLesson = useCallback((t: CodeThreadSummary | null, seed?: CodeThreadDetailPayload | null) => {
-    setOpenLessonId(t ? t.id : null);
+  // Learn — open a lesson in the rail (navigating to its file when needed). The
+  // open lesson lives in the URL (?lesson=), so reload / share restores it.
+  // `opts.full` opens it straight into full page (a SECOND history entry, pushed
+  // once ?lesson= has landed, so Back exits full page before leaving the lesson).
+  const pendingFullRef = useRef<string | null>(null);
+  const openLesson = useCallback((t: CodeThreadSummary | null, seed?: CodeThreadDetailPayload | null, opts?: { full?: boolean }) => {
     setLessonSeed(seed ?? null);
-    if (!t) { setLessonFocus(null); return; }
+    if (!t) { setLessonFocus(null); navigate({ lesson: null, view: null, step: null }, true); return; }
     setRailTab("learn");
-    if (t.path !== path) navigate({ path: t.path, line: null, thread: null }, false);
-  }, [path, navigate]);
+    pendingFullRef.current = opts?.full ? t.id : null;
+    const move = t.path !== path;
+    if (t.id === openLessonId && !move) { if (opts?.full && !lessonFull) { pendingFullRef.current = null; navigate({ view: "full" }, false); } return; }
+    navigate({ lesson: t.id, step: null, ...(move ? { path: t.path, line: null, thread: null } : {}) }, !move);
+  }, [path, navigate, openLessonId, lessonFull]);
+
+  // Learn — full-page lesson mode (?view=full). Entering pushes a history entry
+  // so browser Back exits full page first; the in-page exits (button, F, Esc)
+  // pop that same entry when this session pushed it, else just drop the param
+  // (a reloaded / shared full-page link has nothing of ours to pop).
+  const fullPushedRef = useRef(false);
+  const lessonStepRef = useRef(lessonInitialStep);
+  const enterLessonFull = useCallback(() => {
+    if (!openLessonId || lessonFull) return;
+    fullPushedRef.current = true;
+    setRailTab("learn");
+    setTreeOpen(false);
+    setRailOpen(false);
+    navigate({ view: "full" }, false);
+  }, [openLessonId, lessonFull, navigate]);
+  const exitLessonFull = useCallback(() => {
+    if (!lessonFull) return;
+    if (fullPushedRef.current) { fullPushedRef.current = false; routerNavigate(-1); }
+    else navigate({ view: null }, true);
+  }, [lessonFull, navigate, routerNavigate]);
+  const toggleLessonFull = useCallback(() => {
+    if (lessonFull) exitLessonFull();
+    else enterLessonFull();
+  }, [lessonFull, enterLessonFull, exitLessonFull]);
+  useEffect(() => {
+    if (!openLessonId) return;
+    setRailTab("learn");
+    if (pendingFullRef.current === openLessonId) { pendingFullRef.current = null; enterLessonFull(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openLessonId]);
+  const onLessonStepChange = useCallback((step: number) => {
+    lessonStepRef.current = step;
+    const want = step > 0 ? String(step + 1) : null;
+    if (latestParamsRef.current.get("step") !== want) navigate({ step: want }, true);
+  }, [navigate]);
+  // Presenter mode (full page, wide only): the app sidebar hides too.
+  const [lessonPresent, setLessonPresent] = useState(false);
+  // leaving full page (any route: button, F, Esc, Back) plays the exit motion,
+  // drops presenter mode and re-mirrors the CURRENT step (Back restored the
+  // pre-full entry, whose ?step= may be stale).
+  const [lessonFullExit, setLessonFullExit] = useState(false);
+  const wasFullRef = useRef(lessonFull);
+  useEffect(() => {
+    if (lessonFull) setRailTab("learn");
+    if (wasFullRef.current && !lessonFull) {
+      fullPushedRef.current = false;
+      setLessonPresent(false);
+      if (openLessonId) {
+        const want = lessonStepRef.current > 0 ? String(lessonStepRef.current + 1) : null;
+        if (latestParamsRef.current.get("step") !== want) navigate({ step: want }, true);
+      }
+      setLessonFullExit(true);
+      const t = window.setTimeout(() => setLessonFullExit(false), 520);
+      wasFullRef.current = lessonFull;
+      return () => window.clearTimeout(t);
+    }
+    wasFullRef.current = lessonFull;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lessonFull]);
+  // Esc exits full page (never while typing, inside an editor, a menu or a dialog)
+  useEffect(() => {
+    if (!lessonFull) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as Element | null;
+      if (isEditingTarget(t) || (t && (t as HTMLElement).closest?.('.cm-editor, [role="menu"], [role="dialog"], [role="listbox"]'))) return;
+      e.preventDefault();
+      exitLessonFull();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [lessonFull, exitLessonFull]);
 
   const jumpToPinnedSha = useCallback((sha: string) => {
     navigate({ ref: sha }, true);
@@ -769,6 +867,16 @@ export function CodeSpacePage() {
   const onLessonFocus = useCallback((ranges: FocusRange[] | null, p: string) => {
     setLessonFocus(ranges && ranges.length ? { path: p, ranges } : null);
   }, []);
+  // Full page follows the step: a step citing another file opens THAT file
+  // (replace — stepping never piles up history entries).
+  useEffect(() => {
+    if (!lessonFull || !lessonFocus || lessonFocus.path === path) return;
+    setWorktreePath(null);
+    setSelection(null);
+    setComposerOpen(false);
+    navigate({ path: lessonFocus.path, line: null, thread: null }, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lessonFull, lessonFocus?.path]);
   const onOpenFileRef = useCallback((ref: LineRef) => {
     if (!ref.path) return;
     setSelection(null);
@@ -887,7 +995,7 @@ export function CodeSpacePage() {
   // project list does — name the project like the header / stale bar do
   const unreachableName = snap?.container?.name || (projectList || []).find((p) => p.id === cid)?.name || null;
   const unreachableDetail = [rootError?.status ? "HTTP " + rootError.status : null, rootError?.detail || snapError || null].filter(Boolean).join(" · ");
-  const drawerOpen = layout !== "wide" && (railOpen || (layout === "narrow" && treeOpen));
+  const drawerOpen = !lessonFull && layout !== "wide" && (railOpen || (layout === "narrow" && treeOpen));
   const threadCount = fileThreads.length;
 
   // The ONE file bar (EditContext): breadcrumbs left, state · ref · file
@@ -896,7 +1004,7 @@ export function CodeSpacePage() {
   const fileActions = fileReady && filePayload ? (
     <div className="cs-file-actions">
       <span className="cs-file-size tnum" title={filePayload.size + " bytes"}>{formatSize(filePayload.size)}</span>
-      {!editMode && isMd ? (
+      {!editMode && isMd && !lessonFull ? (
         <>
           {viewMode === "rendered" ? (
             <Button
@@ -1037,14 +1145,22 @@ export function CodeSpacePage() {
     </PageToolbar>
   );
 
+  // Full-page lesson: presenter mode only exists at wide widths; the narrow
+  // single column shows each step's lines inline (the loaded file = the step's).
+  const presentOn = lessonPresent && lessonFull && layout === "wide";
+  const lessonPeek = lessonFull && layout === "narrow" && fileReady && filePayload && !filePayload.binary
+    ? { path: filePayload.path, content: filePayload.content ?? "" }
+    : null;
+
   return (
     <Shell
       page="code"
       title="Code Space"
       crumbs={path ? [{ label: fileName, title: path }] : undefined}
-      toolbar={toolbar}
+      toolbar={lessonFull ? undefined : toolbar}
       flush
     >
+      {presentOn ? <PresentMode /> : null}
       <div className="cs-shell" ref={setShellEl} data-layout={layout}>
         {notConnected ? (
           // the ONE shared not-connected state (same copy + CTA as the GitHub hub);
@@ -1085,8 +1201,9 @@ export function CodeSpacePage() {
         ) : (
         <>
         <div
-          className={"cs-body" + (treeOpen ? " tree-open" : "") + (railOpen ? " rail-open" : "")
-            + (layout === "wide" && collapsed.tree ? " tree-collapsed" : "") + (layout === "wide" && railHidden ? " rail-collapsed" : "")}
+          className={"cs-body" + (lessonFull ? " is-lesson-full" : (treeOpen ? " tree-open" : "") + (railOpen ? " rail-open" : "")
+            + (layout === "wide" && collapsed.tree ? " tree-collapsed" : "") + (layout === "wide" && railHidden ? " rail-collapsed" : ""))
+            + (lessonFullExit ? " is-lesson-exit" : "") + (presentOn ? " is-presenting" : "")}
           onKeyDown={(e) => {
             if (e.key !== "Escape" || !drawerOpen || e.defaultPrevented) return;
             const t = e.target as HTMLElement;
@@ -1261,7 +1378,7 @@ export function CodeSpacePage() {
                       onDirty={() => {}}
                       focusRanges={focusHere}
                     />
-                  ) : isMd && viewMode === "rendered" ? (
+                  ) : isMd && viewMode === "rendered" && !lessonFull ? (
                     <MdRenderedPane
                       content={filePayload.content ?? ""}
                       path={path}
@@ -1388,6 +1505,13 @@ export function CodeSpacePage() {
                 lessonSeed,
                 onFocusLines: onLessonFocus,
                 onOpenFileRef,
+                lessonFull,
+                onToggleLessonFull: toggleLessonFull,
+                lessonPresent: presentOn,
+                onToggleLessonPresent: layout === "wide" ? () => setLessonPresent((v) => !v) : undefined,
+                lessonInitialStep,
+                onLessonStepChange,
+                lessonPeek,
               }}
             />
           </ErrorBoundary>
@@ -1398,4 +1522,15 @@ export function CodeSpacePage() {
       </div>
     </Shell>
   );
+}
+
+/** Presenter mode: hides the app sidebar (html[data-lesson-present], codespace.css)
+ *  for as long as it is mounted. */
+function PresentMode() {
+  useEffect(() => {
+    const el = document.documentElement;
+    el.setAttribute("data-lesson-present", "");
+    return () => el.removeAttribute("data-lesson-present");
+  }, []);
+  return null;
 }

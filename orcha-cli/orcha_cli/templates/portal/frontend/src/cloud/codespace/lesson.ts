@@ -106,6 +106,22 @@ export function localRefs(refs: LineRef[], currentPath?: string): LineRef[] {
   return refs.filter((r) => !r.path || (currentPath != null && (r.path === currentPath || baseName(r.path) === baseName(currentPath))));
 }
 
+/**
+ * Where a step points the editor: its local refs on the lesson's own file, else
+ * (a step that only cites ANOTHER file) the first other file it names with all
+ * of that file's ranges. null = the step cites no lines at all. Full-page mode
+ * follows this target across files; the rail only ever glows the local file.
+ */
+export function stepTarget(step: Pick<LessonStep, "refs"> | null | undefined, lessonPath: string): { path: string; ranges: { start: number; end: number }[] } | null {
+  if (!step) return null;
+  const local = localRefs(step.refs, lessonPath);
+  if (local.length) return { path: lessonPath, ranges: local.map((r) => ({ start: r.start, end: r.end })) };
+  const other = step.refs.find((r) => !!r.path);
+  if (!other || !other.path) return null;
+  const same = step.refs.filter((r) => r.path === other.path);
+  return { path: other.path, ranges: same.map((r) => ({ start: r.start, end: r.end })) };
+}
+
 export function refLabel(r: { start: number; end: number }): string {
   return r.start === r.end ? "L" + r.start : "L" + r.start + "–" + r.end;
 }

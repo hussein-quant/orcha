@@ -17,7 +17,7 @@
  * their own state.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FilterPills, ListGroup } from "../../components/primitives";
+import { FilterPills, IconButton, ListGroup, Menu } from "../../components/primitives";
 import { Icon } from "../../components/ui";
 import { relTime } from "../../lib/format";
 import { useSnapshot } from "../../state/SnapshotProvider";
@@ -51,7 +51,16 @@ export interface LearnTabProps {
   selection?: { start: number; end: number } | null;
   /** Controlled open lesson (undefined = uncontrolled). */
   openLessonId?: string | null;
-  onOpenLesson?: (thread: CodeThreadSummary | null) => void;
+  /** `opts.full` = open it straight into the full-page lesson view. */
+  onOpenLesson?: (thread: CodeThreadSummary | null, seed?: CodeThreadDetailPayload | null, opts?: { full?: boolean }) => void;
+  /** Full-page lesson mode + its toggles (CodeSpacePage); see LessonView. */
+  lessonFull?: boolean;
+  onToggleLessonFull?: () => void;
+  lessonPresent?: boolean;
+  onToggleLessonPresent?: () => void;
+  lessonInitialStep?: number;
+  onLessonStepChange?: (step: number) => void;
+  lessonPeek?: { path: string; content: string } | null;
   /** Optimistic seed for a lesson that was JUST created elsewhere (the editor lens). */
   lessonSeed?: CodeThreadDetailPayload | null;
   onFocusLines?: (ranges: FocusRange[] | null, path: string) => void;
@@ -79,6 +88,13 @@ export function LearnTab({
   onFocusLines,
   onOpenFileRef,
   onJumpToPinnedSha,
+  lessonFull = false,
+  onToggleLessonFull,
+  lessonPresent,
+  onToggleLessonPresent,
+  lessonInitialStep,
+  onLessonStepChange,
+  lessonPeek,
 }: LearnTabProps) {
   const { bump } = useSnapshot();
   const [threads, setThreads] = useState<CodeThreadSummary[] | null>(null);
@@ -105,11 +121,14 @@ export function LearnTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cid, bump]);
 
-  const open = (t: CodeThreadSummary | null, s?: CodeThreadDetailPayload | null) => {
+  const open = (t: CodeThreadSummary | null, s?: CodeThreadDetailPayload | null, opts?: { full?: boolean }) => {
     setSeed(s ?? null);
     if (!controlled) setLocalOpen(t ? t.id : null);
-    onOpenLesson?.(t);
+    if (opts) onOpenLesson?.(t, undefined, opts);
+    else onOpenLesson?.(t);
   };
+  const [rowMenu, setRowMenu] = useState<string | null>(null);
+  const rowMenuAnchor = useRef<HTMLButtonElement | null>(null);
 
   const created = (res: CreateThreadResponse | null) => {
     if (!res) return;
@@ -137,14 +156,21 @@ export function LearnTab({
         seed={activeSeed ?? undefined}
         agents={agents}
         onBack={() => open(null)}
-        onFocusLines={onFocusLines ? (r) => {
+        onFocusLines={onFocusLines ? (r, other) => {
           const t = (threads ?? []).find((x) => x.id === openId) || activeSeed?.thread;
-          onFocusLines(r, t?.path ?? path);
+          onFocusLines(r, other ?? t?.path ?? path);
         } : undefined}
         onOpenFileRef={onOpenFileRef}
         onFollowUp={followUp}
         followUpBusy={busy}
         onJumpToPinnedSha={onJumpToPinnedSha}
+        full={lessonFull}
+        onToggleFull={onToggleLessonFull}
+        present={lessonPresent}
+        onTogglePresent={onToggleLessonPresent}
+        initialStep={lessonInitialStep}
+        onStepChange={onLessonStepChange}
+        peek={lessonPeek}
       />
     );
   }
@@ -267,6 +293,33 @@ export function LearnTab({
                         <ThreadStatusIcon status={t.status} />
                         <span className="cs-thread-time">{relTime(t.updated_at || t.created_at)}</span>
                       </div>
+                      {onOpenLesson ? (
+                        // row menu: its own click/keys never open the row underneath
+                        <span className="cs-lesson-row-menu" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                          <IconButton
+                            size="sm"
+                            icon="more"
+                            label={"Lesson actions for " + libraryTitle(t)}
+                            title="Lesson actions"
+                            aria-haspopup="menu"
+                            aria-expanded={rowMenu === t.id}
+                            onClick={(e) => { rowMenuAnchor.current = e.currentTarget; setRowMenu((m) => (m === t.id ? null : t.id)); }}
+                          />
+                          {rowMenu === t.id ? (
+                            <Menu
+                              anchor={rowMenuAnchor}
+                              open
+                              onClose={() => setRowMenu(null)}
+                              label="Lesson actions"
+                              placement="bottom-end"
+                              items={[
+                                { label: "Open lesson", icon: "arrow", onSelect: () => { setRowMenu(null); open(t); } },
+                                { label: "Open full page", icon: "maximize", hint: "F", onSelect: () => { setRowMenu(null); open(t, null, { full: true }); } },
+                              ]}
+                            />
+                          ) : null}
+                        </span>
+                      ) : null}
                     </div>
                   );
                 })}

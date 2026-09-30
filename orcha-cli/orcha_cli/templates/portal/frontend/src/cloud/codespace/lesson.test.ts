@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lessonParts, localRefs, parseLesson, parseLineRefs, questionTitle, refLabel } from "./lesson";
+import { lessonParts, localRefs, parseLesson, parseLineRefs, questionTitle, refLabel, stepTarget } from "./lesson";
 
 const span = (refs: { start: number; end: number; path?: string }[]) => refs.map((r) => (r.path ? r.path + ":" : "") + r.start + "-" + r.end);
 
@@ -161,5 +161,15 @@ describe("questionTitle / lessonParts", () => {
     expect(answer?.body).toBe("A1");
     expect(lessonParts([{ is_human: true, body: "Q" }]).answer).toBeNull();
     expect(lessonParts(undefined).question).toBeNull();
+  });
+});
+
+describe("stepTarget (full-page follow)", () => {
+  it("prefers the lesson's own file, else the first other file with all of its ranges", () => {
+    const refs = (t: string) => ({ refs: parseLineRefs(t, "src/a.ts") });
+    expect(stepTarget(refs("L2-3 and b.ts:5"), "src/a.ts")).toEqual({ path: "src/a.ts", ranges: [{ start: 2, end: 3 }] });
+    expect(stepTarget(refs("see b.ts:5-6, c.ts:1 and b.ts:9"), "src/a.ts")).toEqual({ path: "b.ts", ranges: [{ start: 5, end: 6 }, { start: 9, end: 9 }] });
+    expect(stepTarget(refs("no lines here"), "src/a.ts")).toBeNull();
+    expect(stepTarget(undefined, "src/a.ts")).toBeNull();
   });
 });

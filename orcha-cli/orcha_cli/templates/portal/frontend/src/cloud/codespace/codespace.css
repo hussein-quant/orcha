@@ -871,3 +871,97 @@
 }
 .cs-learn-open-tag { flex: none; margin-left: 6px; padding: 0 6px; height: 16px; line-height: 15px; border-radius: var(--v2-radius-full); border: 1px solid var(--v2-border);
   font-size: 10.5px; color: var(--v2-text-3); }
+
+/* =============================================================================
+   Learn — full-page lesson (?lesson=<id>&view=full; CodeSpacePage lessonFull)
+   The lesson takes over the Code page's content area: the file tree, dividers,
+   rail tabs and the toolbar go; the code pane becomes the wide left column (a
+   read-only focus view that follows the step, even across files) and the rail
+   becomes a comfortable reading column on the right. Narrow = one column: the
+   lesson, with the active step's lines as an inline peek. The shell sidebar and
+   project tabs stay, unless presenter mode hides the sidebar too.
+   ============================================================================= */
+.cs-body.is-lesson-full .cs-tree-pane,
+.cs-body.is-lesson-full .cs-divider,
+.cs-body.is-lesson-full .cs-rail-tabs,
+.cs-body.is-lesson-full .cs-scrim { display: none !important; }
+.cs-body.is-lesson-full .cs-rail {
+  position: relative; inset: auto; z-index: auto; display: flex !important;
+  width: min(clamp(440px, 36%, 520px), 50%) !important; min-width: 0; max-width: none;
+  background: var(--v2-panel); border-left: 1px solid var(--v2-border); box-shadow: none;
+}
+.cs-body.is-lesson-full .cs-code-pane { min-width: 0; }
+.cs-body.is-lesson-full .rb-code { font-size: 13px; }
+.cs-body.is-lesson-full .rb-code .cs-gutter-add { display: none; }
+.cs-shell[data-layout="narrow"] .cs-body.is-lesson-full .cs-code-pane { display: none; }
+.cs-shell[data-layout="narrow"] .cs-body.is-lesson-full .cs-rail { width: 100% !important; border-left: 0; }
+
+/* the reading column */
+.cs-body.is-lesson-full .cs-rail-body > .cs-lesson-wrap { padding: 14px 28px 56px; gap: 12px; }
+.cs-shell[data-layout="narrow"] .cs-body.is-lesson-full .cs-rail-body > .cs-lesson-wrap { padding: 10px 16px 40px; }
+.cs-lesson-wrap.is-full .cs-lesson-top { position: sticky; top: 0; z-index: 2; margin: 0 -8px; padding: 6px 4px;
+  background: color-mix(in srgb, var(--v2-panel) 88%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.cs-lesson-wrap.is-full .cs-lesson { gap: 16px; }
+.cs-lesson-wrap.is-full .cs-lesson-title { font-size: 24px; line-height: 1.2; letter-spacing: -0.018em; }
+.cs-lesson-wrap.is-full .cs-lesson-summary { font-size: 14px; line-height: 1.6; }
+.cs-lesson-wrap.is-full .cs-lesson-progress { position: sticky; top: 40px; z-index: 1; padding: 6px 0;
+  background: color-mix(in srgb, var(--v2-panel) 88%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.cs-lesson-wrap.is-full .cs-lesson-count { font-size: 12px; color: var(--v2-text-2); }
+/* timeline: the active step expanded, the rest collapsed to their titles + refs */
+.cs-lesson-wrap.is-full .cs-lesson-step { padding-bottom: 14px; opacity: .62; }
+.cs-lesson-wrap.is-full .cs-lesson-step:hover { opacity: .9; }
+.cs-lesson-wrap.is-full .cs-lesson-step.is-active { opacity: 1; }
+.cs-lesson-wrap.is-full .cs-lesson-step:not(.is-active) .cs-lesson-step-body { display: none; }
+.cs-lesson-wrap.is-full .cs-lesson-step.is-active .cs-lesson-step-main { margin: -6px 0 0; padding: 6px 12px 12px; border-radius: 10px;
+  background: var(--v2-hover); }
+.cs-lesson-wrap.is-full .cs-lesson-step.is-active .cs-lesson-step-title { font-size: 14.5px; }
+.cs-lesson-wrap.is-full .cs-lesson-step.is-active .cs-lesson-step-body { font-size: 14px; line-height: 1.65; margin-top: 6px; }
+.cs-lesson-wrap.is-full .cs-lesson-nav { position: sticky; bottom: 0; z-index: 1; margin: 0 -8px; padding: 8px;
+  background: var(--v2-panel); box-shadow: 0 -1px 0 var(--v2-border); }
+.cs-shell[data-layout="narrow"] .cs-lesson-wrap.is-full .cs-lesson-keys { display: none; }
+.cs-lesson-expand[aria-pressed="true"] { background: transparent; }
+
+/* narrow: the active step's lines, inline */
+.cs-lesson-peek { margin-top: 10px; border: 1px solid var(--v2-border); border-radius: 8px; overflow: hidden; background: var(--v2-panel); }
+.cs-lesson-peek > summary { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; list-style: none; cursor: pointer;
+  font-size: 11.5px; color: var(--v2-text-3); }
+.cs-lesson-peek > summary::-webkit-details-marker { display: none; }
+.cs-lesson-peek > summary:hover { color: var(--v2-text-2); }
+.cs-lesson-peek > summary:focus-visible { outline: none; box-shadow: var(--v2-focus-ring-inset, var(--v2-focus-ring)); }
+.cs-lesson-peek > summary .v2-ico { width: 13px; height: 13px; }
+.cs-lesson-peek-code { margin: 0; padding: 6px 0; overflow-x: auto; border-top: 1px solid var(--v2-border);
+  font-size: 12px; line-height: 1.6; background: color-mix(in srgb, var(--v2-accent) 6%, var(--v2-panel)); }
+.cs-lesson-peek-line { display: flex; white-space: pre; padding-right: 12px; }
+.cs-lesson-peek-line.is-gap { margin-top: 8px; }
+.cs-lesson-peek-n { flex: none; width: 38px; padding-right: 10px; text-align: right; color: var(--v2-text-3); -webkit-user-select: none; user-select: none; }
+
+/* library row menu (hover / focus reveals it; always there on touch) */
+.cs-lesson-row { position: relative; }
+.cs-lesson-row-menu { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity var(--v2-dur-fast) var(--v2-ease); }
+.cs-lesson-row:hover .cs-lesson-row-menu, .cs-lesson-row:focus-within .cs-lesson-row-menu, .cs-lesson-row-menu:has([aria-expanded="true"]) { opacity: 1; }
+.cs-lesson-row:hover .cs-thread-side, .cs-lesson-row:focus-within .cs-thread-side { visibility: hidden; }
+.cs-lesson-row-menu .v2-iconbtn { background: var(--v2-raised, var(--v2-panel)); }
+@media (hover: none) { .cs-lesson-row-menu { position: static; transform: none; opacity: 1; } }
+
+/* presenter mode: the app sidebar hides too (mirrors the desktop-embed frame) */
+html[data-lesson-present] .v2-app { grid-template-columns: minmax(0, 1fr); }
+html[data-lesson-present] .v2-sidebar, html[data-lesson-present] .v2-hamburger { display: none !important; }
+html[data-lesson-present] .v2-main { margin-left: var(--v2-frame-gap); }
+
+/* motion: a slow dolly into the lesson, the panes settling back on exit */
+@media (prefers-reduced-motion: no-preference) {
+  .cs-body.is-lesson-full .cs-code-pane { animation: csFullCode 620ms cubic-bezier(.16, 1, .3, 1) both; }
+  .cs-body.is-lesson-full .cs-rail { animation: csFullRail 680ms cubic-bezier(.16, 1, .3, 1) both; }
+  .cs-body.is-lesson-full .cs-lesson-wrap.is-full > * { animation: csLessonIn 520ms cubic-bezier(.2, .8, .2, 1) both; }
+  .cs-body.is-lesson-full .cs-lesson-wrap.is-full > :nth-child(2) { animation-delay: 80ms; }
+  .cs-body.is-lesson-full .cs-lesson-wrap.is-full > :nth-child(3) { animation-delay: 140ms; }
+  .cs-body.is-lesson-exit .cs-tree-pane { animation: csExitTree 480ms cubic-bezier(.16, 1, .3, 1) both; }
+  .cs-body.is-lesson-exit .cs-rail { animation: csExitRail 480ms cubic-bezier(.16, 1, .3, 1) both; }
+  .cs-body.is-lesson-exit .cs-code-pane { animation: csExitCode 420ms ease-out both; }
+  html[data-lesson-present] .v2-main { transition: margin 320ms var(--v2-ease); }
+}
+@keyframes csFullCode { from { opacity: .25; transform: scale(.985); filter: blur(4px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes csFullRail { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes csExitTree { from { opacity: 0; transform: translateX(-14px); } to { opacity: 1; transform: none; } }
+@keyframes csExitRail { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+@keyframes csExitCode { from { opacity: .55; } to { opacity: 1; } }

@@ -3,9 +3,12 @@
  * the house 3s bump; while no agent has answered it shows LessonWaiting (honest live
  * state from the snapshot + the agent's run stream), then reveals the answer as a
  * LessonCard. The raw conversation is one click away ("Conversation") for replies.
+ *
+ * The top bar also carries the full-page toggle (Expand ⇄ Exit, F / Esc) and, in
+ * full page at wide widths, the Present toggle; CodeSpacePage owns both states.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Avatar, Button, LivePill } from "../../components/primitives";
+import { Avatar, Button, IconButton, LivePill } from "../../components/primitives";
 import { useRunStream } from "../../hooks/useRunStream";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import type { Agent, Run } from "../../types";
@@ -23,14 +26,27 @@ export interface LessonViewProps {
   seed?: CodeThreadDetailPayload;
   agents: Agent[];
   onBack: () => void;
-  onFocusLines?: (ranges: FocusRange[] | null) => void;
+  onFocusLines?: (ranges: FocusRange[] | null, path?: string) => void;
   onOpenFileRef?: (ref: LineRef) => void;
   onFollowUp?: (question: string, thread: CodeThreadSummary) => void;
   followUpBusy?: string | null;
   onJumpToPinnedSha?: (sha: string) => void;
+  /** Full-page lesson mode (CodeSpacePage `view=full`). */
+  full?: boolean;
+  /** Enter / exit full page (the header toggle and F). Omitted = no toggle. */
+  onToggleFull?: () => void;
+  /** Presenter mode (full page, wide only): also hides the app sidebar. */
+  present?: boolean;
+  onTogglePresent?: () => void;
+  initialStep?: number;
+  onStepChange?: (step: number) => void;
+  peek?: { path: string; content: string } | null;
 }
 
-export function LessonView({ threadId, seed, agents, onBack, onFocusLines, onOpenFileRef, onFollowUp, followUpBusy, onJumpToPinnedSha }: LessonViewProps) {
+export function LessonView({
+  threadId, seed, agents, onBack, onFocusLines, onOpenFileRef, onFollowUp, followUpBusy, onJumpToPinnedSha,
+  full = false, onToggleFull, present = false, onTogglePresent, initialStep, onStepChange, peek,
+}: LessonViewProps) {
   const { bump } = useSnapshot();
   const [detail, setDetail] = useState<CodeThreadDetailPayload | null>(seed && seed.thread.id === threadId ? seed : null);
   const [failed, setFailed] = useState(false);
@@ -79,7 +95,7 @@ export function LessonView({ threadId, seed, agents, onBack, onFocusLines, onOpe
   const extraReplies = Math.max(0, detail.messages.length - 2);
 
   return (
-    <div className="cs-lesson-wrap">
+    <div className={"cs-lesson-wrap" + (full ? " is-full" : "")}>
       <div className="cs-lesson-top">
         <Button size="sm" variant="ghost" pill icon="arrow-left" onClick={onBack}>Library</Button>
         <span className="grow" />
@@ -87,6 +103,32 @@ export function LessonView({ threadId, seed, agents, onBack, onFocusLines, onOpe
         <Button size="sm" variant="ghost" pill icon="inbox" onClick={() => setConversation(true)} title="Open the full thread to reply">
           {extraReplies ? "Conversation · " + extraReplies : "Conversation"}
         </Button>
+        {full && onTogglePresent ? (
+          <Button
+            size="sm"
+            variant={present ? "secondary" : "ghost"}
+            pill
+            icon="play"
+            className="cs-lesson-present"
+            aria-pressed={present}
+            onClick={onTogglePresent}
+            title={present ? "Show the sidebar again" : "Present: hide the sidebar for a distraction-free walkthrough"}
+          >
+            Present
+          </Button>
+        ) : null}
+        {onToggleFull ? (
+          <IconButton
+            size="sm"
+            icon={full ? "minimize" : "maximize"}
+            className="cs-lesson-expand"
+            label={full ? "Exit full page" : "Full page"}
+            title={full ? "Exit full page (Esc)" : "Full page (F)"}
+            aria-keyshortcuts={full ? "Escape F" : "F"}
+            pressed={full}
+            onClick={onToggleFull}
+          />
+        ) : null}
       </div>
       {question ? (
         <p className="cs-lesson-question" title={question.body}>
@@ -107,6 +149,11 @@ export function LessonView({ threadId, seed, agents, onBack, onFocusLines, onOpe
           onOpenFileRef={onOpenFileRef}
           onFollowUp={onFollowUp ? (q) => onFollowUp(q, thread) : undefined}
           followUpBusy={followUpBusy}
+          followFiles={full}
+          initialStep={initialStep}
+          onStepChange={onStepChange}
+          onToggleFull={onToggleFull}
+          peek={full ? peek : null}
         />
       ) : (
         <LessonWaiting thread={thread} agents={agents} />
