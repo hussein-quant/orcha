@@ -62,7 +62,7 @@ import { AgentsRequestError, createAgentsController, type AgentsController } fro
 import { readAgentPrefs, writeAgentPrefs } from './agentPrefs'
 import { buildTermEnv, resolveShell, type KnownProject } from './terminalLaunch'
 import { startHookReceiver, type HookReceiver } from './hookReceiver'
-import { hookFilePaths, installAgentHooks, readCodexNotify, wireAgentHooks, writeClaudeSettings, type AgentHookFiles } from './agentHooks'
+import { hookFilePaths, installAgentHooks, readCodexNotify, wireAgentHooks } from './agentHooks'
 import { acceptPortalSender } from './embedIpc'
 import {
   canSpaNavigate,
@@ -531,7 +531,6 @@ const agentDetector = new AgentDetector({
  *  until then — or if either fails — sessions fall back to the output heuristics. */
 let agentHookWiring: TermControllerHooks = null
 let hookReceiver: HookReceiver | null = null
-let hookFiles: AgentHookFiles | null = null
 async function startAgentHooks(): Promise<void> {
   const token = randomBytes(32).toString('hex')
   const files = hookFilePaths(app.getPath('userData'))
@@ -541,8 +540,7 @@ async function startAgentHooks(): Promise<void> {
     deliver: (id, e) => void ptyHost.hookEvent(id, e)
   })
   try {
-    installAgentHooks(files, receiver.port, token, undefined, theme?.resolved())
-    hookFiles = files
+    installAgentHooks(files, receiver.port, token, undefined, 'auto')
   } catch (err) {
     await receiver.close()
     throw err
@@ -671,14 +669,7 @@ function publishTheme(s: ThemeState): void {
   for (const w of popoverWindows) if (!w.isDestroyed()) w.setBackgroundColor(bg)
   for (const v of portalViews.values()) if (!v.webContents.isDestroyed()) v.setBackgroundColor(bg)
   sendToManager(THEME_CHANNELS.changed, s)
-  // Claude tabs paint some rows with Claude's own theme: keep it matched (see agentHooks.ts)
-  if (hookFiles) {
-    try {
-      writeClaudeSettings(hookFiles, s.resolved)
-    } catch (err) {
-      console.warn('[theme] could not update the Claude settings theme:', err)
-    }
-  }
+
   for (const w of popoverWindows) if (!w.isDestroyed()) w.webContents.send(THEME_CHANNELS.changed, s)
 }
 

@@ -85,6 +85,17 @@ export const TERMINAL_FONT = "'JetBrains Mono', 'SF Mono', SFMono-Regular, ui-mo
 
 /** One xterm bound to one pty. Kept mounted (hidden) while its tab is in the background so
  *  scrollback and TUI state survive tab switches; `visible` triggers a re-fit on show. */
+
+/** Programs that subscribed to colour-scheme change notifications (DECSET ?2031 — Claude Code
+ *  does in its `auto` theme). Per pty, so a re-mounted view keeps the subscription. */
+const schemeSubscribers = new Set<number>()
+
+/** The "colour scheme changed" report a subscribed program expects: CSI ? 997 ; 1 n = dark,
+ *  ; 2 n = light. It then re-asks the background (OSC 11), which xterm answers from its theme. */
+export function schemeReport(resolved: 'light' | 'dark'): string {
+  return `\x1b[?997;${resolved === 'dark' ? 1 : 2}n`
+}
+
 export default function TerminalView({
   ptyId,
   api,
@@ -145,6 +156,22 @@ export default function TerminalView({
       for (const chunk of chunkWrite(data)) api.write(ptyId, chunk)
     })
     const onResize = term.onResize(({ cols, rows }) => api.resize(ptyId, cols, rows))
+    // Track colour-scheme subscriptions (?2031 h/l) and answer "which scheme?" (?996 n), so a
+    // program in auto theme follows the app's light/dark switch live. Returning false for h/l
+    // lets xterm's own mode handling run too.
+    const decset = term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+      if (params.includes(2031)) schemeSubscribers.add(ptyId)
+      return false
+    })
+    const decrst = term.parser.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => {
+      if (params.includes(2031)) schemeSubscribers.delete(ptyId)
+      return false
+    })
+    const dsr = term.parser.registerCsiHandler({ prefix: '?', final: 'n' }, (params) => {
+      if (params[0] !== 996) return false
+      if (!exitedRef.current) api.write(ptyId, schemeReport(currentResolvedTheme()))
+      return true
+    })
 
     let raf = 0
     const refit = (): void => {
@@ -170,6 +197,9 @@ export default function TerminalView({
       detach()
       onData.dispose()
       onResize.dispose()
+      decset.dispose()
+      decrst.dispose()
+      dsr.dispose()
       term.dispose()
       termRef.current = null
       fitRef.current = null
@@ -184,6 +214,8 @@ export default function TerminalView({
     const o = terminalOptionsFor(resolved)
     term.options.theme = o.theme
     term.options.minimumContrastRatio = o.minimumContrastRatio
+    // tell a subscribed program (Claude Code in auto theme) so it re-themes without a restart
+    if (schemeSubscribers.has(ptyId) && !exitedRef.current) api.write(ptyId, schemeReport(resolved))
   }, [resolved])
 
   // A finished process leaves no live cursor behind (the exit bar says what happened).

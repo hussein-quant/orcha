@@ -138,11 +138,13 @@ export function hookCommand(script: string, event: string): string {
   return `if [ -r ${q} ]; then /bin/sh ${q} ${event}; else cat >/dev/null 2>&1; fi`
 }
 
-/** Claude Code's own theme, matched to the app's resolved appearance. Claude paints some
- *  rows (the echoed prompt, diffs) with its OWN background colours, so a dark Claude theme
- *  inside a light terminal shows dark bars. Set per launch via this --settings file only —
- *  the user's ~/.claude settings are never touched. */
-export type ClaudeTheme = 'light' | 'dark'
+/** Claude Code's own theme. Claude paints some rows (the echoed prompt, diffs) with its OWN
+ *  background colours, so a mismatched theme shows dark bars in a light terminal (or light
+ *  bars in a dark one). We launch it in `auto`: it asks the terminal for its background
+ *  (OSC 11, answered by xterm from the live theme) and subscribes to scheme-change reports
+ *  (?2031), which TerminalView sends on every appearance flip — so even a running session
+ *  follows the switch. Set per launch via this --settings file only; ~/.claude is untouched. */
+export type ClaudeTheme = 'light' | 'dark' | 'auto'
 
 /** The Claude `--settings` document: the status hooks, plus Claude's theme when known. */
 export function claudeHookSettings(script: string, theme?: ClaudeTheme): { hooks: Record<string, unknown[]>; theme?: ClaudeTheme } {

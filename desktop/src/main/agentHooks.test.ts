@@ -251,7 +251,7 @@ describe('hook relay script', () => {
 })
 
 
-describe('Claude theme follows the app appearance (per-launch --settings only)', () => {
+describe('Claude theme via the per-launch --settings file', () => {
   it('adds theme only when known; hooks unchanged', () => {
     expect(claudeHookSettings('/x/hook.sh')).not.toHaveProperty('theme')
     const light = claudeHookSettings('/x/hook.sh', 'light')
@@ -260,13 +260,13 @@ describe('Claude theme follows the app appearance (per-launch --settings only)',
     expect(claudeHookSettings('/x/hook.sh', 'dark').theme).toBe('dark')
   })
 
-  it('install writes the theme, and a later appearance change rewrites only the settings file', () => {
+  it('install writes the theme (the app launches Claude in auto), and a rewrite touches only the settings file', () => {
     const writes: Array<[string, string]> = []
     const fs = { mkdir: () => {}, write: (p: string, d: string) => void writes.push([p, d]) }
     const files = hookFilePaths('/tmp/ud')
-    installAgentHooks(files, 5555, 'a'.repeat(32), fs, 'light')
+    installAgentHooks(files, 5555, 'a'.repeat(32), fs, 'auto')
     const first = writes.find(([p]) => p === files.claudeSettings)!
-    expect(JSON.parse(first[1]).theme).toBe('light')
+    expect(JSON.parse(first[1]).theme).toBe('auto')
     writes.length = 0
     writeClaudeSettings(files, 'dark', fs)
     expect(writes.map(([p]) => p)).toEqual([files.claudeSettings])
