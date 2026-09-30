@@ -4,6 +4,7 @@ import type { TERM_CHANNELS, TermCommand, TermEvent, TermInfo, TermRestoreResult
 import type { AGENT_CHANNELS, AgentsSnapshot } from '../shared/agents'
 import type { USAGE_CHANNELS, UsageSnapshot } from '../shared/usage'
 import type { THEME_CHANNELS, ThemeState } from '../shared/theme'
+import type { PROFILE_CHANNELS, ProfileSaveResult, ProfileState } from '../shared/profile'
 
 /** Terminal channel names, inlined: this sandboxed preload imports shared/* for TYPES only
  *  (no shared runtime chunk). `satisfies` keeps them identical to shared/terminal.ts. */
@@ -44,6 +45,11 @@ const THEME = {
   set: 'orcha:theme:set',
   changed: 'orcha:theme:changed'
 } as const satisfies typeof THEME_CHANNELS
+/** Profile channels, inlined for the same reason (identical to shared/profile.ts). */
+const PROFILE = {
+  get: 'orcha:profile:get',
+  set: 'orcha:profile:set'
+} as const satisfies typeof PROFILE_CHANNELS
 import type {
   AnalyzeProjectResult,
   AttentionItem,
@@ -201,6 +207,11 @@ const api: OrchaDesktopApi = {
       ipcRenderer.on(THEME.changed, listener)
       return () => ipcRenderer.removeListener(THEME.changed, listener)
     }
+  },
+  // Settings › Profile: main validates the name and renames you in running projects.
+  profile: {
+    get: () => invoke<ProfileState>(PROFILE.get),
+    set: (name) => invoke<ProfileSaveResult>(PROFILE.set, name)
   },
   embedSend: (msg: HostToPortal) => invoke<boolean>('orcha:embedSend', msg),
   onEmbedEvent: (cb) => {

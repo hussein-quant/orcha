@@ -49,6 +49,8 @@ import { readAppearance, isEmpty } from './appearanceStore'
 import { buildApplyAppearanceScript } from './appearanceScripts'
 import { createThemeController, readThemeMode, writeThemeMode, type ThemeController } from './themeMode'
 import { canvasFor, THEME_CHANNELS, type ThemeState } from '../shared/theme'
+import { normalizeProfileName, PROFILE_CHANNELS, profileState, type ProfileSaveResult, type ProfileState } from '../shared/profile'
+import { readProfileName, renameSelfInProjects, writeProfileName } from './profileStore'
 import { EmbedTracker } from './embedTracker'
 import { PtyHost, type PtyProcess } from './ptyHost'
 import { acceptTermSender as acceptTermSenderFacts, closeAction, createTermController, TermRequestError, type SenderFacts, type TermControllerHooks } from './terminalIpc'
@@ -112,6 +114,33 @@ const nodeEngineFs: EngineFs = {
 }
 
 
+/** Settings › Profile: the saved name (this Mac only) over the Mac account name. */
+function currentProfile(): ProfileState {
+  return profileState(readProfileName(app.getPath('userData')), os.userInfo().username)
+}
+
+/** Save the profile name and rename your human in every running project to match. */
+async function saveProfile(raw: unknown): Promise<ProfileSaveResult> {
+  let name: string | null
+  try {
+    name = normalizeProfileName(raw)
+  } catch {
+    throw { code: 'INVALID_PROFILE' } satisfies BridgeError
+  }
+  const before = currentProfile()
+  writeProfileName(app.getPath('userData'), name)
+  const state = currentProfile()
+  const stacks = (await listStacks().catch(() => []))
+    .filter((s) => s.running && s.apiPort !== null)
+    .map((s) => ({ projectShort: s.projectShort, apiPort: s.apiPort as number }))
+  const projects = await renameSelfInProjects(
+    { stacks, request: (apiPort, p, method, body) => portalRequest(apiPort, p, method, body) },
+    before.effective,
+    state.effective
+  )
+  return { state, projects }
+}
+
 /** fetch→JSON with HTTP errors carrying `status` (so the engine maps 409→CONTAINER_EXISTS). */
 async function fetchJson(url: string, init?: { method?: string; body?: unknown }): Promise<unknown> {
   const res = await fetch(url, {
@@ -151,7 +180,8 @@ function engineDeps(): EngineDeps {
       return readFileSync(composePath, 'utf8')
     },
     genSecret: () => randomBytes(32).toString('base64url'),
-    user: os.userInfo().username || 'operator',
+    // Settings › Profile name when set, else this Mac's account name.
+    user: currentProfile().effective,
     // After the portal is up, start the host-side agent worker (orcha CLI notifier) so
     // assigned tasks actually run — without this the portal opens but nothing picks up work.
     startWorker: (folder) => startHostWorker(folder, nodeHostWorkerDeps),
@@ -1076,7 +1106,7 @@ async function requireKnownStack(project: string): Promise<Stack> {
 async function portalRequest(
   apiPortRaw: unknown,
   pathRaw: unknown,
-  method: 'GET' | 'POST' | 'PUT',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH',
   body?: unknown
 ): Promise<unknown> {
   const apiPort = typeof apiPortRaw === 'number' ? apiPortRaw : NaN
@@ -1139,6 +1169,20 @@ app.whenReady().then(() => {
     asResult(async () => {
       if (!themeSender(event)) throw { code: 'INVALID_THEME' } satisfies BridgeError
       return themeCtl.set(raw)
+    })
+  )
+
+  // Settings › Profile: same sender rule as Appearance (our own index-preload windows).
+  ipcMain.handle(PROFILE_CHANNELS.get, (event) =>
+    asResult(async () => {
+      if (!themeSender(event)) throw { code: 'INVALID_PROFILE' } satisfies BridgeError
+      return currentProfile()
+    })
+  )
+  ipcMain.handle(PROFILE_CHANNELS.set, (event, raw: unknown) =>
+    asResult(async () => {
+      if (!themeSender(event)) throw { code: 'INVALID_PROFILE' } satisfies BridgeError
+      return saveProfile(raw)
     })
   )
 

@@ -2,6 +2,7 @@ import type { TermApi } from './terminal'
 import type { AgentsApi } from './agents'
 import type { UsageApi } from './usage'
 import type { ThemeApi } from './theme'
+import type { ProfileApi } from './profile'
 import type { EmbedEvent, EmbedMode, HostToPortal, PortalToHost } from './embed'
 import type { ProjectIcon } from './projectIcon'
 
@@ -77,6 +78,8 @@ export type BridgeError =
   | { code: 'USAGE_FAILED'; reason: 'FORBIDDEN' | 'INVALID' }
   /** Settings › Appearance: a mode other than system/light/dark, or a foreign sender. */
   | { code: 'INVALID_THEME' }
+  /** Settings › Profile: a non-string / over-long name, or a foreign sender. */
+  | { code: 'INVALID_PROFILE' }
   // ---- onboarding / provisioning ----
   | { code: 'DOCKER_NOT_INSTALLED' }
   | { code: 'DOCKER_START_TIMEOUT' }
@@ -351,6 +354,8 @@ export interface OrchaDesktopApi {
   usage?: UsageApi
   /** Settings › Appearance (System / Light / Dark; absent on an older preload). */
   theme?: ThemeApi
+  /** Settings › Profile (absent on an older preload: the section is hidden). */
+  profile?: ProfileApi
   /** Forward a host → portal message (navigate / openSearch) to the ACTIVE portal view.
    *  Resolves false when there is nothing to deliver to. */
   embedSend(msg: HostToPortal): Promise<boolean>

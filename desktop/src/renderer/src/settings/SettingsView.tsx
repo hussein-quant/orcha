@@ -1,23 +1,25 @@
 /** Desktop Settings (⌘, / sidebar footer "Settings"): fills the inset content panel while
- *  open (main hides the portal view, like a terminal session). Sections — Agents, Appearance,
- *  Notifications and Usage — in a Linear-style left section list.
+ *  open (main hides the portal view, like a terminal session). Sections — Profile, Agents,
+ *  Appearance, Notifications and Usage — in a Linear-style left section list.
  *
  *  Notifications has no settings of its own: desktop alerts follow the same per-person
  *  rules as every other channel (portal Settings › Notifications, mig 063). The section
  *  says so and opens those preferences in the running project's portal. */
 import { useEffect, useRef, useState } from 'react'
-import { BarChart3, Bell, Bot, Settings as SettingsIcon, SunMoon, X } from 'lucide-react'
+import { BarChart3, Bell, Bot, Settings as SettingsIcon, SunMoon, UserRound, X } from 'lucide-react'
 import type { AgentId } from '../../../shared/agents'
 import AgentsSettings from './AgentsSettings'
 import AppearanceSettings from './AppearanceSettings'
+import ProfileSettings from './ProfileSettings'
 import type { UsageValue } from '../usage/useUsage'
 
 /** Portal section the desktop's Notifications entry opens (SettingsPage `#tab=notifications`). */
 export const NOTIFICATION_SETTINGS_PATH = '/settings#tab=notifications'
 
-type Section = 'agents' | 'appearance' | 'notifications' | 'usage'
+type Section = 'profile' | 'agents' | 'appearance' | 'notifications' | 'usage'
 
 const SECTIONS: { key: Section; label: string; Icon: typeof Bot }[] = [
+  { key: 'profile', label: 'Profile', Icon: UserRound },
   { key: 'agents', label: 'Agents', Icon: Bot },
   { key: 'appearance', label: 'Appearance', Icon: SunMoon },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
@@ -47,6 +49,8 @@ export default function SettingsView({
   const [section, setSection] = useState<Section>(initialSection)
   /** Settings › Appearance needs the theme bridge (absent on an older preload: hidden). */
   const hasTheme = !!window.orchaDesktop?.theme
+  /** Settings › Profile needs the profile bridge (same rule). */
+  const hasProfile = !!window.orchaDesktop?.profile
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     ref.current?.focus()
@@ -85,7 +89,9 @@ export default function SettingsView({
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Settings sections" className="w-[188px] shrink-0 border-r border-border p-2">
           <div className="px-2 pb-1 pt-1.5 text-[11.5px] font-medium text-text-3">Desktop</div>
-          {SECTIONS.filter((x) => (x.key !== 'usage' || usage?.available) && (x.key !== 'appearance' || hasTheme)).map(({ key, label, Icon }) => (
+          {SECTIONS.filter(
+            (x) => (x.key !== 'usage' || usage?.available) && (x.key !== 'appearance' || hasTheme) && (x.key !== 'profile' || hasProfile)
+          ).map(({ key, label, Icon }) => (
             <button
               key={key}
               type="button"
@@ -102,7 +108,9 @@ export default function SettingsView({
         </nav>
         <div className="min-w-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[880px] px-8 pb-16 pt-8">
-            {section === 'agents' ? (
+            {section === 'profile' && hasProfile ? (
+              <ProfileSettings />
+            ) : section === 'agents' ? (
               <>
                 <h2 className="text-[24px] font-semibold tracking-[-0.01em] text-text">Agents</h2>
                 <p className="mb-8 mt-1 text-[13px] text-text-3">
