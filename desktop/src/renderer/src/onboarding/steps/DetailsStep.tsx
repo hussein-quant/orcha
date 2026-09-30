@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { PenLine } from 'lucide-react'
 import { Input } from '../../ui/Input'
 import { ObButton, StepFooter, StepHeader, tildify } from '../ui'
 
@@ -31,6 +32,7 @@ export default function DetailsStep({
   return (
     <>
       <StepHeader
+        icon={<PenLine className="h-4 w-4" aria-hidden="true" />}
         title="Name your project"
         subtitle={
           <>
@@ -39,7 +41,7 @@ export default function DetailsStep({
         }
       />
       <form
-        className="flex flex-col gap-5"
+        className="ob-form flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault()
           if (nameOk) onCreate(name.trim(), objective.trim())

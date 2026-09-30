@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FolderChoice, FolderState, ProvisionResult, WizardVariant } from '../../../shared/types'
 import './onboarding.css'
 import { ObButton, OrchaMark } from './ui'
@@ -7,6 +7,9 @@ import { SkipConfirmDialog } from './SkipConfirmDialog'
 import { useProvisionStream } from './useProvisionStream'
 import { bindCodeSource } from './bindCodeSource'
 import { describeProvisionFailure, type ProvisionFailure } from './provisionError'
+import { motionAllowed, useStageTransition } from './motion'
+import { setupIssues, usePreflightChecks } from './usePreflightChecks'
+import { SetupCheckNotice, setupReason } from './SetupCheckNotice'
 import WelcomeStep from './steps/WelcomeStep'
 import PreflightStep from './steps/PreflightStep'
 import SourceStep, { type ProjectSource } from './steps/SourceStep'
@@ -28,6 +31,30 @@ const TITLES: Record<WizardVariant, string> = {
 type Phase = 'welcome' | 'preflight' | 'source' | 'folder' | 'github' | 'details' | 'provision' | 'fleet' | 'finish'
 
 type StepKey = 'setup' | 'source' | 'details' | 'create' | 'agents'
+
+/** Depth of each phase in the flow — decides whether a move slides forward or back. */
+const ORDER: Record<Phase, number> = {
+  welcome: 0,
+  preflight: 1,
+  source: 2,
+  folder: 3,
+  github: 3,
+  details: 4,
+  provision: 5,
+  fleet: 6,
+  finish: 7
+}
+
+/** The stepper per variant. Adding a project later never shows Setup: its checks run
+ *  silently in the background and only surface when something is actually missing. */
+const STEP_KEYS: Record<WizardVariant, StepKey[]> = {
+  'first-run': ['setup', 'source', 'details', 'create', 'agents'],
+  'add-project': ['source', 'details', 'create', 'agents']
+}
+
+/** How long the Create step holds its completion moment before moving on to Agents. Only
+ *  when motion is allowed — reduced motion moves on at once. */
+export const CELEBRATE_MS = 1200
 
 const STEP_FOR: Partial<Record<Phase, StepKey>> = {
   preflight: 'setup',
@@ -59,8 +86,15 @@ type Attempt =
     }
   | { kind: 'github'; repoUrl: string; dest: string }
 
-/** Drives welcome → setup → source → (folder → details | github) → create → agents → finish
- *  for BOTH first-run onboarding and "Add project" — same steps, only the framing differs.
+/** Drives welcome → setup → source → (folder → details | github) → create → agents → finish.
+ *
+ *  First run walks all of it. "Add a project" starts at Source: the Setup checks run silently
+ *  in the background and only surface — as a compact notice with the fix and "Check again",
+ *  or by routing to Setup with the reason when the user tries to create — if something
+ *  required is missing. Back from Source there closes the wizard; it never lands on Setup.
+ *
+ *  Every move between steps is a direction-aware transition (see motion.ts / onboarding.css);
+ *  under reduced motion it is instant.
  *
  *  Input is preserved across every back/forward move (folder choice, name, objective, repo
  *  URL and destination live here, not in the step components), and a failed provision is
@@ -75,7 +109,34 @@ export default function OnboardingWizard({
   variant?: WizardVariant
   onCancel?: () => void
 }) {
-  const [phase, setPhase] = useState<Phase>(variant === 'first-run' ? 'welcome' : 'preflight')
+  const [phase, setPhaseState] = useState<Phase>(variant === 'first-run' ? 'welcome' : 'source')
+  const phaseRef = useRef(phase)
+  const transition = useStageTransition()
+  const celebrateTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const setPhase = useCallback(
+    (next: Phase): void => {
+      if (celebrateTimer.current) {
+        clearTimeout(celebrateTimer.current)
+        celebrateTimer.current = null
+      }
+      const from = phaseRef.current
+      if (next === from) return
+      phaseRef.current = next
+      transition(ORDER[next] >= ORDER[from] ? 'forward' : 'back', () => setPhaseState(next))
+    },
+    [transition]
+  )
+  useEffect(
+    () => () => {
+      if (celebrateTimer.current) clearTimeout(celebrateTimer.current)
+    },
+    []
+  )
+  // Add a project: the Setup checks, silently. First run shows them as a step instead.
+  const background = usePreflightChecks(variant === 'add-project')
+  const issues = variant === 'add-project' ? setupIssues(background) : []
+  /** Add a project routed to Setup: why, and where to return afterwards. */
+  const [detour, setDetour] = useState<{ reason: string | null; from: Phase } | null>(null)
   const [source, setSource] = useState<ProjectSource | null>(null)
   const [choice, setChoice] = useState<FolderChoice | null>(null)
   const [folderState, setFolderState] = useState<FolderState | null>(null)
@@ -131,7 +192,25 @@ export default function OnboardingWizard({
       ? 'This folder isn’t a git repository yet. Run `git init` in it to unlock the local code features.'
       : null
 
+  function openSetup(from: Phase): void {
+    setDetour({ reason: setupReason(issues), from })
+    setPhase('preflight')
+  }
+
+  function leaveSetup(): void {
+    const back = detour?.from ?? 'source'
+    setDetour(null)
+    background.check()
+    setPhase(back)
+  }
+
   async function runAttempt(a: Attempt, retry = false): Promise<void> {
+    // Add a project: never start a create the background check already knows will fail —
+    // route to Setup with the reason instead (nothing entered is lost).
+    if (variant === 'add-project' && !retry && issues.length > 0) {
+      openSetup(phaseRef.current)
+      return
+    }
     setAttempt(a)
     setPhase('provision')
     setStatus('running')
@@ -169,7 +248,15 @@ export default function OnboardingWizard({
       void bindCodeSource(res.apiPort, isGitRepo).then(setCodeSourceBound)
       // Pause on warnings / the git tip so they're actually read; otherwise move on.
       const pause = res.warnings.length > 0 || (a.kind === 'local' && !a.state.isGitRepo)
-      if (!pause) setPhase('fleet')
+      if (!pause) {
+        // Hold the completion moment briefly (motion only), then on to Agents.
+        if (motionAllowed()) {
+          celebrateTimer.current = setTimeout(() => {
+            celebrateTimer.current = null
+            if (phaseRef.current === 'provision') setPhase('fleet')
+          }, CELEBRATE_MS)
+        } else setPhase('fleet')
+      }
     } catch (err) {
       setFailure(describeProvisionFailure(err))
       setStatus('failed')
@@ -212,8 +299,10 @@ export default function OnboardingWizard({
   // The stepper always shows the same five steps so the count never shifts mid-flow; a step
   // that doesn't apply to this path (Details for GitHub or an existing Orcha folder) is
   // rendered as skipped rather than removed.
-  const stepKeys: StepKey[] = ['setup', 'source', 'details', 'create', 'agents']
-  const currentKey = STEP_FOR[phase]
+  const stepKeys = STEP_KEYS[variant]
+  const mapped = STEP_FOR[phase]
+  // Add a project's detour to Setup isn't one of its steps: no stepper there.
+  const currentKey = mapped && stepKeys.includes(mapped) ? mapped : undefined
   const currentIdx = currentKey ? stepKeys.indexOf(currentKey) : -1
   const steps: StepItem[] = stepKeys.map((key, i) => ({
     key,
@@ -230,7 +319,7 @@ export default function OnboardingWizard({
   // Jumping back is only meaningful before anything has been created.
   const canJump = ['preflight', 'source', 'folder', 'github', 'details'].includes(phase)
   function jump(key: string): void {
-    if (key === 'setup') setPhase('preflight')
+    if (key === 'setup' && variant === 'first-run') setPhase('preflight')
     else if (key === 'source') setPhase(source === 'github' ? 'github' : source === 'local' ? 'folder' : 'source')
     else if (key === 'details') setPhase('details')
   }
@@ -242,6 +331,17 @@ export default function OnboardingWizard({
       : attempt?.kind === 'github'
         ? (attempt.dest.split('/').filter(Boolean).pop() ?? 'your project')
         : 'your project')
+
+  // Only before anything is created, and only when the background check found a problem.
+  const setupNotice =
+    issues.length > 0 && ['source', 'folder', 'github', 'details'].includes(phase) ? (
+      <SetupCheckNotice
+        issues={issues}
+        checking={background.checking && !background.slow}
+        onRecheck={background.check}
+        onOpenSetup={() => openSetup(phase)}
+      />
+    ) : null
 
   return (
     <div className="ob-window">
@@ -264,13 +364,20 @@ export default function OnboardingWizard({
                 <StepIndicator steps={steps} onJump={canJump ? jump : undefined} />
               </div>
             )}
-            <div key={phase} className="ob-enter flex flex-col gap-6">
+            <div key={phase} className="ob-stage flex flex-col gap-6" data-phase={phase}>
+              {setupNotice && phase !== 'source' && setupNotice}
               {phase === 'welcome' && <WelcomeStep onContinue={() => setPhase('preflight')} />}
-              {phase === 'preflight' && <PreflightStep onContinue={() => setPhase('source')} />}
+              {phase === 'preflight' &&
+                (variant === 'add-project' ? (
+                  <PreflightStep reason={detour?.reason} onBack={leaveSetup} onContinue={leaveSetup} />
+                ) : (
+                  <PreflightStep onContinue={() => setPhase('source')} />
+                ))}
               {phase === 'source' && (
                 <SourceStep
                   selected={source}
-                  onBack={() => setPhase('preflight')}
+                  notice={setupNotice}
+                  onBack={variant === 'first-run' ? () => setPhase('preflight') : onCancel}
                   onChoose={(s) => {
                     setSource(s)
                     setPhase(s === 'local' ? 'folder' : 'github')

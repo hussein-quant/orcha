@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Folder, FolderPlus } from 'lucide-react'
+import { Folder, FolderOpen, FolderPlus } from 'lucide-react'
 import type { FolderChoice, FolderMode, FolderState } from '../../../../shared/types'
 import { Notice, ObButton, StepFooter, StepHeader, tildify } from '../ui'
 
@@ -54,11 +54,19 @@ export default function FolderStep({
   return (
     <>
       <StepHeader
+        icon={<FolderOpen className="h-4 w-4" aria-hidden="true" />}
         title="Choose a project folder"
         subtitle="Pick the folder that holds your code, or create an empty one for a new project."
       />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="ob-picker" data-empty={!choice}>
+        {!choice && (
+          <span className="ob-picker-art" aria-hidden="true">
+            <Folder className="h-5 w-5" />
+          </span>
+        )}
+        {!choice && <span className="ob-meta">Your code stays where it is — Quorate adds a small config next to it.</span>}
+        <div className="flex flex-wrap justify-center gap-2">
         <ObButton onClick={() => void choose('existing')} disabled={inspecting}>
           <Folder className="h-3.5 w-3.5" aria-hidden="true" />
           {choice ? 'Choose a different folder…' : 'Choose existing folder…'}
@@ -67,10 +75,11 @@ export default function FolderStep({
           <FolderPlus className="h-3.5 w-3.5" aria-hidden="true" />
           Create new folder…
         </ObButton>
+        </div>
       </div>
 
       {choice && (
-        <div className="ob-list" aria-live="polite">
+        <div className="ob-list ob-reveal" aria-live="polite" key={choice.folder}>
           <div className="ob-row" style={{ minHeight: 52 }}>
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border text-text-2">
               <Folder className="h-3.5 w-3.5" aria-hidden="true" />

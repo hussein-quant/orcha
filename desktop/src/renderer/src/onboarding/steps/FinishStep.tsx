@@ -1,6 +1,10 @@
-import { ObButton, StatusGlyph, StepFooter, StepHeader, tildify } from '../ui'
+import { Check } from 'lucide-react'
+import { ObButton, StepFooter, StepHeader, tildify } from '../ui'
 
-/** Last screen: what was created (one definition list, real values only) and one primary
+const SPARKS = [0, 1, 2, 3, 4, 5, 6, 7]
+
+/** Last screen — lands with one calm celebration (a check that springs in, two soft ripples
+ *  and a single ring of eight sparks; no confetti, nothing loops), then says what was created (one definition list, real values only) and one primary
  *  that opens the project on its next useful screen — its Agents when a fleet was just
  *  created, otherwise the Overview, which explains the next step for an empty project. */
 export default function FinishStep({
@@ -46,9 +50,18 @@ export default function FinishStep({
 
   return (
     <>
-      <div className="flex flex-col gap-4">
-        <span className="flex h-8 w-8 items-center justify-center rounded-full border border-border">
-          <StatusGlyph state="done" />
+      <div className="flex flex-col gap-5">
+        <span className="ob-burst" aria-hidden="true">
+          <span className="ob-burst-ring" data-n="1" />
+          <span className="ob-burst-ring" data-n="2" />
+          {SPARKS.map((i) => (
+            <span key={i} className="ob-spark" style={{ '--a': `${i * 45 + 22.5}deg` } as React.CSSProperties}>
+              <span />
+            </span>
+          ))}
+          <span className="ob-burst-core ob-pop">
+            <Check className="h-5 w-5" strokeWidth={2.75} />
+          </span>
         </span>
         <StepHeader
           title={`${name} is ready`}
@@ -59,9 +72,9 @@ export default function FinishStep({
           }
         />
       </div>
-      <dl className="ob-list m-0">
-        {rows.map(([k, v]) => (
-          <div key={k} className="ob-row" style={{ minHeight: 38 }}>
+      <dl className="ob-list ob-summary m-0">
+        {rows.map(([k, v], i) => (
+          <div key={k} className="ob-row" style={{ minHeight: 38, '--i': i } as React.CSSProperties}>
             <dt className="w-28 shrink-0 text-text-3">{k}</dt>
             <dd className="m-0 min-w-0 flex-1 truncate text-text">{v}</dd>
           </div>

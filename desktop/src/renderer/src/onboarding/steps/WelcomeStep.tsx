@@ -24,28 +24,36 @@ const FEATURES = [
   }
 ]
 
-/** First-run welcome: product mark, a Display title, four one-line capabilities and one
- *  primary. Calm by design — no typewriter, no emoji, no card grid. */
+/** First-run welcome: a hero with the Quorate orca gliding over a slow, soft light field,
+ *  a Display title, four one-line capabilities (revealed in sequence) and one primary.
+ *  No typewriter, no emoji; everything holds still under reduced motion. */
 export default function WelcomeStep({ onContinue }: { onContinue: () => void }) {
   return (
     <>
-      <div className="flex flex-col gap-5">
-        <OrchaMark size={44} />
-        <StepHeader
-          size="xl"
-          title="Welcome to Quorate"
-          subtitle="Your agent fleet, on your machine. Setting up your first project takes a couple of minutes."
-        />
+      <div className="ob-hero">
+        <div className="ob-hero-field" aria-hidden="true">
+          <span className="ob-hero-glow" data-n="1" />
+          <span className="ob-hero-glow" data-n="2" />
+          <span className="ob-hero-wake" />
+        </div>
+        <span className="ob-hero-mark">
+          <OrchaMark size={46} />
+        </span>
       </div>
-      <ul className="m-0 flex list-none flex-col gap-4 p-0">
-        {FEATURES.map((f) => (
-          <li key={f.title} className="flex items-start gap-3">
-            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-text-2">
+      <StepHeader
+        size="xl"
+        title="Welcome to Quorate"
+        subtitle="Your agent fleet, on your machine. Setting up your first project takes a couple of minutes."
+      />
+      <ul className="ob-features">
+        {FEATURES.map((f, i) => (
+          <li key={f.title} className="ob-feature" style={{ '--i': i } as React.CSSProperties}>
+            <span className="ob-feature-icon">
               <f.icon className="h-3.5 w-3.5" aria-hidden="true" />
             </span>
             <div className="flex min-w-0 flex-col">
               <span className="text-[13px] font-medium text-text">{f.title}</span>
-              <span className="text-[13px] text-text-3">{f.body}</span>
+              <span className="text-[12.5px] leading-snug text-text-3">{f.body}</span>
             </div>
           </li>
         ))}

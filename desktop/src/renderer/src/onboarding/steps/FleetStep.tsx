@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Crown, Sparkles } from 'lucide-react'
+import { Crown, Sparkles, UsersRound } from 'lucide-react'
 import type { RosterSuggestResponse } from '../../../../shared/types'
 import { Avatar, Notice, ObButton, StatusGlyph, StepFooter, StepHeader } from '../ui'
 import { fetchAgentAliases, resolveContainerId, resolveRosterIdentity } from '../portalIdentity'
@@ -297,9 +297,24 @@ export default function FleetStep({
   if (state.kind === 'loading') {
     return (
       <>
-        <StepHeader title="Suggested agents" subtitle="Looking at your project to suggest a team…" />
+        <StepHeader
+          icon={<UsersRound className="h-4 w-4" aria-hidden="true" />}
+          title="Suggested agents"
+          subtitle="Looking at your project to suggest a team…"
+        />
         <div className="flex items-center gap-2 text-[13px] text-text-2">
           <StatusGlyph state="running" /> Reading the project…
+        </div>
+        <div className="ob-agent-grid" aria-hidden="true">
+          {[0, 1, 2, 3].map((i) => (
+            <span key={i} className="ob-agent-card ob-agent-ghost ob-breathe" style={{ animationDelay: `${i * 160}ms` }}>
+              <span className="ob-ghost-avatar" />
+              <span className="flex flex-1 flex-col gap-2 pt-1">
+                <span className="ob-ghost-line" style={{ width: '46%' }} />
+                <span className="ob-ghost-line" style={{ width: '78%' }} />
+              </span>
+            </span>
+          ))}
         </div>
       </>
     )
@@ -324,6 +339,7 @@ export default function FleetStep({
   return (
     <>
       <StepHeader
+        icon={<UsersRound className="h-4 w-4" aria-hidden="true" />}
         title="Suggested agents"
         subtitle={`${basis}Pick who joins the project — you can change the team any time.`}
       />
@@ -336,10 +352,11 @@ export default function FleetStep({
       )}
       {analysis.kind === 'done' && analysis.result.ok && <ProjectAnalysisCard summary={analysis.result.summary} />}
 
-      <div className="ob-list" role="group" aria-label="Suggested agents">
-        {sorted.map((s) => (
+      <div className="ob-agent-grid" role="group" aria-label="Suggested agents">
+        {sorted.map((s, i) => (
           <FleetRow
             key={s.alias}
+            index={i}
             suggestion={s}
             checked={selected.has(s.alias) || createdKeys.has(s.alias.toLowerCase())}
             created={createdKeys.has(s.alias.toLowerCase())}
@@ -384,12 +401,15 @@ export default function FleetStep({
 
 function FleetRow({
   suggestion,
+  index = 0,
   checked,
   created = false,
   disabled,
   onToggle
 }: {
   suggestion: MergedSuggestion
+  /** Position in the grid — staggers the card's entrance. */
+  index?: number
   checked: boolean
   /** Already created by an earlier, partly-failed batch. */
   created?: boolean
@@ -398,39 +418,50 @@ function FleetRow({
 }) {
   const fromClaude = suggestion.source === 'claude'
   return (
-    <label className="ob-row" data-align="start" style={{ paddingTop: 10, paddingBottom: 10 }}>
+    <label
+      className="ob-agent-card"
+      data-checked={checked}
+      data-lead={suggestion.is_main || undefined}
+      style={{ '--i': Math.min(index, 8) } as React.CSSProperties}
+    >
       <input
         type="checkbox"
         checked={checked}
         disabled={disabled}
         onChange={onToggle}
         aria-label={`Include ${suggestion.alias}`}
-        className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--color-accent)]"
+        className="ob-agent-check h-3.5 w-3.5 shrink-0 accent-[var(--color-accent)]"
       />
-      <Avatar
-        name={suggestion.alias}
-        size={24}
-        badge={fromClaude ? <Sparkles className="h-2 w-2" aria-hidden="true" /> : undefined}
-      />
-      <span className="ob-row-main gap-0.5">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="ob-row-title">{suggestion.alias}</span>
+      <span className="ob-agent-avatar">
+        <Avatar
+          name={suggestion.alias}
+          size={32}
+          badge={fromClaude ? <Sparkles className="h-2 w-2" aria-hidden="true" /> : undefined}
+        />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="flex min-w-0 flex-col">
+          <span className="ob-row-title pr-5">{suggestion.alias}</span>
           <span className="truncate text-xs text-text-3">{suggestion.role}</span>
-          {suggestion.is_main && (
-            <span className="ob-chip" aria-label="Lead agent">
-              <Crown className="h-3 w-3 text-accent" aria-hidden="true" />
-              Lead
-            </span>
-          )}
-          {created && <span className="ob-chip">Created</span>}
-          {fromClaude && (
-            <span className="ob-chip">
-              <Sparkles className="h-3 w-3 text-accent" aria-hidden="true" />
-              Claude
-            </span>
-          )}
         </span>
-        {suggestion.focus && <span className="text-[12.5px] text-text-2">{suggestion.focus}</span>}
+        {(suggestion.is_main || created || fromClaude) && (
+          <span className="flex flex-wrap items-center gap-1.5">
+            {suggestion.is_main && (
+              <span className="ob-chip" aria-label="Lead agent">
+                <Crown className="h-3 w-3 text-accent" aria-hidden="true" />
+                Lead
+              </span>
+            )}
+            {created && <span className="ob-chip">Created</span>}
+            {fromClaude && (
+              <span className="ob-chip">
+                <Sparkles className="h-3 w-3 text-accent" aria-hidden="true" />
+                Claude
+              </span>
+            )}
+          </span>
+        )}
+        {suggestion.focus && <span className="text-[12.5px] leading-snug text-text-2">{suggestion.focus}</span>}
         {suggestion.rationale && <span className="ob-row-sub">{suggestion.rationale}</span>}
       </span>
     </label>

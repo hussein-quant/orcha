@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight, Copy } from 'lucide-react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { Check, ChevronDown, ChevronRight, Copy, X } from 'lucide-react'
 import type { ProgressEvent, ProvisionStep as StepId } from '../../../../shared/types'
 import type { ProvisionFailure } from '../provisionError'
 import { InlineText, Notice, ObButton, StatusGlyph, StepFooter, StepHeader, type GlyphState } from '../ui'
+import { formatElapsed, useElapsed } from '../motion'
 
 export type ProvisionStatus = 'idle' | 'running' | 'done' | 'failed'
 
@@ -38,9 +39,15 @@ const ASIDE: Record<GlyphState, string> = {
   warning: ''
 }
 
-/** Create: honest, step-by-step progress for provisioning (and cloning), the live log on
- *  demand, and — when it fails — a readable reason, the raw details on demand, Try again and
- *  Back. Never a dead end, and the title always matches what actually happened. */
+/** Create: a live launch view for provisioning (and cloning). A status orb, the stage in
+ *  progress, elapsed time and an overall progress bar sit over a slow, subtle light field;
+ *  below, a stepped timeline of the REAL provisioning stages (driven by the progress stream)
+ *  fills its rail as each stage lands, with per-stage durations. Completion gets one calm
+ *  moment — the orb resolves into a check with a single ripple.
+ *
+ *  Honest by design: the live log on demand, and — when it fails — a readable reason, the
+ *  raw details on demand, Try again and Back. Never a dead end, and the title always matches
+ *  what actually happened. */
 export default function ProvisionStep({
   projectName,
   events,
@@ -87,6 +94,39 @@ export default function ProvisionStep({
   }).length
   const current = visible.find((s) => stepState.get(s.id) === 'running')
 
+  // When each stage started / finished, as seen by this view (events carry no timestamps).
+  const [timing, setTiming] = useState<Map<StepId, { start?: number; end?: number }>>(new Map())
+  useEffect(() => {
+    if (events.length === 0) {
+      setTiming((t) => (t.size ? new Map() : t))
+      return
+    }
+    setTiming((prev) => {
+      const next = new Map(prev)
+      const now = Date.now()
+      let changed = false
+      for (const e of events) {
+        if (e.status === 'log') continue
+        const t = next.get(e.step) ?? {}
+        if (e.status === 'start' && t.start === undefined) {
+          next.set(e.step, { ...t, start: now })
+          changed = true
+        } else if (e.status !== 'start' && t.end === undefined) {
+          next.set(e.step, { ...t, end: now })
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [events])
+
+  // Elapsed time for the current attempt (restarts on Try again).
+  const [startedAt, setStartedAt] = useState<number | null>(null)
+  useEffect(() => {
+    if (status === 'running') setStartedAt(Date.now())
+  }, [status])
+  const elapsed = useElapsed(startedAt, status === 'running')
+
   const [showLog, setShowLog] = useState(false)
   const logOpen = showLog || status === 'failed'
   const logRef = useRef<HTMLPreElement>(null)
@@ -94,8 +134,11 @@ export default function ProvisionStep({
     if (logOpen && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [logOpen, logs.length])
   const [showDetail, setShowDetail] = useState(false)
-  const [showSteps, setShowSteps] = useState(false)
-  const stepsOpen = status !== 'done' || showSteps
+  const [hideSteps, setHideSteps] = useState(false)
+  const notes = warnings.length + (gitTip ? 1 : 0)
+  // Once done, the timeline stays in view for the completion moment; when there is
+  // something to read (warnings / the git tip) it folds away so that comes first.
+  const stepsOpen = status !== 'done' || (notes === 0 ? !hideSteps : hideSteps)
 
   const title =
     status === 'failed'
@@ -107,12 +150,68 @@ export default function ProvisionStep({
     status === 'failed'
       ? 'Nothing you entered is lost. Fix the problem below, then try again — or go back and change your choices.'
       : status === 'done'
-        ? `The project is running. ${warnings.length + (gitTip ? 1 : 0) > 1 ? 'A few things' : 'One thing'} to know before you add agents:`
+        ? notes === 0
+          ? 'The project is running. Next up: your agents.'
+          : `The project is running. ${notes > 1 ? 'A few things' : 'One thing'} to know before you add agents:`
         : `Step ${Math.min(finished + 1, visible.length)} of ${visible.length}${current ? ` · ${current.label}` : ''}. This usually takes a minute or two.`
+
+  const progress = status === 'done' ? 1 : visible.length ? finished / visible.length : 0
+  const failedStep = visible.find((s) => stepState.get(s.id) === 'failed')
+  const stageLabel =
+    status === 'done'
+      ? 'Everything is up'
+      : status === 'failed'
+        ? (failedStep?.label ?? 'Stopped')
+        : (current?.label ?? (finished === 0 ? 'Getting ready' : 'Finishing up'))
+  const lastLog = logs.length ? logs[logs.length - 1].trim() : ''
 
   return (
     <>
       <StepHeader title={title} subtitle={subtitle} />
+
+      <section className="ob-launch" data-status={status} aria-label="Creation progress">
+        <div className="ob-launch-field" aria-hidden="true">
+          <span className="ob-launch-glow" data-n="1" />
+          <span className="ob-launch-glow" data-n="2" />
+        </div>
+        <div className="ob-launch-head">
+          <span className="ob-orb" aria-hidden="true">
+            <span className="ob-orb-ring" />
+            <span className="ob-orb-arc" />
+            {status === 'done' && (
+              <>
+                <span className="ob-orb-ripple" />
+                <span className="ob-orb-core ob-pop">
+                  <Check className="h-4 w-4" strokeWidth={2.75} />
+                </span>
+              </>
+            )}
+            {status === 'failed' && (
+              <span className="ob-orb-core ob-pop" data-tone="danger">
+                <X className="h-4 w-4" strokeWidth={2.75} />
+              </span>
+            )}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span key={stageLabel} className="ob-launch-stage ob-swap">
+              {stageLabel}
+            </span>
+            <span className="ob-meta truncate" title={status === 'running' ? lastLog : undefined}>
+              {status === 'running'
+                ? lastLog || `${finished} of ${visible.length} stages done`
+                : status === 'done'
+                  ? `Up and running in ${formatElapsed(elapsed)}`
+                  : `${finished} of ${visible.length} stages finished`}
+            </span>
+          </span>
+          <span className="ob-launch-time" aria-label={`Elapsed ${formatElapsed(elapsed)}`}>
+            {formatElapsed(elapsed)}
+          </span>
+        </div>
+        <div className="ob-launch-bar" aria-hidden="true">
+          <span className="ob-launch-bar-fill" style={{ transform: `scaleX(${progress})` }} />
+        </div>
+      </section>
 
       {status === 'failed' && failure && (
         <Notice
@@ -155,7 +254,7 @@ export default function ProvisionStep({
         </Notice>
       )}
 
-      {status === 'done' && (warnings.length > 0 || gitTip) && (
+      {status === 'done' && notes > 0 && (
         <div className="flex flex-col gap-2">
           {warnings.map((w, i) => (
             <Notice key={i} tone="warning">
@@ -174,31 +273,58 @@ export default function ProvisionStep({
         <button
           type="button"
           className="ob-disclosure"
-          aria-expanded={showSteps}
-          onClick={() => setShowSteps((v) => !v)}
+          aria-expanded={stepsOpen}
+          onClick={() => setHideSteps((v) => !v)}
         >
-          {showSteps ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          {stepsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
           All {visible.length} steps finished
         </button>
       )}
       {stepsOpen && (
-        <div className="ob-list" aria-label="Progress" role="list">
-          {visible.map((s) => {
+        <div className="ob-timeline" aria-label="Progress" role="list">
+          {visible.map((s, i) => {
             const st = stepState.get(s.id) ?? 'todo'
+            const t = timing.get(s.id)
+            const took =
+              t?.start !== undefined && t.end !== undefined && (st === 'done' || st === 'failed')
+                ? Math.max(0, Math.round((t.end - t.start) / 1000))
+                : null
+            const next = visible[i + 1]
+            const nextState = next ? (stepState.get(next.id) ?? 'todo') : null
             return (
-              <div key={s.id} role="listitem" className="ob-row" data-state={st} style={{ minHeight: 36 }}>
-                <StatusGlyph state={st} />
-                <span className={`flex-1 truncate ${st === 'todo' || st === 'skipped' ? 'text-text-3' : 'text-text'}`}>
+              <div
+                key={s.id}
+                role="listitem"
+                className="ob-tl-item"
+                data-state={st}
+                style={{ '--i': i } as CSSProperties}
+              >
+                <span className="ob-tl-node">
+                  <StatusGlyph key={st} state={st} />
+                </span>
+                {next && (
+                  <span
+                    className="ob-tl-rail"
+                    aria-hidden="true"
+                    data-filled={st === 'done' || st === 'skipped'}
+                    data-live={nextState === 'running'}
+                  >
+                    <span className="ob-tl-rail-fill" />
+                  </span>
+                )}
+                <span className={`ob-tl-label ${st === 'todo' || st === 'skipped' ? 'text-text-3' : 'text-text'}`}>
                   {s.label}
                 </span>
-                <span className={`ob-row-aside ${st === 'failed' ? 'text-danger' : ''}`}>{ASIDE[st]}</span>
+                <span className={`ob-row-aside tabular-nums ${st === 'failed' ? 'text-danger' : ''}`}>
+                  {took !== null && st === 'done' ? `${took}s` : ASIDE[st]}
+                </span>
               </div>
             )
           })}
         </div>
       )}
 
-      {logs.length > 0 && (status !== 'done' || showSteps) && (
+      {logs.length > 0 && (status !== 'done' || stepsOpen) && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <button
@@ -220,11 +346,6 @@ export default function ProvisionStep({
               </button>
             )}
           </div>
-          {!logOpen && status === 'running' && (
-            <span className="truncate font-mono text-[11.5px] text-text-3" title={logs[logs.length - 1]}>
-              {logs[logs.length - 1].trim()}
-            </span>
-          )}
           {logOpen && (
             <pre ref={logRef} className="ob-log" aria-label="Provisioning log">
               {logs.slice(-400).join('\n')}

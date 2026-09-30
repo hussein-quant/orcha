@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, FolderGit2, Search } from 'lucide-react'
+import { Check, FolderGit2, GitBranch, Search } from 'lucide-react'
 import type { GhRepo } from '../../../../shared/types'
 import { validateRepoUrl } from '../../../../shared/repoUrl'
 import { Input } from '../../ui/Input'
@@ -125,7 +125,7 @@ export default function GithubSourceStep({
   if (!checkingAuth && !gitInstalled) {
     return (
       <>
-        <StepHeader title="Clone from GitHub" />
+        <StepHeader icon={<GitBranch className="h-4 w-4" aria-hidden="true" />} title="Clone from GitHub" />
         <Notice tone="warning" title="Git isn’t installed on this Mac">
           <InlineText text="Install it with `xcode-select --install` or `brew install git`, then come back to this step." />
         </Notice>
@@ -136,7 +136,10 @@ export default function GithubSourceStep({
 
   return (
     <>
-      <StepHeader title="Clone from GitHub" subtitle="Quorate clones the repository to this Mac and sets it up there." />
+      <StepHeader
+        icon={<GitBranch className="h-4 w-4" aria-hidden="true" />}
+        title="Clone from GitHub"
+        subtitle="Quorate clones the repository to this Mac and sets it up there." />
 
       {checkingAuth ? (
         <div className="flex items-center gap-2 text-[13px] text-text-2">

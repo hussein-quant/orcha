@@ -29,9 +29,14 @@ const row = (key: string) => document.querySelector(`[data-row="${key}"]`) as HT
 beforeEach(() => stub())
 
 describe('PreflightStep (Setup)', () => {
-  it('lists Docker, Homebrew, the AI agent and the Orcha helper with their real state', async () => {
+  it('lists Docker, Homebrew, the AI agent and the Quorate command-line helper with their real state', async () => {
     render(<PreflightStep onContinue={vi.fn()} />)
     await waitFor(() => expect(within(row('docker')).getByText('Running')).toBeInTheDocument())
+    // User-facing name for the orcha CLI — never "Orcha helper".
+    expect(within(row('orcha')).getByText('Quorate command-line helper')).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/orcha helper/i)
+    // Readiness meter counts what resolved.
+    expect(screen.getByText('4 of 4 ready')).toBeInTheDocument()
     expect(within(row('homebrew')).getByText('Installed')).toBeInTheDocument()
     expect(within(row('ai')).getByText('Claude Code')).toBeInTheDocument()
     expect(within(row('orcha')).getByText('Installed')).toBeInTheDocument()
@@ -139,5 +144,29 @@ describe('PreflightStep (Setup)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('PreflightStep — detour from Add a project', () => {
+  it('says why it is shown and offers Back', async () => {
+    const onBack = vi.fn()
+    const user = userEvent.setup()
+    render(<PreflightStep onContinue={vi.fn()} onBack={onBack} reason="Docker isn’t running." />)
+    expect(screen.getByText(/quorate needs something on this mac first/i)).toBeInTheDocument()
+    expect(screen.getByText('Docker isn’t running.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
+    expect(onBack).toHaveBeenCalled()
+  })
+
+  it('names the helper in its install failure', async () => {
+    stub({
+      probePrereqs: vi.fn().mockResolvedValue({ ...ALL, orcha: false }),
+      installPrereqs: vi.fn().mockResolvedValue({ ok: false, detail: 'network down' })
+    })
+    const user = userEvent.setup()
+    render(<PreflightStep onContinue={vi.fn()} />)
+    await waitFor(() => expect(screen.getByRole('button', { name: /^continue$/i })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: /^continue$/i }))
+    expect(await screen.findByText(/the quorate command-line helper didn.t install: network down/i)).toBeInTheDocument()
   })
 })

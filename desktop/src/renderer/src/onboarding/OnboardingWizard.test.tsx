@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import OnboardingWizard from './OnboardingWizard'
@@ -445,10 +445,15 @@ describe('OnboardingWizard — walker: welcome / agents / finish / cancel', () =
     expect(screen.getByRole('button', { name: /get started/i })).toBeInTheDocument()
   })
 
-  it('add-project skips straight to Setup — no Welcome screen', async () => {
+  it('add-project starts at Source — no Welcome and no "Check your Mac" screen', async () => {
     render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
-    await waitFor(() => expect(screen.getByText(/check your mac/i)).toBeInTheDocument())
+    expect(screen.getByText(/where.s your code/i)).toBeInTheDocument()
+    expect(screen.queryByText(/check your mac/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /get started/i })).not.toBeInTheDocument()
+    // Let the silent background check settle — it must not surface anything when all is well.
+    await waitFor(() => expect(window.orchaDesktop.preflight).toHaveBeenCalled())
+    await waitFor(() => expect(window.orchaDesktop.probePrereqs).toHaveBeenCalled())
+    expect(screen.queryByTestId('setup-notice')).not.toBeInTheDocument()
   })
 
   it('add-project Cancel asks the right question, Keep going is the primary, Escape closes it', async () => {
@@ -496,6 +501,10 @@ describe('OnboardingWizard — walker: welcome / agents / finish / cancel', () =
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /suggested agents/i })).toBeInTheDocument())
     expect(screen.getByText('Atlas')).toBeInTheDocument()
+    // Revealed as a card with an avatar, selected by default.
+    const card = screen.getByText('Atlas').closest('.ob-agent-card')
+    expect(card).toHaveAttribute('data-checked', 'true')
+    expect(card?.querySelector('.ob-avatar')).toHaveTextContent('A')
     await user.click(screen.getByRole('button', { name: /create 1 agent/i }))
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /demo is ready/i })).toBeInTheDocument())
@@ -515,5 +524,206 @@ describe('OnboardingWizard — walker: welcome / agents / finish / cancel', () =
     await user.click(await screen.findByRole('button', { name: /^open /i }))
     await waitFor(() => expect(window.orchaDesktop.openOnboardingPortal).toHaveBeenCalledWith('orcha-demo'))
     expect(onDone).toHaveBeenCalled()
+  })
+})
+
+describe('OnboardingWizard — variants: steps, indicator and Back', () => {
+  it('first run walks Welcome → Setup → Source with a 5-step indicator that starts at Setup', async () => {
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="first-run" />)
+    // Welcome is a bookend: no indicator.
+    expect(screen.queryByRole('list', { name: /step \d of/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /get started/i }))
+    expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
+    const stepper = screen.getByRole('list', { name: /step 1 of 5/i })
+    expect(stepper).toHaveTextContent(/Setup.*Source.*Details.*Create.*Agents/)
+    expect(within(stepper).getByText('Setup').closest('[data-state]')).toHaveAttribute('data-state', 'current')
+    await waitFor(() => expect(screen.getByRole('button', { name: /^continue$/i })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: /^continue$/i }))
+    const next = await screen.findByRole('list', { name: /step 2 of 5/i })
+    expect(within(next).getByText('Setup').closest('[data-state]')).toHaveAttribute('data-state', 'done')
+    // The connector into Source has filled; the one into Details hasn't yet.
+    const seps = next.querySelectorAll('.ob-step-sep')
+    expect(seps[0]).toHaveAttribute('data-filled', 'true')
+    expect(seps[1]).toHaveAttribute('data-filled', 'false')
+  })
+
+  it('add-project shows a 4-step indicator without Setup: Source · Details · Create · Agents', () => {
+    render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
+    const stepper = screen.getByRole('list', { name: /step 1 of 4/i })
+    expect(stepper).toHaveTextContent(/Source.*Details.*Create.*Agents/)
+    expect(stepper).not.toHaveTextContent(/Setup/)
+    expect(within(stepper).getByText('Source').closest('[data-state]')).toHaveAttribute('data-state', 'current')
+  })
+
+  it('add-project walks Source → Folder → Details → Create without ever showing Setup', async () => {
+    const onDone = vi.fn()
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={onDone} variant="add-project" onCancel={vi.fn()} />)
+    await pickLocalFolder(user)
+    expect(await screen.findByRole('list', { name: /step 2 of 4/i })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /create project/i }))
+    await waitFor(() => expect(window.orchaDesktop.provision).toHaveBeenCalled())
+    await finishFromPortal(user, 'orcha-demo', '/')
+    expect(onDone).toHaveBeenCalled()
+    expect(screen.queryByText(/check your mac/i)).not.toBeInTheDocument()
+  })
+
+  it('add-project Back on Source closes the wizard — it never goes to Setup', async () => {
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={onCancel} />)
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
+    expect(onCancel).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/check your mac/i)).not.toBeInTheDocument()
+  })
+
+  it('first run Back on Source returns to Setup', async () => {
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="first-run" />)
+    await continueToSource(user)
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
+    expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
+  })
+})
+
+describe('OnboardingWizard — add-project background setup check', () => {
+  it('surfaces Docker not running on Source with the fix, and Check again clears it', async () => {
+    mock(window.orchaDesktop.preflight)
+      .mockResolvedValueOnce({ docker: 'daemon-down', autoStarted: false, hint: 'Open Docker Desktop, then re-check.' })
+      .mockResolvedValue({ docker: 'ok', autoStarted: false, hint: null })
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
+    const notice = await screen.findByTestId('setup-notice')
+    expect(notice).toHaveTextContent(/docker isn.t running/i)
+    expect(notice).toHaveTextContent(/open docker desktop/i)
+    // Still on Source — nothing blocks choosing a source meanwhile.
+    expect(screen.getByRole('button', { name: /local folder/i })).toBeEnabled()
+    await user.click(within(notice).getByRole('button', { name: /check again/i }))
+    await waitFor(() => expect(screen.queryByTestId('setup-notice')).not.toBeInTheDocument())
+    expect(window.orchaDesktop.preflight).toHaveBeenCalledTimes(2)
+  })
+
+  it('names the missing helper as the "Quorate command-line helper", never "Orcha helper"', async () => {
+    mock(window.orchaDesktop.probePrereqs).mockResolvedValue({
+      homebrew: true,
+      dockerEngine: true,
+      orcha: false,
+      claude: true,
+      codex: false,
+      apiKey: true
+    })
+    render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
+    const notice = await screen.findByTestId('setup-notice')
+    expect(notice).toHaveTextContent(/quorate command-line helper/i)
+    expect(document.body.textContent).not.toMatch(/orcha helper/i)
+  })
+
+  it('Open setup routes to the Setup step with the reason; Back returns to Source', async () => {
+    mock(window.orchaDesktop.preflight).mockResolvedValue({ docker: 'not-installed', autoStarted: false, hint: null })
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
+    const notice = await screen.findByTestId('setup-notice')
+    await user.click(within(notice).getByRole('button', { name: /open setup/i }))
+    expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
+    expect(screen.getByText(/quorate needs something on this mac first/i)).toBeInTheDocument()
+    expect(screen.getByText(/docker isn.t installed\./i)).toBeInTheDocument()
+    // The detour is not one of Add a project's steps — no indicator there.
+    expect(screen.queryByRole('list', { name: /step \d of/i })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
+    expect(screen.getByText(/where.s your code/i)).toBeInTheDocument()
+  })
+
+  it('never starts a create the check knows will fail: routes to Setup with the reason instead', async () => {
+    mock(window.orchaDesktop.preflight).mockResolvedValue({
+      docker: 'daemon-down',
+      autoStarted: false,
+      hint: 'Open Docker Desktop, then re-check.'
+    })
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
+    await screen.findByTestId('setup-notice')
+    await pickLocalFolder(user)
+    // The notice follows the user through the pre-create steps.
+    expect(await screen.findByTestId('setup-notice')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /create project/i }))
+    expect(window.orchaDesktop.provision).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
+    expect(screen.getByText(/docker isn.t running\./i)).toBeInTheDocument()
+    // Back returns to Details with the name still filled in.
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
+    expect(screen.getByLabelText(/project name/i)).toHaveValue('demo')
+  })
+})
+
+describe('OnboardingWizard — motion', () => {
+  function setMotion(reduce: boolean): void {
+    window.matchMedia = vi.fn().mockImplementation((q: string) => ({
+      matches: q.includes('no-preference') ? !reduce : reduce,
+      media: q,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn()
+    })) as never
+  }
+  type VTDoc = { startViewTransition?: unknown }
+  afterEach(() => {
+    delete (window as { matchMedia?: unknown }).matchMedia
+    delete (document as unknown as VTDoc).startViewTransition
+    delete document.documentElement.dataset.obDir
+  })
+  function stubViewTransition(): ReturnType<typeof vi.fn> {
+    const dirs: string[] = []
+    const vt = vi.fn((cb: () => void) => {
+      dirs.push(document.documentElement.dataset.obDir ?? '')
+      cb()
+      return { finished: Promise.resolve() }
+    })
+    ;(vt as unknown as { dirs: string[] }).dirs = dirs
+    ;(document as unknown as VTDoc).startViewTransition = vt
+    return vt
+  }
+
+  it('reduced motion: steps swap instantly — no view transition is started', async () => {
+    setMotion(true)
+    const vt = stubViewTransition()
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="first-run" />)
+    await user.click(screen.getByRole('button', { name: /get started/i }))
+    expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
+    expect(vt).not.toHaveBeenCalled()
+    expect(document.documentElement.dataset.obDir).toBeUndefined()
+  })
+
+  it('with motion allowed, moves are direction-aware view transitions (forward, then back)', async () => {
+    setMotion(false)
+    const vt = stubViewTransition()
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="first-run" />)
+    await continueToSource(user)
+    await user.click(screen.getByRole('button', { name: /^back$/i }))
+    expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
+    expect((vt as unknown as { dirs: string[] }).dirs).toEqual(['forward', 'forward', 'back'])
+  })
+
+  it('with motion allowed, Create holds its completion moment, then moves on by itself', async () => {
+    setMotion(false)
+    stubViewTransition()
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="first-run" />)
+    await toDetailsAndCreate(user)
+    expect(await screen.findByRole('heading', { name: /demo is ready/i })).toBeInTheDocument()
+    expect(document.querySelector('.ob-launch')).toHaveAttribute('data-status', 'done')
+    // Still on Create for the moment (the Finish primary isn't there yet)…
+    expect(screen.queryByRole('button', { name: /^open /i })).not.toBeInTheDocument()
+    // …then Agents (404 → skipped) → Finish.
+    expect(await screen.findByRole('button', { name: /^open /i }, { timeout: 3000 })).toBeInTheDocument()
+  })
+
+  it('reduced motion: Create moves on at once (no completion hold)', async () => {
+    setMotion(true)
+    const user = userEvent.setup()
+    render(<OnboardingWizard onDone={vi.fn()} variant="first-run" />)
+    await toDetailsAndCreate(user)
+    expect(await screen.findByRole('button', { name: /^open /i })).toBeInTheDocument()
   })
 })

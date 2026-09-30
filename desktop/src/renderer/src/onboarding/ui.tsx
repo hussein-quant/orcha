@@ -29,10 +29,26 @@ export const ObButton = forwardRef<HTMLButtonElement, Omit<ButtonProps, 'variant
 )
 ObButton.displayName = 'ObButton'
 
-/** Step title block: optional muted kicker, Display title, one-line subtitle. */
-export function StepHeader({ title, subtitle, size }: { title: ReactNode; subtitle?: ReactNode; size?: 'xl' }) {
+/** Step title block: optional icon tile (the step's illustration, quiet and monochrome),
+ *  Display title, one-line subtitle. */
+export function StepHeader({
+  title,
+  subtitle,
+  size,
+  icon
+}: {
+  title: ReactNode
+  subtitle?: ReactNode
+  size?: 'xl'
+  icon?: ReactNode
+}) {
   return (
-    <header className="flex flex-col gap-2">
+    <header className="ob-header flex flex-col gap-2">
+      {icon && (
+        <span className="ob-icon-tile" aria-hidden="true">
+          {icon}
+        </span>
+      )}
       <h2 className="ob-display" data-size={size}>
         {title}
       </h2>
@@ -98,7 +114,7 @@ export function StatusGlyph({ state, label }: { state: GlyphState; label?: strin
   switch (state) {
     case 'done':
       return (
-        <svg {...common} data-glyph="done">
+        <svg {...common} data-glyph="done" className="ob-pop">
           <circle cx="7" cy="7" r="7" fill="var(--color-ok)" />
           <path
             d="M4.2 7.2 6.1 9 9.8 5.2"
@@ -112,7 +128,7 @@ export function StatusGlyph({ state, label }: { state: GlyphState; label?: strin
       )
     case 'failed':
       return (
-        <svg {...common} data-glyph="failed">
+        <svg {...common} data-glyph="failed" className="ob-pop">
           <circle cx="7" cy="7" r="7" fill="var(--color-danger)" />
           <path d="M4.8 4.8 9.2 9.2M9.2 4.8 4.8 9.2" stroke="var(--color-bg)" strokeWidth="1.6" strokeLinecap="round" />
         </svg>
@@ -126,7 +142,7 @@ export function StatusGlyph({ state, label }: { state: GlyphState; label?: strin
       )
     case 'warning':
       return (
-        <svg {...common} data-glyph="warning">
+        <svg {...common} data-glyph="warning" className="ob-pop">
           <circle cx="7" cy="7" r="6" stroke="var(--color-warning)" strokeWidth="1.5" fill="none" />
           <circle cx="7" cy="7" r="2.2" fill="var(--color-warning)" />
         </svg>
