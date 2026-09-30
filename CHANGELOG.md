@@ -10,6 +10,18 @@ missing.
 
 ## [Unreleased]
 
+### Added
+- `orcha portal` runs a project's portal as a plain host process from the
+  installed CLI, with no portal container (first step of running Orcha without
+  Docker, GH #258). Postgres still comes from the project's Docker `db` service
+  for now, so on an existing project `docker compose -f .orcha/docker-compose.yml
+  stop portal && orcha portal` serves the same UI on the same port. It binds
+  127.0.0.1 unless `.claude/orcha.json` has `"bind": "lan"` (needed for phone
+  pairing); `--host`/`--port` override. The CLI now depends on the portal's
+  Python packages (FastAPI, uvicorn, psycopg, python-multipart, qrcode), and
+  the Homebrew formula installs them as pinned source resources generated from
+  `packaging/homebrew/resources.json` (`render_formula.py lock` refreshes it).
+
 ### Changed
 - The product is now called **Embodent** (formerly Quorate). The portal's
   title, sidebar, pairing dialog, device page and every user-facing message
