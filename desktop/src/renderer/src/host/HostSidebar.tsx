@@ -600,7 +600,9 @@ export default function HostSidebar(props: HostSidebarProps) {
           )}
         </Tooltip>
         <div className="my-1 h-px w-6 bg-border" />
-        <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-visible">
+        {/* pt/px: room for the count badges, which sit just outside each 32px button — a scroll
+            container clips on both axes, so without it the FIRST row's badge lost its top */}
+        <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto overflow-x-hidden px-1.5 pt-1.5">
           {rows.map((row) => {
             const railError = errorRowKey.get(row.stack.project) === row.key ? props.errors[row.stack.project] : null
             const tip = `${row.name} · ${stateWord(row)}${row.attention ? ` · ${row.attention}${row.partial ? '+' : ''} waiting` : ''}${
