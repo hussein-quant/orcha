@@ -14,6 +14,7 @@ import {
   parseCodexNotify,
   readCodexNotify,
   wireAgentHooks,
+  writeClaudeSettings,
   type AgentHookFiles
 } from './agentHooks'
 import { startHookReceiver, type HookReceiver } from './hookReceiver'
@@ -246,5 +247,29 @@ describe('hook relay script', () => {
     expect(readFileSync(out, 'utf8')).toBe(json)
     await runScript(['codex-notify', '{"type":"approval-requested"}'], envFor())
     expect(got).toEqual([[5, { event: 'TurnComplete', detail: null }]])
+  })
+})
+
+
+describe('Claude theme follows the app appearance (per-launch --settings only)', () => {
+  it('adds theme only when known; hooks unchanged', () => {
+    expect(claudeHookSettings('/x/hook.sh')).not.toHaveProperty('theme')
+    const light = claudeHookSettings('/x/hook.sh', 'light')
+    expect(light.theme).toBe('light')
+    expect(Object.keys(light.hooks)).toEqual(Object.keys(claudeHookSettings('/x/hook.sh').hooks))
+    expect(claudeHookSettings('/x/hook.sh', 'dark').theme).toBe('dark')
+  })
+
+  it('install writes the theme, and a later appearance change rewrites only the settings file', () => {
+    const writes: Array<[string, string]> = []
+    const fs = { mkdir: () => {}, write: (p: string, d: string) => void writes.push([p, d]) }
+    const files = hookFilePaths('/tmp/ud')
+    installAgentHooks(files, 5555, 'a'.repeat(32), fs, 'light')
+    const first = writes.find(([p]) => p === files.claudeSettings)!
+    expect(JSON.parse(first[1]).theme).toBe('light')
+    writes.length = 0
+    writeClaudeSettings(files, 'dark', fs)
+    expect(writes.map(([p]) => p)).toEqual([files.claudeSettings])
+    expect(JSON.parse(writes[0][1]).theme).toBe('dark')
   })
 })

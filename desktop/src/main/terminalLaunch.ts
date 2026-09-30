@@ -128,7 +128,7 @@ export const PERSONAL_SESSION_ENV = 'ORCHA_PERSONAL_SESSION'
 /** Environment for a pty: the app's env minus Electron/Orcha internals and secrets Orcha
  *  itself injected (an Orcha-stored API key must not silently switch the user's own
  *  `claude` to API billing), plus sane terminal defaults and the personal-session marker. */
-export function buildTermEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+export function buildTermEnv(env: NodeJS.ProcessEnv, theme?: 'light' | 'dark'): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(env)) {
     if (typeof v !== 'string') continue
@@ -145,5 +145,8 @@ export function buildTermEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   // Finder-launched apps get no locale; without one zsh mangles UTF-8 (prompts, box art).
   if (!out.LANG && !out.LC_ALL) out.LANG = 'en_US.UTF-8'
   out[PERSONAL_SESSION_ENV] = '1'
+  // "fg;bg" in ANSI colour numbers: tells CLIs that sniff it (Claude Code's `auto` theme, vim,
+  // many TUIs) whether the terminal background is light or dark.
+  if (theme) out.COLORFGBG = theme === 'light' ? '0;15' : '15;0'
   return out
 }

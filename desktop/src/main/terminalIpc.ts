@@ -39,6 +39,8 @@ export interface TermControllerDeps {
   host: PtyHost
   listProjects(): Promise<KnownProject[]>
   env: NodeJS.ProcessEnv
+  /** The app's resolved appearance, for COLORFGBG in new terminals. */
+  theme?: () => 'light' | 'dark'
   home: string
   exists(p: string): boolean
   isDir(p: string): boolean
@@ -138,7 +140,7 @@ export function createTermController(deps: TermControllerDeps) {
         shell,
         cols: o.cols,
         rows: o.rows,
-        env: buildTermEnv(deps.env),
+        env: buildTermEnv(deps.env, deps.theme?.()),
         ...(hooks ? { hooks } : {}),
         ...(o.kind !== 'shell' && o.agentSession ? { agentSession: o.agentSession } : {})
       })

@@ -182,3 +182,12 @@ describe('buildTermEnv', () => {
     expect(buildTermEnv({ LANG: 'de_DE.UTF-8' }).LANG).toBe('de_DE.UTF-8')
   })
 })
+
+
+describe('buildTermEnv COLORFGBG', () => {
+  it('tells CLIs whether the terminal background is light or dark', () => {
+    expect(buildTermEnv({}, 'light').COLORFGBG).toBe('0;15')
+    expect(buildTermEnv({}, 'dark').COLORFGBG).toBe('15;0')
+    expect(buildTermEnv({})).not.toHaveProperty('COLORFGBG')
+  })
+})

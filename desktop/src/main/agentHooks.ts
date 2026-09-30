@@ -138,14 +138,20 @@ export function hookCommand(script: string, event: string): string {
   return `if [ -r ${q} ]; then /bin/sh ${q} ${event}; else cat >/dev/null 2>&1; fi`
 }
 
-/** The Claude `--settings` document: hooks only, nothing else. */
-export function claudeHookSettings(script: string): { hooks: Record<string, unknown[]> } {
+/** Claude Code's own theme, matched to the app's resolved appearance. Claude paints some
+ *  rows (the echoed prompt, diffs) with its OWN background colours, so a dark Claude theme
+ *  inside a light terminal shows dark bars. Set per launch via this --settings file only —
+ *  the user's ~/.claude settings are never touched. */
+export type ClaudeTheme = 'light' | 'dark'
+
+/** The Claude `--settings` document: the status hooks, plus Claude's theme when known. */
+export function claudeHookSettings(script: string, theme?: ClaudeTheme): { hooks: Record<string, unknown[]>; theme?: ClaudeTheme } {
   const hooks: Record<string, unknown[]> = {}
   for (const event of CLAUDE_HOOK_EVENTS) {
     const handler = { type: 'command', command: hookCommand(script, event), timeout: 10 }
     hooks[event] = [MATCHER_EVENTS.has(event) ? { matcher: '*', hooks: [handler] } : { hooks: [handler] }]
   }
-  return { hooks }
+  return theme ? { hooks, theme } : { hooks }
 }
 
 const TOKEN_RE = /^[A-Za-z0-9]{16,128}$/
@@ -177,11 +183,17 @@ const realFs: HookFs = {
 
 /** Write the script (0700), the Claude settings (0600) and the endpoint file (0600) for this
  *  app run into an owner-only directory. */
-export function installAgentHooks(files: AgentHookFiles, port: number, token: string, fs: HookFs = realFs): void {
+export function installAgentHooks(files: AgentHookFiles, port: number, token: string, fs: HookFs = realFs, theme?: ClaudeTheme): void {
   fs.mkdir(files.dir)
   fs.write(files.script, hookScript(), 0o700)
-  fs.write(files.claudeSettings, `${JSON.stringify(claudeHookSettings(files.script), null, 2)}\n`, 0o600)
+  writeClaudeSettings(files, theme, fs)
   fs.write(files.endpoint, endpointFileText(port, token), 0o600)
+}
+
+/** (Re)write only the Claude --settings file — on an appearance change, so new Claude tabs
+ *  (and running ones that re-read their settings) follow the app's light/dark theme. */
+export function writeClaudeSettings(files: AgentHookFiles, theme?: ClaudeTheme, fs: HookFs = realFs): void {
+  fs.write(files.claudeSettings, `${JSON.stringify(claudeHookSettings(files.script, theme), null, 2)}\n`, 0o600)
 }
 
 /** The user's own top-level Codex `notify` argv from config.toml text: null = none set,
