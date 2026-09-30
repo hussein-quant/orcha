@@ -101,7 +101,7 @@ function ProviderRow({
       </button>
       {mode === 'detailed' && (
         <div className="flex flex-col gap-1 pb-2 pl-[42px] pr-7">
-          {ok && ok.windows.map((w) => <WindowRow key={w.key} w={w} />)}
+          {ok && ok.windows.map((w) => <WindowRow key={w.key} w={w} now={now} />)}
           {!ok && status && p.limits?.status === 'off' && onEnableLimits && (
             <div className="flex items-center gap-2 text-[11.5px] text-text-3">
               <span className="min-w-0 truncate">5h / weekly limits are off</span>

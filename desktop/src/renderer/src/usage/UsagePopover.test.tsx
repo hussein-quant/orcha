@@ -18,7 +18,13 @@ describe('UsagePopover', () => {
     const row = screen.getByTestId('usage-row-claude')
     expect(row.querySelector('[data-logo="claude"]')).not.toBeNull()
     expect(within(row).getByText('Max')).toBeTruthy()
-    expect(within(row).getByText('Resets in 1h 45m')).toBeTruthy()
+    expect(within(row).getByText('5h resets in 1h 45m')).toBeTruthy()
+    // every window says what is left and when it refills; weekly shows its own reset
+    const wk = row.querySelector('[data-window-remain="wk"]')!.textContent!
+    expect(wk).toMatch(/^23% left · resets .+ · in 3d$/)
+    expect(row.querySelector('[data-window-remain="5h"]')!.textContent).toMatch(/^90% left · resets .+ · in 1h 45m$/)
+    // a window whose reset the provider didn't give shows only what is left
+    expect(row.querySelector('[data-window-remain="wk:fable"]')!.textContent).toBe('76% left')
     const meters = within(row).getAllByRole('meter')
     expect(meters.map((m) => m.getAttribute('aria-valuenow'))).toEqual(['10', '77', '24'])
     expect(meters.map((m) => m.getAttribute('data-tone'))).toEqual(['neutral', 'warn', 'neutral'])

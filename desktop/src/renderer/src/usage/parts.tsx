@@ -51,17 +51,42 @@ export function LimitBar({ percent, className, thin = false }: { percent: number
   )
 }
 
-/** `5h ▓▓░ 10%` — one window as label, bar and percent. */
-export function WindowRow({ w }: { w: LimitWindow }) {
+/** `Fri 3:00 PM` for a reset later this week; `Oct 7, 3:00 PM` further out. */
+export function formatResetAt(resetsAt: number, now: number): string {
+  const d = new Date(resetsAt)
+  const days = (resetsAt - now) / 86_400_000
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  if (days < 1 && d.getDate() === new Date(now).getDate()) return `today ${time}`
+  if (days < 6) return `${d.toLocaleDateString(undefined, { weekday: 'short' })} ${time}`
+  return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${time}`
+}
+
+/** `21% left · resets Fri 3:00 PM · in 2d 4h` — what remains in a window and when it refills. */
+export function windowRemainText(w: LimitWindow, now: number): string {
+  const left = Math.max(0, 100 - Math.round(clampPercent(w.usedPercent)))
+  const parts = [`${left}% left`]
+  if (w.resetsAt !== null && Number.isFinite(w.resetsAt)) {
+    const rel = formatResetIn(w.resetsAt, now)
+    if (rel === 'Resets now') parts.push('resets now')
+    else parts.push(`resets ${formatResetAt(w.resetsAt, now)}`, (rel ?? '').replace(/^Resets /, ''))
+  }
+  return parts.filter(Boolean).join(' · ')
+}
+
+/** `5h ▓▓░ 10%` — one window as label, bar and percent, with what is left and when it resets. */
+export function WindowRow({ w, now = Date.now() }: { w: LimitWindow; now?: number }) {
   const p = Math.round(clampPercent(w.usedPercent))
   const tone = barTone(p)
   return (
-    <div className="grid grid-cols-[44px_1fr_36px] items-center gap-2" data-window={w.key}>
+    <div className="grid grid-cols-[44px_1fr_36px] items-center gap-x-2" data-window={w.key}>
       <span className="truncate text-[11.5px] text-text-3" title={w.label}>
         {w.label}
       </span>
       <LimitBar percent={p} />
       <span className={cn('text-right text-[11.5px] tabular-nums', TONE_TEXT[tone])}>{p}%</span>
+      <span className="col-start-2 col-end-4 mt-0.5 truncate text-[10.5px] tabular-nums text-text-3" data-window-remain={w.key}>
+        {windowRemainText(w, now)}
+      </span>
     </div>
   )
 }
@@ -73,7 +98,9 @@ export function headlineReset(p: ProviderUsage, now: number): string | null {
   const ws = p.limits.windows
   const primary = ws.find((w) => w.key === '5h' || w.key === 'primary') ?? ws[0]
   const withReset = primary?.resetsAt ? primary : ws.find((w) => w.resetsAt)
-  return withReset ? formatResetIn(withReset.resetsAt, now) : null
+  const text = withReset ? formatResetIn(withReset.resetsAt, now) : null
+  // name the window so "Resets in 37m" can't be read as the weekly limit
+  return text && withReset ? `${withReset.label} ${text.charAt(0).toLowerCase()}${text.slice(1)}` : text
 }
 
 /** One muted line saying where a provider stands when there is no bar to show. */
