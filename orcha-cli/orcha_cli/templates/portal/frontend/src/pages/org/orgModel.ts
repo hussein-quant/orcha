@@ -282,8 +282,10 @@ export function spendFact(b: AgentBudgetStatus | null | undefined, load: Budgets
   const spend = fmtUsd(u.spend_usd);
   if (limit == null) return { text: spend, tone: "muted", title: spend + " this month · no monthly budget" };
   const tone = b.paused ? "over" : meterTone(b.usd_ratio);
+  // budgets are usually whole dollars: "$18.71 / $120", not "$18.71 / $120.00" (card space)
+  const cap = Number.isInteger(limit) ? "$" + limit.toLocaleString("en-US") : fmtUsd(limit);
   return {
-    text: spend + " / " + fmtUsd(limit), tone,
+    text: spend + " / " + cap, tone,
     title: b.paused ? (b.reason || "Monthly budget reached — paused for new runs") : spend + " of a " + fmtUsd(limit) + " monthly budget",
   };
 }
@@ -396,7 +398,7 @@ export function roleLine(a: Agent): string {
 
 /* ---- layout -------------------------------------------------------------------- */
 
-export const CARD_W = 248;
+export const CARD_W = 272;
 export const CARD_H = 112;
 /** a proposed-hire card: role (2 lines) + rationale (3 lines) + Approve / Decline */
 export const GHOST_H = 196;

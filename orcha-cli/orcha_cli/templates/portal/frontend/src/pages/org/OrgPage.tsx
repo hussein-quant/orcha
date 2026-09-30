@@ -171,7 +171,7 @@ function CardFacts({ agent, env }: { agent: Agent; env: Env }) {
   const rv = reviewLoad(env.snap, id);
   return (
     <div className="org-card-meta">
-      <span className="org-fact" title={`${open} open ${open === 1 ? "task" : "tasks"}`}><Icon name="tasks" cls="org-fact-ico" />{open} open</span>
+      <span className="org-fact" title={`${open} open ${open === 1 ? "task" : "tasks"}`} aria-label={`${open} open ${open === 1 ? "task" : "tasks"}`}><Icon name="tasks" cls="org-fact-ico" />{open}</span>
       {spend ? <span className={"org-fact org-spend is-" + spend.tone} title={spend.title}>{spend.text}</span> : null}
       {/* mig 057: finished work follows the org chart — whose reviews this person holds */}
       {rv.covers.length || rv.pending.length ? (

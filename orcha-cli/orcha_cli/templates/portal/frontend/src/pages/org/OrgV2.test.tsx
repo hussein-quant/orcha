@@ -118,7 +118,7 @@ describe("org v2 model", () => {
     expect(spendFact(base({ usage: { ...base({}).usage, unmetered_runs: 3, runs: 3 } }), "ready")!.text).toBe("not metered");
     expect(spendFact(base({ usage: { ...base({}).usage, spend_usd: 4.2, metered_runs: 2, runs: 2 } }), "ready")!.text).toBe("$4.20");
     const capped = spendFact(base({ limits: { usd: 50, tokens: null }, usd_ratio: 0.9, usage: { ...base({}).usage, spend_usd: 45, metered_runs: 5, runs: 5 } }), "ready")!;
-    expect(capped).toMatchObject({ text: "$45.00 / $50.00", tone: "warn" });
+    expect(capped).toMatchObject({ text: "$45.00 / $50", tone: "warn" });
     expect(spendFact(base({ limits: { usd: 50, tokens: null }, usd_ratio: 1.2, paused: true, reason: "Monthly budget reached", usage: { ...base({}).usage, spend_usd: 60, metered_runs: 5, runs: 5 } }), "ready"))
       .toMatchObject({ tone: "over", title: "Monthly budget reached" });
   });
@@ -224,8 +224,8 @@ describe("org v2 chart", () => {
     const lead = within(card("lead"));
     expect(lead.getByText("Working")).toBeTruthy();
     expect(lead.getByText("Plan the billing migration")).toBeTruthy();
-    expect(lead.getByText("2 open")).toBeTruthy();
-    expect(lead.getByText("$4.20 / $50.00")).toBeTruthy();
+    expect(lead.getByLabelText("2 open tasks")).toHaveTextContent("2");
+    expect(lead.getByText("$4.20 / $50")).toBeTruthy();
     expect(lead.getByTitle("2 direct reports")).toBeTruthy();
     expect(within(card("forge")).getByText("not metered")).toBeTruthy();
     // humans: no spend figure, their escalation role instead of a run status
