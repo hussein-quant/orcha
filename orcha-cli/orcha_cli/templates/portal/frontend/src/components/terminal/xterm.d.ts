@@ -14,6 +14,7 @@ interface XTermTheme {
   background?: string;
   foreground?: string;
   cursor?: string;
+  selectionBackground?: string;
 }
 
 interface XTermOptions {

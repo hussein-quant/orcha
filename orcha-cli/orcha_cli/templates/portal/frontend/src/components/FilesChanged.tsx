@@ -23,6 +23,14 @@ export interface DiffFile {
   lines: string[];
 }
 
+// V2 a11y: tree rows are keyboard-reachable (Enter/Space activate) and the
+// one-letter status badge carries its word as a tooltip (the badge text itself
+// stays the bare letter — other surfaces' tests pin it).
+const STATUS_WORD: Record<string, string> = { M: "modified", A: "added", D: "deleted", R: "renamed" };
+function activateOnKey(e: { key: string; preventDefault: () => void }, fn: () => void) {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); }
+}
+
 export function diffLineClass(l: string): string {
   if (
     l.startsWith("+++") ||
@@ -203,7 +211,10 @@ function FilePane({ file }: { file: DiffFile | undefined }) {
 // Accepts EITHER a raw unified git diff (`diff`) or pre-parsed per-file
 // entries (`preparsed`, e.g. GitHub API file patches) — same tree/filter/
 // badges UI over both.
-export function FilesChanged({ diff, preparsed }: { diff?: string | null | undefined; preparsed?: DiffFile[] }) {
+/** `hideSummary`: the host already states "N files changed +a −d" (e.g. the
+ *  agent conversation's "Changed N files" card) — drop the viewer's own count
+ *  line so the fact is shown once (D12); the maximize control stays. */
+export function FilesChanged({ diff, preparsed, hideSummary }: { diff?: string | null | undefined; preparsed?: DiffFile[]; hideSummary?: boolean }) {
   const files = useMemo(
     () => (preparsed && preparsed.length ? preparsed : diff && diff.trim() ? parseDiffFiles(diff) : []),
     [diff, preparsed],
@@ -217,7 +228,12 @@ export function FilesChanged({ diff, preparsed }: { diff?: string | null | undef
   useEffect(() => {
     if (!full) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFull(false);
+      // An inner popover/menu that already handled this Escape wins. Otherwise
+      // the full view consumes it (preventDefault) so page-level "Escape closes
+      // the task detail" handlers leave the detail open (parity TSK-129).
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      setFull(false);
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden"; // the overlay owns scrolling
@@ -262,7 +278,7 @@ export function FilesChanged({ diff, preparsed }: { diff?: string | null | undef
           aria-label="Filter changed files"
           onChange={(e) => setQ(e.target.value)}
         />
-        <div className="dfv-tree">
+        <div className="dfv-tree" role="tree" aria-label="Changed files">
           {rows.length ? (
             rows.map((r) =>
               r.kind === "dir" ? (
@@ -272,9 +288,13 @@ export function FilesChanged({ diff, preparsed }: { diff?: string | null | undef
                   data-dfv-dir={r.full}
                   style={{ paddingLeft: 10 + r.depth * 14 }}
                   title={r.full}
+                  role="treeitem"
+                  aria-expanded={r.open}
+                  tabIndex={0}
                   onClick={() => toggleDir(r.full)}
+                  onKeyDown={(e) => activateOnKey(e, () => toggleDir(r.full))}
                 >
-                  <span className="dfv-c">{r.open ? "▾" : "▸"}</span>
+                  <span className="dfv-c" aria-hidden="true">{r.open ? "▾" : "▸"}</span>
                   <DirIcon />
                   <span className="dfv-nm">{r.label}</span>
                   <span className="dfv-ct">{r.count}</span>
@@ -286,11 +306,17 @@ export function FilesChanged({ diff, preparsed }: { diff?: string | null | undef
                   data-dfv-file={r.file!.path}
                   style={{ paddingLeft: 24 + r.depth * 14 }}
                   title={`${r.file!.path} · +${r.file!.add} −${r.file!.del}`}
+                  role="treeitem"
+                  aria-selected={r.file!.path === sel.path}
+                  tabIndex={0}
                   onClick={() => setSelPath(r.file!.path)}
+                  onKeyDown={(e) => activateOnKey(e, () => setSelPath(r.file!.path))}
                 >
                   <FileIcon />
                   <span className="dfv-nm">{r.label}</span>
-                  <span className={"dfv-b " + r.file!.status}>{r.file!.status}</span>
+                  <span className={"dfv-b " + r.file!.status} title={STATUS_WORD[r.file!.status] || r.file!.status}>
+                    {r.file!.status}
+                  </span>
                 </div>
               ),
             )
@@ -306,11 +332,15 @@ export function FilesChanged({ diff, preparsed }: { diff?: string | null | undef
   return (
     <div className={"dfv" + (full ? " dfv-full" : "")}>
       <div className="dfv-top">
-        <span className="dfv-n">
-          {files.length} file{files.length === 1 ? "" : "s"} changed
-        </span>
-        <span className="a">+{addT}</span>
-        <span className="d">−{delT}</span>
+        {hideSummary ? null : (
+          <>
+            <span className="dfv-n">
+              {files.length} file{files.length === 1 ? "" : "s"} changed
+            </span>
+            <span className="a">+{addT}</span>
+            <span className="d">−{delT}</span>
+          </>
+        )}
         <button
           type="button"
           className="dfv-max"

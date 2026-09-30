@@ -17,14 +17,33 @@ export const trunc = (s: string | null | undefined, n: number): string => {
 
 export const shortId = (s: unknown): string => (s ? String(s).slice(0, 8) : "—");
 
+/** Relative time, both directions: "just now", "5m ago" for the past and
+ *  "in 30m" for the future (screen review: a future expiry used to render
+ *  "just now" because negative diffs were clamped). Invalid → "—". */
 export function relTime(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (diff < 5) return "just now";
-  if (diff < 60) return Math.floor(diff) + "s ago";
-  if (diff < 3600) return Math.floor(diff / 60) + "m ago";
-  if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
-  return Math.floor(diff / 86400) + "d ago";
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return "—";
+  const diff = (Date.now() - t) / 1000;
+  const a = Math.abs(diff);
+  if (a < 5) return "just now";
+  const n =
+    a < 60 ? Math.floor(a) + "s"
+    : a < 3600 ? Math.floor(a / 60) + "m"
+    : a < 86400 ? Math.floor(a / 3600) + "h"
+    : Math.floor(a / 86400) + "d";
+  return diff < 0 ? "in " + n : n + " ago";
+}
+
+/** A deadline (e.g. request expires_at) for display: "in 30m" / "overdue by 2h"
+ *  plus an `overdue` flag so callers can style it. Null when there is none. */
+export function deadlineLabel(iso: string | null | undefined): { text: string; overdue: boolean } | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return null;
+  if (t > Date.now()) return { text: relTime(iso), overdue: false };
+  const r = relTime(iso);
+  return { text: r === "just now" ? "expired just now" : "overdue by " + r.replace(/ ago$/, ""), overdue: true };
 }
 
 export function clockTime(iso: string | null | undefined): string {
@@ -113,6 +132,44 @@ export const linkify = (s: unknown, tasks: Task[] = []): string =>
     tasks,
   );
 
+/* ---- markdown links [text](href) ------------------------------------------
+ * Runs on ALREADY-ESCAPED text (esc() first), so `text` and `href` can never
+ * carry markup; `"` is &quot; and cannot break out of the attribute.
+ *  - http(s) and mailto: an external anchor (new tab for http).
+ *  - a relative path (docs/a.md, ./x, ../y, /README.md): an in-app anchor to
+ *    Code Space (/code?path=...; the cid link interceptor adds scope) that
+ *    also carries data-md-path with the path AS WRITTEN, so a renderer that
+ *    knows the current file (MdRenderedPane) can resolve it relative to that
+ *    file instead of the repo root.
+ *  - a bare #fragment: plain text (no page to go to; never a dead link).
+ *  - any other scheme (javascript:, data:, vbscript:, file:, //host ...):
+ *    dropped — only the link text is kept.
+ * Images ![alt](src) are left alone. An optional "title" is ignored. */
+const MD_LINK_RE = /(?<!!)\[([^\]\n]+)\]\(([^\s()]+)(?:\s+&quot;[^\n]*?&quot;)?\)/g;
+
+const unesc = (s: string): string =>
+  s.replace(/&(amp|lt|gt|quot|#39);/g, (_m, e: string) => ({ amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" })[e] as string);
+
+/** The repo path a relative markdown href points at (raw text, not HTML):
+ *  fragment/query dropped, leading ./ and / removed. `href` is escaped. */
+export function mdLinkPath(href: string): string {
+  const raw = unesc(href).replace(/[#?].*$/, "");
+  return raw.replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
+}
+
+function mdLink(text: string, href: string): string {
+  if (/^(?:https?:\/\/|mailto:)/i.test(href)) {
+    const ext = /^https?:/i.test(href);
+    return `<a class="lnk" href="${href}"${ext ? ' target="_blank" rel="noopener noreferrer"' : ""}>${text}</a>`;
+  }
+  // any other scheme, or protocol-relative //host — refuse to link
+  if (/^[a-z][a-z0-9+.-]*:/i.test(href) || /^\/\//.test(href)) return text;
+  if (href.charAt(0) === "#") return text;
+  const path = mdLinkPath(href);
+  if (!path) return text;
+  return `<a class="lnk md-rel" href="/code?path=${encodeURIComponent(path)}" data-md-path="${href}" title="${esc(path)}">${text}</a>`;
+}
+
 /* ---- safe inline-markdown subset (port of app.js mdText) ----------------- */
 export const mdText = (src: unknown, tasks: Task[] = []): string => {
   let s = esc(src == null ? "" : String(src));
@@ -150,6 +207,8 @@ export const mdText = (src: unknown, tasks: Task[] = []): string => {
     }
     s = out.join("\n");
   }
+  // [text](href) — BEFORE bare-URL linkify so the href is not linked twice.
+  s = s.replace(MD_LINK_RE, (_m, text: string, href: string) => keep(mdLink(text, href)));
   s = s.replace(/https?:\/\/[^\s<]+/g, (m) => {
     let tail = "";
     const t = m.match(/[)\].,;:!?]+$/);

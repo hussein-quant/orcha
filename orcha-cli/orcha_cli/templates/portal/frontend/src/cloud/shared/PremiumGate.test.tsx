@@ -32,12 +32,12 @@ describe("PremiumGate", () => {
     expect(document.querySelector('[data-premium-feature="members"]')).not.toBeNull();
   });
 
-  it('"Upgrade to Orcha Cloud Team" opens upgradeUrl in a new tab, noopener', () => {
+  it('"Upgrade to Quorate Cloud Team" opens upgradeUrl in a new tab, noopener', () => {
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
     render(
       <PremiumGate feature="members" title="Members" pitch={[]} upgradeUrl="https://orcha.nursoftai.com/#pricing" />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Upgrade to Orcha Cloud Team/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Upgrade to Quorate Cloud Team/ }));
     expect(openSpy).toHaveBeenCalledWith("https://orcha.nursoftai.com/#pricing", "_blank", "noopener");
   });
 

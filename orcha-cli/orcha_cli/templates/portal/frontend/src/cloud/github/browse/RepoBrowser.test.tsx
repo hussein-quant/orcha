@@ -116,10 +116,17 @@ describe("RepoBrowser tree", () => {
     expect(await screen.findByText("No GitHub repo connected")).toBeInTheDocument();
   });
 
-  it("degrades through the rate_limited ladder on a 403", async () => {
-    stubFetch({ "/browse/tree": { __status: 403, body: { detail: "slow down" } } });
+  it("degrades through the rate_limited ladder on a rate-limit 403", async () => {
+    stubFetch({ "/browse/tree": { __status: 403, body: { detail: "API rate limit exceeded" } } });
     mount();
     expect(await screen.findByText("GitHub rate limit hit")).toBeInTheDocument();
+  });
+
+  it("a permissions 403 is NOT reported as a rate limit", async () => {
+    stubFetch({ "/browse/tree": { __status: 403, body: { detail: "Resource not accessible by personal access token" } } });
+    mount();
+    expect(await screen.findByText(/Resource not accessible/)).toBeInTheDocument();
+    expect(screen.queryByText("GitHub rate limit hit")).not.toBeInTheDocument();
   });
 
   // Folder-expand failure caching regression — a transient dir-load failure
@@ -255,7 +262,7 @@ describe("RepoBrowser search", () => {
     });
     const onNavigate = vi.fn();
     mount({ onNavigate });
-    fireEvent.click(screen.getByRole("tab", { name: "Contents" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Contents" }));
     fireEvent.change(screen.getByLabelText(/search repo files/i), { target: { value: "foo" } });
     expect(await screen.findByText(/default branch only/i)).toBeInTheDocument();
     const matchText = await screen.findByText((_, el) => el?.className === "rb-result-text mono");

@@ -170,7 +170,8 @@ export function open(el: HTMLElement, aid: string, opts?: OpenOpts): void {
   s.term = new TerminalCtor({
     fontSize: 13, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
     cursorBlink: true, convertEol: true, scrollback: 5000,
-    theme: { background: "#0b0e14", foreground: "#d5d9e0", cursor: "#3fb6a8" },
+    // V2 dark tokens (canvas / text / accent) — xterm needs literal colours
+    theme: { background: "#101113", foreground: "#EEEFF2", cursor: "#8D93F7", selectionBackground: "rgba(141,147,247,0.30)" },
   });
   const FitCtor = window.FitAddon && window.FitAddon.FitAddon;
   if (FitCtor) {
