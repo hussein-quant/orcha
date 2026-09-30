@@ -16,7 +16,7 @@ from portal_backend.application import app
 
 PLAN_ENV = "ORCHA_PLAN"
 UPGRADE_URL_ENV = "ORCHA_UPGRADE_URL"
-DEFAULT_UPGRADE_URL = "https://orcha.nursoftai.com/#pricing"
+DEFAULT_UPGRADE_URL = "https://orcha.quantallabs.ai"
 VALID_PLANS = ("solo", "team")
 
 _LOG = logging.getLogger("orcha.plan")

@@ -369,7 +369,7 @@ function MembersCard() {
   const catchPremium402 = (res: MemRes): boolean => {
     if (!isPremium402(res)) return false;
     const d = res.body?.detail as Premium402;
-    setForcedGate({ upgradeUrl: d.upgrade_url || "https://orcha.nursoftai.com/#pricing" });
+    setForcedGate({ upgradeUrl: d.upgrade_url || "https://orcha.quantallabs.ai" });
     return true;
   };
 

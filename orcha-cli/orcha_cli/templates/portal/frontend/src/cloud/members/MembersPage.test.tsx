@@ -15,8 +15,8 @@ import { MembersPage, MembersSection, membersRedirectTarget, removeBlockedReason
 
 interface Call { url: string; method: string; body: unknown }
 
-const TEAM_PLAN = { plan: "team", features: { members: true }, upgrade_url: "https://orcha.nursoftai.com/#pricing" };
-const SOLO_PLAN = { plan: "solo", features: { members: false }, upgrade_url: "https://orcha.nursoftai.com/#pricing" };
+const TEAM_PLAN = { plan: "team", features: { members: true }, upgrade_url: "https://orcha.quantallabs.ai" };
+const SOLO_PLAN = { plan: "solo", features: { members: false }, upgrade_url: "https://orcha.quantallabs.ai" };
 
 const rawSnap = {
   container: { id: "c1", name: "Orcha", status: "active", autonomy_level: "plan" },
@@ -58,7 +58,7 @@ function stubFetch(
     if (url === "/api/containers/c1/members") {
       if ((init?.method || "GET") === "POST") {
         if (overrides.memberStatus === 402) {
-          return json({ detail: { premium: "members", message: "Members needs Team.", upgrade_url: "https://orcha.nursoftai.com/#pricing" } }, 402);
+          return json({ detail: { premium: "members", message: "Members needs Team.", upgrade_url: "https://orcha.quantallabs.ai" } }, 402);
         }
         return json({ agent_id: "h3" }, 201);
       }
