@@ -59,7 +59,9 @@ export type RunGit = (cwd: string, args: string[]) => Promise<string>
 
 const defaultRunGit: RunGit = (cwd, args) =>
   new Promise((resolve, reject) => {
-    execFile('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 3000, maxBuffer: 512 * 1024 }, (err, stdout) =>
+    // --no-optional-locks: a background poller must never take .git/index.lock — a poll
+    // killed by the timeout would otherwise leave a stale lock that blocks the user's commits.
+    execFile('git', ['--no-optional-locks', '-C', cwd, ...args], { encoding: 'utf8', timeout: 3000, maxBuffer: 512 * 1024 }, (err, stdout) =>
       err ? reject(err) : resolve(stdout)
     )
   })
