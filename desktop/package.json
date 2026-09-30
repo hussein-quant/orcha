@@ -6,7 +6,7 @@
   "author": "Orcha",
   "private": true,
   "scripts": {
-    "predev": "node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs",
+    "predev": "node scripts/ensure-electron.mjs && node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
@@ -14,14 +14,14 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "copy:templates": "node scripts/copy-orcha-templates.mjs",
-    "prebuild": "node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs",
-    "predist:mac": "node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs",
-    "predist:mac:arm64": "node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs",
+    "prebuild": "node scripts/ensure-electron.mjs && node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs",
+    "predist:mac": "node scripts/ensure-electron.mjs && node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs",
+    "predist:mac:arm64": "node scripts/ensure-electron.mjs && node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs",
     "dist:mac": "electron-vite build && electron-builder --mac --universal",
     "dist:mac:arm64": "electron-vite build && electron-builder --mac --arm64",
     "postinstall": "node scripts/fix-node-pty.mjs",
     "dist:dir": "electron-vite build && electron-builder --mac --dir -c.mac.notarize=false",
-    "predist:dir": "node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs"
+    "predist:dir": "node scripts/ensure-electron.mjs && node scripts/copy-orcha-templates.mjs && node scripts/fix-node-pty.mjs"
   },
   "license": "MIT",
   "dependencies": {
