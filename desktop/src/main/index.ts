@@ -1601,6 +1601,13 @@ app.whenReady().then(() => {
           onTerminal: (command) => sendTermCommand(command),
           onSettings: () => sendTermCommand('open-settings'),
           defaultAgentLabel,
+          onReloadPage: () => {
+            // the project page on screen (bypassing cache so a freshly upgraded portal loads);
+            // with no portal showing, reload the host window as the stock item did
+            const view = activeProject ? portalViews.get(activeProject) : undefined
+            if (view && !view.webContents.isDestroyed() && view.getVisible()) view.webContents.reloadIgnoringCache()
+            else if (managerWindow && !managerWindow.isDestroyed()) managerWindow.webContents.reload()
+          },
           onClose: () => {
             // ⌘W: with focus in the host's terminal dock it closes the active TAB; anywhere
             // else (portal view, other windows) it closes the window as before.

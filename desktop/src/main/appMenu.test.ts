@@ -85,3 +85,21 @@ describe('app menu', () => {
     }
   })
 })
+
+describe('View › Reload Page', () => {
+  it('⌘R reloads the project page via the hook (the stock role only reloads the host window)', () => {
+    let reloaded = 0
+    const tpl = buildAppMenuTemplate({ onAddProject: () => {}, onReloadPage: () => void reloaded++ })
+    const view = tpl.find((m) => m.label === 'View')!
+    const items = view.submenu as Array<{ id?: string; accelerator?: string; click?: () => void }>
+    const item = items.find((i) => i.id === 'reload-page')!
+    expect(item.accelerator).toBe('CmdOrCtrl+R')
+    item.click?.()
+    expect(reloaded).toBe(1)
+  })
+
+  it('without the hook the stock View menu is kept', () => {
+    const tpl = buildAppMenuTemplate({ onAddProject: () => {} })
+    expect(tpl.some((m) => m.role === 'viewMenu')).toBe(true)
+  })
+})

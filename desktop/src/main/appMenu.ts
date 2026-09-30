@@ -14,6 +14,10 @@ export interface AppMenuHooks {
   onSettings?: () => void
   /** Label of the Default agent (Settings › Agents) for the ⌥⌘T item; defaults to Claude. */
   defaultAgentLabel?: string
+  /** View › Reload Page (⌘R): reload the project page on screen. The stock `reload` role only
+   *  reloads the host window, never the embedded portal — so a portal upgraded underneath
+   *  (`orcha upgrade`) kept showing its old build until the app restarted. */
+  onReloadPage?: () => void
 }
 
 /** Build the macOS app menu template. Kept pure (no Menu.setApplicationMenu) so it's unit-testable;
@@ -71,7 +75,22 @@ export function buildAppMenuTemplate(hooks: AppMenuHooks): MenuItemConstructorOp
       ]
     },
     { role: 'editMenu' },
-    { role: 'viewMenu' },
+    hooks.onReloadPage
+      ? ({
+          label: 'View',
+          submenu: [
+            { id: 'reload-page', label: 'Reload Page', accelerator: 'CmdOrCtrl+R', click: () => hooks.onReloadPage?.() },
+            { role: 'forceReload' as const, label: 'Reload App Window' },
+            { role: 'toggleDevTools' as const },
+            { type: 'separator' as const },
+            { role: 'resetZoom' as const },
+            { role: 'zoomIn' as const },
+            { role: 'zoomOut' as const },
+            { type: 'separator' as const },
+            { role: 'togglefullscreen' as const }
+          ]
+        } satisfies MenuItemConstructorOptions)
+      : { role: 'viewMenu' as const },
     ...(term
       ? [
           {

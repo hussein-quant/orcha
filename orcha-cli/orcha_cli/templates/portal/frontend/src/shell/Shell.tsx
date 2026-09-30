@@ -15,6 +15,7 @@
  * with its existing confirm copy (GH #148/#149) · notifications bell.
  * The theme toggle lives in Settings › Interface and the ⌘K palette.
  */
+import { UpdateNotice } from "./UpdateNotice";
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { sendJSON, getJSON } from "../api/client";
@@ -1299,6 +1300,7 @@ function ShellBody({ page, title, ctx, crumbs, primaryAction, secondaryActions, 
           </div>
         </header>
         <StaleBar />
+        <UpdateNotice />
         {toolbar ? <div className="v2-toolbar-slot">{toolbar}</div> : null}
       </div>
       <NotificationCenter open={ncOpen} onClose={() => setNcOpen(false)} onUnread={setUnread} onPaused={setNcPaused} />
