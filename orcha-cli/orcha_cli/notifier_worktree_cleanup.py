@@ -13,13 +13,43 @@ from typing import Any
 
 NESTED_WORKTREES_PREFIX = ".orcha-worktrees/"
 
+# Quorate's own scaffolding, kept out of checkpoint commits and captured diffs. Must cover
+# every worktree_gc.SCAFFOLDING_PATTERNS entry (a test enforces it): a checkpoint that swept
+# in a wake log or the .orcha overlay made the branch look "unmerged", so cleanup kept it
+# forever. Agent output under .orcha/outputs is collected separately (it is self-ignoring).
 DIFF_EXCLUDES = (
     ".",
     ":(exclude).claude/orcha.json",
     ":(exclude).claude/orcha-tabs",
     ":(exclude).claude/settings.json",
+    ":(exclude).claude/settings.local.json",
     ":(exclude).claude/commands/orcha-*.md",
+    ":(exclude).claude/.orcha-*",
     ":(exclude).agents/skills/orcha-*",
+    ":(exclude).codex/hooks.json",
+    ":(exclude).orcha",
+    ":(exclude)docs/orcha-project-preferences.md",
+)
+
+# Unstaged again after a checkpoint's `git add -A -- .`. A checkpoint must NOT pass these as
+# `:(exclude)` pathspecs to `git add`: when an excluded path is gitignored (e.g. a global
+# ignore of .claude/settings.local.json, or a repo ignoring .orcha/), `git add` refuses with
+# "paths are ignored", stages NOTHING, and the agent's work silently isn't checkpointed.
+# `git add -A -- .` never touches ignored files, and `git reset -- <glob>` restores these
+# paths to HEAD in the index (tracked scaffolding keeps its committed version, untracked
+# scaffolding stays out) without erroring when nothing matches.
+SCAFFOLD_UNSTAGE = (
+    ":(glob).claude/orcha.json",
+    ":(glob).claude/orcha-tabs/**",
+    ":(glob).claude/settings.json",
+    ":(glob).claude/settings.local.json",
+    ":(glob).claude/commands/orcha-*.md",
+    ":(glob).claude/.orcha-*",
+    ":(glob).agents/skills/orcha-*",
+    ":(glob).agents/skills/orcha-*/**",
+    ":(glob).codex/hooks.json",
+    ":(glob).orcha/**",
+    ":(glob)docs/orcha-project-preferences.md",
 )
 
 
