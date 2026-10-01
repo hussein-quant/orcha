@@ -1,4 +1,6 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, shell, WebContentsView } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, systemPreferences, WebContentsView } from 'electron'
+import { installMediaPermissions, micAccessStatus, requestMicAccess } from './micPermission'
+import { MIC_CHANNELS, MIC_SETTINGS_URL } from '../shared/mic'
 import { classifyVerdiktLink, launchMacApp, openVerdiktLink } from './verdiktLinks'
 import path from 'node:path'
 import os from 'node:os'
@@ -1177,6 +1179,35 @@ app.whenReady().then(() => {
     asResult(async () => {
       if (!themeSender(event)) throw { code: 'INVALID_PROFILE' } satisfies BridgeError
       return saveProfile(raw)
+    })
+  )
+
+  // Dictation (portal Settings › Voice): the microphone. Chromium's `media` permission is
+  // granted only to our own pages and only for audio, after macOS says yes (micPermission.ts).
+  installMediaPermissions(session.defaultSession, {
+    ask: () => requestMicAccess(systemPreferences),
+    trustedExtra: () => (process.env['ELECTRON_RENDERER_URL'] ? [process.env['ELECTRON_RENDERER_URL']] : [])
+  })
+  /** Manager window, tray popovers, or an embedded portal view (dictation asks before recording). */
+  const micSender = (event: Electron.IpcMainInvokeEvent): boolean =>
+    themeSender(event) || portalProjectByWebContentsId.has(event.sender.id)
+  ipcMain.handle(MIC_CHANNELS.status, (event) =>
+    asResult(async () => {
+      if (!micSender(event)) throw { code: 'INVALID_MIC' } satisfies BridgeError
+      return micAccessStatus(systemPreferences)
+    })
+  )
+  ipcMain.handle(MIC_CHANNELS.request, (event) =>
+    asResult(async () => {
+      if (!micSender(event)) throw { code: 'INVALID_MIC' } satisfies BridgeError
+      return requestMicAccess(systemPreferences)
+    })
+  )
+  ipcMain.handle(MIC_CHANNELS.openSettings, (event) =>
+    asResult(async () => {
+      if (!micSender(event)) throw { code: 'INVALID_MIC' } satisfies BridgeError
+      if (process.platform === 'darwin') await shell.openExternal(MIC_SETTINGS_URL)
+      return true
     })
   )
 

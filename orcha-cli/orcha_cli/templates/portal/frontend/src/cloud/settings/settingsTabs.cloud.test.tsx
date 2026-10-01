@@ -104,7 +104,7 @@ describe("cloud settings tabs (vanilla settings.html arrangement, real registry)
     await screen.findByText("Details");
     const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
     expect(tabs).toEqual([
-      "General", "Execution", "Models & providers", "Integrations", "Members & access", "Devices & pairing", "Notifications", "Interface",
+      "General", "Execution", "Models & providers", "Integrations", "Members & access", "Devices & pairing", "Notifications", "Voice", "Interface",
     ]);
   });
 

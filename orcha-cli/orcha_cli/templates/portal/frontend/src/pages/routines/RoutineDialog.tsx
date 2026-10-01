@@ -195,7 +195,7 @@ export function RoutineDialog({ cid, routine, agents, busy, error, onSubmit, onC
             {form.preset === "advanced" ? (
               <label className="rt-inline rt-grow" htmlFor={ids.cron}>
                 cron
-                <input id={ids.cron} className="rt-input rt-mono" value={form.cron} spellCheck={false}
+                <input id={ids.cron} className="rt-input rt-mono" value={form.cron} spellCheck={false} data-dictation="off"
                   placeholder="minute hour day month weekday" aria-describedby={ids.cron + "-h"}
                   onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value }))} />
               </label>

@@ -3,6 +3,7 @@ import type { AgentsApi } from './agents'
 import type { UsageApi } from './usage'
 import type { ThemeApi } from './theme'
 import type { ProfileApi } from './profile'
+import type { MicApi } from './mic'
 import type { EmbedEvent, EmbedMode, HostToPortal, PortalToHost } from './embed'
 import type { ProjectIcon } from './projectIcon'
 
@@ -146,6 +147,8 @@ export type BridgeError =
   | { code: 'INVALID_THEME' }
   /** Settings › Profile: a non-string / over-long name, or a foreign sender. */
   | { code: 'INVALID_PROFILE' }
+  /** Microphone (dictation): a sender that isn't our window or an embedded portal view. */
+  | { code: 'INVALID_MIC' }
   /** Settings › Storage: the item isn't a leftover the current scan offers (or no confirm). */
   | { code: 'INVALID_STORAGE_ITEM' }
   // ---- onboarding / provisioning ----
@@ -433,6 +436,8 @@ export interface OrchaDesktopApi {
   theme?: ThemeApi
   /** Settings › Profile (absent on an older preload: the section is hidden). */
   profile?: ProfileApi
+  /** Microphone access for dictation (Settings › Voice). */
+  mic?: MicApi
   /** Forward a host → portal message (navigate / openSearch) to the ACTIVE portal view.
    *  Resolves false when there is nothing to deliver to. */
   embedSend(msg: HostToPortal): Promise<boolean>

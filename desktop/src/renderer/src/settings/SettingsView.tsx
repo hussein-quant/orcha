@@ -6,24 +6,26 @@
  *  rules as every other channel (portal Settings › Notifications, mig 063). The section
  *  says so and opens those preferences in the running project's portal. */
 import { useEffect, useRef, useState } from 'react'
-import { BarChart3, Bell, Bot, HardDrive, Settings as SettingsIcon, SunMoon, UserRound, X } from 'lucide-react'
+import { BarChart3, Bell, Bot, HardDrive, Mic, Settings as SettingsIcon, SunMoon, UserRound, X } from 'lucide-react'
 import type { AgentId } from '../../../shared/agents'
 import AgentsSettings from './AgentsSettings'
 import AppearanceSettings from './AppearanceSettings'
 import ProfileSettings from './ProfileSettings'
 import StorageSettings from './StorageSettings'
+import VoiceSettings from './VoiceSettings'
 import type { UsageValue } from '../usage/useUsage'
 
 /** Portal section the desktop's Notifications entry opens (SettingsPage `#tab=notifications`). */
 export const NOTIFICATION_SETTINGS_PATH = '/settings#tab=notifications'
 
-type Section = 'profile' | 'agents' | 'appearance' | 'notifications' | 'usage' | 'storage'
+type Section = 'profile' | 'agents' | 'appearance' | 'notifications' | 'voice' | 'usage' | 'storage'
 
 const SECTIONS: { key: Section; label: string; Icon: typeof Bot }[] = [
   { key: 'profile', label: 'Profile', Icon: UserRound },
   { key: 'agents', label: 'Agents', Icon: Bot },
   { key: 'appearance', label: 'Appearance', Icon: SunMoon },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
+  { key: 'voice', label: 'Voice', Icon: Mic },
   { key: 'usage', label: 'Usage', Icon: BarChart3 },
   { key: 'storage', label: 'Storage', Icon: HardDrive }
 ]
@@ -35,7 +37,8 @@ export default function SettingsView({
   notificationsProject,
   initialSection = 'agents',
   usage,
-  onOpenStats
+  onOpenStats,
+  onOpenVoiceSettings
 }: {
   onClose(): void
   onTestLaunch?: (id: AgentId) => void
@@ -47,6 +50,8 @@ export default function SettingsView({
   /** Usage & spend (absent on an older preload: the section is hidden). */
   usage?: UsageValue
   onOpenStats?: () => void
+  /** Opens portal Settings › Voice in the running project (absent: none running). */
+  onOpenVoiceSettings?: () => void
 }) {
   const [section, setSection] = useState<Section>(initialSection)
   /** Settings › Appearance needs the theme bridge (absent on an older preload: hidden). */
@@ -124,6 +129,8 @@ export default function SettingsView({
               </>
             ) : section === 'appearance' && hasTheme ? (
               <AppearanceSettings />
+            ) : section === 'voice' ? (
+              <VoiceSettings project={notificationsProject} onOpenProjectVoice={onOpenVoiceSettings} />
             ) : section === 'storage' && hasStorage ? (
               <StorageSettings />
             ) : section === 'usage' && usage ? (

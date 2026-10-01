@@ -6,8 +6,9 @@
  *  - `window.orchaHost` is exposed ONLY when the page's origin equals the origin main passed
  *    for this view (`http://localhost:<that stack's apiPort>`). Any other origin — an external
  *    page that somehow loaded, about:blank, a different stack — gets nothing.
- *  - The API is two fixed channels. No generic invoke, no Node, no access to `orcha:*`
- *    manager channels. Every outgoing message is validated here and AGAIN in main. */
+ *  - The API is two fixed channels plus ONE fixed request (microphone access for
+ *    dictation). No generic invoke, no Node, no access to `orcha:*` manager channels.
+ *    Every outgoing message is validated here and AGAIN in main. */
 import {
   EMBED_TO_HOST_CHANNEL,
   EMBED_TO_PORTAL_CHANNEL,
@@ -26,7 +27,13 @@ export interface PortalBridgeDeps {
   origin(): string
   send(channel: string, payload: unknown): void
   on(channel: string, listener: (payload: unknown) => void): () => void
+  /** One fixed request/response channel: MIC_REQUEST_CHANNEL only (main checks the sender). */
+  invokeMic?(): Promise<unknown>
 }
+
+/** Same string as shared/mic.ts MIC_CHANNELS.request (inlined: this preload stays self-contained). */
+export const MIC_REQUEST_CHANNEL = 'orcha:mic:request'
+const MIC_STATES = new Set(['granted', 'denied', 'restricted', 'not-determined', 'unknown'])
 
 /** Returns the host API object to expose, or null when this page must not get one. */
 export function createOrchaHost(deps: PortalBridgeDeps): OrchaHostApi | null {
@@ -43,6 +50,18 @@ export function createOrchaHost(deps: PortalBridgeDeps): OrchaHostApi | null {
       if (!onOrigin()) return
       const parsed = parsePortalMessage(msg)
       if (parsed) deps.send(EMBED_TO_HOST_CHANNEL, parsed)
+    },
+    /** Dictation: ask macOS for the microphone before the page calls getUserMedia (the TCC
+     *  prompt names this app). Resolves to the access state; never rejects. */
+    async requestMicAccess(): Promise<string> {
+      if (!onOrigin() || !deps.invokeMic) return 'unknown'
+      try {
+        const r = (await deps.invokeMic()) as { ok?: boolean; data?: unknown } | null
+        const v = r && r.ok ? r.data : null
+        return typeof v === 'string' && MIC_STATES.has(v) ? v : 'unknown'
+      } catch {
+        return 'unknown'
+      }
     },
     on(cb: (msg: HostToPortal) => void): () => void {
       if (typeof cb !== 'function') return () => {}

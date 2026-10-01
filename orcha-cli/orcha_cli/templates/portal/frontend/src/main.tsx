@@ -2,7 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ToastProvider } from "./components/ui";
-import { SnapshotProvider } from "./state/SnapshotProvider";
+import { SnapshotProvider, useSnapshot } from "./state/SnapshotProvider";
+import { PortalDictationProvider } from "./dictation/PortalDictation";
 import { initTheme } from "./shell/theme";
 import { AppRoutes } from "./shell/routes";
 
@@ -23,13 +24,21 @@ if (!document.querySelector('link[href="/assets/styles.css"]')) {
 // React render and keep it live (index.html already did it pre-paint).
 initTheme();
 
+/** Dictation for every text field (src/dictation): needs the project id for the cloud engine. */
+function DictationRoot({ children }: { children: React.ReactNode }) {
+  const { cid } = useSnapshot();
+  return <PortalDictationProvider cid={cid}>{children}</PortalDictationProvider>;
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ToastProvider>
       <SnapshotProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <DictationRoot>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </DictationRoot>
       </SnapshotProvider>
     </ToastProvider>
   </React.StrictMode>,

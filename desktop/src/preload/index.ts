@@ -5,6 +5,7 @@ import type { AGENT_CHANNELS, AgentsSnapshot } from '../shared/agents'
 import type { USAGE_CHANNELS, UsageSnapshot } from '../shared/usage'
 import type { THEME_CHANNELS, ThemeState } from '../shared/theme'
 import type { PROFILE_CHANNELS, ProfileSaveResult, ProfileState } from '../shared/profile'
+import type { MIC_CHANNELS, MicAccess } from '../shared/mic'
 
 /** Terminal channel names, inlined: this sandboxed preload imports shared/* for TYPES only
  *  (no shared runtime chunk). `satisfies` keeps them identical to shared/terminal.ts. */
@@ -50,6 +51,12 @@ const PROFILE = {
   get: 'orcha:profile:get',
   set: 'orcha:profile:set'
 } as const satisfies typeof PROFILE_CHANNELS
+/** Microphone channels, inlined for the same reason (identical to shared/mic.ts). */
+const MIC = {
+  status: 'orcha:mic:status',
+  request: 'orcha:mic:request',
+  openSettings: 'orcha:mic:openSettings'
+} as const satisfies typeof MIC_CHANNELS
 import type {
   AnalyzeProjectResult,
   AttentionItem,
@@ -225,6 +232,12 @@ const api: OrchaDesktopApi = {
   profile: {
     get: () => invoke<ProfileState>(PROFILE.get),
     set: (name) => invoke<ProfileSaveResult>(PROFILE.set, name)
+  },
+  // Dictation: macOS microphone access (main asks TCC; portal views ask via window.orchaHost).
+  mic: {
+    status: () => invoke<MicAccess>(MIC.status),
+    request: () => invoke<MicAccess>(MIC.request),
+    openSettings: () => invoke<boolean>(MIC.openSettings)
   },
   embedSend: (msg: HostToPortal) => invoke<boolean>('orcha:embedSend', msg),
   onEmbedEvent: (cb) => {

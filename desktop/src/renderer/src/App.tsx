@@ -57,6 +57,10 @@ import type { TermKind } from '../../shared/terminal'
 import { agentDef, agentShortLabel, type AgentId } from '../../shared/agents'
 import { AgentsProvider, useAgents, useAgentsController, useLaunchers } from './agents/AgentsContext'
 import SettingsView, { NOTIFICATION_SETTINGS_PATH } from './settings/SettingsView'
+import DesktopDictation from './dictation/DesktopDictation'
+
+/** Portal Settings › Voice (dictation engine, language, speech keys). */
+const VOICE_SETTINGS_PATH = '/settings#tab=voice'
 import { BarChart3 } from 'lucide-react'
 import { useUsage } from './usage/useUsage'
 import UsagePopover from './usage/UsagePopover'
@@ -976,6 +980,14 @@ function AppShell() {
             }
           : undefined
       }
+      onOpenVoiceSettings={
+        settingsRow
+          ? () => {
+              closeOverlays()
+              navigate(settingsRow, VOICE_SETTINGS_PATH)
+            }
+          : undefined
+      }
     />
   )
 
@@ -1001,9 +1013,27 @@ function AppShell() {
       content
     )
 
+  // Dictation in the desktop's own fields goes through the running project's portal.
+  const withDictation = (node: ReactNode) => (
+    <DesktopDictation
+      apiPort={settingsRow?.stack.apiPort ?? null}
+      cid={settingsRow?.container?.id ?? null}
+      onOpenSettings={
+        settingsRow
+          ? () => {
+              closeOverlays()
+              navigate(settingsRow, VOICE_SETTINGS_PATH)
+            }
+          : undefined
+      }
+    >
+      {node}
+    </DesktopDictation>
+  )
+
   if (legacy) {
     // Older portal in the view: keep the pre-V2 chrome so its own sidebar isn't doubled.
-    return (
+    return withDictation(
       <div className="flex h-full flex-col">
         {activeStack && <TopBar stack={activeStack} onBack={showHome} />}
         <div className="relative min-h-0 min-w-0 flex-1">
@@ -1025,7 +1055,7 @@ function AppShell() {
     )
   }
 
-  return (
+  return withDictation(
     <div className="flex h-full">
       <HostSidebar
         rows={rows}

@@ -42,6 +42,7 @@ import { ProjectIcon, useProjectIcon } from "../../components/primitives/Project
 import { ProjectIconPicker } from "../../components/primitives/EmojiPicker";
 import { InterfaceSection } from "./InterfaceSection";
 import { NotificationsSection } from "./notifications/NotificationsSection";
+import { VoiceSection } from "./voice/VoiceSection";
 import { AgentLimitRow } from "./AgentLimitRow";
 import { ObjectiveRow } from "./ObjectiveRow";
 import { ReviewRoutingRow } from "./ReviewRoutingRow";
@@ -207,6 +208,8 @@ export const SETTINGS_ALIASES: Record<string, string> = {
   access: "members",
   notification: "notifications",
   alerts: "notifications",
+  dictation: "voice",
+  microphone: "voice",
 };
 
 /** Resolve a (possibly aliased) key against the available section keys; unknown → first. */
@@ -1773,6 +1776,7 @@ const SECTION_META: Record<string, { icon: string; cluster: string }> = {
   members: { icon: "agents", cluster: "Access" },
   pairing: { icon: "phone", cluster: "Access" },
   notifications: { icon: "bell", cluster: "Personal" },
+  voice: { icon: "mic", cluster: "Personal" },
   interface: { icon: "sidebar", cluster: "Personal" },
 };
 export function sectionMeta(key: string): { icon: string; cluster: string } {
@@ -1856,6 +1860,12 @@ export function buildSettingsGroups(cid: string | null, ext = extensions): Setti
     key: "notifications", title: "Notifications",
     sub: "What reaches you, and where. Saved instantly, just for you.",
     render: () => <NotificationsSection cid={cid} />,
+  });
+
+  groups.push({
+    key: "voice", title: "Voice",
+    sub: "Dictate into any text field: engine, language, clean-up, shortcut and microphone.",
+    render: () => <VoiceSection cid={cid} />,
   });
 
   const app = byKey("appearance");

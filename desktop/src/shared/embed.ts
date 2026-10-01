@@ -65,6 +65,8 @@ export interface OrchaHostApi {
   project: string
   send(msg: PortalToHost): void
   on(cb: (msg: HostToPortal) => void): () => void
+  /** Dictation: ask macOS for microphone access (resolves to the access state). */
+  requestMicAccess?(): Promise<string>
 }
 
 /** Main → manager renderer: a validated portal message, tagged with the SENDER's stack

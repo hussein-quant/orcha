@@ -74,3 +74,20 @@ describe('createOrchaHost (portal preload)', () => {
     expect(cb).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('requestMicAccess (dictation)', () => {
+  it('asks main on the ONE fixed channel and returns the access state', async () => {
+    const invokeMic = vi.fn(async () => ({ ok: true, data: 'granted' }))
+    const host = createOrchaHost(deps('http://localhost:8123', { invokeMic }))!
+    await expect(host.requestMicAccess!()).resolves.toBe('granted')
+    expect(invokeMic).toHaveBeenCalledTimes(1)
+  })
+  it('never rejects and never passes junk through', async () => {
+    const bad = createOrchaHost(deps('http://localhost:8123', { invokeMic: vi.fn(async () => ({ ok: true, data: 'root' })) }))!
+    await expect(bad.requestMicAccess!()).resolves.toBe('unknown')
+    const boom = createOrchaHost(deps('http://localhost:8123', { invokeMic: vi.fn(async () => { throw new Error('x') }) }))!
+    await expect(boom.requestMicAccess!()).resolves.toBe('unknown')
+    const none = createOrchaHost(deps('http://localhost:8123'))!
+    await expect(none.requestMicAccess!()).resolves.toBe('unknown')
+  })
+})

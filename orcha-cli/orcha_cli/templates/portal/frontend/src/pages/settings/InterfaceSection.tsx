@@ -115,6 +115,7 @@ const SHORTCUTS: [string, string][] = [
   ["↑ ↓", "Move between rows in a list; Enter opens the focused row"],
   ["Esc", "Close the open dialog, menu or search and return focus"],
   [RAIL_TOGGLE_KEY, "Collapse or expand the sidebar when you are not typing"],
+  ["⌥Space / Alt+Space", "Dictate into the focused field: hold to talk, or tap to start and tap again to finish (change it in Settings › Voice)"],
 ];
 
 /**

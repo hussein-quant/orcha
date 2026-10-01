@@ -70,7 +70,8 @@ export default defineConfig({
     // running portal (override with ORCHA_PORTAL=http://host:port). /assets/dist
     // is excluded — that's this app's own build output.
     proxy: {
-      "/api": process.env.ORCHA_PORTAL || "http://localhost:8000",
+      // ws: dictation streams audio over a WebSocket (/api/containers/{cid}/voice/stream)
+      "/api": { target: process.env.ORCHA_PORTAL || "http://localhost:8000", ws: true },
       "^/assets/(?!dist/)": process.env.ORCHA_PORTAL || "http://localhost:8000",
     },
   },

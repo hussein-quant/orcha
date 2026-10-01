@@ -86,6 +86,7 @@ from portal_backend import (
     templates_routes,  # project mode (Code | General) + industry templates
     terminal_config_routes,
     user_pref_routes,
+    voice_routes,  # dictation: streaming STT proxy + clean-up
     verdikt_routes,  # Verdikt QA handoff (mig 058)
     wake_acknowledgement_routes,
     wake_backoff_routes,

@@ -52,6 +52,10 @@ directories:
 mac:
   category: public.app-category.developer-tools
   icon: resources/icon.icns
+  # Dictation (portal Settings › Voice): macOS shows this when the app first asks for the
+  # microphone, and kills an app that touches the mic without it.
+  extendInfo:
+    NSMicrophoneUsageDescription: Quorate uses your microphone only while you dictate into a text field. Audio is never stored.
   # Signed with a Developer ID Application certificate and notarized by Apple,
   # so Gatekeeper opens the app on a normal double-click — no right-click→Open
   # or xattr/quarantine workaround needed. Credentials are supplied via

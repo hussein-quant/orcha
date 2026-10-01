@@ -90,7 +90,7 @@ describe("SettingsPage V2 sections (open Orcha, no extension sections)", () => {
     expect(bar.getAttribute("role")).toBe("tablist");
     expect(bar.getAttribute("aria-orientation")).toBe("vertical");
     // Integrations appears because this build registers the /github route (repo link)
-    expect(tabNames()).toEqual(["General", "Execution", "Models & providers", "Integrations", "Devices & pairing", "Notifications", "Interface"]);
+    expect(tabNames()).toEqual(["General", "Execution", "Models & providers", "Integrations", "Devices & pairing", "Notifications", "Voice", "Interface"]);
     expect(screen.getByRole("tab", { name: "General" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("heading", { level: 1, name: "General" })).toBeInTheDocument();
     expect(container.querySelector('.set-wrap[data-tab="general"]')).not.toBeNull();
@@ -153,7 +153,7 @@ describe("SettingsPage with extension sections", () => {
     renderPage();
     await screen.findByText("Ship the portal");
     expect(tabNames()).toEqual([
-      "General", "Execution", "Models & providers", "Integrations", "Members & access", "Devices & pairing", "Notifications", "Interface", "Billing",
+      "General", "Execution", "Models & providers", "Integrations", "Members & access", "Devices & pairing", "Notifications", "Voice", "Interface", "Billing",
     ]);
   });
 

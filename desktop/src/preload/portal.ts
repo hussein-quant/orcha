@@ -5,12 +5,13 @@
  *  Exposes `window.orchaHost` via contextBridge when, and only when, the page origin matches
  *  the stack origin main passed in additionalArguments. See portalBridge.ts. */
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
-import { createOrchaHost } from './portalBridge'
+import { MIC_REQUEST_CHANNEL, createOrchaHost } from './portalBridge'
 
 const host = createOrchaHost({
   argv: process.argv,
   origin: () => window.location.origin,
   send: (channel, payload) => ipcRenderer.send(channel, payload),
+  invokeMic: () => ipcRenderer.invoke(MIC_REQUEST_CHANNEL),
   on: (channel, listener) => {
     const wrapped = (_e: IpcRendererEvent, payload: unknown): void => listener(payload)
     ipcRenderer.on(channel, wrapped)

@@ -17,6 +17,7 @@
  */
 import { useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from "react";
 import { IconButton } from "./IconButton";
+import { DictationButton } from "../../dictation/DictationButton";
 
 export function AttachGlyph() {
   return (
@@ -128,6 +129,7 @@ export function Composer({
         id={tid}
         ref={(el) => { ta.current = el; textareaRef?.(el); }}
         className="v2-composer-input"
+        data-dictation-inline=""
         aria-label={label}
         aria-describedby={reasonId}
         placeholder={placeholder}
@@ -145,6 +147,7 @@ export function Composer({
         </div>
         <div className="v2-composer-tools">
           {tools}
+          <DictationButton getTarget={() => ta.current} disabled={disabled} />
           {onFiles ? (
             <>
               <IconButton
