@@ -138,6 +138,22 @@ export function requestTitle(p0: unknown, fallback = "Request", max = TITLE_MAX)
   return line.length <= max ? line : line.slice(0, max - 1).replace(/\s+\S*$/, "") + "…";
 }
 
+/** A request-like row: its display title (code-thread questions carry one, lib/requestText.ts) wins. */
+type Titled = { title?: string | null; payload: unknown };
+
+/** List/crumb headline of a request: its display title, else payloadTitle. */
+export function reqTitle(r: Titled, fallback = "Request"): string {
+  const t = (r.title || "").trim();
+  return t || payloadTitle(r.payload, fallback);
+}
+
+/** Detail headline of a request: its display title (capped at `max`), else requestTitle. */
+export function reqDetailTitle(r: Titled, fallback = "Request", max = TITLE_MAX): string {
+  const t = (r.title || "").trim();
+  if (!t) return requestTitle(r.payload, fallback, max);
+  return t.length <= max ? t : t.slice(0, max - 1).replace(/\s+\S*$/, "") + "…";
+}
+
 /**
  * The payload with an already-shown title removed, so the body never repeats
  * it (D12). Strings drop the title prefix; objects drop it from their headline

@@ -44,6 +44,10 @@ export interface Routine {
   last_run: RoutineLastRun | null;
   /** server-rendered title for the next run, when the backend provides it */
   title_preview?: string | null;
+  /** "Make recurring…": the task this routine was copied from (provenance only) */
+  origin_task_id?: string | null;
+  /** that task's current title (null when there is no origin or it was removed) */
+  origin_task_title?: string | null;
 }
 
 /** Local {{date}}/{{time}}/{{weekday}} values for `at` in `tz` (mirrors
@@ -120,6 +124,8 @@ export interface RoutineInput {
   timezone: string;
   enabled: boolean;
   skip_if_open: boolean;
+  /** create only: the task this routine is a copy of ("Created from task #…") */
+  origin_task_id?: string | null;
 }
 
 export interface SchedulePreview {
@@ -140,6 +146,10 @@ const enc = encodeURIComponent;
 
 export const listRoutines = (cid: string, signal?: AbortSignal) =>
   getJSON<RoutineList>(`/api/containers/${enc(cid)}/routines`, signal);
+
+/** Routines made from one task — the task's "Recurring" link. */
+export const listRoutinesFromTask = (cid: string, taskId: string, signal?: AbortSignal) =>
+  getJSON<RoutineList>(`/api/containers/${enc(cid)}/routines?origin_task_id=${enc(taskId)}`, signal);
 
 export const listRuns = (rid: string, signal?: AbortSignal) =>
   getJSON<{ runs: RoutineRun[] }>(`/api/routines/${enc(rid)}/runs?limit=25`, signal);

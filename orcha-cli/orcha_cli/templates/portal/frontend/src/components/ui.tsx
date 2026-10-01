@@ -187,6 +187,10 @@ export function Linkified({ text, tasks, className }: { text: unknown; tasks?: T
 export interface ToastOptions {
   /** stay until dismissed (failures the user must read and act on) */
   sticky?: boolean;
+  /** one inline action (e.g. "Undo") — the toast stays clickable while shown */
+  action?: { label: string; onClick: () => void };
+  /** how long a non-sticky toast shows (ms, default 2600) */
+  durationMs?: number;
 }
 type ToastFn = (msg: string, kind?: "ok" | "warn" | "danger" | "", opts?: ToastOptions) => void;
 const ToastCtx = createContext<ToastFn>(() => {});
@@ -194,13 +198,13 @@ export function useToast(): ToastFn {
   return useContext(ToastCtx);
 }
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [t, setT] = useState<{ msg: string; kind: string; show: boolean; sticky: boolean } | null>(null);
+  const [t, setT] = useState<{ msg: string; kind: string; show: boolean; sticky: boolean; action: ToastOptions["action"] | null } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toast: ToastFn = (msg, kind = "", opts) => {
     if (timer.current) clearTimeout(timer.current);
     const sticky = !!opts?.sticky;
-    setT({ msg, kind, show: true, sticky });
-    timer.current = sticky ? null : setTimeout(() => setT((v) => (v ? { ...v, show: false } : v)), 2600);
+    setT({ msg, kind, show: true, sticky, action: opts?.action ?? null });
+    timer.current = sticky ? null : setTimeout(() => setT((v) => (v ? { ...v, show: false } : v)), opts?.durationMs ?? 2600);
   };
   const dismiss = () => setT((v) => (v ? { ...v, show: false } : v));
   return (
@@ -209,8 +213,15 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {/* persistent polite live region (V2 a11y): the toast text is announced once */}
       <div className="v2-toast-region" role="status" aria-live="polite">
         {t && (
-          <div className={`toast ${t.kind}${t.show ? " show" : ""}${t.sticky ? " sticky" : ""}`}>
-            {t.msg}
+          <div className={`toast ${t.kind}${t.show ? " show" : ""}${t.sticky ? " sticky" : ""}${t.action ? " has-action" : ""}`}>
+            <span className="toast-msg">{t.msg}</span>
+            {t.action && t.show ? (
+              <button
+                type="button"
+                className="toast-act"
+                onClick={() => { const a = t.action; dismiss(); a?.onClick(); }}
+              >{t.action.label}</button>
+            ) : null}
             {t.sticky && t.show ? (
               <button type="button" className="toast-x" aria-label="Dismiss" onClick={dismiss}>×</button>
             ) : null}

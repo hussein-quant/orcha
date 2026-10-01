@@ -270,8 +270,11 @@ async def test_tagged_create_makes_directed_request_with_anchor_and_wakes(
     assert req.json()["target_id"] == tagged["agent_id"]
     assert req.json()["status"] == "open"
 
-    payload_rows = db.execute("SELECT payload FROM requests WHERE id=%s", (request_id,))
-    payload_text = payload_rows[0]["payload"]
+    # mig 065: the AGENT's text (anchor + question + reply instruction) is agent_payload;
+    # people see just the question as payload.
+    payload_rows = db.execute("SELECT payload, agent_payload FROM requests WHERE id=%s", (request_id,))
+    assert payload_rows[0]["payload"] == "why did we do it this way?"
+    payload_text = payload_rows[0]["agent_payload"]
     assert "src/a.py:10-12" in payload_text
     assert "why did we do it this way?" in payload_text
     assert f"POST /api/code/threads/{thread_id}/messages" in payload_text
@@ -316,9 +319,11 @@ async def test_wake_payload_deep_link_url_encodes_path(client, db, container, ma
     thread_id = r.json()["id"]
     request_id = r.json()["request_id"]
 
-    payload_rows = db.execute("SELECT payload FROM requests WHERE id=%s", (request_id,))
-    payload_text = payload_rows[0]["payload"]
+    payload_rows = db.execute("SELECT agent_payload, detail FROM requests WHERE id=%s", (request_id,))
+    payload_text = payload_rows[0]["agent_payload"]
     assert f"view/reply in the portal: /code?path=src/my%20file.py&thread={thread_id}" in payload_text
+    # the human-facing link (detail.code_thread.link) is the same well-formed string
+    assert payload_rows[0]["detail"]["code_thread"]["link"] == f"/code?path=src/my%20file.py&thread={thread_id}"
 
 
 async def test_untagged_create_makes_no_request(client, db, container, make_agent, token_env, monkeypatch):

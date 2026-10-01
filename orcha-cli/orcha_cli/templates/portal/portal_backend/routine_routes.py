@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
@@ -69,6 +69,46 @@ class RoutineCreate(BaseModel):
     timezone: str = Field(default="UTC", max_length=64, description="IANA timezone, e.g. Africa/Nairobi")
     enabled: bool = True
     skip_if_open: bool = True
+    origin_task_id: Optional[str] = Field(
+        default=None,
+        description="The task this routine was copied from (\"Make recurring…\"): provenance only — "
+                    "the task itself is never changed. Must be a task of the same project.")
+
+
+class RoutineRead(BaseModel):
+    """Documentation model for a routine as the API returns it (the handlers return the
+    serialized dict; this only describes its shape in /openapi.json)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    container_id: str
+    title: str
+    title_preview: Optional[str] = None
+    description: Optional[str] = None
+    definition_of_done: str
+    assignee_agent_id: Optional[str] = None
+    assignee_alias: Optional[str] = None
+    priority: int
+    cron: str
+    timezone: str
+    schedule_text: str
+    enabled: bool
+    skip_if_open: bool
+    next_run_at: Optional[str] = None
+    origin_task_id: Optional[str] = Field(
+        default=None, description="The task this routine was created from, if any (\"Created from task #…\")")
+    origin_task_title: Optional[str] = Field(
+        default=None, description="That task's current title (null when there is no origin or it was removed)")
+
+
+class RoutineList(BaseModel):
+    """Documentation model for GET /api/containers/{cid}/routines."""
+
+    model_config = ConfigDict(extra="allow")
+
+    routines: list[RoutineRead]
+    scheduler: dict
 
 
 class RoutineUpdate(BaseModel):
@@ -136,6 +176,19 @@ def _validate_assignee(cur, cid, assignee_id):
     return str(row["id"])
 
 
+def _validate_origin_task(cur, cid, task_id):
+    """"Make recurring…" provenance: the task must exist in THIS project. Read-only — the
+    task is only referenced, never changed."""
+    if task_id is None:
+        return None
+    _require_uuid(task_id, "origin_task_id")
+    cur.execute("SELECT id, container_id FROM tasks WHERE id=%s", (task_id,))
+    row = cur.fetchone()
+    if not row or str(row["container_id"]) != cid:
+        raise HTTPException(404, "origin task is not a task of this project")
+    return str(row["id"])
+
+
 _ROUTINE_SELECT = """
     SELECT r.*,
            asg.alias AS assignee_alias,
@@ -145,7 +198,8 @@ _ROUTINE_SELECT = """
            lr.id AS last_run_id, lr.outcome AS last_outcome, lr.trigger AS last_trigger,
            lr.detail AS last_detail, lr.created_at AS last_run_created_at,
            lr.task_id AS last_task_id, lr.missed_count AS last_missed_count,
-           lt.status AS last_task_status, lt.title AS last_task_title
+           lt.status AS last_task_status, lt.title AS last_task_title,
+           ot.title AS origin_task_title
       FROM routines r
       LEFT JOIN agents asg ON asg.id = r.assignee_agent_id
       LEFT JOIN agents cb  ON cb.id  = r.created_by_agent_id
@@ -154,6 +208,7 @@ _ROUTINE_SELECT = """
             SELECT * FROM routine_runs rr WHERE rr.routine_id = r.id
              ORDER BY rr.created_at DESC LIMIT 1) lr ON true
       LEFT JOIN tasks lt ON lt.id = lr.task_id
+      LEFT JOIN tasks ot ON ot.id = r.origin_task_id
 """
 
 
@@ -196,6 +251,8 @@ def _serialize(row) -> dict:
         "created_at": _iso(row["created_at"]),
         "updated_at": _iso(row["updated_at"]),
         "last_run": last,
+        "origin_task_id": str(row["origin_task_id"]) if row.get("origin_task_id") else None,
+        "origin_task_title": row.get("origin_task_title") if row.get("origin_task_id") else None,
     }
 
 
@@ -245,23 +302,31 @@ def _scheduler_state(cur, cid) -> dict:
 # Reads
 # ---------------------------------------------------------------------------
 
-@app.get("/api/containers/{cid}/routines")
-def list_routines(cid: str, request: Request):
+@app.get("/api/containers/{cid}/routines", responses={200: {"model": RoutineList}})
+def list_routines(
+    cid: str,
+    request: Request,
+    origin_task_id: Optional[str] = Query(
+        None, description="Only routines created from this task (the task's \"Recurring\" link)"),
+):
     """Every live routine of the project (+ its latest run) and the scheduler's last check-in."""
     _require_uuid(cid, "container_id")
+    if origin_task_id is not None:
+        _require_uuid(origin_task_id, "origin_task_id")
     with db_cursor() as (_conn, cur):
         require_container(cur, cid)
         require_member_read(cur, request, cid)
+        origin_clause = " AND r.origin_task_id=%s" if origin_task_id else ""
         cur.execute(
-            _ROUTINE_SELECT + " WHERE r.container_id=%s AND r.archived_at IS NULL "
-            "ORDER BY r.enabled DESC, r.next_run_at ASC NULLS LAST, r.created_at ASC",
-            (cid,),
+            _ROUTINE_SELECT + " WHERE r.container_id=%s AND r.archived_at IS NULL" + origin_clause +
+            " ORDER BY r.enabled DESC, r.next_run_at ASC NULLS LAST, r.created_at ASC",
+            (cid, origin_task_id) if origin_task_id else (cid,),
         )
         rows = cur.fetchall()
         return {"routines": [_serialize(r) for r in rows], "scheduler": _scheduler_state(cur, cid)}
 
 
-@app.get("/api/routines/{rid}")
+@app.get("/api/routines/{rid}", responses={200: {"model": RoutineRead}})
 def get_routine(rid: str, request: Request):
     with db_cursor() as (_conn, cur):
         row = _load_routine(cur, rid)
@@ -317,7 +382,7 @@ def preview_schedule(cid: str, body: SchedulePreview, request: Request):
 # Writes (owner / manage_agents; viewers refused)
 # ---------------------------------------------------------------------------
 
-@app.post("/api/containers/{cid}/routines", status_code=201)
+@app.post("/api/containers/{cid}/routines", status_code=201, responses={201: {"model": RoutineRead}})
 def create_routine(cid: str, body: RoutineCreate, request: Request):
     _require_uuid(cid, "container_id")
     with db_cursor() as (conn, cur):
@@ -326,27 +391,29 @@ def create_routine(cid: str, body: RoutineCreate, request: Request):
         actor = str(member["id"])
         cron, tz = _validate_schedule(body.cron, body.timezone)
         assignee = _validate_assignee(cur, cid, body.assignee_agent_id)
+        origin = _validate_origin_task(cur, cid, body.origin_task_id)
         next_run = sched.next_after(cron, tz, _now()) if body.enabled else None
         cur.execute(
             """INSERT INTO routines
                  (container_id, title, description, definition_of_done, assignee_agent_id,
                   priority, cron, timezone, enabled, skip_if_open, next_run_at,
-                  created_by_agent_id, updated_by_agent_id)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                  created_by_agent_id, updated_by_agent_id, origin_task_id)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (cid, body.title.strip(), body.description, body.definition_of_done, assignee,
              body.priority, cron.expr, body.timezone, body.enabled, body.skip_if_open,
-             next_run, actor, actor),
+             next_run, actor, actor, origin),
         )
         rid = str(cur.fetchone()["id"])
         log_event(cur, cid, "human", actor, "routine", rid, "routine_created", {
             "title": body.title, "cron": cron.expr, "timezone": body.timezone,
             "enabled": body.enabled, "assignee_agent_id": assignee,
+            **({"origin_task_id": origin} if origin else {}),
         })
         conn.commit()
         return _fetch_serialized(cur, rid)
 
 
-@app.patch("/api/routines/{rid}")
+@app.patch("/api/routines/{rid}", responses={200: {"model": RoutineRead}})
 def update_routine(rid: str, body: RoutineUpdate, request: Request):
     """Partial update. Saving makes the saver the human future tasks are created as.
     A schedule/timezone change or (re-)enable recomputes the next run from NOW — time spent

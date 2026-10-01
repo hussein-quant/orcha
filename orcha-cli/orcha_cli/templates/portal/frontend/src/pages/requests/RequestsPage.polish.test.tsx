@@ -111,7 +111,9 @@ describe("decision card — titled by who owns the next action", () => {
     expect(requestNextStep(snap, req({}), h)).toMatchObject({ mine: false, title: "Waiting on mira" });
     expect(requestNextStep(snap, req({ status: "answered" }), h)).toMatchObject({ mine: false, title: "Answered · waiting on forge" });
     // your own question came back: who answered + what is left (never a bare "Your move")
-    expect(requestNextStep(snap, req({ status: "answered", from: "kedar", requester_id: "h1" }), h)).toMatchObject({ mine: true, title: "mira answered — convert or close" });
+    // a question: "<who> answered" (Resolve is primary); a WORK request keeps "convert or close"
+    expect(requestNextStep(snap, req({ status: "answered", from: "kedar", requester_id: "h1" }), h)).toMatchObject({ mine: true, title: "mira answered" });
+    expect(requestNextStep(snap, req({ status: "answered", from: "kedar", requester_id: "h1", type: "task" }), h)).toMatchObject({ mine: true, title: "mira answered — convert or close" });
     expect(requestNextStep(snap, req({ to: "kedar", target_id: "h1", escalated: true }), h)).toMatchObject({ mine: true, title: "Escalated to you" });
     // legacy "escalated" is counted as yours by Needs you — the card must agree (never "waiting on X")
     expect(requestNextStep(snap, req({ status: "escalated" }), h)).toMatchObject({ mine: true, title: "Escalated to you" });

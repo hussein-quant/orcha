@@ -117,18 +117,82 @@ export function taskRefs(html: string, tasks: Task[]): string {
     .join("");
 }
 
+/* ---- portal paths → link chips ---------------------------------------------
+ * A bare portal-relative path in prose ("/code?path=a.ts&thread=…",
+ * "/tasks?task=…", "/requests?req=…", "/agents") renders as a compact link
+ * chip naming where it goes ("Open thread in Code"), never as a raw URL. Only
+ * the portal's own sections match, only at a word start (never inside an
+ * http URL or a longer path like /code/foo or /codex), and trailing
+ * punctuation stays outside. Runs on ALREADY-ESCAPED text: the href keeps the
+ * escaping (valid in an attribute) and the label is re-escaped. The cid link
+ * interceptor (lib/scope.ts) adds project scope on click. */
+const PORTAL_SECTIONS: Record<string, string> = {
+  code: "Code", tasks: "Tasks", requests: "Requests", agents: "Agents", needs: "Needs you",
+  activity: "Activity", routines: "Routines", github: "GitHub", metrics: "Metrics",
+  members: "Members", settings: "Settings",
+};
+const PORTAL_PATH_RE = /(^|[\s(])(\/(?:code|tasks|requests|agents|needs|activity|routines|github|metrics|members|settings)(?:\?[^\s<]*)?)(?=[\s<).,;:!?]|$)/gm;
+const LINK_ICON =
+  '<svg class="v2-ico plink-ico" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 12.5 13 7M8.5 7H13v4.5"/></svg>';
+
+/** What a portal path opens, in words ("Open thread in Code"). `path` is raw (unescaped). */
+export function portalLinkLabel(path: string, tasks: Task[] = []): string {
+  const qi = path.indexOf("?");
+  const section = (qi < 0 ? path : path.slice(0, qi)).replace(/^\//, "");
+  let q: URLSearchParams;
+  try { q = new URLSearchParams(qi < 0 ? "" : path.slice(qi + 1)); } catch { q = new URLSearchParams(); }
+  const name = PORTAL_SECTIONS[section] || section;
+  if (section === "code") {
+    if (q.get("thread")) return "Open thread in Code";
+    const p = q.get("path");
+    if (p) return "Open " + (p.replace(/\/+$/, "").split("/").pop() || p) + " in Code";
+    return "Open Code";
+  }
+  if (section === "tasks" && q.get("task")) {
+    const t = taskByRef(tasks, q.get("task") as string);
+    return t && t.title ? "Open task · " + trunc(t.title, 48) : "Open task " + shortId(q.get("task"));
+  }
+  if (section === "requests" && q.get("req")) return "Open request " + shortId(q.get("req"));
+  if (section === "agents" && q.get("agent")) return "Open agent " + q.get("agent");
+  if (section === "github" && q.get("pr")) return "Open PR #" + q.get("pr");
+  if (section === "github" && q.get("issue")) return "Open issue #" + q.get("issue");
+  return "Open " + name;
+}
+
+/** One chip for an ESCAPED portal path (see PORTAL_PATH_RE). */
+function portalChip(escPath: string, tasks: Task[]): string {
+  const raw = unesc(escPath);
+  return `<a class="lnk plink v2-chip v2-chip-sm is-interactive" href="${escPath}" title="${escPath}">${LINK_ICON}<span class="v2-chip-text">${esc(portalLinkLabel(raw, tasks))}</span></a>`;
+}
+
+/** Replace bare portal paths in ESCAPED text with chips; `wrap` lets mdText stash them. */
+function portalPaths(s: string, tasks: Task[], wrap: (html: string) => string = (h) => h): string {
+  return s.replace(PORTAL_PATH_RE, (_m, lead: string, p: string) => {
+    let tail = "";
+    const t = p.match(/[)\].,;:!?]+$/);
+    if (t && p.indexOf("?") >= 0) {
+      tail = p.slice(p.length - t[0].length);
+      p = p.slice(0, p.length - t[0].length);
+    }
+    return lead + wrap(portalChip(p, tasks)) + tail;
+  });
+}
+
 /* ---- ISS-44 linkify (esc first; anchors escape-proof) -------------------- */
 export const linkify = (s: unknown, tasks: Task[] = []): string =>
   taskRefs(
-    esc(s == null ? "" : String(s)).replace(/https?:\/\/[^\s<]+/g, (m) => {
-      let tail = "";
-      const t = m.match(/[)\].,;:!?]+$/);
-      if (t) {
-        tail = m.slice(m.length - t[0].length);
-        m = m.slice(0, m.length - t[0].length);
-      }
-      return `<a class="lnk" href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>${tail}`;
-    }),
+    portalPaths(
+      esc(s == null ? "" : String(s)).replace(/https?:\/\/[^\s<]+/g, (m) => {
+        let tail = "";
+        const t = m.match(/[)\].,;:!?]+$/);
+        if (t) {
+          tail = m.slice(m.length - t[0].length);
+          m = m.slice(0, m.length - t[0].length);
+        }
+        return `<a class="lnk" href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>${tail}`;
+      }),
+      tasks,
+    ),
     tasks,
   );
 
@@ -218,6 +282,7 @@ export const mdText = (src: unknown, tasks: Task[] = []): string => {
     }
     return keep(`<a class="lnk" href="${m}" target="_blank" rel="noopener noreferrer">${m}</a>`) + tail;
   });
+  s = portalPaths(s, tasks, keep);
   s = s.replace(/\*\*(?!\s)([^\n]+?)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/__(?!\s)([^\n_]+?)__/g, "<strong>$1</strong>");
   s = s.replace(/(^|[^*])\*(?!\s)([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>");

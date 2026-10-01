@@ -123,7 +123,10 @@ async def test_created_thread_request_payload(client, db, container, make_agent,
     assert r.status_code == 201, r.text
     thread_id = r.json()["id"]
     request_id = r.json()["request_id"]
-    payload = db.execute("SELECT payload FROM requests WHERE id=%s", (request_id,))[0]["payload"]
+    row = db.execute("SELECT payload, agent_payload FROM requests WHERE id=%s", (request_id,))[0]
+    # mig 065: people see just the question; the agent's wake text rides agent_payload
+    assert row["payload"] == "Explain this file."
+    payload = row["agent_payload"]
     assert "Explain this file." in payload
     assert ("## Steps" in payload) is expect_guide
     assert ("## Follow-ups" in payload) is expect_guide

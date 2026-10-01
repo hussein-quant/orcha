@@ -90,6 +90,30 @@ export const detailCss = `
   .rq-help .v2-ico { width: 14px; height: 14px; }
   .rq-help:hover { color: var(--v2-text-2); background: var(--v2-hover); }
   .rq-help:focus-visible { box-shadow: var(--v2-focus-ring); outline: none; }
+  /* answered question: the answer in the card (clamped), Resolve primary */
+  .rq-card-when { color: var(--v2-text-3); font-weight: var(--v2-fw-regular); font-size: var(--v2-fs-meta, 12px); font-variant-numeric: tabular-nums; }
+  .rq-qa-body { margin: 0 0 var(--v2-space-3); }
+  .rq-qa-answer { max-height: 6.2em; overflow: hidden; position: relative; font-size: var(--v2-fs-body); color: var(--v2-text); line-height: 1.55; }
+  .rq-qa-answer .rq-payload { margin: 0; }
+  .rq-qa-answer:not(.is-open)::after { content: ""; position: absolute; inset: auto 0 0 0; height: 1.6em;
+    background: linear-gradient(to bottom, transparent, var(--v2-surface)); pointer-events: none; }
+  .rq-qa-answer.is-open { max-height: none; }
+  .rq-qa-answer.is-open::after { display: none; }
+  .rq-qa-more { margin-top: 6px; }
+  .rq-qa-link { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; font: inherit;
+    font-size: var(--v2-fs-meta, 12px); color: var(--v2-text-2); cursor: pointer; text-decoration: none; }
+  .rq-qa-link:hover { color: var(--v2-text); text-decoration: underline; text-underline-offset: 2px; }
+  .rq-qa-link .v2-ico { width: 12px; height: 12px; }
+  .rq-qa-link:focus-visible { outline: none; box-shadow: var(--v2-focus-ring); border-radius: 4px; }
+  .rq-card.is-resolving { background: transparent; box-shadow: none; display: flex; align-items: center; gap: var(--v2-space-3); padding: 10px 12px 10px var(--v2-space-4); }
+  .rq-card.is-resolving .rq-card-h { margin: 0; flex: 1 1 auto; }
+  /* where a code-thread question lives: one chip + the anchor (mono path, D15) */
+  .rq-src { display: flex; align-items: center; gap: var(--v2-space-2); flex-wrap: wrap; margin-top: var(--v2-space-3); }
+  .rq-thread-chip { text-decoration: none; color: var(--v2-text); }
+  .rq-thread-chip .v2-ico { width: 12px; height: 12px; color: var(--v2-text-2); }
+  .rq-src-path { font-family: var(--v2-font-mono, ui-monospace, monospace); font-size: 11.5px; color: var(--v2-text-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  /* portal paths inside request/answer text render as link chips (lib/format.ts) */
+  .rq-md .plink, .rq-payload .plink { text-decoration: none; color: var(--v2-text); vertical-align: baseline; }
   .rq-card-kv { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 8px var(--v2-space-3); margin: 0 0 var(--v2-space-3); font-size: var(--v2-fs-body); align-items: center; }
   .rq-card-kv dt { color: var(--v2-text-3); }
   .rq-card-kv dd { margin: 0; min-width: 0; color: var(--v2-text); overflow-wrap: anywhere; }

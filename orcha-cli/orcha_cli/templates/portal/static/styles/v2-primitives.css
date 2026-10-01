@@ -453,6 +453,15 @@ body.v2-resizing { cursor: col-resize; user-select: none; }
 }
 .toast .toast-x:hover { background: var(--v2-hover); color: var(--v2-text); }
 .toast .toast-x:focus-visible { outline: none; box-shadow: var(--v2-focus-ring); }
+/* an action toast ("Resolved · Undo") stays clickable while shown */
+.toast.has-action.show { pointer-events: auto; display: flex; align-items: center; gap: var(--v2-space-3); }
+.toast .toast-act {
+  flex: none; margin-left: auto; height: 24px; padding: 0 8px; border: 1px solid var(--v2-border-strong);
+  border-radius: var(--v2-radius-control); background: transparent; color: var(--v2-text); font: inherit;
+  font-size: 12px; font-weight: var(--v2-fw-medium); cursor: pointer;
+}
+.toast .toast-act:hover { background: var(--v2-hover); }
+.toast .toast-act:focus-visible { outline: none; box-shadow: var(--v2-focus-ring); }
 
 /* touch layouts: tabs reach 44 px (QA) */
 @media (pointer: coarse) {
@@ -1087,3 +1096,9 @@ a.v2-changes-pr:hover .v2-changes-prtitle { text-decoration: underline; text-und
      same-specificity `.set-nav-pills { padding: 0 … }` shorthand */
   nav.set-nav-pills { padding-block: 10px; margin-block: -10px; }
 }
+
+/* Portal paths in prose ("/code?path=…&thread=…", "/tasks?task=…") render as link chips
+   (lib/format.ts portalPaths) — named destinations, never raw URLs. */
+a.plink.v2-chip { text-decoration: none; color: var(--v2-text); vertical-align: baseline; max-width: 100%; }
+a.plink.v2-chip:hover { text-decoration: none; background: var(--v2-hover); }
+a.plink .plink-ico { width: 12px; height: 12px; flex: none; color: var(--v2-text-2); }

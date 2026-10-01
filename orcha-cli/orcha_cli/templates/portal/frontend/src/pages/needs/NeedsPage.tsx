@@ -162,10 +162,10 @@ function evidencePreview(i: AttentionItem): string {
 
 /** Item title: a request's payload title (never JSON), else the entity title. */
 function itemTitle(i: AttentionItem): string {
-  if (i.request) return payloadTitle(i.request.payload, i.title || (i.request.type || "Request") + " request");
+  if (i.request) return i.request.title || payloadTitle(i.request.payload, i.title || (i.request.type || "Request") + " request");
   return i.title;
 }
-const requestTitle = (r: OrchaRequest) => payloadTitle(r.payload, (r.type || "Request") + " request");
+const requestTitle = (r: OrchaRequest) => r.title || payloadTitle(r.payload, (r.type || "Request") + " request");
 
 /** Detail titles stay short (D12): at most ~2 lines at display size. A longer
  *  first sentence is cut at a word boundary (full text in the tooltip). */
@@ -186,7 +186,8 @@ export function headline(text: string, max = DETAIL_TITLE_MAX): string {
  * string and object payloads alike.
  */
 export function requestHead(r: OrchaRequest): { title: string; titleShown: string } {
-  const title = payloadRequestTitle(r.payload, (r.type || "Request") + " request", DETAIL_TITLE_MAX);
+  // a display title (code-thread questions) is already short and complete — capped, never sentence-cut
+  const title = r.title ? (r.title.length <= DETAIL_TITLE_MAX ? r.title : r.title.slice(0, DETAIL_TITLE_MAX - 1).replace(/\s+\S*$/, "") + "…") : payloadRequestTitle(r.payload, (r.type || "Request") + " request", DETAIL_TITLE_MAX);
   return { title, titleShown: title };
 }
 const requestDetailTitle = (r: OrchaRequest) => requestHead(r).title;

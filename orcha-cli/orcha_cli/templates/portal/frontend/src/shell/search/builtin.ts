@@ -170,9 +170,9 @@ const requests: SearchProvider = {
   limit: 6,
   search(q, ctx) {
     const list = ctx.snap?.requests ?? [];
-    const hits = byScore(list, (r) => matchScore(q, payloadSummary(r.payload), payloadHaystack(r.payload), r.type, r.from, r.to), 6);
+    const hits = byScore(list, (r) => matchScore(q, r.title || payloadSummary(r.payload), payloadHaystack(r.payload), r.type, r.from, r.to), 6);
     return hits.map((r) => {
-      const text = payloadSummary(r.payload).replace(/\s+/g, " ").trim();
+      const text = (r.title || payloadSummary(r.payload)).replace(/\s+/g, " ").trim();
       const route = [r.from, r.to].filter(Boolean).join(" → ");
       return {
         id: String(r.id),

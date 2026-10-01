@@ -37,13 +37,14 @@ import { statusMeta } from "../../lib/status";
 import { Icon, Linkified, useToast } from "../../components/ui";
 import { Tooltip } from "../../components/primitives";
 import {
-  Avatar, Button, Chip, Dialog, actorKey, rosterPaletteSlots, EmptyState, IconButton, List, Menu, PriorityIcon, Row, SplitPane, StatusGlyph, StatusIcon,
+  Avatar, Button, ButtonLink, Chip, Dialog, actorKey, rosterPaletteSlots, EmptyState, IconButton, List, Menu, PriorityIcon, Row, SplitPane, StatusGlyph, StatusIcon,
   isEditingTarget, type MenuItemSpec,
 } from "../../components/primitives";
 import { Timeline, TimelineComment, TimelineEvent } from "../../components/primitives";
 import { Property, PropertyRail, PropertySection } from "../../components/primitives";
 import { Composer } from "../../components/primitives";
-import { markAttentionDecided } from "../../state/attention";
+import { markAttentionDecided, unmarkAttentionDecided } from "../../state/attention";
+import { RESOLVE_UNDO_MS, scheduleResolve, undoResolve, useResolving } from "./resolveUndo";
 import { Shell } from "../../shell/Shell";
 import { CircleIconButton, FilterPills, PageHeader, Pager, scrollMainTo } from "../../shell/PageChrome";
 import { useInboxKeys } from "../needs/useInboxKeys";
@@ -60,7 +61,7 @@ import { sortComparator, sortState, type SortState } from "../../lib/sort";
 import { workCss } from "../tasks/workCss";
 import { SnapshotPending } from "../../components/SnapshotPending";
 import { grantDenied } from "../agents/agentModel";
-import { PayloadView, payloadAfterTitle, payloadSearchText, payloadText, payloadTitle, requestTitle } from "./requestPayload";
+import { PayloadView, payloadAfterTitle, payloadSearchText, payloadText, reqDetailTitle, reqTitle } from "./requestPayload";
 import { detailCss, listCss } from "./requestsCss";
 
 export { payloadText, payloadTitle, requestTitle } from "./requestPayload";
@@ -184,7 +185,7 @@ export function requestMatches(snap: Snapshot | null, r: OrchaRequest, filter: s
   }
   const s = q.trim().toLowerCase();
   if (!s) return true;
-  const hay = [r.id, r.type, r.status, r.from, r.to, payloadSearchText(r.payload), payloadSearchText(r.response)].join("\n").toLowerCase();
+  const hay = [r.id, r.type, r.status, r.from, r.to, r.title || "", payloadSearchText(r.payload), payloadSearchText(r.response)].join("\n").toLowerCase();
   return s.split(/\s+/).every((tok) => (tok.startsWith("#") && tok.length > 1 ? String(r.id).toLowerCase().startsWith(tok.slice(1)) : hay.includes(tok)));
 }
 
@@ -569,6 +570,18 @@ export function requestActions(snap: Snapshot | null, req: OrchaRequest, h: Agen
   };
 }
 
+/**
+ * Your own question came back answered (owner request): the card shows the answer and one-click
+ * Resolve is primary; "Turn into a task" / "Ask a follow-up" are secondary. Only a request that
+ * asks for WORK (type task) keeps "Convert to task" as the primary action.
+ */
+export function isAnsweredQuestion(req: OrchaRequest, h: Agent | null): boolean {
+  return !!h && req.status === "answered" && String(req.requester_id) === String(h.id) && (req.type || "").toLowerCase() !== "task";
+}
+
+/** Line label for a code-thread anchor ("L3" / "L3–9"). */
+const lineLabel = (s: number, e: number) => (s === e ? "L" + s : "L" + s + "–" + e);
+
 /** The decision an open request routed to you asks for (Linear's triage card names it). */
 function askTitle(req: OrchaRequest, from: string): string {
   const t = (req.type || "").toLowerCase();
@@ -597,7 +610,11 @@ export function requestNextStep(snap: Snapshot | null, req: OrchaRequest, h: Age
   }
   if (req.status === "answered") {
     // your own question came back: say who answered and what is left to do
-    if (isRequester) return { mine: true, owner: h!.alias, title: name(req.to) + " answered — convert or close" };
+    if (isRequester) {
+      // a question: read the answer and resolve it; a work request: convert it (see isAnsweredQuestion)
+      if ((req.type || "").toLowerCase() !== "task") return { mine: true, owner: h!.alias, title: name(responderAlias(req)) + " answered" };
+      return { mine: true, owner: h!.alias, title: name(req.to) + " answered — convert or close" };
+    }
     return { mine: false, owner: req.from, title: "Answered · waiting on " + name(req.from) };
   }
   if (req.status === "escalated") {
@@ -646,6 +663,12 @@ export function RequestDetail({
   const [modal, setModal] = useState<ModalSt | null>(null);
   const [modalErr, setModalErr] = useState<string | null>(null);
   const [modalBusy, setModalBusy] = useState(false);
+  const [followUp, setFollowUp] = useState(false); // inline follow-up box open
+  const [fuDraft, setFuDraft] = useState("");
+  const [fuErr, setFuErr] = useState<string | null>(null);
+  const [fuBusy, setFuBusy] = useState(false);
+  const [answerOpen, setAnswerOpen] = useState(false); // answered-card excerpt expanded
+  const resolving = useResolving(r.id);
   useRefocusDialogOnError(!!modal && !modalBusy && !!modalErr);
   const reqs = snap?.requests ?? [];
   const done = (how: Resolution) => {
@@ -754,6 +777,69 @@ export function RequestDetail({
     );
   };
 
+  /* One click, no dialog: the close is deferred for RESOLVE_UNDO_MS so Undo is real (resolveUndo.ts). */
+  const doResolve = (req: OrchaRequest) => {
+    const h = requireHuman();
+    if (!h) return;
+    const key = "request:" + req.id;
+    const undo = () => {
+      if (!undoResolve(req.id)) return;
+      unmarkAttentionDecided(key);
+      toast("Kept open", "");
+    };
+    scheduleResolve(req.id, h.id, {
+      onDone: () => void refresh(),
+      onFail: (msg) => {
+        unmarkAttentionDecided(key);
+        toast("Couldn't resolve " + shortId(req.id) + " " + msg, "danger", { sticky: true });
+        void refresh();
+      },
+    });
+    done("closed");
+    toast("Resolved", "ok", { action: { label: "Undo", onClick: undo }, durationMs: RESOLVE_UNDO_MS });
+  };
+  const doUndoResolve = (req: OrchaRequest) => {
+    if (!undoResolve(req.id)) return;
+    unmarkAttentionDecided("request:" + req.id);
+    toast("Kept open", "");
+  };
+
+  /* A follow-up is a new question to whoever answered, chained to this one (parent_request_id);
+     this one is then resolved — the conversation continues on the follow-up. */
+  const sendFollowUp = async (req: OrchaRequest) => {
+    const h = requireHuman();
+    if (!h) return;
+    const text = fuDraft.trim();
+    const cid = snap?.container?.id;
+    if (!text || !cid) return;
+    const to = responderAlias(req);
+    const target = agentByAlias(snap, to)?.id ?? req.target_id;
+    setFuBusy(true);
+    setFuErr(null);
+    try {
+      await sendJSON("POST", "/api/containers/" + encodeURIComponent(cid) + "/requests", {
+        requester_agent_id: h.id,
+        target_agent_id: target,
+        payload: text,
+        parent_request_id: req.id,
+      });
+      let resolved = true;
+      try {
+        await sendJSON("POST", "/api/requests/" + encodeURIComponent(req.id) + "/close", { requester_agent_id: h.id });
+      } catch { resolved = false; }
+      toast("Follow-up sent to " + who(to) + (resolved ? " · this question is resolved" : ""), "ok");
+      setFuDraft("");
+      setFollowUp(false);
+      if (resolved) done("closed");
+      void refresh();
+    } catch (e) {
+      setFuErr(failMsg(e));
+      toast(failMsg(e), "danger");
+    } finally {
+      setFuBusy(false);
+    }
+  };
+
   const doNudge = async (req: OrchaRequest) => {
     const h = requireHuman();
     if (!h) return;
@@ -805,7 +891,7 @@ export function RequestDetail({
       setModal({
         kind: "convert",
         req,
-        title: trunc(payloadTitle(req.payload, typeLabel(req.type)), 80),
+        title: trunc(reqTitle(req, typeLabel(req.type)), 80),
         dod: "",
         assignee: responder?.alias ?? aiAgents[0]?.alias ?? "",
       });
@@ -840,6 +926,8 @@ export function RequestDetail({
   // answered locally, snapshot not caught up: nothing to answer again
   const acts = pending ? { ...acts0, answer: false, nudge: false, escalate: false, convert: false } : acts0;
   const showAnswer = acts.answer && !sugg; // a roster suggestion is decided, not answered (answer stays in ⋯)
+  const answeredQ = !pending && isAnsweredQuestion(r, h);
+  const threadLink = r.code_thread?.link || null;
 
   /* ---- actions block (vanilla actionsFor) -------------------------------- */
   const actionsBlock = (req: OrchaRequest): ReactNode => {
@@ -871,6 +959,56 @@ export function RequestDetail({
       );
     }
     if (sugg) return null; // the suggestion card carries the actions (answer/close live in its ⋯)
+    if (answeredQ) {
+      if (resolving) {
+        return (
+          <div className="rq-actions" id="reqacts" data-req={req.id}>
+            <Button variant="secondary" icon="refresh" onClick={() => doUndoResolve(req)}>Undo</Button>
+          </div>
+        );
+      }
+      if (followUp) {
+        return (
+          <div className="rq-answer">
+            <Composer
+              id="fuIn"
+              label={"Follow-up to " + who(responderAlias(req))}
+              placeholder={"Ask " + who(responderAlias(req)) + " a follow-up — it's sent as a new question linked to this one."}
+              value={fuDraft}
+              onChange={setFuDraft}
+              onSubmit={() => void sendFollowUp(req)}
+              busy={fuBusy}
+              submitLabel="Send follow-up"
+              minRows={2}
+              autoFocus
+              keyHint
+              leading={<Button variant="ghost" size="sm" onClick={() => { setFollowUp(false); setFuErr(null); }}>Cancel</Button>}
+            />
+            {fuErr ? (
+              <div className="wk-err" role="alert">
+                <b>Follow-up not sent.</b> {fuErr}. Your text is kept.
+              </div>
+            ) : null}
+          </div>
+        );
+      }
+      const moreQ: MenuItemSpec[] = acts.escalate
+        ? [{ label: "Escalate to human…", icon: "flag", onSelect: () => openAction("escalate", req) }]
+        : [];
+      return (
+        <div className="rq-actions" id="reqacts" data-req={req.id}>
+          <MoreMenu items={moreQ} />
+          {threadLink ? (
+            // a code-thread question's conversation lives in its thread: follow up there
+            <ButtonLink variant="ghost" icon="pencil" href={threadLink}>Ask a follow-up</ButtonLink>
+          ) : (
+            <Button variant="ghost" icon="pencil" onClick={() => { setFuErr(null); setFollowUp(true); }}>Ask a follow-up</Button>
+          )}
+          <Button variant="secondary" icon="convert" onClick={() => openAction("convert", req)}>Turn into a task</Button>
+          <Button variant="primary" icon="check" onClick={() => doResolve(req)}>Resolve</Button>
+        </div>
+      );
+    }
     const primaryIsAnswer = showAnswer;
     const primaryIsConvert = !primaryIsAnswer && acts.convert;
     // Escalate is requester-only, i.e. always YOUR own request: re-routing it to "a human"
@@ -974,6 +1112,18 @@ export function RequestDetail({
           </section>
         ) : null}
 
+        {r.code_thread ? (
+          // mig 065: the conversation lives in the code thread — one chip, never the raw /code?… path
+          <div className="rq-src">
+            {threadLink ? (
+              <a className="v2-chip v2-chip-sm is-interactive rq-thread-chip" href={threadLink}>
+                <Icon name="code" cls="v2-ico" /><span className="v2-chip-text">Open thread in Code</span>
+              </a>
+            ) : null}
+            <span className="rq-src-path" title={r.code_thread.path}>{r.code_thread.path} {lineLabel(r.code_thread.start_line, r.code_thread.end_line)}</span>
+          </div>
+        ) : null}
+
         {task ? (
           <section className="rq-proposed" aria-label="Proposed task">
             <h2 className="rq-h2">Proposed task</h2>
@@ -987,7 +1137,35 @@ export function RequestDetail({
 
         {sugg ? <SuggestionDecision r={r} onDone={(k) => done(k)} overflow={suggOverflow} /> : null}
 
-        {actions || pending ? (
+        {answeredQ && actions ? (
+          // "Atlas answered · 2m ⓘ", the answer (clamped, expandable / Open thread), then
+          // [⋯] [Ask a follow-up] [Turn into a task] [Resolve] — Resolve is one click with Undo
+          <section className={"rq-card rq-qa is-mine" + (resolving ? " is-resolving" : "")} aria-label={resolving ? "Resolved" : who(answeredBy) + " answered"}>
+            <header className="rq-card-h">
+              {resolving ? <Icon name="check" cls="v2-ico rq-card-ico" /> : <PartyAvatar snap={snap} alias={answeredBy} size={16} decorative />}
+              <span className="rq-card-t">{resolving ? "Resolved" : who(answeredBy) + " answered"}</span>
+              {!resolving && r.responded_at ? <span className="rq-card-when" title={stampText(r.responded_at)}>{relTime(r.responded_at)}</span> : null}
+              <HelpDot text={resolving ? "Leaves every queue now; the close is sent in a few seconds unless you undo." : "Resolve closes your question — " + who(answeredBy) + " isn't woken again. " + moveHelp} />
+            </header>
+            {!resolving && hasResponse ? (
+              <div className="rq-qa-body">
+                <div className={"rq-qa-answer" + (answerOpen ? " is-open" : "")}>
+                  <PayloadView value={r.response} tasks={snap?.tasks} testClass="answer" />
+                </div>
+                <div className="rq-qa-more">
+                  {threadLink ? (
+                    <a className="lnk rq-qa-link" href={threadLink}>Open thread<Icon name="arrow" cls="v2-ico" /></a>
+                  ) : (
+                    <button type="button" className="rq-qa-link" aria-expanded={answerOpen} onClick={() => setAnswerOpen((o) => !o)}>
+                      {answerOpen ? "Show less" : "Show full answer"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            {actions}
+          </section>
+        ) : actions || pending ? (
           answering && actions ? (
             <section className="rq-card is-answering" aria-label="Your answer">
               <header className="rq-card-h">
@@ -1023,7 +1201,7 @@ export function RequestDetail({
                 return (
                   <TimelineEvent key={x.id} glyph={<StatusGlyph status={x.status} size={14} />} className={cur ? "is-cur" : undefined}>
                     <button type="button" className={"rq-cnode" + (cur ? " cur" : "")} aria-current={cur ? "true" : undefined} onClick={() => onSelect(x.id)}>
-                      <span className="ttl">{payloadTitle(x.payload, typeLabel(x.type))}</span>
+                      <span className="ttl">{reqTitle(x, typeLabel(x.type))}</span>
                       <span className="sub">
                         {who(x.from)} → {who(x.to)} · {statusMeta(x.status).l}
                       </span>
@@ -1060,7 +1238,12 @@ export function RequestDetail({
                 <PayloadView value={pending.text} tasks={snap?.tasks} testClass="answer" />
               </TimelineComment>
             ) : null}
-            {hasResponse ? (
+            {hasResponse && answeredQ && !resolving ? (
+              // the card above shows the answer: the activity logs the event once (D12)
+              <TimelineEvent glyph={<PartyAvatar snap={snap} alias={answeredBy} size={16} decorative />} actor={who(answeredBy)} at={r.responded_at || null}>
+                answered
+              </TimelineEvent>
+            ) : hasResponse ? (
               <TimelineComment author={who(answeredBy)} avatar={<PartyAvatar snap={snap} alias={answeredBy} size={16} decorative />} meta={<><span className="rq-ok"><Icon name="check" cls="v2-ico" /></span>{r.status === "accepted" ? "accepted the task" : "answered"}</>} at={r.responded_at || null}>
                 <PayloadView value={r.response} tasks={snap?.tasks} testClass="answer" />
               </TimelineComment>
@@ -1090,7 +1273,13 @@ export function RequestDetail({
               </TimelineEvent>
             ) : null}
             {r.status === "closed" ? (
-              r.closed_by ? (
+              typeof r.detail?.auto_resolved === "string" ? (
+                // backend auto-resolve (code_space_routes._settle_thread_request): the thread IS the conversation
+                <TimelineEvent icon="check" at={r.closed_at || r.responded_at || null}>
+                  Resolved automatically — {r.detail.auto_resolved === "thread_resolved" ? "the code thread was resolved" : "answered in the code thread"}
+                  {threadLink ? <> · <a className="lnk" href={threadLink}>Open thread</a></> : null}
+                </TimelineEvent>
+              ) : r.closed_by ? (
                 // parity r2: name who closed it and, for a force-close, why
                 <TimelineEvent glyph={<PartyAvatar snap={snap} alias={r.closed_by} size={16} decorative />} actor={who(r.closed_by)} at={r.closed_at || null}>
                   closed it{r.close_reason ? <> — <span className="rq-close-reason">{r.close_reason}</span></> : null}
@@ -1476,7 +1665,7 @@ export function RequestsPage() {
 
   /* ---- render ------------------------------------------------------------ */
   const rowFor = (x: OrchaRequest) => {
-    const title = payloadTitle(x.payload, typeLabel(x.type));
+    const title = reqTitle(x, typeLabel(x.type));
     // D10/D12 inbox item: bold headline + ONE fully muted line ("lead → you · question");
     // the glyph carries the status (exact label in its tooltip + screen-reader text).
     const trail = [isEscalated(x) && x.status !== "escalated" ? "escalated" : "", x.chain_depth ? "in a chain" : "", x.type].filter(Boolean).join(" · ");
@@ -1605,7 +1794,7 @@ export function RequestsPage() {
   );
 
   // detail title: the whole first sentence of prose (fits the Display title), else the headline field
-  const rTitle = r ? requestTitle(r.payload, typeLabel(r.type)) : "";
+  const rTitle = r ? reqDetailTitle(r, typeLabel(r.type)) : "";
   const idx = r ? list.findIndex((x) => x.id === r.id) : -1;
   const rPending = r ? pendingAnswer(r) : null;
   const inspector = detailOpen ? (

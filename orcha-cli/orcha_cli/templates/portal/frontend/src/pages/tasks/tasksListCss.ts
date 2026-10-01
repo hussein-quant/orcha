@@ -67,6 +67,15 @@ export const tasksListCss = String.raw`
   .tl-chips { flex: none; display: inline-flex; align-items: center; gap: 6px; max-width: 42%; overflow: hidden; }
   .tl-who { flex: none; display: inline-flex; align-items: center; justify-content: flex-end; min-width: 20px; }
   .tl-time { flex: none; width: auto; min-width: 34px; text-align: right; font-size: var(--v2-fs-meta, 12px); color: var(--v2-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* row ⋯ menu: floats over the row's right edge on hover / focus / open, so the
+     row never reflows (Linear); touch devices keep it visible in the flow */
+  .tl-rowmenu { flex: none; display: inline-flex; }
+  @media (hover: hover) {
+    .tl-row.v2-row { position: relative; }
+    .tl-row .tl-rowmenu { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); opacity: 0;
+      border-radius: 50%; background: var(--v2-panel, var(--v2-surface)); transition: opacity var(--v2-dur-fast, .12s) var(--v2-ease, ease); }
+    .tl-row:hover .tl-rowmenu, .tl-row:focus-within .tl-rowmenu, .tl-row .tl-rowmenu:has([aria-expanded="true"]) { opacity: 1; }
+  }
   .tl-noone { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 1px dashed var(--v2-border-strong); flex: none; }
   .tl-noone.is-sm { width: 16px; height: 16px; }
   .tl-page .wk-more { margin: var(--v2-space-3) auto; width: auto; }

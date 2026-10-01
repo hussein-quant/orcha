@@ -12,7 +12,7 @@
  * Authority: owner or `manage_agents`; everyone else reads (the server enforces).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Avatar, Button, Chip, ConfirmDialog, EmptyState, IconButton, Inspector, Skeleton, SplitPane, StatusIcon, Tooltip,
 } from "../../components/primitives";
@@ -23,6 +23,7 @@ import { Shell } from "../../shell/Shell";
 import { CircleIconButton, FilterPills, PageToolbar } from "../../shell/PageChrome";
 import { useActingAuthority, useSnapshot } from "../../state/SnapshotProvider";
 import { RoutineDialog } from "./RoutineDialog";
+import { RoutineOrigin } from "./MakeRecurring";
 import {
   createRoutine, deleteRoutine, hasTemplateTokens, listRoutines, listRuns, routineTitle, runRoutineNow, updateRoutine,
   type Routine, type RoutineInput, type RoutineLastRun, type RoutineRun,
@@ -112,7 +113,9 @@ export function RoutinesPage() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
   const [filter, setFilter] = useState<Filter>("all");
-  const [selId, setSelId] = useState<string | null>(null);
+  // a task's "Recurring" link lands here as /routines?routine=<id> — preselect it
+  const [params] = useSearchParams();
+  const [selId, setSelId] = useState<string | null>(() => params.get("routine"));
   const [dialog, setDialog] = useState<{ routine: Routine | null } | null>(null);
   const [dialogBusy, setDialogBusy] = useState(false);
   const [dialogErr, setDialogErr] = useState<string | null>(null);
@@ -331,6 +334,7 @@ function RoutineInspector({ routine: r, nonce, can, reason, onClose, onEdit, onR
           <dt>If still open</dt><dd>{r.skip_if_open ? "Skip the run" : "Create another task"}</dd>
           <dt>Tasks created as</dt><dd>{r.updated_by_alias || r.created_by_alias || "—"}</dd>
         </dl>
+        <RoutineOrigin routine={{ origin_task_id: r.origin_task_id ?? null, origin_task_title: r.origin_task_title ?? null }} />
         <section className="rt-insp-sec" aria-label="Task template">
           <h3 className="rt-insp-h">Task template</h3>
           {hasTemplateTokens(r.title) ? <p className="rt-pre"><span className="rt-muted">Template: </span>{r.title}</p> : null}

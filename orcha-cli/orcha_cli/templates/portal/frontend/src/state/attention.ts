@@ -78,7 +78,8 @@ function ts(iso: string | null): number {
 // Payload primitive's summary/question/title picker, else a humanised type.
 function requestTitle(r: OrchaRequest): string {
   const type = r.type ? r.type.charAt(0).toUpperCase() + r.type.slice(1).replace(/_/g, " ") : "Request";
-  return sharedPayloadTitle(r.payload, type + " request");
+  // a display title (code-thread questions, lib/requestText.ts) wins over the payload's first line
+  return (r.title || "").trim() || sharedPayloadTitle(r.payload, type + " request");
 }
 
 /** Is the request's target a human who is NOT the acting human? */

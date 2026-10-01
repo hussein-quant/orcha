@@ -10,15 +10,19 @@ from portal_backend.database import db_cursor
 from portal_backend.guards import require_agent as _require_agent
 from portal_backend.guards import valid_uuid as _valid_uuid
 from portal_backend.identity_routes import require_member_read
+from portal_backend.schemas.requests import AgentInboxResponse, AgentOutboxResponse
 from portal_backend.request_ownership import (
     _annotate_request_ownership,
 )
 
-_REQUEST_COLUMNS = """r.id, r.type, r.status, r.priority, r.payload, r.response,
-                      r.created_at, r.responded_at, r.expires_at"""
+# Mig 065: `agent_payload` is the full text addressed to the agent (e.g. a code-thread
+# question's anchor + reply instructions + lesson guide); null = `payload` is all there is.
+# The /orcha-inbox and /orcha-checkpoint skills tell the agent to act on it when present.
+_REQUEST_COLUMNS = """r.id, r.type, r.status, r.priority, r.payload, r.agent_payload, r.response,
+                      r.created_at, r.responded_at, r.expires_at, r.detail"""
 
 
-@app.get("/api/agents/{aid}/inbox")
+@app.get("/api/agents/{aid}/inbox", responses={200: {"model": AgentInboxResponse}})
 def agent_inbox(aid: str, request: Request, since: Optional[str] = None):
     """Open requests addressed to this agent (incoming side of the inbox).
 
@@ -53,7 +57,7 @@ def agent_inbox(aid: str, request: Request, since: Optional[str] = None):
         return {"open_requests": _annotate_request_ownership(cur.fetchall())}
 
 
-@app.get("/api/agents/{aid}/outbox")
+@app.get("/api/agents/{aid}/outbox", responses={200: {"model": AgentOutboxResponse}})
 def agent_outbox(
     aid: str, request: Request, status: Optional[str] = None, include_closed: bool = False
 ):

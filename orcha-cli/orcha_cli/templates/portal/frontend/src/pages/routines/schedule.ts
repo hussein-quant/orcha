@@ -30,7 +30,7 @@ export const PRESETS: { key: Preset; label: string }[] = [
   { key: "weekdays", label: "Weekdays" },
   { key: "weekly", label: "Weekly" },
   { key: "monthly", label: "Monthly" },
-  { key: "advanced", label: "Advanced" },
+  { key: "advanced", label: "Custom" },
 ];
 
 export const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];

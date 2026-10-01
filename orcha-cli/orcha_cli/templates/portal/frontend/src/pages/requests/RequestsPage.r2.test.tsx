@@ -1,7 +1,7 @@
 /**
  * Linear polish round 2 (/requests):
- *  - your own answered question: "<who> answered — convert or close", Convert primary,
- *    Escalate only in ⋯ (never an inline "escalate to yourself");
+ *  - your own answered question: "<who> answered" with the answer, Resolve primary (one
+ *    click, Undo), "Turn into a task" / "Ask a follow-up" secondary, Escalate only in ⋯;
  *  - legacy escalated = "Escalated to you" (Needs counts it) — covered in polish.test;
  *  - detail header = status glyph + copyable ID + type label; the flowline drops the status
  *    (statusShown) and the rail states it once; rail times are clock-only;
@@ -71,12 +71,15 @@ const openDetail = () => waitFor(() => { expect(detail()).toBeTruthy(); return d
 const selParam = () => new URLSearchParams(loc.search).get("req");
 
 describe("decision card", () => {
-  it("your own answered question: '<who> answered — convert or close', Convert primary, Escalate only in ⋯", async () => {
+  it("your own answered question: '<who> answered' + the answer, Resolve primary, Escalate only in ⋯", async () => {
     mount("/requests?req=r2");
-    const card = await waitFor(() => within(detail()).getByRole("region", { name: "mira answered — convert or close" }));
+    const card = await waitFor(() => within(detail()).getByRole("region", { name: "mira answered" }));
+    expect(card.textContent).toContain("Today.");
     expect(within(card).queryByRole("button", { name: /Escalate/ })).toBeNull();
-    const convert = within(card).getByRole("button", { name: /Convert to task/ });
-    expect(convert.className).toMatch(/primary/);
+    expect(within(card).getByRole("button", { name: /^Resolve$/ }).className).toMatch(/primary/);
+    expect(within(card).getByRole("button", { name: /Turn into a task/ }).className).not.toMatch(/primary/);
+    expect(within(card).getByRole("button", { name: /Ask a follow-up/ })).toBeInTheDocument();
+    expect(within(card).queryByRole("button", { name: /Convert to task/ })).toBeNull();
     fireEvent.click(within(card).getByRole("button", { name: "More request actions" }));
     expect(await screen.findByRole("menuitem", { name: /Escalate to human/ })).toBeInTheDocument();
   });

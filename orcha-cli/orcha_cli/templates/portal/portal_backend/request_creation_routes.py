@@ -166,10 +166,22 @@ def create_request(cid: str, body: RequestCreate, request: Request):
         # TaskRequestPayload (title = first line of payload truncated; dod = the payload;
         # priority = the request priority) and route it through the SAME task-detail build
         # path below, then stamp the audit fields onto `detail`.
+        # Mig 065: agent-only instructions ride their own column; an empty/duplicate value
+        # collapses to NULL so "null = the agent reads payload" stays the single rule.
+        agent_payload: Optional[str] = (
+            body.agent_payload if (body.agent_payload or "").strip() else None
+        )
+        if agent_payload == body.payload:
+            agent_payload = None
+
         effective_type = body.type
         effective_task = body.task
         promoted_verb: Optional[str] = None
-        if body.type == "info" and body.task is None:
+        # Mig 065: a request that carries its OWN agent instructions (agent_payload — e.g. a
+        # code-thread question, answered in its thread) already says how the target answers;
+        # the work-verb backstop is for bare info asks and would turn "Fix this?" into a task
+        # request the thread can never settle.
+        if body.type == "info" and body.task is None and agent_payload is None:
             verdict, matched_verb = classify_request_type(body.payload)
             if verdict == "task":
                 effective_type = "task"
@@ -217,9 +229,9 @@ def create_request(cid: str, body: RequestCreate, request: Request):
             """INSERT INTO requests
                  (container_id, type, requester_id, target_id, priority, status,
                   payload, expires_at, parent_request_id, chain_depth, detail,
-                  originating_task_id)
+                  originating_task_id, agent_payload)
                VALUES (%s, %s, %s, %s, %s, 'open', %s,
-                       now() + (%s || ' minutes')::interval, %s, %s, %s::jsonb, %s)
+                       now() + (%s || ' minutes')::interval, %s, %s, %s::jsonb, %s, %s)
                RETURNING id, expires_at""",
             (
                 cid,
@@ -233,6 +245,7 @@ def create_request(cid: str, body: RequestCreate, request: Request):
                 chain_depth,
                 json.dumps(detail) if detail is not None else None,
                 originating_task_id,
+                agent_payload,
             ),
         )
         row = cur.fetchone()
@@ -270,7 +283,9 @@ def create_request(cid: str, body: RequestCreate, request: Request):
                 "request_id": rid,
                 "type": effective_type,
                 "from_agent_id": body.requester_agent_id,
-                "preview": body.payload[:120],
+                # The TARGET's bus event: the agent-facing text (mig 065), so the wake
+                # manifest preview is exactly what it was before the human/agent split.
+                "preview": (agent_payload or body.payload)[:120],
             },
         )
         conn.commit()
@@ -293,6 +308,8 @@ def create_request(cid: str, body: RequestCreate, request: Request):
         "chain_depth": chain_depth,
         "originating_task_id": originating_task_id,  # GH #56: task the answer's wake will attach to (or null)
         "task": detail,  # null for info; full task body for type='task'
+        # Mig 065: echoed so a caller can confirm what the target agent receives.
+        "agent_payload": agent_payload,
         # Parity r1: set when the named target was a read-only viewer and the request was
         # routed to the actionable human (target_alias) instead; null otherwise.
         "rerouted_from_alias": rerouted_from_alias,

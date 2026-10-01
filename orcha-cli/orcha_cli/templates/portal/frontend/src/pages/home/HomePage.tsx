@@ -192,7 +192,7 @@ export function activityEvents(tasks: Task[], requests: OrchaRequest[], limit = 
   });
   requests.forEach((r) => {
     const link = "/requests?req=" + encodeURIComponent(r.id);
-    const title = trunc(payloadTitle(r.payload, (r.type || "request") + " request"), 90);
+    const title = trunc(r.title || payloadTitle(r.payload, (r.type || "request") + " request"), 90);
     out.push({ who: r.from || null, human: r.from === "human", kind: "request", ctx: title, text: "", at: r.created_at || "", link });
     if (r.responded_at) {
       // parity r2: an answer given before an escalation belongs to the agent it was
@@ -291,7 +291,7 @@ function KindChip({ it }: { it: AttentionItem }) {
 const Help = ({ text }: { text: string }) => <HelpTip tip={text} />;
 const plural = (n: number, one: string, many = one + "s") => (n === 1 ? one : many);
 function itemTitle(it: AttentionItem): string {
-  if (it.request) return payloadTitle(it.request.payload, it.title);
+  if (it.request) return it.request.title || payloadTitle(it.request.payload, it.title);
   return it.title;
 }
 

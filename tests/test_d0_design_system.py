@@ -126,28 +126,27 @@ def test_shell_brand_and_needs_you():
 
 
 def test_theme_applied_on_load():
-    """Review P2 (React port) → V2 (dark-only): the theme must be applied before the
-    first paint and before React renders, so there is never a flash. V2 retires
-    light/auto/skins: initTheme pins <html data-theme="dark"> and drops data-skin; the
-    stored orcha:theme preference is still READ (never deleted) for rollback/prefs
-    parity; index.html paints the dark canvas inline before any stylesheet loads."""
+    """The theme is applied before the first paint and before React renders, so there is
+    never a flash. V2 now has System / Light / Dark (shell/theme.ts, re-exported from
+    Shell.tsx): skins stay retired (data-skin dropped), the stored orcha:theme preference
+    is READ and never deleted, and index.html paints the right canvas for BOTH themes
+    inline before any stylesheet loads — each matching that theme's --v2-window token."""
+    import re as _re
     shell = (FRONTEND / "shell" / "Shell.tsx").read_text()
-    assert "export function initTheme" in shell, "no load-time theme initializer"
-    assert 'setAttribute("data-theme", "dark")' in shell, "initTheme doesn't pin dark"
-    assert 'removeAttribute("data-skin")' in shell, "legacy skins still applied"
-    assert 'localStorage.getItem("orcha:theme") || "auto"' in shell, "stored preference no longer read (rollback parity)"
-    assert "removeItem(\"orcha:theme\")" not in shell, "legacy preference must not be deleted"
+    theme = (FRONTEND / "shell" / "theme.ts").read_text()
+    assert "export function initTheme" in theme, "no load-time theme initializer"
+    assert "initTheme" in shell, "Shell no longer exposes initTheme"
+    assert 'removeAttribute("data-skin")' in theme, "legacy skins still applied"
+    assert 'THEME_KEY = "orcha:theme"' in theme and "localStorage.getItem(THEME_KEY)" in theme, \
+        "stored preference no longer read"
+    assert "removeItem(" not in theme, "the stored preference must not be deleted"
     main_tsx = (FRONTEND / "main.tsx").read_text()
     assert "initTheme();" in main_tsx, "main.tsx doesn't apply the theme before render"
     assert main_tsx.index("initTheme();") < main_tsx.index("createRoot"), \
         "theme applied only after the app mounts (would flash the wrong theme)"
-    index_html = (PORTAL / "frontend" / "index.html").read_text()
-    # the pre-paint colour must equal the darkest V2 tone (--v2-window) so
-    # there is no flash between first paint and the token layer loading
-    import re as _re
-    window = _re.search(r"--v2-window:\s*(#[0-9A-Fa-f]{6})", (STATIC / "styles" / "v2-tokens.css").read_text())
-    assert window, "--v2-window token missing"
-    assert f"background:{window.group(1)}".lower() in index_html.replace(" ", "").lower(), "no pre-paint dark canvas"
-    assert 'setAttribute("data-theme", "dark")' in index_html, "pre-paint boot doesn't pin dark"
-
-
+    index_html = (PORTAL / "frontend" / "index.html").read_text().replace(" ", "").lower()
+    tokens = (STATIC / "styles" / "v2-tokens.css").read_text()
+    windows = _re.findall(r"--v2-window:\s*(#[0-9A-Fa-f]{6})", tokens)
+    assert len(windows) >= 2, "--v2-window must be defined for dark and light"
+    for w in windows[:2]:
+        assert w.lower() in index_html, f"no pre-paint canvas for {w}"

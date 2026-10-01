@@ -203,7 +203,8 @@ describe("RequestsPage round 1", () => {
 
   it("convert defaults the assignee to the agent that answered", async () => {
     mount("/requests?req=r3");
-    fireEvent.click(await screen.findByRole("button", { name: /Convert to task/ }));
+    // an answered QUESTION offers "Turn into a task" (secondary; Resolve is primary)
+    fireEvent.click(await screen.findByRole("button", { name: /Turn into a task/ }));
     const dialog = await screen.findByRole("dialog");
     expect((within(dialog).getByRole("combobox") as HTMLSelectElement).value).toBe("mira");
     expect((within(dialog).getAllByRole("textbox")[0] as HTMLInputElement).value).toBe("Status of the migration?");

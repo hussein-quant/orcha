@@ -52,6 +52,7 @@ import {
   type MenuItemSpec,
 } from "../../components/primitives";
 import { Timeline, TimelineCard, TimelineEvent, TimelineMessage } from "../../components/primitives";
+import { MakeRecurringDialog, RecurringLink, makeRecurringItem, useMakeRecurringGate, useTaskRoutines } from "../routines/MakeRecurring";
 import { Property, PropertyRail, PropertySection } from "../../components/primitives";
 import { AttachGlyph, Composer } from "../../components/primitives";
 import { PageHeader, Pager } from "../../shell/PageChrome";
@@ -3294,6 +3295,7 @@ function TaskDetail({
             ) : null}
           </PropertySection>
           ) : null}
+          <RecurringProperty t={t} />
           <Relationships t={t} />
           <ProtocolPanel key={"proto-" + t.id} t={t} />
           <CloseCard key={"close-" + t.id} t={t} onActed={onActed} openRef={cancelRef} />
@@ -3318,6 +3320,20 @@ function TaskDetail({
         {panel("runs", runsSeen ? <RunsPanel state={runs} /> : null)}
       </div>
     </div>
+  );
+}
+
+/** The task's small "Recurring" link to the routine(s) made from it — nothing when none. */
+function RecurringProperty({ t }: { t: Task }) {
+  const { cid } = useSnapshot();
+  const routines = useTaskRoutines(cid, t.id);
+  if (!routines || !routines.length) return null;
+  return (
+    <PropertySection>
+      <Property label="Routine">
+        <RecurringLink routines={routines} />
+      </Property>
+    </PropertySection>
   );
 }
 
@@ -3372,6 +3388,9 @@ export function TaskDetailPane({
   const runs = useTaskRuns(t ? t.id : null);
   const cancelRef = useRef<(() => void) | null>(null);
   const [unassignOpen, setUnassignOpen] = useState(false);
+  // "Make recurring…": a routine pre-filled as a COPY of this task (the task is never changed)
+  const recurGate = useMakeRecurringGate();
+  const [recurOpen, setRecurOpen] = useState(false);
   const [dispatchBusy, setDispatchBusy] = useState(false);
   // TG-50: hold / release / unassign — the human dispatch controls
   // (POST /api/tasks/{tid}/readiness and /unassign, both human-authority)
@@ -3463,6 +3482,8 @@ export function TaskDetailPane({
           ? { label: "Pair in terminal", icon: "play", hint: aiAssignee.alias, disabled: true, disabledReason: noHuman }
           : { label: "Pair in terminal", icon: "play", disabled: true, disabledReason: "No agent assigned — assign an agent to pair in a terminal" },
     ];
+    const recurItem = makeRecurringItem(recurGate, () => setRecurOpen(true), t);
+    if (recurItem) menu.push("separator", recurItem);
     // TG-50: readiness + unassign (the server refuses root / finished tasks)
     const finished = ["completed", "needs_verification", "cancelled"].indexOf(t.status) >= 0;
     const dispatchItems: MenuItemSpec[] = [];
@@ -3541,6 +3562,7 @@ export function TaskDetailPane({
     <section ref={paneRef} className={"td-pane is-" + mode} aria-label={t ? "Task: " + t.title : "Task"} data-v2-surface="panel" data-h1-visible={mode === "full" ? String(h1Visible) : undefined}>
       <style>{composerCss}</style>
       {header}
+      {t && recurOpen ? <MakeRecurringDialog task={t} onClose={() => setRecurOpen(false)} /> : null}
       {t && unassignOpen ? (
         <Dialog
           title="Unassign this task?"

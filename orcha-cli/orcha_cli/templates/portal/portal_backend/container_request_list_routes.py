@@ -9,6 +9,7 @@ from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
 from portal_backend.identity_routes import require_member_read
 from portal_backend.list_sorting import sort_clause, validate_sort
+from portal_backend.schemas.requests import RequestListResponse
 from portal_backend.request_ownership import (
     REQUEST_CLOSE_COLUMNS,
     REQUEST_ESCALATION_COLUMNS,
@@ -26,7 +27,7 @@ REQUEST_STATUSES = {
 }
 
 
-@app.get("/api/containers/{cid}/requests")
+@app.get("/api/containers/{cid}/requests", responses={200: {"model": RequestListResponse}})
 def list_container_requests(
     cid: str,
     request: Request,
@@ -93,7 +94,7 @@ def list_container_requests(
         )
         cur.execute(
             f"""SELECT id, type, status, priority, requester_id, target_id,
-                       payload, response, rejection_reason, spawned_task_id,
+                       payload, agent_payload, response, rejection_reason, spawned_task_id,
                        expires_at, created_at, responded_at, closed_at,
                        parent_request_id, chain_depth, detail,
                        (SELECT json_build_object('task_id', st.id, 'title', st.title, 'status', st.status)

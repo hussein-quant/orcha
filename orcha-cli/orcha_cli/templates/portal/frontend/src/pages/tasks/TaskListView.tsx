@@ -25,7 +25,7 @@ import { relTime, shortId } from "../../lib/format";
 import { reviewerName, reviewerRef, reviewerTitle } from "../../lib/reviewer";
 import { agentByAlias, planAwaitsHuman, useSnapshot } from "../../state/SnapshotProvider";
 import { Icon } from "../../components/ui";
-import { Button, Menu, MenuButton, Popover, Row, isEditingTarget, moveRowFocus } from "../../components/primitives";
+import { Button, Menu, MenuButton, Popover, Row, isEditingTarget, moveRowFocus, type MenuItemSpec } from "../../components/primitives";
 import { Avatar, AvatarStack, type AvatarActor } from "../../components/primitives";
 import { StatusGlyph, StatusIcon } from "../../components/primitives";
 import { PriorityGlyph, PriorityIcon, priorityLevel } from "../../components/primitives";
@@ -184,10 +184,29 @@ function When({ t }: { t: Task }) {
   );
 }
 
+/* ---- row ⋯ menu (hover / focus, Linear) ---------------------------------------- */
+export type RowMenuItems = (MenuItemSpec | "separator")[];
+function RowMenu({ t, items }: { t: Task; items: RowMenuItems }) {
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+  // the menu renders in a popover, but React events still bubble through the row —
+  // stop them here so picking an item never also opens the task
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  return (
+    <span className="tl-rowmenu" onClick={stop} onKeyDown={stop}>
+      <IconButton ref={ref} size="sm" icon="more" label={"Actions for " + t.title} aria-haspopup="menu" aria-expanded={open}
+        onClick={() => setOpen((o) => !o)} />
+      <Menu anchor={ref} open={open} onClose={() => setOpen(false)} items={items} label="Task actions" placement="bottom-end" />
+    </span>
+  );
+}
+
 /* ---- row -------------------------------------------------------------------- */
-export function TaskRow({ t, snap, selected, onSelect, compact, groupedBy, reviewOn, level, phone }: {
+export function TaskRow({ t, snap, selected, onSelect, compact, groupedBy, reviewOn, level, phone, menu }: {
   t: Task; snap: Snapshot | null; selected: boolean; onSelect: (id: string) => void; compact: boolean;
   groupedBy: TaskQuery["group"]; reviewOn: boolean; level: string; phone: boolean;
+  /** row ⋯ menu items (e.g. "Make recurring…"); no button when absent/empty */
+  menu?: RowMenuItems | null;
 }) {
   const act = latestActivity(t);
   const chips = taskChips(snap, t, { reviewOn, level }).slice(0, phone ? 1 : 2);
@@ -209,6 +228,7 @@ export function TaskRow({ t, snap, selected, onSelect, compact, groupedBy, revie
         <Who snap={snap} t={t} hide={hideWho} />
       </span>
       <When t={t} />
+      {menu && menu.length ? <RowMenu t={t} items={menu} /> : null}
     </Row>
   );
 }

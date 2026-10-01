@@ -40,6 +40,13 @@ def format_brief(brief: dict) -> str:
                 f"{(item.get('payload') or '')[:120]}  "
                 f"(id {str(item.get('id'))[:8]})"
             )
+            if item.get("agent_payload"):
+                # mig 065: `payload` above is already the agent-facing text; point at the
+                # full instructions (e.g. a code thread's reply endpoint) past the 120 chars.
+                lines.append(
+                    "        ↳ carries its own reply instructions — read them in full via "
+                    "/orcha-inbox (agent_payload)"
+                )
     outbox = brief.get("outbox") or []
     if outbox:
         lines.append(f"  Your asks now answered ({len(outbox)}):")

@@ -38,6 +38,7 @@ import { actingHuman, autLevel, pendingPlan, useActingAuthority, useSnapshot } f
 import type { Snapshot, Task, ThreadMsg } from "../../types";
 import { tasksPageCss } from "./pageCss";
 import { TaskBoard, TaskGroups, TaskRow, TasksToolbar, useDensity, usePhone } from "./TaskListView";
+import { MakeRecurringDialog, makeRecurringItem, useMakeRecurringGate } from "../routines/MakeRecurring";
 import { tasksListCss } from "./tasksListCss";
 import { mainScrollTop, scrollMainTo } from "../../shell/PageChrome";
 import { workCss } from "./workCss";
@@ -481,6 +482,14 @@ export function TasksPage() {
     replaceSearch({ sort: k });
   };
 
+  // row ⋯ → "Make recurring…" (a routine pre-filled as a COPY of the task)
+  const recurGate = useMakeRecurringGate();
+  const [recurTask, setRecurTask] = useState<Task | null>(null);
+  const rowMenu = (x: Task) => {
+    const item = makeRecurringItem(recurGate, () => setRecurTask(x), x);
+    return item ? [item] : null;
+  };
+
   const [density, setDensity] = useDensity();
   const phone = usePhone();
   const compact = density === "compact";
@@ -499,6 +508,7 @@ export function TasksPage() {
 
   const trow = (x: Task) => (
     <TaskRow
+      menu={rowMenu(x)}
       key={x.id}
       t={x}
       snap={snap}
@@ -713,6 +723,7 @@ export function TasksPage() {
           )}
         </div>
       )}
+      {recurTask ? <MakeRecurringDialog task={recurTask} onClose={() => setRecurTask(null)} /> : null}
       {newTaskOpen && (
         <NewTaskModal
           initialAssignee={params.get("for")}

@@ -148,7 +148,11 @@ def rehydrate(aid: str, request: Request):
         )
         tasks = cur.fetchall()
         cur.execute(
-            """SELECT r.id, r.type, r.priority, LEFT(r.payload, 240) AS payload,
+            # Mig 065: the brief is agent-only — it shows the text addressed to the agent
+            # (agent_payload, e.g. a code thread's reply instructions) when there is one.
+            """SELECT r.id, r.type, r.priority,
+                      LEFT(COALESCE(r.agent_payload, r.payload), 240) AS payload,
+                      r.agent_payload,
                       req.alias AS requester_alias
                FROM requests r JOIN agents req ON req.id = r.requester_id
                WHERE r.target_id = %s AND r.status = 'open'
@@ -157,7 +161,7 @@ def rehydrate(aid: str, request: Request):
         )
         inbox = cur.fetchall()
         cur.execute(
-            """SELECT r.id, r.type, LEFT(r.payload, 160) AS payload,
+            """SELECT r.id, r.type, LEFT(COALESCE(r.agent_payload, r.payload), 160) AS payload,
                       LEFT(r.response, 240) AS response,
                       COALESCE(tgt.alias, '(human)') AS target_alias
                FROM requests r LEFT JOIN agents tgt ON tgt.id = r.target_id

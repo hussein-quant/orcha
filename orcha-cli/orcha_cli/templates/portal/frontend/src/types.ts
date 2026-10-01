@@ -2,6 +2,8 @@
  * Component-shape types — the exact output of the vanilla data.js mapSnapshot
  * (static/data.js), so React pages read the same fields the HTML pages did.
  */
+import type { CodeThreadRef } from "./lib/requestText";
+
 export interface ActiveRun {
   run_id: string;
   wake_event?: string | null;
@@ -176,6 +178,10 @@ export interface OrchaRequest {
   expires_at: string | null;
   /** Backend `requests.detail` jsonb, unchanged (roster suggestions carry `proposed_alias`). */
   detail?: Record<string, unknown> | null;
+  /** Display title when the request has one (code-thread questions, lib/requestText.ts); else derive from payload. */
+  title?: string | null;
+  /** The code thread a Code › Learn/Ask question lives in (its conversation is there). */
+  code_thread?: CodeThreadRef | null;
 }
 
 export interface Container {

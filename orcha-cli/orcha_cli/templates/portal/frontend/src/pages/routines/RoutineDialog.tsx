@@ -5,6 +5,8 @@
  */
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button, Dialog, HelpTip, Segmented } from "../../components/primitives";
+import { Icon } from "../../components/ui";
+import { shortId } from "../../lib/format";
 import type { Agent } from "../../types";
 import { PRIORITY_BUCKETS, priorityBucket } from "../tasks/taskQuery";
 import type { Routine, RoutineInput, SchedulePreview } from "./routinesApi";
@@ -22,17 +24,24 @@ export interface RoutineDialogProps {
   error: string | null;
   onSubmit: (body: RoutineInput) => void;
   onClose: () => void;
+  /** create only: pre-filled template fields (e.g. "Make recurring…" copies a task) */
+  initial?: Partial<RoutineInput>;
+  /** create only: the task the routine is copied from — shown as "Copy of task #…" */
+  origin?: { taskId: string; title: string } | null;
+  /** dialog title override (default "New routine" / "Edit routine") */
+  heading?: string;
 }
 
 const TOKENS_TIP = "Use {{date}}, {{time}} or {{weekday}} in the title, description or definition of done — they're filled in with the run's date in the routine's timezone.";
 
-export function RoutineDialog({ cid, routine, agents, busy, error, onSubmit, onClose }: RoutineDialogProps) {
+export function RoutineDialog({ cid, routine, agents, busy, error, onSubmit, onClose, initial, origin, heading }: RoutineDialogProps) {
+  const init = routine ? null : initial ?? null;
   const ids = { title: useId(), desc: useId(), dod: useId(), asg: useId(), prio: useId(), tz: useId(), time: useId(), extra: useId(), cron: useId() };
-  const [title, setTitle] = useState(routine?.title ?? "");
-  const [description, setDescription] = useState(routine?.description ?? "");
-  const [dod, setDod] = useState(routine?.definition_of_done ?? "");
-  const [assignee, setAssignee] = useState<string>(routine?.assignee_agent_id ?? "");
-  const [priority, setPriority] = useState<number>(routine?.priority ?? 100);
+  const [title, setTitle] = useState(routine?.title ?? init?.title ?? "");
+  const [description, setDescription] = useState(routine?.description ?? init?.description ?? "");
+  const [dod, setDod] = useState(routine?.definition_of_done ?? init?.definition_of_done ?? "");
+  const [assignee, setAssignee] = useState<string>(routine?.assignee_agent_id ?? init?.assignee_agent_id ?? "");
+  const [priority, setPriority] = useState<number>(routine?.priority ?? init?.priority ?? 100);
   const [form, setForm] = useState<ScheduleForm>(() => (routine ? fromCron(routine.cron) : DEFAULT_FORM));
   const [tz, setTz] = useState<string>(routine?.timezone ?? browserZone());
   const [enabled, setEnabled] = useState<boolean>(routine?.enabled ?? true);
@@ -84,7 +93,7 @@ export function RoutineDialog({ cid, routine, agents, busy, error, onSubmit, onC
 
   return (
     <Dialog
-      title={routine ? "Edit routine" : "New routine"}
+      title={heading ?? (routine ? "Edit routine" : "New routine")}
       onClose={onClose}
       size="lg"
       initialFocus={titleRef}
@@ -100,6 +109,12 @@ export function RoutineDialog({ cid, routine, agents, busy, error, onSubmit, onC
       }
     >
       <form className="rt-form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        {origin && !routine ? (
+          <p className="rt-origin rt-origin-note">
+            <Icon name="copy" cls="v2-ico" />
+            <span>A copy of task <span className="tnum" title={origin.taskId}>#{shortId(origin.taskId)}</span> as a template — the task itself isn't changed.</span>
+          </p>
+        ) : null}
         <div className="rt-field">
           <div className="rt-labelrow">
             <label htmlFor={ids.title} className="rt-label">Task title</label>

@@ -5,6 +5,7 @@
  * is governed by /openapi.json — nothing here invents a route.
  */
 import type { Agent, Snapshot, ThreadMsg } from "../types";
+import { humanizeRequest } from "../lib/requestText";
 
 /** A failed API call: the message keeps the legacy "<url> → <status>[: detail]"
  *  shape (parsers depend on it), and `status` / `detail` carry the HTTP status
@@ -209,7 +210,11 @@ export function mapSnapshot(rawIn: any): Snapshot {
       closed_at: cd && typeof cd.at === "string" ? cd.at : null,
     };
   };
-  const requests = (raw.requests || []).map((r: any) => ({
+  const requests = (raw.requests || []).map((r: any) => {
+    const detail = r.detail && typeof r.detail === "object" ? r.detail : null;
+    // mig 065: people read the question, never the agent's wake instructions (legacy rows stripped)
+    const human = humanizeRequest(r.payload, detail);
+    return {
     id: r.id,
     type: r.type,
     status: r.status,
@@ -221,7 +226,9 @@ export function mapSnapshot(rawIn: any): Snapshot {
     // prefer the backend's joined alias, else say "retired agent".
     from: r.requester_alias || aliasFor(agents, r.requester_id) || (r.requester_id != null ? "retired agent" : "human"),
     to: r.target_alias || aliasFor(agents, r.target_id) || (r.target_id != null ? "retired agent" : "human"),
-    payload: r.payload,
+    payload: human.payload,
+    title: human.title,
+    code_thread: human.codeThread,
     response: r.response != null ? r.response : null,
     rejection_reason: r.rejection_reason != null ? r.rejection_reason : null,
     in_service_of: r.parent_request_id || null,
@@ -239,8 +246,9 @@ export function mapSnapshot(rawIn: any): Snapshot {
     responded_at: r.responded_at || null,
     expires_at: r.expires_at || null,
     // backend request.detail (e.g. roster suggestion marker `proposed_alias`), passed through unchanged
-    detail: r.detail && typeof r.detail === "object" ? r.detail : null,
-  }));
+    detail,
+  };
+  });
 
   // current_task: what the agent is actually working on. The project's ROOT
   // task (the objective, is_root) is never an agent's "current task" — it used

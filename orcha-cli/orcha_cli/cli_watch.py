@@ -133,7 +133,8 @@ def cmd_watch(args: argparse.Namespace, services) -> None:
                         "type": r.get("type", "info"),
                         "priority": r.get("priority"),
                         "from": r.get("requester_alias"),
-                        "preview": (r.get("payload") or "")[:160],
+                        # mig 065: the agent-facing text when the request has one
+                        "preview": (r.get("agent_payload") or r.get("payload") or "")[:160],
                         "chain_depth": r.get("chain_depth") or 0,
                         "created_at": r.get("created_at"),
                     })
@@ -148,7 +149,8 @@ def cmd_watch(args: argparse.Namespace, services) -> None:
                         "id": rid,
                         "type": r.get("type", "info"),
                         "to": r.get("target_alias"),
-                        "preview": (r.get("payload") or "")[:160],
+                        # mig 065: the agent-facing text when the request has one
+                        "preview": (r.get("agent_payload") or r.get("payload") or "")[:160],
                         "answer_preview": (r.get("response") or "")[:160],
                         "responded_at": r.get("responded_at"),
                     })
