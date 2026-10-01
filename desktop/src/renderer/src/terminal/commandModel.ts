@@ -23,6 +23,8 @@ export interface CommandItem {
   shortcut?: string[]
   icon?: string
   disabled?: boolean
+  /** Destructive action (e.g. "Remove project…"): rendered in the danger colour. */
+  danger?: boolean
 }
 
 function norm(s: string): string {

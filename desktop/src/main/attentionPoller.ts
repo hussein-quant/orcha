@@ -45,6 +45,15 @@ export class AttentionPoller {
     return { items: this.cached, projects: [...this.projects.values()] }
   }
 
+  /** A project was removed: drop everything cached for it, so its items vanish now and a
+   *  re-added stack of the same name starts from a clean baseline (no "back up" alert). */
+  forget(project: string): void {
+    this.lastRunning.delete(project)
+    this.projects.delete(project)
+    this.cached = this.cached.filter((i) => i.project !== project)
+    for (const k of [...this.seen]) if (k.startsWith(`${project}:`)) this.seen.delete(k)
+  }
+
   start(): void {
     void this.tick()
     this.timer = setInterval(() => void this.tick(), this.intervalMs)

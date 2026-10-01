@@ -6,24 +6,26 @@
  *  rules as every other channel (portal Settings › Notifications, mig 063). The section
  *  says so and opens those preferences in the running project's portal. */
 import { useEffect, useRef, useState } from 'react'
-import { BarChart3, Bell, Bot, Settings as SettingsIcon, SunMoon, UserRound, X } from 'lucide-react'
+import { BarChart3, Bell, Bot, HardDrive, Settings as SettingsIcon, SunMoon, UserRound, X } from 'lucide-react'
 import type { AgentId } from '../../../shared/agents'
 import AgentsSettings from './AgentsSettings'
 import AppearanceSettings from './AppearanceSettings'
 import ProfileSettings from './ProfileSettings'
+import StorageSettings from './StorageSettings'
 import type { UsageValue } from '../usage/useUsage'
 
 /** Portal section the desktop's Notifications entry opens (SettingsPage `#tab=notifications`). */
 export const NOTIFICATION_SETTINGS_PATH = '/settings#tab=notifications'
 
-type Section = 'profile' | 'agents' | 'appearance' | 'notifications' | 'usage'
+type Section = 'profile' | 'agents' | 'appearance' | 'notifications' | 'usage' | 'storage'
 
 const SECTIONS: { key: Section; label: string; Icon: typeof Bot }[] = [
   { key: 'profile', label: 'Profile', Icon: UserRound },
   { key: 'agents', label: 'Agents', Icon: Bot },
   { key: 'appearance', label: 'Appearance', Icon: SunMoon },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
-  { key: 'usage', label: 'Usage', Icon: BarChart3 }
+  { key: 'usage', label: 'Usage', Icon: BarChart3 },
+  { key: 'storage', label: 'Storage', Icon: HardDrive }
 ]
 
 export default function SettingsView({
@@ -51,6 +53,8 @@ export default function SettingsView({
   const hasTheme = !!window.orchaDesktop?.theme
   /** Settings › Profile needs the profile bridge (same rule). */
   const hasProfile = !!window.orchaDesktop?.profile
+  /** Settings › Storage needs the storage bridge (same rule). */
+  const hasStorage = !!window.orchaDesktop?.storageScan
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     ref.current?.focus()
@@ -90,7 +94,7 @@ export default function SettingsView({
         <nav aria-label="Settings sections" className="w-[188px] shrink-0 border-r border-border p-2">
           <div className="px-2 pb-1 pt-1.5 text-[11.5px] font-medium text-text-3">Desktop</div>
           {SECTIONS.filter(
-            (x) => (x.key !== 'usage' || usage?.available) && (x.key !== 'appearance' || hasTheme) && (x.key !== 'profile' || hasProfile)
+            (x) => (x.key !== 'usage' || usage?.available) && (x.key !== 'appearance' || hasTheme) && (x.key !== 'profile' || hasProfile) && (x.key !== 'storage' || hasStorage)
           ).map(({ key, label, Icon }) => (
             <button
               key={key}
@@ -120,6 +124,8 @@ export default function SettingsView({
               </>
             ) : section === 'appearance' && hasTheme ? (
               <AppearanceSettings />
+            ) : section === 'storage' && hasStorage ? (
+              <StorageSettings />
             ) : section === 'usage' && usage ? (
               <section data-testid="settings-usage">
                 <h2 className="text-[24px] font-semibold tracking-[-0.01em] text-text">Usage</h2>

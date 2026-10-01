@@ -26,6 +26,9 @@ import { provision, type EngineDeps, type EngineFs } from './initEngine'
 import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv } from './hostWorker'
 import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } from './analyzeProject'
 import { resetStack } from './resetEngine'
+import { planRemoval, removeProject, type RemoveDeps } from './removeEngine'
+import { removeLeftover, scanStorage } from './storageScan'
+import { dropKept, keptStatus, nodeDocker, nodeRemoveFs, nodeRun, recordKept } from './removeHost'
 import { buildAppMenuTemplate } from './appMenu'
 import { pinnedUserDataPath } from './userDataPath'
 import { PRODUCT_NAME } from '../shared/brand'
@@ -1235,6 +1238,109 @@ app.whenReady().then(() => {
     })
   )
 
+  // ---- Remove project (removeEngine.ts) + Settings › Storage (storageScan.ts) ----
+  /** Only the manager window's own renderer may run these (never a portal view). */
+  const fromManager = (event: Electron.IpcMainInvokeEvent): boolean =>
+    !!managerWindow && !managerWindow.isDestroyed() && event.sender === managerWindow.webContents
+  const removeDeps = (): RemoveDeps => ({
+    docker: (args) => nodeDocker(args),
+    run: nodeRun({ ...scrubWorkerEnv(process.env), PATH: nodeHostWorkerDeps.pathEnv ?? hostToolPath() }),
+    fs: nodeRemoveFs,
+    home: os.homedir(),
+    log: (line) => console.log(`[orcha-desktop] remove: ${line}`)
+  })
+  /** Projects validated against discovery for a removal this session — a Retry after a
+   *  partial failure (the stack may already be gone from `docker ps`) stays allowed. */
+  const removalTargets = new Map<string, { projectShort: string; folder: string | null }>()
+  const removalTarget = async (project: unknown): Promise<{ project: string; projectShort: string; folder: string | null }> => {
+    if (typeof project !== 'string') throw { code: 'UNKNOWN_STACK' } as const
+    try {
+      const stack = await requireKnownStack(project)
+      const t = { projectShort: stack.projectShort, folder: stack.folder }
+      removalTargets.set(stack.project, t)
+      return { project: stack.project, ...t }
+    } catch (err) {
+      const prior = removalTargets.get(project)
+      if (prior && (err as { code?: unknown })?.code === 'UNKNOWN_STACK') return { project, ...prior }
+      throw err
+    }
+  }
+  /** Main's own per-project state: the portal view (and what it reported), attention and
+   *  saved terminal tabs. */
+  const forgetProjectInMain = (project: string): void => {
+    if (activeProject === project) hidePortalView()
+    const view = portalViews.get(project)
+    if (view) {
+      try {
+        if (managerWindow && !managerWindow.isDestroyed()) managerWindow.contentView.removeChildView(view)
+        view.webContents.close()
+      } catch {
+        // already gone
+      }
+      portalViews.delete(project)
+    }
+    portalOrigins.delete(project)
+    lastRoutes.delete(project)
+    lastCids.delete(project)
+    embedTracker.forget(project)
+    poller?.forget(project)
+    const tabs = sessionKeeper.forgetProject(project)
+    console.log(`[orcha-desktop] remove: forgot app state for ${project} (portal view, attention, ${tabs} saved tab${tabs === 1 ? '' : 's'})`)
+  }
+
+  ipcMain.handle('orcha:removePlan', (event, project: unknown) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'UNKNOWN_STACK' } as const
+      const t = await removalTarget(project)
+      return planRemoval(t.project, t.projectShort, t.folder, removeDeps())
+    })
+  )
+
+  ipcMain.handle('orcha:removeProject', (event, project: unknown, rawOpts: unknown) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'UNKNOWN_STACK' } as const
+      const o = (rawOpts ?? {}) as { deleteData?: unknown; removeFiles?: unknown }
+      const opts = { deleteData: o.deleteData === true, removeFiles: o.removeFiles === true }
+      const t = await removalTarget(project)
+      console.log(`[orcha-desktop] remove: ${t.project} (folder ${t.folder ?? 'unknown'}) deleteData=${opts.deleteData} removeFiles=${opts.removeFiles}`)
+      const result = await removeProject(t.project, t.projectShort, t.folder, opts, removeDeps(), (phase) => {
+        if (!event.sender.isDestroyed()) event.sender.send('orcha:removeProject:progress', { project: t.project, phase })
+      })
+      removalTargets.delete(t.project)
+      forgetProjectInMain(t.project)
+      try {
+        const dir = app.getPath('userData')
+        if (!opts.deleteData && t.folder && !result.filesRemoved) recordKept(dir, t.project, t.folder)
+        else dropKept(dir, t.project)
+      } catch {
+        // ledger is best effort
+      }
+      return result
+    })
+  )
+
+  const storageDeps = () => ({ docker: (args: string[]) => nodeDocker(args, 60_000), kept: () => keptStatus(app.getPath('userData')) })
+  ipcMain.handle('orcha:storage:scan', (event) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'INVALID_STORAGE_ITEM' } as const
+      return scanStorage(storageDeps())
+    })
+  )
+  ipcMain.handle('orcha:storage:remove', (event, raw: unknown) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'INVALID_STORAGE_ITEM' } as const
+      const done = await removeLeftover(raw, storageDeps())
+      console.log(`[orcha-desktop] storage: removed ${done.kind} ${done.name}`)
+      if (done.kind === 'volume' && done.project) {
+        try {
+          dropKept(app.getPath('userData'), done.project)
+        } catch {
+          // ledger is best effort
+        }
+      }
+    })
+  )
+
   ipcMain.handle('orcha:portalShow', (_event, project: string, path?: unknown) =>
     asResult(async () => {
       const stack = await requireKnownStack(project)
@@ -1482,11 +1588,18 @@ app.whenReady().then(() => {
   ipcMain.handle('orcha:provision', (_event, opts: ProvisionOptions) =>
     asResult(async () => {
       const deps = await reservedEngineDeps()
-      return provision(
+      const res = await provision(
         opts,
         (e: ProgressEvent) => sendToManager('orcha:provision:progress', e),
         deps
       )
+      // Re-added: its kept data is in use again (Settings › Storage stops listing it).
+      try {
+        dropKept(app.getPath('userData'), res.project)
+      } catch {
+        // ledger is best effort
+      }
+      return res
     })
   )
 

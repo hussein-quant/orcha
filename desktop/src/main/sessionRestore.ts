@@ -546,6 +546,20 @@ export function createSessionKeeper(deps: SessionKeeperDeps) {
       layout = null
       cwdCache.clear()
     },
+    /** A project was removed: drop its saved tabs (waiting-for-discovery and the skipped
+     *  "Restore last session" set) so they never come back, and persist that. Returns how
+     *  many saved tabs were dropped. Live tabs are closed by the renderer. */
+    forgetProject(project: string): number {
+      const before = deferred.length + (skipped?.tabs.length ?? 0)
+      deferred = deferred.filter((t) => t.project !== project)
+      if (skipped) {
+        const tabs = skipped.tabs.filter((t) => t.project !== project)
+        skipped = tabs.length > 0 ? { ...skipped, tabs, active: null } : null
+      }
+      const dropped = before - (deferred.length + (skipped?.tabs.length ?? 0))
+      if (dropped > 0) saveSoon()
+      return dropped
+    },
     /** Is there a skipped set ⌘K could restore? */
     skippedCount(): number {
       return skipped?.tabs.length ?? 0

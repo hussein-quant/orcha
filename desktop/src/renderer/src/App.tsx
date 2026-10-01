@@ -39,7 +39,8 @@ import {
   type ProjectIcon
 } from './host/projectIcons'
 
-import { History, Search as SearchIcon, Settings as SettingsIcon, LayoutGrid, PanelTop, Plus as PlusIcon } from 'lucide-react'
+import { History, Search as SearchIcon, Settings as SettingsIcon, LayoutGrid, PanelTop, Plus as PlusIcon, Trash2 } from 'lucide-react'
+import { useProjectRemoval } from './host/useProjectRemoval'
 import SessionPanel, { STRIP_OUTER } from './terminal/SessionPanel'
 import CommandMenu, { type CommandAction } from './terminal/CommandMenu'
 import PortalSnapshot, { decodeSnapshot } from './terminal/PortalSnapshot'
@@ -549,6 +550,31 @@ function AppShell() {
     setStopTarget({ project, name: stack?.projectShort ?? project })
   }, [host.stacks])
 
+  // "Remove project…" (sidebar ⋯, All projects ⋯, ⌘K): dialog, progress, cleanup, toast.
+  // Offered only when this preload has the bridge (an older one hides it everywhere).
+  const canRemove = !!window.orchaDesktop.removeProject
+  const removal = useProjectRemoval({
+    rows,
+    tabs: terms.state.tabs,
+    activeProject,
+    closeTab: terms.close,
+    storage: store,
+    forgetIcons: (cids) => iconStore.forget(cids),
+    applyPrefs: (p) => {
+      setPinned(p.favorites)
+      setOrder(p.order)
+      setAgentsExpanded(p.expanded)
+    },
+    openRow,
+    showHome,
+    refresh: host.refresh,
+    // Inside the sidebar column when it is expanded: a native portal view can't cover it.
+    toastStyle:
+      collapsed || (activeProject !== null && embed === 'legacy')
+        ? { left: (activeProject !== null && embed === 'legacy' ? 0 : SIDEBAR_RAIL) + 8, bottom: 12, maxWidth: 360 }
+        : { left: 8, bottom: 12, width: Math.max(200, width - 16) }
+  })
+
   // Portal → host action requests (validated + sender-tagged by main; the project is the
   // SENDER's own stack, never one named in the message). Stop always goes through the
   // host confirm dialog.
@@ -573,7 +599,7 @@ function AppShell() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const hit = matchHostShortcut(e, navigator.platform.toLowerCase().includes('mac'))
-      if (!hit || mode !== 'manager' || stopTarget || menu.open) return
+      if (!hit || mode !== 'manager' || stopTarget || removal.open || menu.open) return
       if (hit.type === 'command-menu') {
         e.preventDefault()
         void openMenu()
@@ -586,7 +612,7 @@ function AppShell() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [mode, stopTarget, menu.open, openMenu, terms, focusTerminal])
+  }, [mode, stopTarget, removal.open, menu.open, openMenu, terms, focusTerminal])
 
   if (mode === 'loading') {
     // The app frame with a quiet skeleton — never a blank window while Docker answers.
@@ -672,6 +698,7 @@ function AppShell() {
         if (row.container) setPinned(toggleFavorite(store, row.container.id))
       }}
       onDismissError={dismissError}
+      onRemove={canRemove ? removal.request : undefined}
       onRefresh={host.refresh}
       onStartDocker={async () => {
         try {
@@ -834,6 +861,23 @@ function AppShell() {
               }
             ]
           : []),
+        ...(activeRow && canRemove
+          ? [
+              {
+                id: 'remove-project',
+                section: 'actions' as const,
+                label: 'Remove project…',
+                hint: activeRow.name,
+                danger: true,
+                keywords: 'delete uninstall remove project stack docker containers clean',
+                glyph: <Trash2 className="h-4 w-4 text-danger" />,
+                run: () => {
+                  closeMenu('host')
+                  removal.request(activeRow)
+                }
+              }
+            ]
+          : []),
         ...terms.state.tabs.map((tab, i) => ({
           id: `tab-${tab.key}`,
           section: 'tabs' as const,
@@ -973,6 +1017,7 @@ function AppShell() {
           {statsView_}
         </div>
         {stopDialog}
+        {removal.ui}
         {closer.dialog}
         {commandMenu}
         {usagePopover}
@@ -1064,6 +1109,7 @@ function AppShell() {
           tabMenu: { tabs: terms.state.tabs, onPin: terms.pin, onCloseTabs: closer.request, onColor: terms.setColor }
         }}
         onLaunch={terms.available ? (row, kind, branch) => openTerminal(kind, { row, branch }) : undefined}
+        onRemove={canRemove ? removal.request : undefined}
         onToggleCollapsed={() => {
           setCollapsed((c) => {
             saveCollapsed(store, !c)
@@ -1087,6 +1133,7 @@ function AppShell() {
         </div>
       </div>
       {stopDialog}
+      {removal.ui}
       {closer.dialog}
       {commandMenu}
       {usagePopover}

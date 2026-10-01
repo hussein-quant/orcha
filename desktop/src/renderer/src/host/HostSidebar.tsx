@@ -15,6 +15,7 @@ import {
   Settings,
   Settings2,
   SquareTerminal,
+  Trash2,
   X
 } from 'lucide-react'
 import { cn } from '../ui/cn'
@@ -106,6 +107,8 @@ export interface HostSidebarProps {
   sessionActions?: SessionActions
   /** Launch a full-panel session for a project — in a branch's checkout when `branch` is set. */
   onLaunch?(row: ProjectRow, kind: TermKind, branch: string | null): void
+  /** "Remove project…" (the ⋯ menu's last, red item): opens the confirmation dialog. */
+  onRemove?(row: ProjectRow): void
 }
 
 export { LIVE_SHOWN_MAX }
@@ -287,7 +290,7 @@ function RowMenu({
   canMoveDown: boolean
   busy: boolean
   onClose: (restoreFocus: boolean) => void
-  actions: Pick<HostSidebarProps, 'onOpen' | 'onNavigate' | 'onStart' | 'onStop' | 'onTogglePin' | 'onMove'> & {
+  actions: Pick<HostSidebarProps, 'onOpen' | 'onNavigate' | 'onStart' | 'onStop' | 'onTogglePin' | 'onMove' | 'onRemove'> & {
     /** Orca's "Open" section: a full-panel session for this project. */
     onLaunchKind?: (kind: TermKind) => void
     onChangeIcon?: () => void
@@ -408,6 +411,25 @@ function RowMenu({
       {row.stack.running
         ? item(busy ? 'Stopping…' : 'Stop stack…', () => actions.onStop(row), { disabled: busy })
         : item(busy ? 'Starting…' : 'Start stack', () => actions.onStart(row), { disabled: busy })}
+      {actions.onRemove && (
+        <>
+          <div className="my-1 h-px bg-border" role="separator" />
+          <button
+            type="button"
+            role="menuitem"
+            data-menu-item="remove-project"
+            disabled={busy}
+            className="flex h-7 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] text-danger hover:bg-hover focus-visible:bg-hover disabled:opacity-40"
+            onClick={() => {
+              onClose(true)
+              actions.onRemove?.(row)
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 flex-1 truncate">Remove project…</span>
+          </button>
+        </>
+      )}
     </div>
   )
 }

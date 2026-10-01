@@ -228,6 +228,19 @@ export class ProjectIconStore {
     return result
   }
 
+  /** A project was removed: drop what this Mac cached for its containers (the icon itself
+   *  lives in the project's database, so re-adding the project brings it back). */
+  forget(cids: readonly string[]): void {
+    let changed = false
+    for (const cid of cids) {
+      if (cid in this.cache || cid in this.legacy || this.refused.has(cid)) changed = true
+      delete this.cache[cid]
+      delete this.legacy[cid]
+      this.refused.delete(cid)
+    }
+    if (changed) this.commit()
+  }
+
   private commit(): void {
     writeJson(this.storage, ICON_CACHE_KEY, this.cache)
     if (Object.keys(this.legacy).length > 0) writeJson(this.storage, LEGACY_ICONS_KEY, this.legacy)

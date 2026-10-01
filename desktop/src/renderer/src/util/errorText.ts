@@ -13,6 +13,7 @@ const CODE_TEXT: Record<string, string> = {
   DOCKER_NOT_INSTALLED: 'Docker isn’t installed.',
   DOCKER_START_TIMEOUT: 'Docker didn’t start in time.',
   UNKNOWN_STACK: 'This stack no longer exists.',
+  INVALID_STORAGE_ITEM: 'That item changed since the list was made — refresh and try again.',
   PORT_UNAVAILABLE: 'The port is already in use.',
   PORTAL_TIMEOUT: 'The portal didn’t come up in time.',
   INTERNAL: 'Something went wrong inside Quorate.'

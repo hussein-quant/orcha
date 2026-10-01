@@ -34,6 +34,8 @@ export interface ProjectsHomeProps {
   onStop(row: ProjectRow): void
   onTogglePin(row: ProjectRow): void
   onDismissError(project: string): void
+  /** "Remove project…" — opens the host's confirmation dialog. */
+  onRemove?(row: ProjectRow): void
   /** Re-read the host state (after a delete, or "Retry" when Docker is down). */
   onRefresh(): Promise<void> | void
   /** Try to start Docker (preflight auto-start), then refresh. */
@@ -493,6 +495,9 @@ export default function ProjectsHome(props: ProjectsHomeProps) {
                             row.stack.running
                               ? { label: isBusy ? 'Stopping…' : 'Stop stack…', onSelect: () => props.onStop(row), disabled: isBusy }
                               : { label: isBusy ? 'Starting…' : 'Start stack', onSelect: () => props.onStart(row), disabled: isBusy },
+                            ...(props.onRemove
+                              ? [{ label: 'Remove project…', danger: true, disabled: isBusy, onSelect: () => props.onRemove?.(row) }]
+                              : []),
                             {
                               label: 'Delete stack…',
                               danger: true,

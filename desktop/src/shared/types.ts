@@ -41,6 +41,72 @@ export interface Stack {
   folder: string | null
 }
 
+// ---- Remove project / Storage -------------------------------------------------------------
+
+/** "Remove project…" levels. Default (both false) = Remove from Quorate: containers, sandboxes,
+ *  network, portal image and host daemons go; the data volume and every file stay. */
+export interface RemoveOptions {
+  /** Also delete the stack's volumes (tasks, agents, history) — irreversible, typed confirm. */
+  deleteData: boolean
+  /** Also remove Quorate's own files from the project folder (never the user's code). */
+  removeFiles: boolean
+}
+
+export type RemovePhase = 'stopping' | 'removing' | 'deleting-data' | 'removing-files' | 'cleaning'
+
+export interface SizedName {
+  name: string
+  /** Bytes, null when docker didn't report it. */
+  size: number | null
+}
+
+/** Exactly what a removal would touch (exact names, by compose label). */
+export interface RemovePlan {
+  project: string
+  projectShort: string
+  folder: string | null
+  /** The folder demonstrably belongs to this project (else it's never touched). */
+  folderMatches: boolean
+  containers: string[]
+  sandboxes: string[]
+  networks: string[]
+  images: SizedName[]
+  volumes: SizedName[]
+  daemonPidFiles: string[]
+  /** Quorate's files present in the folder (relative), removed only with removeFiles. */
+  folderFiles: string[]
+  worktrees: Array<{ path: string; branch: string | null }>
+}
+
+export interface RemoveResult {
+  project: string
+  projectShort: string
+  dataDeleted: boolean
+  filesRemoved: boolean
+  /** Plain-words lines of what was removed / kept, and anything left with a reason. */
+  removed: string[]
+  kept: string[]
+  warnings: string[]
+}
+
+export type StorageItemKind = 'image' | 'volume' | 'network' | 'container'
+
+export interface StorageItem {
+  kind: StorageItemKind
+  name: string
+  /** The compose project it belonged to (orcha-*), null when unknown (a sandbox). */
+  project: string | null
+  size: number | null
+  /** Plain words: why it's listed / what removing it means. */
+  note: string
+}
+
+export interface StorageReport {
+  items: StorageItem[]
+  /** Compose projects that still have a stack (their resources are never listed). */
+  inUse: string[]
+}
+
 // ---- Home screen: per-container project cards (GET /api/containers) --------------------
 // Mirrors the cloud hub's ProjectsPage contract (resources/orcha-templates/portal/frontend/
 // src/cloud/projects/ProjectsPage.tsx + its portal_backend route) — the desktop home renders
@@ -80,6 +146,8 @@ export type BridgeError =
   | { code: 'INVALID_THEME' }
   /** Settings › Profile: a non-string / over-long name, or a foreign sender. */
   | { code: 'INVALID_PROFILE' }
+  /** Settings › Storage: the item isn't a leftover the current scan offers (or no confirm). */
+  | { code: 'INVALID_STORAGE_ITEM' }
   // ---- onboarding / provisioning ----
   | { code: 'DOCKER_NOT_INSTALLED' }
   | { code: 'DOCKER_START_TIMEOUT' }
@@ -284,6 +352,15 @@ export interface OrchaDesktopApi {
   /** Destructively delete a stack: down -v + remove its portal image + on-disk Orcha files.
    *  Irreversible; the renderer gates it behind a type-to-confirm prompt. */
   resetStack(project: string): Promise<void>
+  /** What "Remove project…" would remove / keep (with sizes) — the dialog's summary. */
+  removePlan?(project: string): Promise<RemovePlan>
+  /** Remove a project from Quorate (see RemoveOptions). Progress arrives on onRemoveProgress. */
+  removeProject?(project: string, opts: RemoveOptions): Promise<RemoveResult>
+  onRemoveProgress?(cb: (e: { project: string; phase: RemovePhase }) => void): () => void
+  /** Settings › Storage: Quorate leftovers whose project no longer has a stack. */
+  storageScan?(): Promise<StorageReport>
+  /** Remove one leftover (re-validated against a fresh scan; a volume needs `confirm` = its name). */
+  storageRemove?(item: { kind: StorageItemKind; name: string; confirm?: string }): Promise<void>
   listAttention(): Promise<AttentionItem[]>
   openManager(): Promise<void>
   quitApp(): Promise<void>

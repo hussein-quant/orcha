@@ -503,6 +503,32 @@ describe('session keeper', () => {
     expect(p.deferred).toBe(0)
   })
 
+  it('forgetProject: a removed project’s waiting tabs are dropped from disk and never reopen', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'orcha-restore-'))
+    const gone = tab({ kind: 'claude', project: 'orcha-gone', cwd: '/Users/me/gone', title: 'gone' })
+    const goneWeb = tab({ kind: 'shell', project: 'orcha-gone-web', cwd: '/Users/me/gone-web', title: 'gone-web' })
+    writeFileSync(sessionsFilePath(dir), JSON.stringify(saved([tab({ title: 'now' }), gone, goneWeb])))
+    const w = world(dir)
+    const r = await w.keeper.restore({})
+    expect(r.deferred).toBe(2)
+    expect(w.keeper.forgetProject('orcha-gone')).toBe(1)
+    await w.runTimers()
+    // exact project match: orcha-gone-web's tab stays
+    expect(JSON.parse(readFileSync(w.file, 'utf8')).tabs.map((t: SavedTab) => t.title)).toEqual(['now', 'gone-web'])
+    expect((await w.keeper.restore({ project: 'orcha-gone' })).tabs).toEqual([])
+  })
+
+  it('forgetProject also prunes the skipped "Restore last session" set', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'orcha-restore-'))
+    const gone = tab({ kind: 'claude', project: 'orcha-gone', cwd: '/Users/me/gone', title: 'gone' })
+    writeFileSync(sessionsFilePath(dir), JSON.stringify(saved([tab({ title: 'a' }), gone], 0)))
+    const w = world(dir, { restoreSessions: false })
+    expect(await w.keeper.restore({})).toMatchObject({ skipped: 2 })
+    expect(w.keeper.forgetProject('orcha-gone')).toBe(1)
+    expect(w.keeper.skippedCount()).toBe(1)
+    expect((await w.keeper.restore({ manual: true })).tabs.map((t) => t.title)).toEqual(['a'])
+  })
+
   it('debounced saves pick up a newly captured conversation id', async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'orcha-restore-'))
     const w = world(dir)

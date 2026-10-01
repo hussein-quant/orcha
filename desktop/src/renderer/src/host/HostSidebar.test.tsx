@@ -410,3 +410,40 @@ describe('HostSidebar — Orca-style project tree + icons (D14)', () => {
   })
 })
 
+
+describe('HostSidebar — Remove project… (⋯ menu)', () => {
+  it('is the LAST item, after a separator, in the danger colour with a trash icon', async () => {
+    render(<HostSidebar {...props({ onRemove: vi.fn() })} />)
+    await userEvent.click(screen.getByRole('button', { name: 'More actions for mobile' }))
+    const menu = screen.getByRole('menu', { name: 'Actions for mobile' })
+    const items = within(menu).getAllByRole('menuitem')
+    const last = items[items.length - 1]
+    expect(last).toHaveTextContent('Remove project…')
+    expect(last).toHaveAttribute('data-menu-item', 'remove-project')
+    expect(last.className).toContain('text-danger')
+    expect(last.querySelector('svg')).not.toBeNull()
+    // the element right before it is a separator
+    expect(last.previousElementSibling).toHaveAttribute('role', 'separator')
+  })
+
+  it('is keyboard reachable: ↑ from the first item wraps to it, Enter fires onRemove with the row', async () => {
+    const onRemove = vi.fn()
+    render(<HostSidebar {...props({ onRemove })} />)
+    const user = userEvent.setup()
+    const trigger = screen.getByRole('button', { name: 'More actions for mobile' })
+    trigger.focus()
+    await user.keyboard('{Enter}')
+    await user.keyboard('{ArrowUp}')
+    expect(screen.getByRole('menuitem', { name: 'Remove project…' })).toHaveFocus()
+    await user.keyboard('{Enter}')
+    expect(onRemove).toHaveBeenCalledWith(expect.objectContaining({ key: 'orcha-web:c2', name: 'mobile' }))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('is absent when the host does not offer removal', async () => {
+    render(<HostSidebar {...props()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'More actions for mobile' }))
+    expect(screen.queryByRole('menuitem', { name: 'Remove project…' })).toBeNull()
+  })
+})

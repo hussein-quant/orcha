@@ -151,7 +151,7 @@ export default function CommandMenu({
                       )}
                     >
                       <span className="flex h-4 w-4 shrink-0 items-center justify-center">{action.glyph}</span>
-                      <span className={cn('truncate', selected && 'text-text')}>{item.label}</span>
+                      <span className={cn('truncate', item.danger ? 'text-danger' : selected && 'text-text')}>{item.label}</span>
                       {item.hint && <span className="min-w-0 truncate text-[12px] text-text-3">{item.hint}</span>}
                       {item.shortcut && (
                         <span className="ml-auto flex shrink-0 items-center gap-0.5 pl-3" aria-hidden="true">

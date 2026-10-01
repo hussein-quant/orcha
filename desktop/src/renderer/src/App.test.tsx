@@ -963,3 +963,74 @@ describe('App — Settings › Agents wiring', () => {
     await waitFor(() => expect(screen.queryByTestId('settings-view')).not.toBeInTheDocument())
   })
 })
+
+describe('App — Remove project…', () => {
+  beforeEach(() => {
+    vi.useRealTimers()
+    window.localStorage.clear()
+  })
+
+  const withRemoval = () => {
+    const api = window.orchaDesktop as unknown as Record<string, unknown>
+    api.removePlan = vi.fn(() => new Promise(() => {}))
+    api.removeProject = vi.fn().mockResolvedValue({
+      project: 'orcha-x',
+      projectShort: 'x',
+      dataDeleted: false,
+      filesRemoved: false,
+      removed: [],
+      kept: [],
+      warnings: []
+    })
+    api.onRemoveProgress = vi.fn().mockReturnValue(() => {})
+  }
+
+  it('⌘K offers "Remove project…" (danger) for the OPEN project only, and it opens the dialog', async () => {
+    stub([runningStack], demoGet, demoAttention)
+    withRemoval()
+    render(<App />)
+    const sidebar = await screen.findByTestId('host-sidebar')
+    await waitFor(() => expect(within(sidebar).getByText('Second')).toBeInTheDocument())
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    let menu = await screen.findByRole('dialog', { name: 'Command menu' })
+    expect(within(menu).queryByRole('option', { name: /Remove project/ })).not.toBeInTheDocument()
+    fireEvent.keyDown(within(menu).getByRole('combobox'), { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Command menu' })).not.toBeInTheDocument())
+
+    openV2('/')
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+    menu = await screen.findByRole('dialog', { name: 'Command menu' })
+    const option = within(menu).getByRole('option', { name: /Remove project…/ })
+    expect(option).toHaveTextContent('Demo')
+    expect(option.querySelector('.text-danger')).not.toBeNull()
+    await userEvent.setup().click(option)
+    expect(await screen.findByRole('alertdialog', { name: 'Remove “Demo”?' })).toBeInTheDocument()
+  })
+
+  it('removing the OPEN project from the sidebar: no other project can open → home screen, and a toast', async () => {
+    stub([runningStack], demoGet, demoAttention)
+    withRemoval()
+    render(<App />)
+    const sidebar = await screen.findByTestId('host-sidebar')
+    await waitFor(() => expect(within(sidebar).getByText('Second')).toBeInTheDocument())
+    openV2('/tasks')
+    const user = userEvent.setup()
+    await user.click(within(sidebar).getByRole('button', { name: 'More actions for Demo' }))
+    await user.click(within(sidebar).getByRole('menuitem', { name: 'Remove project…' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove “Demo”?' })
+    // the stack's other project goes with it — named up front
+    expect(dialog).toHaveTextContent('It shares its stack with Second, which is removed too.')
+    expect(window.orchaDesktop.setHostModal).toHaveBeenCalledWith(true)
+    await user.click(within(dialog).getByRole('button', { name: 'Remove project' }))
+    await waitFor(() => expect(window.orchaDesktop.removeProject).toHaveBeenCalledWith('orcha-x', { deleteData: false, removeFiles: false }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(window.orchaDesktop.portalHide).toHaveBeenCalled()
+    expect(await screen.findByTestId('toast')).toHaveTextContent('Removed Demo. Its data is kept')
+  })
+
+  it('an older preload without the bridge offers no Remove anywhere', async () => {
+    const sidebar = await renderHost()
+    await userEvent.setup().click(within(sidebar).getByRole('button', { name: 'More actions for Demo' }))
+    expect(within(sidebar).queryByRole('menuitem', { name: 'Remove project…' })).not.toBeInTheDocument()
+  })
+})

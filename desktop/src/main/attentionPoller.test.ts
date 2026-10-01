@@ -191,3 +191,22 @@ describe('AttentionPoller', () => {
     expect(poller.snapshot().projects).toEqual([])
   })
 })
+
+describe('AttentionPoller.forget (project removed)', () => {
+  it('drops the project’s cached items and status, and a re-added stack starts silently', async () => {
+    let stacks = [stackUp]
+    const { poller, notify } = makePoller({
+      listStacks: vi.fn(async () => stacks),
+      fetchStackAttention: vi.fn(async () => detail([item('r1')]))
+    })
+    await poller.tick()
+    expect(poller.current()).toHaveLength(1)
+    poller.forget('orcha-demo')
+    expect(poller.current()).toEqual([])
+    expect(poller.snapshot().projects).toEqual([])
+    // removed, then added back stopped: no "went down" alert from the stale running state
+    stacks = [stackDown]
+    await poller.tick()
+    expect(notify).not.toHaveBeenCalled()
+  })
+})

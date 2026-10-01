@@ -71,7 +71,11 @@ import type {
   ProgressEvent,
   ProvisionOptions,
   ProvisionResult,
+  RemovePhase,
+  RemovePlan,
+  RemoveResult,
   Stack,
+  StorageReport,
   WizardVariant
 } from '../shared/types'
 
@@ -92,6 +96,15 @@ const api: OrchaDesktopApi = {
   portalShow: (project, path) => invoke<void>('orcha:portalShow', project, path),
   portalHide: () => invoke<void>('orcha:portalHide'),
   resetStack: (project) => invoke<void>('orcha:resetStack', project),
+  removePlan: (project) => invoke<RemovePlan>('orcha:removePlan', project),
+  removeProject: (project, opts) => invoke<RemoveResult>('orcha:removeProject', project, opts),
+  onRemoveProgress: (cb) => {
+    const listener = (_e: IpcRendererEvent, payload: { project: string; phase: RemovePhase }): void => cb(payload)
+    ipcRenderer.on('orcha:removeProject:progress', listener)
+    return () => ipcRenderer.removeListener('orcha:removeProject:progress', listener)
+  },
+  storageScan: () => invoke<StorageReport>('orcha:storage:scan'),
+  storageRemove: (item) => invoke<void>('orcha:storage:remove', item),
   listAttention: () => invoke<AttentionItem[]>('orcha:listAttention'),
   openManager: () => invoke<void>('orcha:openManager'),
   quitApp: () => invoke<void>('orcha:quitApp'),
