@@ -210,3 +210,55 @@ describe('AttentionPoller.forget (project removed)', () => {
     expect(notify).not.toHaveBeenCalled()
   })
 })
+
+describe('AttentionPoller — no notification flood when a stack drops and comes back', () => {
+  const items = [item('r1'), item('r2'), item('r3')]
+
+  it('a failed fetch (portal restarting on upgrade) keeps the seen items: no flood on recovery', async () => {
+    let fail = false
+    const { poller, notify } = makePoller({
+      fetchStackAttention: vi.fn(async () => {
+        if (fail) throw new Error('ECONNREFUSED')
+        return detail(items)
+      })
+    })
+    await poller.tick() // baseline
+    fail = true
+    await poller.tick() // portal restarting
+    fail = false
+    await poller.tick() // back up, same queue
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('a stack unreachable at startup baselines silently on its first successful fetch', async () => {
+    let fail = true
+    const { poller, notify } = makePoller({
+      fetchStackAttention: vi.fn(async () => {
+        if (fail) throw new Error('down')
+        return detail(items)
+      })
+    })
+    await poller.tick()
+    fail = false
+    await poller.tick()
+    expect(notify).not.toHaveBeenCalled()
+  })
+
+  it('a genuinely new item after recovery still notifies, once', async () => {
+    let phase = 0
+    const { poller, notify } = makePoller({
+      fetchStackAttention: vi.fn(async () => {
+        if (phase === 1) throw new Error('blip')
+        return detail(phase === 2 ? [...items, item('r4')] : items)
+      })
+    })
+    await poller.tick()
+    phase = 1
+    await poller.tick()
+    phase = 2
+    await poller.tick()
+    await poller.tick()
+    expect(notify).toHaveBeenCalledTimes(1)
+    expect(notify.mock.calls[0][0]).toEqual(item('r4'))
+  })
+})

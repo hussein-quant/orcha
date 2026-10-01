@@ -23,6 +23,11 @@ const key = (i: AttentionItem): string => `${i.project}:${i.kind}:${i.id}`
 export class AttentionPoller {
   private seen = new Set<string>()
   private baselined = false
+  /** Projects whose items have been fetched successfully at least once. A project's FIRST
+   *  successful fetch is its own silent baseline — so a stack that was unreachable at
+   *  startup, or restarting (upgrade, Docker restart, wake from sleep), never floods the
+   *  person with its whole existing queue when it comes back. */
+  private baselinedProjects = new Set<string>()
   private lastRunning = new Map<string, boolean>()
   private cached: AttentionItem[] = []
   /** Per running stack: what the last tick fetched (or that it failed) — lets the host
@@ -52,6 +57,7 @@ export class AttentionPoller {
     this.projects.delete(project)
     this.cached = this.cached.filter((i) => i.project !== project)
     for (const k of [...this.seen]) if (k.startsWith(`${project}:`)) this.seen.delete(k)
+    this.baselinedProjects.delete(project)
   }
 
   start(): void {
@@ -105,6 +111,7 @@ export class AttentionPoller {
       }
 
       const items: AttentionItem[] = []
+      const fetchedOk = new Set<string>()
       const details = new Map<string, StackAttention>()
       const projects = new Map<string, AttentionProjectStatus>()
       for (const s of stacks) {
@@ -113,6 +120,7 @@ export class AttentionPoller {
           const detail = await this.deps.fetchStackAttention(s)
           details.set(s.project, detail)
           items.push(...detail.items)
+          fetchedOk.add(s.project)
           projects.set(s.project, {
             project: s.project,
             containers: detail.containers ?? [],
@@ -135,12 +143,16 @@ export class AttentionPoller {
       }
       this.projects = projects
 
-      if (this.baselined) {
-        for (const i of items) {
-          if (!this.seen.has(key(i))) await this.alert(i)
-        }
+      // Alert only for projects that already have a baseline; a project fetched for the
+      // first time (or the first time since it was forgotten) is recorded silently.
+      for (const i of items) {
+        if (this.baselinedProjects.has(i.project) && !this.seen.has(key(i))) await this.alert(i)
       }
-      this.seen = new Set(items.map(key))
+      // A project we couldn't read this tick (down, restarting, API hiccup) KEEPS what we'd
+      // already seen for it — replacing the whole set would make its queue look new later.
+      const kept = [...this.seen].filter((k) => !fetchedOk.has(k.slice(0, k.indexOf(':'))))
+      this.seen = new Set([...kept, ...items.map(key)])
+      for (const p of fetchedOk) this.baselinedProjects.add(p)
       this.cached = items
       this.baselined = true
       this.deps.onUpdate?.(items, stacks, details)
