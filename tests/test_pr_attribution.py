@@ -45,9 +45,11 @@ def test_migration_042_exists_and_is_next_sequential():
     # notification preferences (notification_prefs + notification_pref_defaults); 064 Verdikt
     # preview environments (container_verdikt_settings.preview_* + verdikt_previews); 065 splits a
     # request's human text from its agent instructions (requests.agent_payload); 066 records the
-    # task a routine was made from (routines.origin_task_id).
+    # task a routine was made from (routines.origin_task_id); 067 agent-worktree clean-up
+    # (containers.worktree_auto_cleanup / worktree_grace_days + agent_worktree_inventory /
+    # agent_worktree_actions).
     # Keep this pin moving with the chain tip so gaps/dupes still fail loudly.
-    assert numbers[-1] == 66, f"066 must be the latest migration, saw {numbers[-1]:03d}"
+    assert numbers[-1] == 67, f"067 must be the latest migration, saw {numbers[-1]:03d}"
 
 
 def test_agents_git_email_column_applied(db):

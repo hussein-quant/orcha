@@ -83,6 +83,8 @@ import type {
   RemoveResult,
   Stack,
   StorageReport,
+  ProjectWorktrees,
+  AgentWorktreeCleanResult,
   WizardVariant
 } from '../shared/types'
 
@@ -112,6 +114,9 @@ const api: OrchaDesktopApi = {
   },
   storageScan: () => invoke<StorageReport>('orcha:storage:scan'),
   storageRemove: (item) => invoke<void>('orcha:storage:remove', item),
+  storageWorktrees: () => invoke<ProjectWorktrees[]>('orcha:storage:worktrees'),
+  storageCleanWorktrees: (req) => invoke<AgentWorktreeCleanResult>('orcha:storage:worktreesClean', req),
+  revealWorktree: (folder, p) => invoke<void>('orcha:storage:revealWorktree', folder, p),
   listAttention: () => invoke<AttentionItem[]>('orcha:listAttention'),
   openManager: () => invoke<void>('orcha:openManager'),
   quitApp: () => invoke<void>('orcha:quitApp'),

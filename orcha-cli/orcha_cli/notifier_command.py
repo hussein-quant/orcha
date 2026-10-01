@@ -6,6 +6,7 @@ from . import notifier_fast_lane as _fast_lane
 from . import notifier_preview as _preview
 from . import notifier_request_sweep as _request_sweep
 from . import notifier_routines as _routines
+from . import notifier_worktree_gc as _worktree_gc
 
 
 def cmd_notifier(args, *, services) -> None:
@@ -248,6 +249,12 @@ def cmd_notifier(args, *, services) -> None:
                 # a Verdikt run, report it ready, stop it after the run / TTL (never raises).
                 _preview.service_previews(api_base, cid, previews, project_cwd, quiet=args.quiet,
                                           dry_run=args.dry_run)
+                # Agent worktrees (mig 067): run Settings › Agent worktrees requests, sweep
+                # clean / past-grace worktrees (pre-existing ones too), report the inventory.
+                _worktree_gc.service_worktrees(api_base, cid, _worktree_gc.STATE, project_cwd,
+                                               live_workers=live_workers,
+                                               live_residents=live_residents, previews=previews,
+                                               quiet=args.quiet, dry_run=args.dry_run)
                 tick(api_base, cid, dry_run=args.dry_run, cooldown=args.cooldown,
                      min_idle=args.min_idle, quiet=args.quiet,
                      lease_ttl=getattr(args, "lease_ttl", 1200.0),

@@ -13,7 +13,7 @@ describe('shared/theme', () => {
 
   it('the host advertises the theme capability to embedded portals', () => {
     expect(HOST_CAPABILITIES).toContain('theme')
-    expect(HOST_CAPABILITIES).toEqual(['sidebar', 'notifications', 'stackControl', 'theme'])
+    expect(HOST_CAPABILITIES).toEqual(['sidebar', 'notifications', 'stackControl', 'theme', 'revealPath'])
   })
 
   it('identity palette lightness is theme-driven with the dark values as fallback', () => {

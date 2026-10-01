@@ -35,6 +35,7 @@ import { useChrome } from "../../shell/chrome";
 import { extensions, type SettingsSection } from "../../extensions";
 import { actingHuman, autLevel, useSnapshot } from "../../state/SnapshotProvider";
 import { useGrantAuthority } from "./grantAuthority";
+import { AgentWorktreesSection } from "./AgentWorktreesSection";
 import { projectStatusMeta } from "../../cloud/projects/projectStatus";
 import { useProjectIconAuthority } from "../../components/primitives/projectIconAuthority";
 import * as prefs from "../../cloud/projects/prefs";
@@ -1528,6 +1529,8 @@ function ExecutionSection() {
           <AgentLimitRow cid={cid} />
         </SettingRows>
       </SettingsGroup>
+      {/* mig 067: agent worktree clean-up (GET/PUT …/agent-worktrees, owner-or-manage_autonomy) */}
+      <AgentWorktreesSection cid={cid} />
       {/* mig 057: finished work follows the org chart (PUT …/review-routing, owner-or-assign_reviewers) */}
       {c.review_route != null ? (
         <SettingsGroup

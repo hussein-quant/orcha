@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Box, Database, Loader2, Network, Package, RefreshCw } from 'lucide-react'
 import { Button } from '../ui/Button'
 import ErrorNotice from '../components/ErrorNotice'
+import AgentWorktreesStorage from './AgentWorktreesStorage'
 import { formatBytes } from '../host/removeProject'
 import type { StorageItem, StorageItemKind, StorageReport } from '../../../shared/types'
 
@@ -80,6 +81,8 @@ export default function StorageSettings() {
         Clean up unused Quorate data: what projects that are no longer in Quorate left behind in Docker. Projects you
         still have are never listed.
       </p>
+
+      <AgentWorktreesStorage />
 
       <div className="mb-4 flex items-center gap-2">
         <Button

@@ -168,4 +168,29 @@ describe('RemoveProjectDialog', () => {
     setup({ siblings: ['mobile'] })
     expect(screen.getByText(/shares its stack with/)).toHaveTextContent('It shares its stack with mobile, which is removed too.')
   })
+
+  it('agent worktrees: scaffolding-only ones go, output is saved first (opt-out keeps them), unmerged ones stay', async () => {
+    const W = '/Users/me/acme/.orcha-worktrees'
+    const plan: RemovePlan = {
+      ...PLAN,
+      worktrees: [
+        { path: `${W}/wk-a`, branch: 'orcha/wk-a', state: 'clean' },
+        { path: `${W}/task-qa`, branch: 'orcha/task-qa', state: 'has-output', files: ['qa-runs/report.md', 'qa-runs/a.png', 'qa-runs/b.png', 'notes.md'] },
+        { path: `${W}/wk-ahead`, branch: 'orcha/wk-ahead', state: 'unmerged' }
+      ]
+    }
+    const p = setup({ loadPlan: vi.fn().mockResolvedValue(plan) })
+    await screen.findByText('Portal image · 347 MB')
+    await userEvent.click(screen.getByRole('checkbox', { name: /Remove Quorate’s files from the folder/ }))
+    expect(screen.getByTestId('remove-files-row')).toHaveTextContent('and 2 agent worktrees')
+    expect(screen.getByTestId('remove-save-output-row')).toHaveTextContent('Output of 1 worktree saved first (4 files)')
+    expect(screen.getByTestId('keep-worktrees-row')).toHaveTextContent('1 agent worktree with unmerged commits or in use')
+    const save = screen.getByRole('checkbox', { name: /Save agent output first/ })
+    expect(save).toBeChecked()
+    expect(screen.getByTestId('remove-save-output')).toHaveTextContent('qa-runs/report.md, qa-runs/a.png, qa-runs/b.png, +1 more')
+    await userEvent.click(save)
+    expect(screen.getByTestId('remove-files-row')).toHaveTextContent('and 1 agent worktree')
+    await userEvent.click(confirmButton())
+    expect(p.onConfirm).toHaveBeenCalledWith({ deleteData: false, removeFiles: true, saveOutput: false })
+  })
 })

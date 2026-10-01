@@ -51,6 +51,10 @@ export interface RemoveOptions {
   deleteData: boolean
   /** Also remove Quorate's own files from the project folder (never the user's code). */
   removeFiles: boolean
+  /** With removeFiles: first save agent worktrees' output (attached to its task while the
+   *  portal still runs, else copied to .orcha/saved-output/<branch>/, which is kept). Default
+   *  true; when false, worktrees with output are kept instead. */
+  saveOutput?: boolean
 }
 
 export type RemovePhase = 'stopping' | 'removing' | 'deleting-data' | 'removing-files' | 'cleaning'
@@ -76,7 +80,16 @@ export interface RemovePlan {
   daemonPidFiles: string[]
   /** Quorate's files present in the folder (relative), removed only with removeFiles. */
   folderFiles: string[]
-  worktrees: Array<{ path: string; branch: string | null }>
+  worktrees: Array<{
+    path: string
+    branch: string | null
+    /** The CLI's classification (absent when the CLI is too old to say). Quorate's own
+     *  scaffolding never counts as a change. */
+    state?: AgentWorktreeState
+    /** has-output: the files that would be saved first. */
+    files?: string[]
+    size?: number | null
+  }>
 }
 
 export interface RemoveResult {
@@ -88,6 +101,70 @@ export interface RemoveResult {
   removed: string[]
   kept: string[]
   warnings: string[]
+}
+
+// ---- Agent worktrees (orcha worktrees --json; orcha_cli/worktree_gc.py) -------------------
+
+export type AgentWorktreeState = 'clean' | 'has-output' | 'unmerged' | 'in-use' | 'not-quorate'
+
+export interface AgentWorktree {
+  path: string
+  name: string
+  branch: string | null
+  kind: string | null
+  agent: string | null
+  state: AgentWorktreeState
+  reason?: string
+  task_id?: string | null
+  task_title?: string | null
+  unmerged_commits?: number | null
+  output?: string[]
+  modified?: string[]
+  output_count?: number
+  modified_count?: number
+  size_bytes?: number | null
+  last_activity_at?: string | null
+}
+
+export interface ProjectWorktrees {
+  project: string
+  projectShort: string
+  folder: string
+  items: AgentWorktree[]
+  reclaimable_bytes: number
+  /** Plain words when this project's worktrees couldn't be read (e.g. an old CLI). */
+  error?: string
+}
+
+export interface WorktreeCleanRequest {
+  folder: string
+  /** Preview only — nothing changes. */
+  dryRun: boolean
+  /** Leave worktrees with output alone. */
+  onlyClean: boolean
+  /** Unmerged worktrees to remove anyway (their branches are kept). */
+  unmerged: string[]
+}
+
+export interface WorktreeCleanEntry {
+  path: string
+  name: string
+  branch: string | null
+  state: AgentWorktreeState
+  size_bytes?: number | null
+  reason?: string
+  /** dry run: files that would be saved first */
+  saves?: string[]
+  keep_branch?: boolean
+}
+
+export interface AgentWorktreeCleanResult {
+  folder: string
+  dryRun: boolean
+  removed: WorktreeCleanEntry[]
+  kept: WorktreeCleanEntry[]
+  skipped: WorktreeCleanEntry[]
+  freed_bytes: number
 }
 
 export type StorageItemKind = 'image' | 'volume' | 'network' | 'container'
@@ -364,6 +441,12 @@ export interface OrchaDesktopApi {
   storageScan?(): Promise<StorageReport>
   /** Remove one leftover (re-validated against a fresh scan; a volume needs `confirm` = its name). */
   storageRemove?(item: { kind: StorageItemKind; name: string; confirm?: string }): Promise<void>
+  /** Settings › Storage › Agent worktrees: every known project's worktrees, classified. */
+  storageWorktrees?(): Promise<ProjectWorktrees[]>
+  /** Preview (dryRun) or run a clean-up of one project's worktrees. */
+  storageCleanWorktrees?(req: WorktreeCleanRequest): Promise<AgentWorktreeCleanResult>
+  /** Show one agent worktree in Finder (must be inside a known project's .orcha-worktrees). */
+  revealWorktree?(folder: string, path: string): Promise<void>
   listAttention(): Promise<AttentionItem[]>
   openManager(): Promise<void>
   quitApp(): Promise<void>

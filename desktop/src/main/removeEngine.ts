@@ -15,6 +15,7 @@
 import path from 'node:path'
 import type { RemoveOptions, RemovePhase, RemovePlan, RemoveResult } from '../shared/types'
 import { killLingeringDaemons, nodeProcessDeps, type ProcessDeps } from './daemonCleanup'
+import { classifyFolder, removeOne, saveOutput } from './agentWorktrees'
 import {
   COMMAND_FILE,
   IMAGES_FORMAT,
@@ -170,6 +171,9 @@ export async function planRemoval(project: string, projectShort: string, folder:
     // sizes are a nicety — the plan stands without them
   }
   const worktrees = facts.folder && facts.matches ? ((await listWorktrees(facts.folder, deps)) ?? []) : []
+  // The CLI's classification (Quorate scaffolding is never a "change"); absent on an old CLI.
+  const classified = facts.folder && facts.matches && worktrees.length ? await classifyFolder(facts.folder, deps.run) : null
+  const byPath = new Map((classified ?? []).map((c) => [c.path, c]))
   const pidFiles = daemonPidFiles(facts.matches ? facts.folder : null, facts.cid, deps.home).filter((p) => deps.fs.exists(p))
   return {
     project,
@@ -183,16 +187,53 @@ export async function planRemoval(project: string, projectShort: string, folder:
     volumes: inv.volumes.map((name) => ({ name, size: sizes.volumes.get(name) ?? null })),
     daemonPidFiles: pidFiles,
     folderFiles: facts.folder && facts.matches ? existingFolderFiles(facts.folder, deps.fs) : [],
-    worktrees: worktrees.map((w) => ({ path: w.path, branch: w.branch }))
+    worktrees: worktrees.map((w) => {
+      const c = byPath.get(w.path)
+      return c
+        ? { path: w.path, branch: w.branch, state: c.state, size: c.size_bytes ?? null,
+            files: c.state === 'has-output' ? [...(c.output ?? []), ...(c.modified ?? [])] : undefined }
+        : { path: w.path, branch: w.branch }
+    })
   }
 }
 
 /** Remove Quorate's own files from `folder` (only called when it belongs to the project). */
-async function removeFolderFiles(folder: string, deps: RemoveDeps, result: RemoveResult): Promise<void> {
+async function removeFolderFiles(folder: string, deps: RemoveDeps, result: RemoveResult, saveOutputFirst = true): Promise<void> {
   const { fs } = deps
-  // 1. agent worktrees — `git worktree remove` (never --force: uncommitted work is kept).
-  const trees = await listWorktrees(folder, deps)
-  if (trees === null) {
+  // 1. agent worktrees — through the CLI's classification when it can give one (Quorate's own
+  //    scaffolding is not "uncommitted work"; output is saved before a worktree goes; unmerged
+  //    commits, in-use and non-Quorate worktrees are always kept). An old CLI falls back to
+  //    plain `git worktree remove` (never --force).
+  const classified = await classifyFolder(folder, deps.run, true)
+  const trees = classified === null ? await listWorktrees(folder, deps) : []
+  if (classified !== null) {
+    for (const wt of classified) {
+      const name = path.basename(wt.path)
+      if (wt.state === 'not-quorate') {
+        result.warnings.push(`Kept ${name} in .orcha-worktrees — it isn't a Quorate worktree.`)
+        continue
+      }
+      if (wt.state === 'in-use') {
+        result.warnings.push(`Kept worktree ${name} — something is still running in it.`)
+        continue
+      }
+      if (wt.state === 'unmerged') {
+        result.warnings.push(`Kept worktree ${name} — branch ${wt.branch} has commits that aren't merged.`)
+        continue
+      }
+      if (wt.state === 'has-output' && !saveOutputFirst) {
+        result.warnings.push(`Kept worktree ${name} — it has output you chose not to save.`)
+        continue
+      }
+      const res = await removeOne(folder, wt.path, deps.run)
+      if (!res.ok) {
+        result.warnings.push(`Kept worktree ${name} — ${res.reason || 'it could not be removed safely'}.`)
+        continue
+      }
+      result.removed.push(`Worktree ${name}`)
+      if (res.branchNote === 'deleted' && wt.branch) result.removed.push(`Branch ${wt.branch}`)
+    }
+  } else if (trees === null) {
     if ((fs.listDir(path.join(folder, '.orcha-worktrees')) ?? []).length > 0) {
       result.warnings.push('Kept .orcha-worktrees/ — git could not list its worktrees.')
     }
@@ -231,13 +272,19 @@ async function removeFolderFiles(folder: string, deps: RemoveDeps, result: Remov
       // best effort
     }
   }
-  // 2. Quorate's directories and files (fixed relative paths only).
+  // 2. Quorate's directories and files (fixed relative paths only). Saved agent output
+  //    (.orcha/saved-output) is the one thing inside .orcha that is the user's — it stays.
   for (const rel of ORCHA_DIRS) {
     const p = path.join(folder, rel)
-    if (fs.exists(p)) {
-      fs.rmrf(p)
-      result.removed.push(rel)
+    if (!fs.exists(p)) continue
+    if (rel === '.orcha' && fs.exists(path.join(p, 'saved-output'))) {
+      for (const child of fs.listDir(p) ?? []) if (child !== 'saved-output') fs.rmrf(path.join(p, child))
+      result.removed.push('.orcha (except saved-output)')
+      result.kept.push('Saved agent output in .orcha/saved-output')
+      continue
     }
+    fs.rmrf(p)
+    result.removed.push(rel)
   }
   for (const rel of ORCHA_FILES) {
     const p = path.join(folder, rel)
@@ -293,6 +340,19 @@ export async function removeProject(
   }
   const facts = folderFacts(project, folder, deps.fs)
   const inv = await inventory(project, facts.cid, deps)
+
+  // 0. save agent output while the portal still runs (it is attached to its task; with no
+  //    task it is copied to .orcha/saved-output, which the file removal keeps).
+  if (opts.removeFiles && opts.saveOutput !== false && facts.folder && facts.matches) {
+    const rows = await classifyFolder(facts.folder, deps.run)
+    for (const wt of (rows ?? []).filter((r) => r.state === 'has-output')) {
+      if (await saveOutput(facts.folder, wt.path, deps.run)) {
+        result.removed.push(`Saved the output of ${path.basename(wt.path)}`)
+      } else {
+        result.warnings.push(`Couldn't save the output of ${path.basename(wt.path)} — its worktree is kept.`)
+      }
+    }
+  }
 
   // 1. stop: the CLI's own `orcha down` from the folder stops the notifier + terminal bridge
   //    via their pid files (exactly like a Terminal `orcha down`), then the belt-and-braces
@@ -386,7 +446,7 @@ export async function removeProject(
   if (opts.removeFiles && facts.folder) {
     onPhase('removing-files')
     if (facts.matches) {
-      await removeFolderFiles(facts.folder, deps, result)
+      await removeFolderFiles(facts.folder, deps, result, opts.saveOutput !== false)
       result.filesRemoved = true
     } else {
       result.warnings.push('Left the folder untouched — it no longer belongs to this project.')

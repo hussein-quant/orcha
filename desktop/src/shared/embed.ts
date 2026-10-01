@@ -21,8 +21,10 @@ export const EMBED_PROJECT_ARG = '--orcha-embed-project='
 /** `theme`: the host owns the colour theme. The desktop drives nativeTheme.themeSource from
  *  Settings › Appearance, so the portal ignores its own stored theme preference and follows
  *  `prefers-color-scheme` (which Electron keeps equal to the desktop's choice, live). */
-export type HostCapability = 'sidebar' | 'notifications' | 'stackControl' | 'theme'
-export const HOST_CAPABILITIES: readonly HostCapability[] = ['sidebar', 'notifications', 'stackControl', 'theme']
+export type HostCapability = 'sidebar' | 'notifications' | 'stackControl' | 'theme' | 'revealPath'
+/** `revealPath`: the portal may ask the host to show an agent worktree in Finder (main only
+ *  accepts a path directly inside that stack's own `<folder>/.orcha-worktrees/`). */
+export const HOST_CAPABILITIES: readonly HostCapability[] = ['sidebar', 'notifications', 'stackControl', 'theme', 'revealPath']
 
 /** How long main waits for a portal's `ready` before falling back to the legacy
  *  (pre-V2 portal) layout: slim TopBar above the view, no host sidebar. */
@@ -56,6 +58,7 @@ export type PortalToHost =
   | { type: 'attention'; cid: string | null; count: number | null; partial: boolean }
   | { type: 'liveAgents'; cid: string | null; agents: LiveAgent[] }
   | { type: 'requestHostAction'; action: HostAction }
+  | { type: 'revealPath'; path: string }
 
 /** What the portal preload exposes as `window.orchaHost` (only on the expected origin). */
 export interface OrchaHostApi {
@@ -150,6 +153,12 @@ export function parsePortalMessage(raw: unknown): PortalToHost | null {
       return typeof raw.action === 'string' && (HOST_ACTIONS as readonly string[]).includes(raw.action)
         ? { type: 'requestHostAction', action: raw.action as HostAction }
         : null
+    case 'revealPath': {
+      const p = str(raw.path, 4096)
+      return p && p.startsWith('/') && p.includes('/.orcha-worktrees/') && !p.split('/').includes('..')
+        ? { type: 'revealPath', path: p }
+        : null
+    }
     default:
       return null
   }

@@ -324,3 +324,80 @@ describe('dockerFailure', () => {
     expect(dockerFailure({ stderr: 'boom' })).toEqual({ code: 'COMPOSE_FAILED', stderr: 'boom' })
   })
 })
+
+describe('removeProject — agent worktrees through the CLI classification', () => {
+  const WT = `${FOLDER}/.orcha-worktrees`
+  const row = (name: string, state: string, extra: Record<string, unknown> = {}) => ({
+    path: `${WT}/${name}`, name, branch: `orcha/${name}`, kind: 'wake', agent: 'Atlas', state, size_bytes: 1000, ...extra
+  })
+  const ROWS = [
+    row('wk-scaffold', 'clean', { reason: 'only Quorate scaffolding — safe to remove' }),
+    row('task-qa', 'has-output', { output: ['qa-runs/report.md'] }),
+    row('wk-ahead', 'unmerged', { unmerged_commits: 2 }),
+    row('live-Atlas', 'in-use'),
+    { ...row('truck', 'not-quorate'), branch: 'feat/truck-card-profit' }
+  ]
+  const cliRun = () =>
+    vi.fn(async (cmd: string, args: string[]) => {
+      if (cmd === 'git' && args.includes('list')) {
+        return { stdout: [`worktree ${FOLDER}`, 'branch refs/heads/main', '', ...ROWS.flatMap((r) => [`worktree ${r.path}`, `branch refs/heads/${r.branch}`, ''])].join('\n') }
+      }
+      if (cmd === 'orcha' && args[0] === 'worktrees') {
+        if (args[1] === 'list') return { stdout: JSON.stringify({ ok: true, items: ROWS }) + '\n' }
+        if (args[1] === 'save-output') return { stdout: JSON.stringify({ ok: true, attached: ['qa-runs/report.md'], saved: [] }) }
+        if (args[1] === 'remove') return { stdout: JSON.stringify({ ok: true, outcome: 'removed', reason: 'ok', branch_note: 'deleted' }) }
+      }
+      return { stdout: '' }
+    })
+  const orchaCalls = (run: ReturnType<typeof cliRun>) => run.mock.calls.filter((c) => c[0] === 'orcha').map((c) => (c[1] as string[]).slice(0, 3).join(' '))
+
+  it('scaffolding-only worktrees are not "changes"; output is saved before the stack stops', async () => {
+    const run = cliRun()
+    const files = { ...projectFiles(), [`${FOLDER}/.orcha/saved-output/wk-old/notes.md`]: 'saved earlier' }
+    const { d, mem } = deps({ run, files })
+    const res = await removeProject('orcha-acme', 'acme', FOLDER, { deleteData: false, removeFiles: true }, d)
+    const calls = orchaCalls(run)
+    // the output was saved while the portal still ran — before `orcha down`
+    expect(calls.indexOf(`worktrees save-output ${WT}/task-qa`)).toBeGreaterThanOrEqual(0)
+    expect(calls.indexOf(`worktrees save-output ${WT}/task-qa`)).toBeLessThan(calls.indexOf('down'))
+    // clean + saved has-output go through the CLI's safe remove; nothing else is touched
+    expect(calls).toContain(`worktrees remove ${WT}/wk-scaffold`)
+    expect(calls).toContain(`worktrees remove ${WT}/task-qa`)
+    for (const kept of ['wk-ahead', 'live-Atlas', 'truck']) expect(calls).not.toContain(`worktrees remove ${WT}/${kept}`)
+    const gitCalls = run.mock.calls.filter((c) => c[0] === 'git').map((c) => c[1] as string[])
+    expect(gitCalls.some((a) => a.includes('remove'))).toBe(false)
+    expect(res.removed).toEqual(expect.arrayContaining(['Worktree wk-scaffold', 'Branch orcha/wk-scaffold', 'Saved the output of task-qa']))
+    expect(res.warnings).toEqual(expect.arrayContaining([
+      expect.stringMatching(/wk-ahead.*orcha\/wk-ahead has commits that aren't merged/),
+      expect.stringMatching(/live-Atlas.*still running/),
+      expect.stringMatching(/truck.*isn't a Quorate worktree/)
+    ]))
+    expect(res.warnings.some((w) => /uncommitted/.test(w))).toBe(false)
+    // saved agent output survives the .orcha removal
+    expect(mem.files.get(`${FOLDER}/.orcha/saved-output/wk-old/notes.md`)).toBe('saved earlier')
+    expect(mem.files.has(`${FOLDER}/.orcha/docker-compose.yml`)).toBe(false)
+    expect(res.kept).toContain('Saved agent output in .orcha/saved-output')
+  })
+
+  it('"Save agent output first" unticked keeps worktrees with output', async () => {
+    const run = cliRun()
+    const { d } = deps({ run })
+    const res = await removeProject('orcha-acme', 'acme', FOLDER, { deleteData: false, removeFiles: true, saveOutput: false }, d)
+    const calls = orchaCalls(run)
+    expect(calls.some((c) => c.startsWith('worktrees save-output'))).toBe(false)
+    expect(calls).not.toContain(`worktrees remove ${WT}/task-qa`)
+    expect(calls).toContain(`worktrees remove ${WT}/wk-scaffold`)
+    expect(res.warnings).toEqual(expect.arrayContaining([expect.stringMatching(/task-qa.*output you chose not to save/)]))
+  })
+
+  it('the plan carries each worktree’s state and the files that would be saved', async () => {
+    const run = cliRun()
+    const { d } = deps({ run })
+    const plan = await planRemoval('orcha-acme', 'acme', FOLDER, d)
+    expect(plan.worktrees.map((w) => [w.path.split('/').pop(), w.state])).toEqual([
+      ['wk-scaffold', 'clean'], ['task-qa', 'has-output'], ['wk-ahead', 'unmerged'], ['live-Atlas', 'in-use'], ['truck', 'not-quorate']
+    ])
+    expect(plan.worktrees[1].files).toEqual(['qa-runs/report.md'])
+    expect(orchaCalls(run).every((c) => c.startsWith('worktrees list'))).toBe(true) // planning changes nothing
+  })
+})

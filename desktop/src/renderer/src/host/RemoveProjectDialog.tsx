@@ -57,6 +57,7 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
   useHostModal(true)
   const [deleteData, setDeleteData] = useState(false)
   const [removeFiles, setRemoveFiles] = useState(false)
+  const [saveOutput, setSaveOutput] = useState(true)
   const [typed, setTyped] = useState('')
   const [plan, setPlan] = useState<RemovePlan | null>(null)
   const [planError, setPlanError] = useState<unknown>(null)
@@ -92,6 +93,12 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
   const folder = plan?.folder ?? null
   const filesAllowed = !!plan && !!folder && plan.folderMatches
   const containerCount = (plan?.containers.length ?? 0) + (plan?.sandboxes.length ?? 0)
+  // Agent worktrees, as the CLI classified them (Quorate's scaffolding never counts as a change).
+  const wts = plan?.worktrees ?? []
+  const outputWts = wts.filter((w) => w.state === 'has-output')
+  const keptWts = wts.filter((w) => w.state === 'unmerged' || w.state === 'in-use' || w.state === 'not-quorate')
+  const goingWts = wts.length - keptWts.length - (saveOutput ? 0 : outputWts.length)
+  const outputFiles = outputWts.flatMap((w) => w.files ?? [])
   const dataSize = plan ? plan.volumes.reduce<number | null>((t, v) => (v.size === null ? t : (t ?? 0) + v.size), null) : null
 
   const primary = busy ? (phase ? PHASE_LABEL[phase] : 'Removing…') : error != null ? 'Try again' : deleteData ? 'Remove and delete data' : 'Remove project'
@@ -154,7 +161,12 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
                   )}
                   {removeFiles && filesAllowed && (
                     <Row icon="remove" testId="remove-files-row">
-                      Quorate’s files in the folder{plan && plan.worktrees.length > 0 ? ` and ${plan.worktrees.length} agent worktree${plan.worktrees.length === 1 ? '' : 's'}` : ''}
+                      Quorate’s files in the folder{goingWts > 0 ? ` and ${goingWts} agent worktree${goingWts === 1 ? '' : 's'}` : ''}
+                    </Row>
+                  )}
+                  {removeFiles && filesAllowed && saveOutput && outputWts.length > 0 && (
+                    <Row icon="keep" testId="remove-save-output-row">
+                      Output of {outputWts.length} worktree{outputWts.length === 1 ? '' : 's'} saved first ({outputFiles.length} file{outputFiles.length === 1 ? '' : 's'})
                     </Row>
                   )}
                 </ul>
@@ -172,6 +184,14 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
                   </Row>
                   {!deleteData && <Row icon="keep" testId="keep-data-row">{sized('Project data: tasks, agents, history', dataSize)}</Row>}
                   {!removeFiles && <Row icon="keep">Quorate’s files in the folder</Row>}
+                  {removeFiles && filesAllowed && keptWts.length > 0 && (
+                    <Row icon="keep" testId="keep-worktrees-row">
+                      {keptWts.length} agent worktree{keptWts.length === 1 ? '' : 's'} with unmerged commits or in use
+                    </Row>
+                  )}
+                  {removeFiles && filesAllowed && !saveOutput && outputWts.length > 0 && (
+                    <Row icon="keep">{outputWts.length} agent worktree{outputWts.length === 1 ? '' : 's'} with unsaved output</Row>
+                  )}
                 </ul>
               </div>
             </div>
@@ -246,6 +266,26 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
                   </span>
                 </span>
               </label>
+              {removeFiles && filesAllowed && outputWts.length > 0 && (
+                <label className="ml-6 flex items-start gap-2" data-testid="remove-save-output">
+                  <input
+                    type="checkbox"
+                    className="mt-[3px]"
+                    checked={saveOutput}
+                    disabled={busy}
+                    onChange={(e) => setSaveOutput(e.target.checked)}
+                    aria-describedby={`${ids}-save-hint`}
+                  />
+                  <span>
+                    <span className="font-medium text-text">Save agent output first</span>
+                    <span id={`${ids}-save-hint`} className="block text-[12px] text-text-3">
+                      {outputWts.length} worktree{outputWts.length === 1 ? ' has' : 's have'} files an agent made
+                      {outputFiles.length ? ` (${outputFiles.slice(0, 3).join(', ')}${outputFiles.length > 3 ? `, +${outputFiles.length - 3} more` : ''})` : ''}.
+                      They’re attached to their task, or kept in .orcha/saved-output. Unticked, those worktrees are kept.
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
 
             {busy && phase && (
@@ -267,7 +307,13 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
           <Button
             variant="destructive"
             disabled={!canConfirm}
-            onClick={() => props.onConfirm({ deleteData, removeFiles: removeFiles && filesAllowed })}
+            onClick={() =>
+              props.onConfirm({
+                deleteData,
+                removeFiles: removeFiles && filesAllowed,
+                ...(removeFiles && filesAllowed && outputWts.length > 0 ? { saveOutput } : {})
+              })
+            }
           >
             {primary}
           </Button>

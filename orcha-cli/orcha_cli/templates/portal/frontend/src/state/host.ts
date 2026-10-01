@@ -16,7 +16,7 @@
 
 /** "theme": the host owns the colour theme (it drives prefers-color-scheme via
  *  Electron nativeTheme) — shell/theme.ts then follows System. */
-export type HostCapability = "sidebar" | "notifications" | "stackControl" | "theme";
+export type HostCapability = "sidebar" | "notifications" | "stackControl" | "theme" | "revealPath";
 
 export type HostToPortal =
   | { type: "navigate"; path: string }
@@ -35,7 +35,10 @@ export type PortalToHost =
   | { type: "route"; path: string; search: string; title: string }
   | { type: "attention"; cid: string | null; count: number | null; partial: boolean }
   | { type: "liveAgents"; cid: string | null; agents: LiveAgentMsg[] }
-  | { type: "requestHostAction"; action: "startStack" | "stopStack" | "openManager" | "addProject" };
+  | { type: "requestHostAction"; action: "startStack" | "stopStack" | "openManager" | "addProject" }
+  /** "revealPath": show an agent worktree folder in Finder. The host only accepts a path
+   *  inside a known project's .orcha-worktrees folder. */
+  | { type: "revealPath"; path: string };
 
 export interface OrchaHostApi {
   version: 1;

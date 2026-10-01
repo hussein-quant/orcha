@@ -30,6 +30,7 @@ import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } fro
 import { resetStack } from './resetEngine'
 import { planRemoval, removeProject, type RemoveDeps } from './removeEngine'
 import { removeLeftover, scanStorage } from './storageScan'
+import { cleanAgentWorktrees, isAgentWorktreePath, knownFolder, parseCleanRequest, scanAgentWorktrees } from './agentWorktrees'
 import { dropKept, keptStatus, nodeDocker, nodeRemoveFs, nodeRun, recordKept } from './removeHost'
 import { buildAppMenuTemplate } from './appMenu'
 import { pinnedUserDataPath } from './userDataPath'
@@ -1330,8 +1331,8 @@ app.whenReady().then(() => {
   ipcMain.handle('orcha:removeProject', (event, project: unknown, rawOpts: unknown) =>
     asResult(async () => {
       if (!fromManager(event)) throw { code: 'UNKNOWN_STACK' } as const
-      const o = (rawOpts ?? {}) as { deleteData?: unknown; removeFiles?: unknown }
-      const opts = { deleteData: o.deleteData === true, removeFiles: o.removeFiles === true }
+      const o = (rawOpts ?? {}) as { deleteData?: unknown; removeFiles?: unknown; saveOutput?: unknown }
+      const opts = { deleteData: o.deleteData === true, removeFiles: o.removeFiles === true, saveOutput: o.saveOutput !== false }
       const t = await removalTarget(project)
       console.log(`[orcha-desktop] remove: ${t.project} (folder ${t.folder ?? 'unknown'}) deleteData=${opts.deleteData} removeFiles=${opts.removeFiles}`)
       const result = await removeProject(t.project, t.projectShort, t.folder, opts, removeDeps(), (phase) => {
@@ -1369,6 +1370,34 @@ app.whenReady().then(() => {
           // ledger is best effort
         }
       }
+    })
+  )
+
+  // ---- Settings › Storage › Agent worktrees (agentWorktrees.ts → `orcha worktrees --json`) ----
+  const worktreeRun = () => nodeRun({ ...scrubWorkerEnv(process.env), PATH: nodeHostWorkerDeps.pathEnv ?? hostToolPath() })
+  ipcMain.handle('orcha:storage:worktrees', (event) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'INVALID_WORKTREE' } as const
+      return scanAgentWorktrees(await listKnownProjects(), worktreeRun(), (f) => isDirectory(path.join(f, '.orcha-worktrees')))
+    })
+  )
+  ipcMain.handle('orcha:storage:worktreesClean', (event, raw: unknown) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'INVALID_WORKTREE' } as const
+      const req = parseCleanRequest(raw, await listKnownProjects())
+      const res = await cleanAgentWorktrees(req, worktreeRun())
+      if (!req.dryRun) {
+        console.log(`[orcha-desktop] storage: cleaned ${res.removed.length} agent worktree(s) in ${req.folder} (${res.freed_bytes} bytes)`)
+      }
+      return res
+    })
+  )
+  ipcMain.handle('orcha:storage:revealWorktree', (event, folder: unknown, p: unknown) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'INVALID_WORKTREE' } as const
+      const f = knownFolder(await listKnownProjects(), folder)
+      if (!isAgentWorktreePath(f, p) || !isDirectory(p)) throw { code: 'INVALID_WORKTREE' } as const
+      shell.showItemInFolder(p)
     })
   )
 
@@ -1502,6 +1531,17 @@ app.whenReady().then(() => {
       embedTracker.ready(from)
       // a new full load: the previous load's resolved container may no longer apply
       lastCids.delete(from)
+    }
+    if (msg.type === 'revealPath') {
+      // Settings › Agent worktrees "Open folder": only a folder directly inside THIS stack's
+      // own .orcha-worktrees (the project is the sender's, never the message's).
+      void listStacks()
+        .then((stacks) => {
+          const folder = stacks.find((s) => s.project === from)?.folder
+          if (folder && isAgentWorktreePath(folder, msg.path) && isDirectory(msg.path)) shell.showItemInFolder(msg.path)
+        })
+        .catch(() => {})
+      return
     }
     if (msg.type === 'route') lastRoutes.set(from, msg)
     // The portal's RESOLVED container (its route may drop ?cid=, QA 2/6).

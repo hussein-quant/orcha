@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from . import notifier_deliverables
+from . import notifier_worktree_gc
 
 
 def _save_task_result(api_base, aid, worker, diff, failed_drains, services):
@@ -110,6 +111,10 @@ def handle_exited(
             else "noop"
         )
         _release_worker(api_base, aid, worker, lane, "released", services)
+    # Agent-worktree housekeeping (mig 067): a clean wake worktree the legacy teardown kept only
+    # because of Quorate's own scaffolding goes now; a has-output one gets its files attached
+    # to the task. Never raises; a no-op when auto clean-up is off.
+    notifier_worktree_gc.after_run(api_base, worker, live_workers, quiet=quiet)
     if proc.returncode == 0:
         services._post_json(
             f"{api_base}/api/agents/{aid}/events/ack-handled",
@@ -166,6 +171,7 @@ def handle_human_stop(api_base, aid, worker, live_workers, renew, quiet, service
     services._safe_teardown_worktree(
         worker.get("base_cwd"), worker.get("worktree"), worker.get("branch")
     )
+    notifier_worktree_gc.after_run(api_base, worker, live_workers, quiet=quiet)
     services._post_json(
         f"{api_base}/api/agents/{aid}/wake-ack",
         {"kind": "worker_human_stopped", "release_lease": True, "lane": lane},

@@ -16,6 +16,7 @@ from portal_backend import (
     agent_spend_routes,
     agent_suggestion_routes,
     agent_task_claim_routes,
+    agent_worktree_routes,  # agent worktree clean-up (mig 067)
     agent_wake_policy_routes,
     attachment_routes,
     budget_routes,
