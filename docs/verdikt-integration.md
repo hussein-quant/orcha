@@ -5,8 +5,10 @@ own runs recorded. It can also hand the task to **Verdikt** (Husseinovich/verdik
 that drives a web page in Chromium, an iOS simulator app or an Android package. Verdikt checks the
 task's definition of done and reports a verdict for each line, with screenshots and a report link.
 
-Neither one changes the task's status. A human still accepts or rejects the work at the
-verification gate.
+Neither one completes a task. A human still accepts the work at the verification gate. The one
+exception to "evidence only" is the opt-in **auto-fix loop** (section 9): when an automatic Verdikt
+run fails, Quorate can send the task back to its agent (as the system identity `system:verdikt`)
+until Verdikt passes or a stop condition fires. Even then a pass only hands the task to a person.
 
 ## 1. The evidence pack
 
@@ -195,6 +197,10 @@ All routes are additive. Tables are `task_evidence_packs`, `container_verdikt_se
 | `GET /api/tasks/{tid}/verdikt/open?run=` · `GET /api/containers/{cid}/verdikt/open` | Members read, including viewers. A 302 into Verdikt's own UI (section 8). |
 | `GET /api/tasks/{tid}/verdikt/runs/{rid}/preview` · `GET …/preview/log` | Members read. `preview` returns a 302 to the running preview; `log` returns the log tail (section 7). |
 | `POST /api/containers/{cid}/verdikt/previews/claim` · `POST /api/verdikt/previews/{pid}/ready`, `/failed`, `/heartbeat`, `/stopped` | The notifier's machine lane. A header-less daemon call passes. A trusted human must be a non-viewer member with `manage_repo` (owners hold it). |
+| `GET /api/tasks/{tid}/verdikt/autofix` | Members read, including viewers. The task's auto-fix state: whether it applies and why, the override, the latest loop and its attempts (section 9). |
+| `PUT /api/tasks/{tid}/verdikt/autofix` | Owner or `manage_repo` (like the settings). Per-task override `inherit` / `on` / `off`. Audited as `verdikt_autofix_override`. |
+| `POST /api/tasks/{tid}/verdikt/autofix/stop` | A human member (viewers and AI agents get 403). **Stop auto-fix**. 409 when no loop runs. |
+| `POST /api/containers/{cid}/verdikt/sweep` | The machine lane (as above). The background check: refreshes in-flight runs and applies the loop. Idempotent. |
 
 Settings changes are audited as `verdikt_settings_changed`. The preview settings and the
 `verdikt_previews` table come from migration `064_verdikt_previews.sql`.
@@ -392,3 +398,150 @@ In the UI:
 - Settings → Integrations → Verdikt has **Open Verdikt**.
 
 All three open in a new tab.
+
+## 9. Auto-fix: send failures back until Verdikt passes
+
+Opt-in per project (migration `068_verdikt_autofix.sql`; `portal_backend/verdikt_autofix.py` is
+the source of truth, `verdikt_autofix_routes.py` the API).
+
+```
+agent marks done → Verdikt (auto) → FAIL → back to the agent (system:verdikt) → rework → done
+      ↑                                                                                   │
+      └──────────────────────── a new verification round, auto-triggered once ←──────────┘
+                              … until PASS (→ a person verifies) or a stop condition
+```
+
+### Settings
+
+Settings → Integrations → Verdikt → **Auto-fix** (owner or `manage_repo`):
+
+- **When Verdikt fails, send it back to the agent automatically.** Off by default.
+- **Max attempts.** Default 3, 1–10. It counts Verdikt checks in one loop, the first one included,
+  so 3 means at most two send-backs. 1 means report only.
+
+Both only take effect while Verdikt runs automatically (**When** = `ui_changes` or `always`). With
+`manual` they are disabled in the UI, and the API reports `autofix_applies: false`. Each task's
+Verdikt section has an override: **Project default / On / Off**. Turning auto-fix off (project or
+task), or switching Verdikt to `manual`, ends any running loop as "turned off".
+
+### The loop
+
+1. An automatic run started while auto-fix applies to the task is flagged `verdikt_runs.autofix`.
+   Only flagged runs drive the loop. Manual runs never do, and neither does a run that started
+   before auto-fix was switched on.
+2. When a flagged run finishes, the loop judges it exactly once (attempt N of M). Three things
+   enforce that: `autofix_done_at`, a per-task advisory lock and a UNIQUE Verdikt-run key on
+   `verdikt_autofix_attempts`. So two pollers, a person's **Check now** and a retry can never send
+   the task back twice.
+3. **Fail** → the task goes `needs_verification → in_progress`. This is the same transition a
+   person's reject makes: assignees are restored to `working`, and a pending AI-manager pre-review is
+   superseded. The actor is the system identity `system:verdikt`, recorded as
+   `actor_type='system'` with a `verdikt_auto_rework` event. It never impersonates a person.
+   - **The agent's message** is posted to the task thread (a system line,
+     `[Verdikt auto-fix] …`) and carried as `feedback` on the assignee's `task_verified` event
+     (`approved:false`, `by:"system:verdikt"`, `verdikt_auto_rework:true`, `attempt`,
+     `max_attempts`). That is the normal rework directive. It always wakes the agent through the
+     event bus. The message, failures first:
+     ```
+     Verdikt failed this task on attempt 1 of 3. Quorate sent it back to you automatically … mark the
+     task done again. Verdikt will check it again (2 more checks before a person takes over).
+
+     Failed criteria:
+     1. The error text is red
+        Expected: the error text is red
+        Actual: the error text is black
+        Screenshot: /api/tasks/{tid}/verdikt/runs/{rid}/artifact?path=…
+     Passed: 1 of 2 criteria.
+     Verdikt's summary: …
+
+     Report: /api/tasks/{tid}/verdikt/runs/{rid}/report
+     Tested: web:http://127.0.0.1:5173/login
+     Your changes on this attempt: /agents?agent=Pixel&changes={run}
+     ```
+     Links are portal paths. They become absolute when `ORCHA_PORTAL_BASE_URL` is set.
+   - The send-back starts a **new verification round**: the evidence pack's round start is now the
+     last person's reject *or* `verdikt_auto_rework`. When the agent marks the task done again, the
+     existing auto-trigger fires once for that round. While a loop runs, it fires even under
+     `ui_changes` for a rework that touched no UI file.
+4. **Pass** → the loop stops and the task **stays in needs_verification**. The loop never completes a
+   task (never self-certify). The humans get a `verdikt_autofix_stopped` notification and a push
+   saying "Verdikt passed on attempt N of M — ready for your review". While a loop runs, the
+   per-`/done` "Verify task" push and Slack ping are held back. People are told once, when it
+   stops.
+
+### Stop conditions
+
+Each one is recorded on the loop with `stop_kind` and a plain-words `stop_reason`, and posted as a
+`[Verdikt auto-fix] Stopped: …` line. The humans are notified, except when a person caused the
+stop, and the task is left for a person:
+
+| `stop_kind` | When |
+|---|---|
+| `pass` | Verdikt passed. |
+| `attempt_limit` | The Nth failed check, where N is Max attempts. |
+| `no_diff` | **No progress.** The agent marked the task done again with no code change at all in the new round (checked at hand-back, before Verdikt runs again), or the rework's code changes are byte-identical to the previous attempt's. Run diffs are cumulative against the base, so an identical diff means nothing changed. |
+| `same_failure` | **No progress.** The same set of criteria failed with the same "actual" twice in a row (compared case- and whitespace-insensitively). |
+| `non_fail` | Any outcome that isn't a test fail: blocked, unprocessable, warning-only, no verdict, unavailable, timeout, cancelled, failed to run, or no run could be started for the rework (no target, Verdikt switched off). |
+| `budget` / `agent_paused` / `no_assignee` | The assignee hit a budget hard stop, its wakes are off (or the project's are, or the project isn't active), or nobody is assigned. |
+| `human` | A person accepted, rejected, cancelled or reassigned the task. The loop ends in that same transaction. A late Verdikt answer then does nothing. |
+| `stopped_by_human` | **Stop auto-fix** (task page or Verdikt section). |
+| `turned_off` | Auto-fix was turned off for the project or the task, or Verdikt was made manual. |
+
+A loop that stopped never restarts by itself. A new loop can start only after a person accepts or
+rejects the task, which begins a new review cycle. The Stop button therefore really stops the
+loop, and the agent's next hand-back simply waits for a person.
+
+### Background check (results at 3am)
+
+Results used to be polled only while someone viewed the evidence or a preview ran. Now two paths
+poll them:
+
+- **The portal**: a daemon thread (`application_lifecycle.start_verdikt_sweeper`). Every
+  `ORCHA_VERDIKT_SWEEP_SECONDS` (default 12; `0` turns it off) it refreshes every in-flight run
+  (each at most every 3 s, the existing throttle) and judges finished flagged runs. When idle, a
+  pass costs two indexed queries.
+- **The host notifier**: it calls `POST /api/containers/{cid}/verdikt/sweep` every 12 s while that
+  answer says runs are in flight, otherwise once a minute (`notifier_verdikt_sweep.py`). If the
+  portal thread is gone, the loop still closes.
+
+Both are idempotent with each other and with any read (see step 2).
+
+### UI
+
+- **Task page** (any status while a current-cycle loop exists): a *Verdikt auto-fix* card. It
+  shows "Auto-fix running: attempt 2 of 3" with **Stop auto-fix**, or the stop reason. Below that
+  is the attempts timeline: "Attempt 1 ✗ 1/3 · Attempt 2 ✗ 2/3 · Attempt 3 ✓ 3/3". Each attempt
+  links to its run evidence (the Verdikt report) and to *changes* (that attempt's captured diff).
+- **Verdikt section** of the evidence pack: the same status and timeline, plus the per-task
+  override.
+- **Activity**: the system lines render as events ("Verdikt auto-fix sent it back to the agent —
+  Verdikt failed attempt 1 of 3", with the failed criteria; "Verdikt auto-fix stopped").
+- **Needs you** and the proof line: the loop's part comes first, for example "Verdikt passed on
+  attempt 3/3" or "Auto-fix stopped: same failure twice". The full reason is in the tooltip. An
+  older cycle's loop (a person has decided since) is not shown.
+
+### Data
+
+- `container_verdikt_settings.autofix_enabled` / `autofix_max_attempts`.
+- `verdikt_runs.autofix` / `autofix_done_at`.
+- `verdikt_task_autofix`: the override.
+- `verdikt_autofix_loops`: one row per loop. At most one is `running` per task.
+- `verdikt_autofix_attempts`: one row per judged run. `failed` holds `[{text, expected, actual}]`
+  and `changes` holds `{summary, files, href, run_ids}`.
+
+### Tested for real (2026-10-01)
+
+The test used the e2e portal on :9440 (real uvicorn and Postgres, migrations through 068). The fake
+Verdikt served real HTTP on :9441 and was scripted per scenario. A stub agent with no LLM drove only
+the public API: it started a run, finished it with a diff, called `/done` with a work token, then
+blocked on `/agents/{id}/wait` for its rework directive. Nothing called the sweep or polled Verdikt;
+the portal's own sweeper closed every step.
+
+- **fail → fail → pass**: the task was sent back after 4.6 s and 6.6 s with the directive above.
+  The loop stopped `pass` ("Verdikt passed on attempt 3 of 3 — ready for your review"). The task
+  stayed in needs_verification. Timeline: Attempt 1 ✗ 1/3 · Attempt 2 ✗ 2/3 · Attempt 3 ✓ 3/3.
+- **fail → fail → fail**: two send-backs, then `attempt_limit` ("Verdikt failed 3 of 3 attempts —
+  the attempt limit is reached, over to you").
+- Needs you showed "Verdikt passed on attempt 3/3 · …" and "Auto-fix stopped: failed 3 of 3
+  attempts · …". None of the page loads had page errors, console errors or 5xx responses.
+

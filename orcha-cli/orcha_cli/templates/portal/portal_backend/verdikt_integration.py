@@ -15,7 +15,9 @@ What comes back (polled from the Verdikt site on read, throttled): request statu
 per-criterion verdicts mapped back to DoD lines, the scenario verdict + reason, screenshot /
 recording links and the report URL. Unreachable Verdikt → `unavailable`; a request error →
 `failed`; nothing after `timeout_minutes` → `timeout` (best-effort cancel). All are shown with
-Retry. A Verdikt verdict is evidence only: it NEVER verifies or rejects the task.
+Retry. A Verdikt verdict is evidence only: it NEVER verifies the task. With the auto-fix loop
+(mig 068, verdikt_autofix) a fail may send the task back to its agent as `system:verdikt`; a pass
+leaves it in needs_verification for a human.
 """
 
 from __future__ import annotations
@@ -53,7 +55,8 @@ def settings_public(row: dict | None) -> dict:
     if not row:
         return {"configured": False, "enabled": False, "base_url": None, "verdikt_project": None,
                 "target_kind": "web", "target_locator": None, "trigger_mode": "manual",
-                "timeout_minutes": 30, "updated_at": None, "updated_by": None, **vp.settings_fields(None)}
+                "timeout_minutes": 30, "updated_at": None, "updated_by": None, **vp.settings_fields(None),
+                **_autofix_fields(None)}
     return {
         "configured": bool(row.get("base_url") and row.get("verdikt_project")),
         "enabled": bool(row["enabled"]),
@@ -66,7 +69,17 @@ def settings_public(row: dict | None) -> dict:
         "updated_at": row["updated_at"].isoformat() if row.get("updated_at") else None,
         "updated_by": str(row["updated_by"]) if row.get("updated_by") else None,
         **vp.settings_fields(row),
+        **_autofix_fields(row),
     }
+
+
+def _autofix_fields(row: dict | None) -> dict:
+    """The auto-fix loop settings (mig 068): on/off + max attempts, and whether the trigger
+    mode lets them take effect (only 'ui_changes' / 'always')."""
+    from portal_backend import verdikt_autofix as vaf
+
+    f = vaf.settings_fields(row)
+    return {**f, "autofix_applies": vaf.mode_applies(row)}
 
 
 def validate_locator(kind: str, locator: str | None) -> str | None:
@@ -164,6 +177,8 @@ def run_public(row: dict | None) -> dict | None:
         "updated_at": _iso(row.get("updated_at")),
         "last_polled_at": _iso(row.get("last_polled_at")),
         "finished_at": _iso(row.get("finished_at")),
+        # mig 068: auto-triggered while the auto-fix loop applied — its verdict drives the loop
+        "autofix": bool(row.get("autofix")),
         # the preview environment behind this run (mig 064), None when the run tested a
         # configured URL. Attached by `with_preview` (rows loaded through this module carry it).
         "preview": vp.public(row.get("_preview")),
@@ -577,6 +592,11 @@ def trigger(task: dict, *, trigger_kind: str, actor_id: str | None, locator_over
             pack, _ = evidence_pack.ensure_pack(cur, task, reason="verdikt")
         row = create_run(cur, task, settings or {}, pack, trigger=trigger_kind, actor_id=actor_id,
                          locator_override=locator_override)
+        if trigger_kind == "auto":
+            # mig 068: an automatic run started while auto-fix applies drives the loop
+            from portal_backend import verdikt_autofix as vaf
+
+            row["autofix"] = vaf.mark_run(cur, task, row["id"])
         from portal_backend.agent_status import log_event
 
         log_event(cur, str(task["container_id"]), "human" if actor_id else "system", actor_id, "task",
@@ -628,7 +648,11 @@ def maybe_auto_trigger(tid: str, pack: dict, *, background: bool = False) -> dic
                     return None
                 task = dict(task)
                 settings = settings_row(cur, str(task["container_id"]))
-                if not should_auto_trigger(settings, pack):
+                from portal_backend import verdikt_autofix as vaf
+
+                # a running auto-fix loop always checks the rework (it may touch no UI file)
+                if not should_auto_trigger(settings, pack) and not (
+                        vaf.mode_applies(settings) and vaf.force_trigger(cur, tid)):
                     return None
                 start = pack.get("round_started_at")
                 cur.execute(
@@ -639,6 +663,12 @@ def maybe_auto_trigger(tid: str, pack: dict, *, background: bool = False) -> dic
                 if cur.fetchone():
                     return None
             return trigger(task, trigger_kind="auto", actor_id=None, pack=pack)
+        except TriggerRefused as e:
+            # a running auto-fix loop can't continue without a run: hand it to a person
+            from portal_backend import verdikt_autofix as vaf
+
+            vaf.stop_unstartable(tid, e.detail)
+            return None
         except Exception:  # noqa: BLE001 — auto-trigger must never break the caller
             return None
 

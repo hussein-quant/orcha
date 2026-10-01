@@ -68,7 +68,7 @@ import {
 } from "../../state/SnapshotProvider";
 import { FilesChanged } from "../../components/FilesChanged";
 import { modeWords, useProjectMode } from "../../lib/projectMode";
-import { EvidencePack } from "./evidence";
+import { AutofixSection, EvidencePack } from "./evidence";
 import { DeliverablesEvidence, DeliverablesSection } from "./deliverables";
 import { GoalChain } from "./goal";
 import { pausedById, useContainerBudgets, type AgentBudgetStatus } from "../agents/budget/budgetModel";
@@ -1290,13 +1290,29 @@ type ActItem =
 /** Backend marker messages the thread carries as plain text:
  *   decision_routing.py        "[DECISION · <subject> = APPROVED|REJECTED by <alias>]( — <reason>)"
  *   task_verification_routes   "[verification rejected] <feedback>"
+ *   verdikt_autofix (mig 068)  "[Verdikt auto-fix] Verdikt failed this task on attempt N of M …"
+ *                              "[Verdikt auto-fix] Stopped: <reason>"
  *  Parsed into structured timeline events (D12) instead of comment cards. */
 export type ThreadMarker =
   | { kind: "decision"; subject: string; approved: boolean; actor: string | null; reason: string }
   | { kind: "verify_rejected"; feedback: string }
-  | { kind: "verify_approved"; feedback: string };
+  | { kind: "verify_approved"; feedback: string }
+  | { kind: "autofix_rework"; attempt: number; max: number; detail: string }
+  | { kind: "autofix_stopped"; reason: string };
 export function parseThreadMarker(body: string | null | undefined): ThreadMarker | null {
   const b = String(body || "");
+  const af = /^\[Verdikt auto-fix\]\s*([\s\S]*)$/.exec(b.trim());
+  if (af) {
+    const rest = af[1].trim();
+    const st = /^Stopped:\s*([\s\S]*)$/.exec(rest);
+    if (st) return { kind: "autofix_stopped", reason: st[1].trim() };
+    const n = /attempt (\d+) of (\d+)/.exec(rest);
+    const fc = rest.indexOf("Failed criteria:");
+    // the failed criteria (expected vs actual) — links stay in the agent's copy, not the timeline
+    const detail = (fc >= 0 ? rest.slice(fc + "Failed criteria:".length) : rest.split("\n").slice(2).join("\n")).split("\n\n")[0]
+      .split("\n").filter((l) => !/^\s*(Screenshot|Other screenshots):/.test(l)).join("\n").trim();
+    return { kind: "autofix_rework", attempt: n ? Number(n[1]) : 0, max: n ? Number(n[2]) : 0, detail };
+  }
   const d = /^\[DECISION · ([\w-]+) = (APPROVED|REJECTED) by ([^\]]+)\](?:\s+—\s+([\s\S]*))?$/.exec(b.trim());
   if (d) {
     const actor = d[3].trim();
@@ -1321,6 +1337,18 @@ export function latestRejection(msgs: ThreadMsg[]): { feedback: string; at: stri
  *  author alias — parity r2: the backend now attributes the verification note to
  *  the verifying human (task_verification_routes), so the line names them. */
 function markerEventNode(mk: ThreadMarker, at: string, author?: string | null): ReactNode {
+  if (mk.kind === "autofix_rework" || mk.kind === "autofix_stopped") {
+    // the system identity (system:verdikt), never a person
+    const who = <span className="td-tl-who">Verdikt auto-fix</span>;
+    if (mk.kind === "autofix_stopped") {
+      return <TimelineEvent icon={/^Verdikt passed/.test(mk.reason) ? "check" : "alert"} actor={who} at={at} body={mk.reason} bodyLines={2}>stopped</TimelineEvent>;
+    }
+    return (
+      <TimelineEvent icon="x" actor={who} at={at} body={mk.detail || undefined} bodyLines={2}>
+        sent it back to the agent — Verdikt failed attempt {mk.attempt || "?"} of {mk.max || "?"}
+      </TimelineEvent>
+    );
+  }
   if (mk.kind === "verify_rejected" || mk.kind === "verify_approved") {
     const by = author && author !== "system" ? author : null;
     const rej = mk.kind === "verify_rejected";
@@ -3037,6 +3065,14 @@ export interface ThreadCache {
 /** "overview" (the default) and "activity" both show the Activity panel. */
 const actsTab = (tab: TabKey): "activity" | "runs" => (tab === "runs" ? "runs" : "activity");
 
+/** Mig 068: the Verdikt auto-fix loop on the task — status, attempts timeline, Stop. Shown
+ *  while a loop of the current review cycle exists (also while the task is back with its agent). */
+function TaskAutofix({ t }: { t: Task }) {
+  const actor = useActor();
+  const noHuman = useNoHumanReason();
+  return <AutofixSection taskId={t.id} status={t.status} actorId={actor ? String(actor.id) : null} noActorReason={noHuman} />;
+}
+
 function TaskDetail({
   t,
   tab,
@@ -3197,6 +3233,7 @@ function TaskDetail({
             {rejection.feedback ? <Md className="wk-text wk-md td-changes-b" text={rejection.feedback} tasks={snap?.tasks} /> : null}
           </div>
         ) : null}
+        {t.status !== "completed" && t.status !== "cancelled" ? <TaskAutofix key={"af-" + t.id} t={t} /> : null}
         {!gated ? (
           <div className="td-block">
             <div className="td-block-k">Definition of done</div>

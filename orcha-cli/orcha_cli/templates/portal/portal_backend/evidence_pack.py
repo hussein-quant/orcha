@@ -58,11 +58,13 @@ def _result_text(result: Any) -> str:
 
 def _round_start(cur, tid: str):
     """When the current verification round began: the last REJECTED verification of the task
-    (its rework runs are what the new claim rests on), else None (all runs count)."""
+    — a person's reject, or the Verdikt auto-fix loop sending it back (mig 068) — whose rework
+    runs are what the new claim rests on; else None (all runs count)."""
     cur.execute(
         """SELECT max(created_at) AS at FROM events
-            WHERE entity_type='task' AND entity_id=%s AND event_type='verified'
-              AND coalesce(detail->>'approved','') = 'false'""",
+            WHERE entity_type='task' AND entity_id=%s
+              AND ((event_type='verified' AND coalesce(detail->>'approved','') = 'false')
+                   OR event_type='verdikt_auto_rework')""",
         (tid,),
     )
     row = cur.fetchone()
@@ -358,8 +360,11 @@ def on_task_needs_verification(tid: str, *, background: bool = True) -> None:
                 return
             pack, _ = ensure_pack(cur, task, reason="needs_verification")
             conn.commit()
+        from portal_backend import verdikt_autofix as vaf
         from portal_backend import verdikt_integration as vi
 
+        # mig 068: a rework handed back with no code change at all ends the auto-fix loop
+        vaf.on_rework_done(tid, pack)
         vi.maybe_auto_trigger(tid, pack)
     except Exception:  # noqa: BLE001 — a hook must never break the transition
         return

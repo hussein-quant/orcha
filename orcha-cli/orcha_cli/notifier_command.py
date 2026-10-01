@@ -6,6 +6,7 @@ from . import notifier_fast_lane as _fast_lane
 from . import notifier_preview as _preview
 from . import notifier_request_sweep as _request_sweep
 from . import notifier_routines as _routines
+from . import notifier_verdikt_sweep as _verdikt_sweep
 from . import notifier_worktree_gc as _worktree_gc
 
 
@@ -249,6 +250,9 @@ def cmd_notifier(args, *, services) -> None:
                 # a Verdikt run, report it ready, stop it after the run / TTL (never raises).
                 _preview.service_previews(api_base, cid, previews, project_cwd, quiet=args.quiet,
                                           dry_run=args.dry_run)
+                # Verdikt background check (mig 068): refresh in-flight runs + apply the auto-fix
+                # loop (every ~12s while runs are in flight, else once a minute; never raises).
+                _verdikt_sweep.maybe_sweep(api_base, cid, quiet=args.quiet, dry_run=args.dry_run)
                 # Agent worktrees (mig 067): run Settings › Agent worktrees requests, sweep
                 # clean / past-grace worktrees (pre-existing ones too), report the inventory.
                 _worktree_gc.service_worktrees(api_base, cid, _worktree_gc.STATE, project_cwd,

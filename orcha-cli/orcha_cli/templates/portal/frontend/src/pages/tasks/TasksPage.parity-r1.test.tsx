@@ -356,6 +356,11 @@ describe("activity markers and a rejected attempt", () => {
     expect(parseThreadMarker("[DECISION · plan_approval = REJECTED by kedar] — too broad")).toMatchObject({ approved: false, reason: "too broad" });
     expect(parseThreadMarker("[verification rejected] Tests fail")).toEqual({ kind: "verify_rejected", feedback: "Tests fail" });
     expect(parseThreadMarker("hello")).toBeNull();
+    // mig 068: the Verdikt auto-fix loop's system lines
+    expect(parseThreadMarker("[Verdikt auto-fix] Verdikt failed this task on attempt 2 of 3. Quorate sent it back…\n\nFailed criteria:\n1. The error text is red\n   Actual: black\n   Screenshot: /api/x.png\n\nReport: /x"))
+      .toEqual({ kind: "autofix_rework", attempt: 2, max: 3, detail: "1. The error text is red\n   Actual: black" });
+    expect(parseThreadMarker("[Verdikt auto-fix] Stopped: Verdikt passed on attempt 3 of 3 — ready for your review"))
+      .toEqual({ kind: "autofix_stopped", reason: "Verdikt passed on attempt 3 of 3 — ready for your review" });
     expect(latestRejection([
       { id: "1", is_human: false, from: "system", body: "[verification rejected] old", at: "2026-08-02T00:00:00Z", attachments: [] },
       { id: "2", is_human: false, from: "system", body: "[verification rejected] new", at: "2026-08-03T00:00:00Z", attachments: [] },

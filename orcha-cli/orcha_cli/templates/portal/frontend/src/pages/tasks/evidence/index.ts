@@ -13,6 +13,7 @@
 export { EvidencePack, EvidenceDetails, type EvidencePackProps } from "./EvidencePack";
 export { EvidenceSummaryLine, summaryParts, summaryText } from "./EvidenceSummaryLine";
 export { VerdiktPanel } from "./VerdiktPanel";
+export { AutofixSection, AutofixStatus, AutofixTimeline, AutofixOverride } from "./AutofixPanel";
 export { useEvidence, useEvidenceSummaries } from "./useEvidence";
 export { evidenceCss } from "./evidenceCss";
 export type * from "./evidenceTypes";

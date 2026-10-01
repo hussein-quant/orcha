@@ -6,7 +6,38 @@
  * when a runner printed no summary). Colour lives only in the small glyph/word.
  */
 import { Icon } from "../../../components/ui";
-import type { EvidenceSummary } from "./evidenceTypes";
+import type { AutofixSummary, EvidenceSummary } from "./evidenceTypes";
+
+/** The auto-fix loop's part (mig 068) — first, because it says why the task is (back) here:
+ *  "Auto-fix: attempt 2 of 3" · "Verdikt passed on attempt 3/3" · "Auto-fix stopped: same
+ *  failure twice". The full plain-words reason rides in the title. */
+export function autofixPart(a: AutofixSummary | null | undefined): SummaryPart | null {
+  if (!a) return null;
+  if (a.status === "running") {
+    return { key: "autofix", text: `Auto-fix: attempt ${a.current_attempt} of ${a.max_attempts}`, tone: "plain", icon: "refresh",
+      title: "Verdikt failures go back to the agent automatically" };
+  }
+  const n = a.attempts_made;
+  const why: Record<string, string> = {
+    pass: `Verdikt passed on attempt ${n}/${a.max_attempts}`,
+    attempt_limit: `Auto-fix stopped: failed ${n} of ${a.max_attempts} attempts`,
+    no_diff: "Auto-fix stopped: the rework changed no code",
+    same_failure: "Auto-fix stopped: same failure twice",
+    budget: "Auto-fix stopped: budget limit",
+    agent_paused: "Auto-fix stopped: agent paused",
+    stopped_by_human: "Auto-fix stopped by a person",
+    turned_off: "Auto-fix turned off",
+    no_assignee: "Auto-fix stopped: nobody assigned",
+  };
+  let text = why[a.stop_kind || ""];
+  if (!text) {
+    // non-fail outcomes / a person stepping in: the reason's first clause says it
+    const r = (a.stop_reason || a.stop_label || "stopped").split(/ — | \(/)[0];
+    text = "Auto-fix stopped: " + (/^Verdikt/.test(r) ? r : r.charAt(0).toLowerCase() + r.slice(1));
+  }
+  return { key: "autofix", text, tone: a.stop_kind === "pass" ? "ok" : "warn", icon: a.stop_kind === "pass" ? "check" : "alert",
+    title: a.stop_reason || undefined };
+}
 
 export interface SummaryPart {
   key: string;
@@ -20,6 +51,8 @@ export interface SummaryPart {
 export function summaryParts(s: EvidenceSummary | null | undefined, opts: { short?: boolean; general?: boolean } = {}): SummaryPart[] {
   if (!s) return [];
   const parts: SummaryPart[] = [];
+  const af = autofixPart(s.autofix);
+  if (af) parts.push(af);
   const d = s.dod;
   if (d && d.total) {
     const tone = d.not_proven ? "bad" : d.proven === d.total ? "ok" : "plain";

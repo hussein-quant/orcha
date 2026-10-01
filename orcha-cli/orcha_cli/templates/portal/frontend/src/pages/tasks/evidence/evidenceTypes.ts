@@ -185,6 +185,71 @@ export interface VerdiktRun {
   /** set on the pack's run when it was handed off before the last rejected verification —
    *  it judged the previous claim, so it proves nothing about the rework */
   previous_round?: boolean;
+  /** mig 068: auto-triggered while the auto-fix loop applied — its verdict drives the loop */
+  autofix?: boolean;
+}
+
+/* ---- the Verdikt auto-fix loop (mig 068, portal_backend/verdikt_autofix.py) ---------------- */
+
+export type AutofixStopKind =
+  | "pass" | "attempt_limit" | "no_diff" | "same_failure" | "non_fail" | "budget" | "agent_paused"
+  | "human" | "stopped_by_human" | "turned_off" | "no_assignee";
+
+/** One Verdikt check the loop judged: attempt N of the loop's max. */
+export interface AutofixAttempt {
+  attempt: number;
+  /** pass | fail | the non-fail status / verdict (blocked, timeout, unavailable …) */
+  outcome: string;
+  action: "reworked" | "stopped" | "passed";
+  verdikt_run: string;
+  /** portal redirect to this attempt's Verdikt report (its run evidence) */
+  report_url: string;
+  /** portal redirect to this attempt's run page in Verdikt */
+  open_url: string;
+  failed: { text: string; expected?: string | null; actual?: string | null }[];
+  /** the code changes Verdikt checked on this attempt (Live changes / captured diff link) */
+  changes: { summary: string | null; files: number | null; href: string | null };
+  created_at: string | null;
+}
+
+export interface AutofixLoop {
+  id: string;
+  status: "running" | "stopped";
+  /** false: an older review cycle (a person accepted/rejected since) */
+  current?: boolean;
+  max_attempts: number;
+  attempts_made: number;
+  /** while running: the attempt being reworked / checked now */
+  current_attempt: number;
+  stop_kind: AutofixStopKind | null;
+  stop_label: string | null;
+  /** plain words, e.g. "Verdikt passed on attempt 3 of 3 — ready for your review" */
+  stop_reason: string | null;
+  stopped_by: string | null;
+  started_at: string | null;
+  stopped_at: string | null;
+  attempts: AutofixAttempt[];
+}
+
+/** GET /api/tasks/{tid}/verdikt/autofix (also `autofix` on GET …/verdikt/runs). */
+export interface AutofixState {
+  task_id: string;
+  effective: boolean;
+  why: string;
+  override: "inherit" | "on" | "off";
+  project: { enabled: boolean; max_attempts: number; applies: boolean };
+  loop: AutofixLoop | null;
+}
+
+/** The compact loop line on the evidence summary / Needs-you rows (current cycle only). */
+export interface AutofixSummary {
+  status: "running" | "stopped";
+  attempts_made: number;
+  max_attempts: number;
+  current_attempt: number;
+  stop_kind: AutofixStopKind | null;
+  stop_label: string | null;
+  stop_reason: string | null;
 }
 
 export interface EvidenceSummary {
@@ -193,6 +258,8 @@ export interface EvidenceSummary {
   risk_flags: number;
   verdikt: { status: VerdiktStatus; verdict: VerdiktRun["verdict"] } | null;
   line: string;
+  /** mig 068 — absent on an older backend */
+  autofix?: AutofixSummary | null;
 }
 
 export interface EvidencePack {
@@ -216,6 +283,7 @@ export interface EvidencePack {
   verdikt: VerdiktRun | null;
   summary: EvidenceSummary;
   rebuilt?: boolean;
+  autofix?: AutofixSummary | null;
 }
 
 export interface VerdiktSettings {
@@ -234,6 +302,11 @@ export interface VerdiktSettings {
   preview_ready_path?: string;
   preview_timeout_seconds?: number;
   preview_ttl_minutes?: number;
+  /** auto-fix loop (mig 068) — absent on an older backend */
+  autofix_enabled?: boolean;
+  autofix_max_attempts?: number;
+  /** read-only: the trigger mode lets auto-fix take effect (ui_changes / always) */
+  autofix_applies?: boolean;
 }
 
 export const VERDIKT_OPEN: VerdiktStatus[] = ["queued", "running"];

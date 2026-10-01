@@ -10,7 +10,10 @@ Implements exactly the routes Orcha uses, with the shapes of verdikt/web/src/app
   POST /api/requests                     {request, worker} (201)
   PATCH /api/requests/{id}               {request} (cancel)
   GET  /api/artifacts/qa-runs/{path}     run artifact bytes (`files`), Range on video
-Tests drive the "worker" by calling `complete(...)` / `fail(...)` on the state.
+Tests drive the "worker" by calling `complete(...)` / `fail(...)` on the state, or SCRIPT it:
+`script(fail_a, fail_b, passing)` answers the next queued requests in order (each entry a
+`scripted(...)` dict: a verdict + criteria, or `error=` for a run that failed to run) — the
+auto-fix loop's fail → fail → pass sequences.
 """
 from __future__ import annotations
 
@@ -41,6 +44,9 @@ class FakeVerdikt:
         self.artifact_content_type: str | None = None  # None → the real per-type answer
         self.server = None
         self.thread = None
+        # scripted worker: queued requests are answered from this list, in order
+        self.scripted_results: list[dict] = []
+        self.answered: list[tuple[str, dict]] = []
 
     # ------------------------------------------------------------------ seeding
     def add_project(self, slug, name=None, archived=False):
@@ -87,6 +93,25 @@ class FakeVerdikt:
 
     def fail(self, rid, error):
         self.request_row(rid).update(status="failed", error=error)
+
+    # ------------------------------------------------------------------ scripted worker
+    def script(self, *results):
+        """Queue answers for the NEXT requests, in order (see `scripted`)."""
+        with self.lock:
+            self.scripted_results.extend(results)
+
+    def _answer_scripted(self, rid):
+        if not self.scripted_results:
+            return
+        res = self.scripted_results.pop(0)
+        self.answered.append((rid, res))
+        if res.get("error"):
+            self.fail(rid, res["error"])
+        elif res.get("cancel"):
+            self.request_row(rid).update(status="cancelled", error="cancelled in Verdikt")
+        else:
+            self.complete(rid, res["outcome"], res.get("criteria") or [], reason=res.get("reason", ""),
+                          evidence=res.get("evidence") or (), video=res.get("video", False))
 
     # ------------------------------------------------------------------ query executor
     def select(self, ast):
@@ -153,7 +178,9 @@ class FakeVerdikt:
                        "target_kind": body["target_kind"], "locator": body["locator"], "mode": body["mode"],
                        "scenario_ids": json.dumps(body.get("scenario_ids")), "project_id": body.get("project_id")}
                 self.tables["run_requests"].append(req)
-                return 201, {"request": req, "worker": "w1" if self.worker_online else None}
+                answer = dict(req)  # what the queue call itself returns: still queued
+                self._answer_scripted(req["id"])
+                return 201, {"request": answer, "worker": "w1" if self.worker_online else None}
             if len(parts) == 3 and parts[:2] == ["api", "requests"] and method == "PATCH":
                 req = next((r for r in self.tables["run_requests"] if r["id"] == parts[2]), None)
                 if not req or req["status"] not in ("queued", "running"):
@@ -163,7 +190,7 @@ class FakeVerdikt:
                 return 200, {"request": req}
         return 404, {"error": "no route"}
 
-    def start(self):
+    def start(self, port: int = 0):
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -231,7 +258,7 @@ class FakeVerdikt:
             def log_message(self, *a):
                 pass
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), H)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         return f"http://127.0.0.1:{self.server.server_address[1]}"
@@ -240,3 +267,10 @@ class FakeVerdikt:
         if self.server:
             self.server.shutdown()
             self.server.server_close()
+
+
+def scripted(outcome=None, criteria=None, *, reason="", evidence=(), error=None, cancel=False, video=False):
+    """One scripted Verdikt answer: `scripted("fail", [{text, outcome, expected, actual}…])`,
+    `scripted(error="worker crashed")` (the run failed to run) or `scripted(cancel=True)`."""
+    return {"outcome": outcome, "criteria": list(criteria or []), "reason": reason, "evidence": list(evidence),
+            "error": error, "cancel": cancel, "video": video}

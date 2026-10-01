@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException, Query, Request
 
-from portal_backend import evidence_pack, verdikt_integration as vi
+from portal_backend import evidence_pack, verdikt_autofix as vaf, verdikt_integration as vi
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
@@ -39,6 +39,9 @@ def _pack_response(cur, task: dict, *, force: bool = False, reason: str = "read"
     verdict_run = vrun if vrun and vrun["status"] == "completed" else \
         vi.latest_completed_run(cur, str(task["id"]), pack.get("round_started_at"))
     out = evidence_pack.with_verdikt(pack, vi.run_public(vrun), vi.run_public(verdict_run))
+    # mig 068: the auto-fix loop's state (attempt N of M / why it stopped) for the gate and Needs-you
+    out["autofix"] = vaf.summary(cur, str(task["id"]))
+    out["summary"]["autofix"] = out["autofix"]
     out["rebuilt"] = rebuilt
     return out, pack, rebuilt
 
@@ -52,7 +55,8 @@ def get_task_evidence(tid: str, request: Request):
     proven|not_proven|needs_human, basis, evidence, related?, claim?, verdikt?}], total, proven,
     not_proven, needs_human}, claim{text}|null, links[{kind, label, href}], branch, pr_urls[],
     preview_urls[], verdikt (latest Verdikt run)|null, summary{dod, tests, risk_flags, verdikt,
-    line}, rebuilt}."""
+    line, autofix}, autofix (the Verdikt auto-fix loop: {status, attempts_made, max_attempts,
+    current_attempt, stop_kind, stop_label, stop_reason})|null, rebuilt}."""
     if not valid_uuid(tid):
         raise HTTPException(400, "task_id is not a valid UUID")
     with db_cursor() as (conn, cur):
@@ -60,6 +64,12 @@ def get_task_evidence(tid: str, request: Request):
         require_member_read(cur, request, str(task["container_id"]))
         out, pack, rebuilt = _pack_response(cur, task)
         conn.commit()
+    if out.get("verdikt") and out["verdikt"].get("autofix") and vaf.process_task(tid):
+        # the poll above finished an auto-fix run: the loop just acted — answer with that state
+        with db_cursor() as (conn, cur):
+            task = _task(cur, tid)
+            out, pack, rebuilt = _pack_response(cur, task, poll=False)
+            conn.commit()
     if rebuilt and task["status"] == "needs_verification":
         vi.maybe_auto_trigger(tid, pack, background=True)
     return out

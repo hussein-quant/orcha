@@ -18,6 +18,7 @@ from portal_backend.guards import (
     valid_uuid as _valid_uuid,
 )
 from portal_backend.push_outbox import push_task_verify as _push_task_verify
+from portal_backend.verdikt_autofix import is_running as _autofix_running
 from portal_backend.evidence_pack import on_task_needs_verification as _evidence_on_needs_verification
 from portal_backend.review_routing import route_finished_work as _route_finished_work
 from portal_backend.schemas.task_operations import TaskDone
@@ -196,13 +197,16 @@ def mark_done(
         # manager sits in between, ask it to pre-review. Same txn as the transition.
         review = _route_finished_work(cur, t["container_id"], tid, body.agent_id, body.result)
         conn.commit()
-    # Push pipeline (mig 041): the task just became a needs-you item. AFTER the
-    # commit, best-effort — the hook never raises and never touches this txn.
-    _push_task_verify(str(t["container_id"]), tid)
-    # Slack seam (mig 044): if this container has a slack_webhook_url, ping it with a
-    # compact Block Kit "Verify in Orcha" message. Same after-commit, non-fatal contract
-    # as the push hook — a POST failure (or no webhook) never breaks the transition.
-    _slack_notify_needs_verification(str(t["container_id"]), tid)
+    # Mig 068: while a Verdikt auto-fix loop runs, the hand-back goes straight to Verdikt —
+    # the human is told once, when the loop stops (pass / limit / no progress …).
+    if not _autofix_running(tid):
+        # Push pipeline (mig 041): the task just became a needs-you item. AFTER the
+        # commit, best-effort — the hook never raises and never touches this txn.
+        _push_task_verify(str(t["container_id"]), tid)
+        # Slack seam (mig 044): if this container has a slack_webhook_url, ping it with a
+        # compact Block Kit "Verify in Orcha" message. Same after-commit, non-fatal contract
+        # as the push hook — a POST failure (or no webhook) never breaks the transition.
+        _slack_notify_needs_verification(str(t["container_id"]), tid)
     # Proof-of-work (mig 058): build the evidence pack and apply the project's Verdikt
     # auto-trigger policy — in a background thread, after the commit, never raising.
     _evidence_on_needs_verification(tid)

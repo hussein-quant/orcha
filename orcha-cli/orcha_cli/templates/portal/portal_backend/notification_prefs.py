@@ -113,6 +113,7 @@ KIND_TO_CATEGORY = {
     "plan_approval": "approvals",          # push outbox: opening plan posted
     "task_plan": "approvals",              # desktop: plan waiting for approval
     "task_verified": "approvals",
+    "verdikt_autofix_stopped": "approvals",  # mig 068: auto-fix loop handed the task to a person
     "decision_made": "approvals",
     "agent_suggested": "approvals",
     "agent_suggestion_decided": "approvals",

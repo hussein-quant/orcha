@@ -19,6 +19,12 @@
  * Verdikt then tests that preview instead of whatever runs at the URL.
  * "Open Verdikt" opens the project in Verdikt's own UI
  * (GET /api/containers/{cid}/verdikt/open, a browser-reachable redirect).
+ *
+ * Auto-fix (mig 068): "When Verdikt fails, send it back to the agent
+ * automatically" (off by default) + Max attempts (default 3, 1–10). It only
+ * takes effect while Verdikt runs automatically (When = UI changes / every
+ * task); with "Only when someone presses Run in Verdikt" both controls are
+ * disabled and say why. A pass never completes a task — a person verifies.
  */
 import { useEffect, useState } from "react";
 import { Button, ButtonLink, Segmented } from "../../../components/primitives";
@@ -145,6 +151,8 @@ export function VerdiktSettingsGroup({ cid, actorId, reason }: VerdiktSettingsGr
   }
   const kind = KIND_LABEL[form.target_kind];
   const previewSupported = !!saved && "preview_command" in saved;
+  const autofixSupported = !!saved && "autofix_enabled" in saved;
+  const autofixApplies = form.trigger_mode !== "manual";
   return (
     <SettingsGroup
       settab="github-access"
@@ -192,6 +200,36 @@ export function VerdiktSettingsGroup({ cid, actorId, reason }: VerdiktSettingsGr
           </span>
         </SettingRow>
       </SettingRows>
+      {autofixSupported ? (
+        <>
+          <div className="vk-sub" id="verdiktAutofix">
+            <div className="vk-sub-h">Auto-fix</div>
+            <div className="set-rowi-d">
+              When an automatic Verdikt run fails, Quorate sends the task back to its agent with the failed criteria, the
+              screenshots and the report, then checks the rework again — until it passes or a limit is hit. A pass never
+              completes the task: a person still verifies it.
+            </div>
+          </div>
+          <SettingRows label="Auto-fix">
+            <SettingRow label="Send failures back" desc={autofixApplies ? "Off by default. Stops on a pass, the attempt limit, no progress, anything that isn't a fail, or when a person steps in"
+              : "Only works when Verdikt runs automatically — set When above to UI changes or every task"}>
+              <label className="vk-switch" data-testid="vk-autofix">
+                <input type="checkbox" checked={!!form.autofix_enabled} disabled={locked || !!busy || !autofixApplies}
+                  aria-label="When Verdikt fails, send it back to the agent automatically"
+                  onChange={(e) => set("autofix_enabled", e.target.checked)} />
+                <span>When Verdikt fails, send it back to the agent automatically</span>
+              </label>
+            </SettingRow>
+            <SettingRow label="Max attempts" desc="Verdikt checks per loop, the first one included (1 = report only, never send back)">
+              <span className="vk-timeout">
+                <input className="sc-inp vk-num" type="number" min={1} max={10} aria-label="Max attempts" value={form.autofix_max_attempts ?? 3}
+                  disabled={locked || !!busy || !autofixApplies || !form.autofix_enabled}
+                  onChange={(e) => set("autofix_max_attempts", Math.max(1, Math.min(10, Math.round(Number(e.target.value)) || 3)))} />
+              </span>
+            </SettingRow>
+          </SettingRows>
+        </>
+      ) : null}
       {previewSupported && form.target_kind === "web" ? (
         <>
           <div className="vk-sub" id="verdiktPreview">
@@ -260,10 +298,13 @@ function pick(s: VerdiktSettings) {
     enabled: s.enabled, base_url: s.base_url || null, verdikt_project: s.verdikt_project || null, target_kind: s.target_kind,
     target_locator: s.target_locator || null, trigger_mode: s.trigger_mode, timeout_minutes: s.timeout_minutes,
   };
+  // auto-fix fields only when the backend knows them (mig 068)
+  const af = "autofix_enabled" in s ? { autofix_enabled: !!s.autofix_enabled, autofix_max_attempts: s.autofix_max_attempts ?? 3 } : {};
   // preview fields only when the backend knows them (mig 064); an older one never sees them
-  if (!("preview_command" in s)) return base;
+  if (!("preview_command" in s)) return { ...base, ...af };
   return {
     ...base,
+    ...af,
     preview_command: (s.preview_command || "").trim() || null,
     preview_ready_path: (s.preview_ready_path || "").trim() || "/",
     preview_timeout_seconds: s.preview_timeout_seconds ?? 120,

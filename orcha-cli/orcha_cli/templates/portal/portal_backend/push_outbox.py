@@ -123,8 +123,9 @@ def _enqueue(cur, container_id, kind, ref_id, body) -> None:
     )
 
 
-def push_task_verify(container_id, task_id) -> None:
-    """A task parked at needs_verification — a human must verify it."""
+def push_task_verify(container_id, task_id, body=None) -> None:
+    """A task parked at needs_verification — a human must verify it. `body` replaces the
+    default (the task title), e.g. "… — Verdikt passed on attempt 2 — ready for your review"."""
     try:
         with db_cursor() as (conn, cur):
             if not _seeded(cur, container_id):
@@ -140,7 +141,7 @@ def push_task_verify(container_id, task_id) -> None:
             if not _audience_wants(cur, container_id, "task_verify", task_id):
                 return  # mig 063: every device owner muted this — no row
             _prune(cur)
-            _enqueue(cur, container_id, "task_verify", task_id, row["title"])
+            _enqueue(cur, container_id, "task_verify", task_id, body or row["title"])
             conn.commit()
     except Exception:
         pass  # best-effort by contract — push must never surface in the main flow

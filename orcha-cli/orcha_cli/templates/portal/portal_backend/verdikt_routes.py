@@ -14,7 +14,8 @@
   GET  /api/tasks/{tid}/verdikt/open?run=               — 302 "Open in Verdikt": the run's page, else
                                                            the project, in Verdikt's own web UI
   GET  /api/containers/{cid}/verdikt/open               — 302 to the project in Verdikt (members read)
-  Preview environments (mig 064): verdikt_preview_routes.
+  Preview environments (mig 064): verdikt_preview_routes. Auto-fix loop (mig 068):
+  verdikt_autofix_routes.
 
 Truthful states: `unavailable` (Verdikt did not answer), `failed` (it answered with an error or
 no verdict), `timeout`, `cancelled`, `queued`/`running`, `completed` (+ verdict). A Verdikt
@@ -32,7 +33,7 @@ from fastapi import HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from portal_backend import evidence_pack, verdikt_integration as vi, verdikt_preview as vp
+from portal_backend import evidence_pack, verdikt_autofix as vaf, verdikt_integration as vi, verdikt_preview as vp
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -64,6 +65,15 @@ class VerdiktSettingsBody(BaseModel):
                                                    description="How long the preview may take to become ready")
     preview_ttl_minutes: Optional[int] = Field(default=None, ge=5, le=480,
                                                description="The notifier stops a preview after this long regardless")
+    # Auto-fix loop (mig 068). Omitted = keep the saved value (older clients never reset it).
+    autofix_enabled: Optional[bool] = Field(
+        default=None,
+        description="When Verdikt fails, send the task back to its agent automatically (default off). Takes "
+                    "effect only when trigger_mode is ui_changes or always; a pass always leaves the task for "
+                    "a human to verify.")
+    autofix_max_attempts: Optional[int] = Field(
+        default=None, ge=1, le=10,
+        description="How many Verdikt checks one auto-fix loop may make, the first included (default 3)")
 
 
 class VerdiktTestBody(BaseModel):
@@ -131,7 +141,8 @@ def put_verdikt_settings(cid: str, body: VerdiktSettingsBody, request: Request):
         require_container(cur, cid)
         member = require_grant(cur, request, cid, body.actor_agent_id, "manage_repo")
         actor = str(member["id"])
-        prev = vp.settings_fields(vi.settings_row(cur, cid))
+        prev_row = vi.settings_row(cur, cid)
+        prev = vp.settings_fields(prev_row)
         pv = {
             "preview_command": pv_cmd if "preview_command" in sent else prev["preview_command"],
             "preview_ready_path": (pv_path or "/") if "preview_ready_path" in sent else prev["preview_ready_path"],
@@ -160,10 +171,20 @@ def put_verdikt_settings(cid: str, body: VerdiktSettingsBody, request: Request):
             (pv["preview_command"], pv["preview_ready_path"], pv["preview_timeout_seconds"],
              pv["preview_ttl_minutes"], cid),
         )
+        af_prev = vaf.settings_fields(prev_row)
+        af = {
+            "autofix_enabled": body.autofix_enabled if body.autofix_enabled is not None else af_prev["autofix_enabled"],
+            "autofix_max_attempts": body.autofix_max_attempts or af_prev["autofix_max_attempts"],
+        }
+        cur.execute(
+            "UPDATE container_verdikt_settings SET autofix_enabled=%s, autofix_max_attempts=%s WHERE container_id=%s",
+            (af["autofix_enabled"], af["autofix_max_attempts"], cid),
+        )
+        vaf.stop_where_off(cur, cid, actor)  # turned off (or Verdikt made manual): running loops end
         log_event(cur, cid, "human", actor, "container", cid, "verdikt_settings_changed",
                   {"enabled": body.enabled, "base_url": base, "verdikt_project": project,
                    "target_kind": body.target_kind, "trigger_mode": body.trigger_mode,
-                   "preview_command": pv["preview_command"]})
+                   "preview_command": pv["preview_command"], **af})
         row = vi.settings_row(cur, cid)
         conn.commit()
     return vi.settings_public(row)
@@ -222,10 +243,13 @@ def list_verdikt_runs(tid: str, request: Request):
         task = _load_task(cur, tid)
         require_member_read(cur, request, str(task["container_id"]))
         vi.refresh_latest(cur, task)
+        conn.commit()
+    vaf.process_task(tid)  # a run that just finished may move the auto-fix loop (idempotent)
+    with db_cursor() as (_, cur):
         rows = vi.runs_for_task(cur, tid)
         settings = vi.settings_public(vi.settings_row(cur, str(task["container_id"])))
-        conn.commit()
-    return {"task_id": tid, "settings": settings, "runs": [vi.run_public(r) for r in rows]}
+        autofix = vaf.state(cur, task)
+    return {"task_id": tid, "settings": settings, "runs": [vi.run_public(r) for r in rows], "autofix": autofix}
 
 
 @app.post("/api/tasks/{tid}/verdikt/runs", status_code=201)
@@ -265,6 +289,8 @@ def refresh_verdikt_run(tid: str, rid: str, request: Request):
         run = vi.refresh_run(cur, run, timeout_minutes=int(s.get("timeout_minutes") or 30), force=True)
         vi.with_preview(cur, run)
         conn.commit()
+    if run.get("autofix") and run["status"] not in vi.OPEN_STATUSES:
+        vaf.process_task(tid)
     return vi.run_public(run)
 
 
@@ -434,8 +460,12 @@ def cancel_verdikt_run(tid: str, rid: str, body: VerdiktActorBody, request: Requ
         cur.execute("SELECT * FROM verdikt_runs WHERE id=%s", (rid,))
         row = vi.with_preview(cur, dict(cur.fetchone()))
         conn.commit()
+    if row.get("autofix"):
+        vaf.process_task(tid)  # a cancelled run is not a test fail: the loop hands over
     return vi.run_public(row)
 
 
 # Preview environments (mig 064): registered with the Verdikt routes they extend.
 from portal_backend import verdikt_preview_routes  # noqa: E402,F401
+# Auto-fix loop (mig 068).
+from portal_backend import verdikt_autofix_routes  # noqa: E402,F401

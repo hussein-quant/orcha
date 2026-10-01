@@ -20,13 +20,18 @@
  * "Open in Verdikt" (header, and on every earlier run) goes through
  * GET /api/tasks/{tid}/verdikt/open, a redirect to the run's page in Verdikt
  * (or the project before any run) at a host the browser can reach.
+ *
+ * Auto-fix loop (mig 068, `autofix` on the runs response): "Auto-fix running:
+ * attempt 2 of 3" + Stop auto-fix, or why it stopped; the attempts timeline;
+ * the per-task override (Project default / On / Off).
  */
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "../../../components/ui";
 import { Button, ButtonLink } from "../../../components/primitives";
 import { relTime, clockTime } from "../../../lib/format";
 import { detailText, postJSON } from "./useEvidence";
-import { VERDIKT_OPEN, type VerdiktPreview, type VerdiktRun, type VerdiktSettings, type VerdiktShot } from "./evidenceTypes";
+import { VERDIKT_OPEN, type AutofixState, type VerdiktPreview, type VerdiktRun, type VerdiktSettings, type VerdiktShot } from "./evidenceTypes";
+import { AUTOFIX_CSS, AutofixOverride, AutofixStatus } from "./AutofixPanel";
 
 export const VERDIKT_SETUP_HREF = "/settings#tab=github-access";
 
@@ -161,6 +166,7 @@ export interface VerdiktPanelProps {
 export function VerdiktPanel({ taskId, latest, actorId, noActorReason, onChanged, showCriteria = true, previewUrls }: VerdiktPanelProps) {
   const [settings, setSettings] = useState<VerdiktSettings | null>(null);
   const [history, setHistory] = useState<VerdiktRun[]>([]);
+  const [autofix, setAutofix] = useState<AutofixState | null>(null);
   const [settingsErr, setSettingsErr] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -170,9 +176,10 @@ export function VerdiktPanel({ taskId, latest, actorId, noActorReason, onChanged
   const load = useCallback(() => {
     fetch("/api/tasks/" + encodeURIComponent(taskId) + "/verdikt/runs")
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((d: { settings: VerdiktSettings; runs?: VerdiktRun[] }) => {
+      .then((d: { settings: VerdiktSettings; runs?: VerdiktRun[]; autofix?: AutofixState }) => {
         setSettings(d.settings);
         setHistory(Array.isArray(d.runs) ? d.runs : []);
+        setAutofix(d.autofix && typeof d.autofix === "object" && "override" in d.autofix ? d.autofix : null);
         setSettingsErr(false);
       })
       .catch(() => setSettingsErr(true));
@@ -298,6 +305,7 @@ export function VerdiktPanel({ taskId, latest, actorId, noActorReason, onChanged
       {run?.previous_round ? (
         <div className="ev-m" data-testid="verdikt-previous-round">From before the last rejection — it doesn't count for the rework. Run it again to check the new work.</div>
       ) : null}
+      {autofix ? <AutofixStatus state={autofix} taskId={taskId} actorId={actorId} noActorReason={noActorReason} onChanged={(s) => { setAutofix(s); load(); }} /> : null}
       {pv ? <VerdiktPreviewLine preview={pv} /> : null}
       {!open && hasPreviewField && enabled && settings?.target_kind === "web" && (!pv || !settings?.preview_command) ? (
         settings?.preview_command ? (
@@ -369,6 +377,8 @@ export function VerdiktPanel({ taskId, latest, actorId, noActorReason, onChanged
         </div>
       ) : null}
       {err ? <div className="ev-err" role="alert">{err}</div> : null}
+      {autofix && enabled ? <AutofixOverride state={autofix} taskId={taskId} actorId={actorId} onChanged={setAutofix} /> : null}
+      {autofix ? <style>{AUTOFIX_CSS}</style> : null}
       {earlier.length ? (
         <details className="ev-vk-hist" data-testid="verdikt-history">
           <summary>Earlier runs ({earlier.length})</summary>

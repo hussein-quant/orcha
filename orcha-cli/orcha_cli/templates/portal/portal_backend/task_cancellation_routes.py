@@ -97,6 +97,10 @@ def cancel_task(tid: str, body: TaskCancel, request: Request):
             (tid,),
         )
         cur.execute("DELETE FROM agent_self_wake WHERE task_id=%s", (tid,))
+        # Mig 068: cancelling ends a running Verdikt auto-fix loop
+        from portal_backend.verdikt_autofix import end_for_person as _end_autofix
+
+        _end_autofix(cur, t, body.actor_agent_id, "cancelled", actor_kind="human" if is_human else "ai")
         # Mig 057: a cancelled task needs no AI manager pre-review — close it.
         _supersede_pending_prereview(cur, t["container_id"], tid, reason="task_cancelled")
         # Review P2: clear the now-stale assignments so assignees don't stay 'working'.
