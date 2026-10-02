@@ -567,6 +567,9 @@ struct ConversationScreen: View {
     /// Whether the bottom sentinel is on screen — drives auto-scroll vs the "New messages" pill.
     @State private var atBottom = true
     @State private var hasUnseen = false
+    /// Set once the first `loadConversation` for this screen finishes — the empty state
+    /// (and its hint chips) only shows after that, so it never flashes over loading turns.
+    @State private var hasLoaded = false
 
     private var agent: AgentDto? {
         model.snapshot?.agents.first { $0.id == agentId }
@@ -602,7 +605,10 @@ struct ConversationScreen: View {
                 Text("\(agent?.alias ?? "The agent") goes back to their own work. The transcript stays here.")
             }
             .navigationDestination(item: $linkedTaskId) { TaskDetailScreen(taskId: $0) }
-            .task { await model.loadConversation(agentId) }
+            .task {
+                await model.loadConversation(agentId)
+                hasLoaded = true
+            }
     }
 
     // MARK: working strip (top inset)
@@ -641,7 +647,14 @@ struct ConversationScreen: View {
                         .frame(maxWidth: .infinity)
                     }
                     if model.turns.isEmpty {
-                        emptyConversation
+                        if hasLoaded {
+                            emptyConversation
+                        } else {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(maxWidth: .infinity, minHeight: 120)
+                                .accessibilityLabel("Loading conversation")
+                        }
                     }
                     turnRows
                     if model.sendFlow.showsPendingBubble {
@@ -1129,6 +1142,8 @@ private struct ChatComposer: View {
                 .foregroundStyle(p.text)
                 .lineLimit(1...6)
                 .focused($focused)
+                .accessibilityLabel("Message")
+                .accessibilityHint(placeholder)
                 .padding(.leading, LSpace.m)
                 .padding(.vertical, 10)
             DictationMicButton(text: $draft)

@@ -18,6 +18,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.data.RunDto
+import io.openorcha.mobile.domain.ActivityCopy
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.ui.components.LAvatar
 import io.openorcha.mobile.ui.components.LStatusGlyph
@@ -38,7 +39,7 @@ internal fun runGlyphStatus(status: String): String = when (status) {
 fun RunRow(run: RunDto, onOpenRun: (RunDto) -> Unit) {
     val p = Orcha.palette
     val ago = MobileUx.agoLabel(run.startedAt)
-    val subtitle = run.taskTitle ?: run.wakeEvent ?: "worker run"
+    val subtitle = run.taskTitle ?: run.wakeEvent?.let(ActivityCopy::humanize) ?: "Worker run"
     Row(
         Modifier
             .fillMaxWidth()

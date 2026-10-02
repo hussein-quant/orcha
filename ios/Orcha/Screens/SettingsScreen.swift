@@ -194,7 +194,7 @@ struct SettingsScreen: View {
                     if model.prefsActive {
                         Text("Appearance follows your GitHub account — changes here sync to the portal and your other devices.")
                             .ltype(.micro)
-                            .foregroundStyle(p.faint)
+                            .foregroundStyle(p.muted)
                     }
                 }
             }
@@ -250,7 +250,7 @@ struct SettingsScreen: View {
                          ? "The roster is private on this project — you can see your own membership; owners see everyone."
                          : "Invites and role changes are managed from the portal.")
                         .ltype(.micro)
-                        .foregroundStyle(p.faint)
+                        .foregroundStyle(p.muted)
                         .padding(.horizontal, 4)
                 }
             }
@@ -343,60 +343,30 @@ struct SettingsScreen: View {
 
     // MARK: Access → Devices and pairing
 
+    /// Projects paired from one server share its token, remote address and
+    /// connection, so each server appears once with its projects listed.
+    private var serverGroups: [ServerGroup] {
+        var order: [String] = []
+        var byBase: [String: [StoredContainer]] = [:]
+        for container in model.containers {
+            if byBase[container.baseUrl] == nil { order.append(container.baseUrl) }
+            byBase[container.baseUrl, default: []].append(container)
+        }
+        return order.compactMap { base in
+            byBase[base].flatMap { list in list.first.map { ServerGroup(primary: $0, projects: list) } }
+        }
+    }
+
     private var containersSection: some View {
-        LSection("Devices and pairing", count: model.containers.count) {
+        let groups = serverGroups
+        return LSection("Devices and pairing", count: groups.count) {
             VStack(alignment: .leading, spacing: LSpace.s) {
-                ForEach(model.containers) { container in
-                    rowsCard {
-                        LRow(title: container.displayName, subtitle: container.baseUrl) {
-                            LAvatar(name: container.displayName, size: 28)
-                        } trailing: {
-                            Button("Disconnect", role: .destructive) { model.forgetContainer(container.id) }
-                                .ltype(.meta)
-                                .fontWeight(.medium)
-                                .foregroundStyle(p.danger)
-                                .frame(minHeight: 44)
-                        }
-                        LDivider()
-                        Button {
-                            tokenDraft = ""
-                            tokenEditing = container
-                        } label: {
-                            LRow(title: "Access token") {
-                                rowIcon("key.horizontal", tint: container.accessToken == nil ? nil : p.accent)
-                            } trailing: {
-                                HStack(spacing: 6) {
-                                    Text(container.accessToken == nil ? "Not set" : "Set")
-                                    chevron()
-                                }
-                            }
-                        }
-                        .buttonStyle(.lRow)
-                        .accessibilityHint(container.accessToken == nil ? "Adds a token" : "Updates the token")
-                        LDivider()
-                        Button {
-                            remoteDraft = container.remoteBaseUrl ?? ""
-                            remoteError = nil
-                            remoteEditing = container
-                        } label: {
-                            LRow(title: "Remote address") {
-                                rowIcon("network", tint: container.remoteBaseUrl == nil ? nil : p.accent)
-                            } trailing: {
-                                HStack(spacing: 6) {
-                                    Text(container.remoteBaseUrl.flatMap { $0.isEmpty ? nil : $0 } ?? "None")
-                                        .monospaced(container.remoteBaseUrl != nil)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                    chevron()
-                                }
-                            }
-                        }
-                        .buttonStyle(.lRow)
-                    }
+                ForEach(groups) { group in
+                    serverCard(group)
                 }
-                Text("Cloud deployments authenticate every request with the team access token — update it here when your admin rotates it; it applies to every project at that address. The remote address is for self-hosted boxes only: add the computer's Tailscale address and the app fails over to whichever answers.")
+                Text("Cloud deployments authenticate every request with the team access token — update it here when your admin rotates it; it applies to every project on that server. The remote address is for self-hosted boxes only: add the computer's Tailscale address and the app fails over to whichever answers.")
                     .ltype(.micro)
-                    .foregroundStyle(p.faint)
+                    .foregroundStyle(p.muted)
                     .padding(.horizontal, 4)
             }
         }
@@ -417,12 +387,70 @@ struct SettingsScreen: View {
                 .autocorrectionDisabled()
             Button("Save") { saveRemote() }
             Button("Remove", role: .destructive) {
-                if let c = remoteEditing { model.setRemoteUrl(c.id, to: nil) }
+                if let c = remoteEditing { setRemote(for: c, to: nil) }
                 remoteEditing = nil
             }
             Button("Cancel", role: .cancel) { remoteEditing = nil }
         } message: {
             Text("The computer's Tailscale name or IP, with the portal port. Tried automatically when the local address is unreachable.")
+        }
+    }
+
+    private func serverCard(_ group: ServerGroup) -> some View {
+        let container = group.primary
+        let remote = container.remoteBaseUrl.flatMap { $0.isEmpty ? nil : $0 }
+        return rowsCard {
+            LRow(title: group.title, subtitle: group.subtitle) {
+                LAvatar(name: group.title, size: 28)
+            } trailing: {
+                Button("Disconnect", role: .destructive) { model.forgetContainer(container.id) }
+                    .ltype(.meta)
+                    .fontWeight(.medium)
+                    .foregroundStyle(p.danger)
+                    .frame(minHeight: 44)
+            }
+            LDivider()
+            Button {
+                tokenDraft = ""
+                tokenEditing = container
+            } label: {
+                LRow(title: "Access token") {
+                    rowIcon("key.horizontal", tint: container.accessToken == nil ? nil : p.accent)
+                } trailing: {
+                    HStack(spacing: 6) {
+                        Text(container.accessToken == nil ? "Not set" : "Set")
+                        chevron()
+                    }
+                }
+            }
+            .buttonStyle(.lRow)
+            .accessibilityHint(container.accessToken == nil ? "Adds a token" : "Updates the token")
+            LDivider()
+            Button {
+                remoteDraft = remote ?? ""
+                remoteError = nil
+                remoteEditing = container
+            } label: {
+                LRow(title: "Remote address") {
+                    rowIcon("network", tint: remote == nil ? nil : p.accent)
+                } trailing: {
+                    HStack(spacing: 6) {
+                        Text(remote ?? "None")
+                            .monospaced(remote != nil)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        chevron()
+                    }
+                }
+            }
+            .buttonStyle(.lRow)
+        }
+    }
+
+    /// Applies a remote address to every project paired from the same server.
+    private func setRemote(for container: StoredContainer, to url: String?) {
+        for sibling in model.containers where sibling.baseUrl == container.baseUrl {
+            model.setRemoteUrl(sibling.id, to: url)
         }
     }
 
@@ -460,11 +488,11 @@ struct SettingsScreen: View {
         defer { remoteEditing = nil }
         let draft = remoteDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.isEmpty else {
-            model.setRemoteUrl(container.id, to: nil)
+            setRemote(for: container, to: nil)
             return
         }
         if let normalized = try? OrchaServerAddress.parse(draft).baseUrl {
-            model.setRemoteUrl(container.id, to: normalized)
+            setRemote(for: container, to: normalized)
             model.toast = "Remote address saved"
         } else {
             model.error = "That doesn't look like an address — try host:port, e.g. my-mac.tailnet.ts.net:8001."
@@ -499,5 +527,24 @@ struct SettingsScreen: View {
         .frame(maxWidth: .infinity)
         .padding(.top, LSpace.l)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// One paired server and the projects stored from it.
+private struct ServerGroup: Identifiable {
+    let primary: StoredContainer
+    let projects: [StoredContainer]
+
+    var id: String { primary.baseUrl }
+
+    /// A lone project keeps its own name; a shared server shows its address.
+    var title: String {
+        projects.count == 1 ? primary.displayName : primary.baseUrl
+    }
+
+    var subtitle: String {
+        projects.count == 1
+            ? primary.baseUrl
+            : projects.map(\.displayName).joined(separator: ", ")
     }
 }

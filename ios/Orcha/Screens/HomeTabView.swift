@@ -178,7 +178,8 @@ private struct HomeHeader: View {
         let inProgress = t.filter { $0.status == "in_progress" }.count
         let verify = t.filter { $0.status == "needs_verification" }.count
         let blocked = t.filter { $0.status == "blocked" }.count
-        let done = t.filter { $0.status == "completed" }.count
+        // Same set as the Tasks "Done" filter (completed + cancelled + failed).
+        let done = t.filter { TaskScope.of($0.status) == .done }.count
         return "\(inProgress) in progress · \(verify) to verify · \(blocked) blocked · \(done) done"
     }
 
@@ -324,7 +325,7 @@ private struct ActiveTaskRow: View {
         LRow(title: task.title) {
             HStack(spacing: LSpace.s) {
                 LPriorityGlyph(priority: task.priority)
-                Text(task.id.prefix(6).uppercased())
+                Text(task.shortId)
                     .ltype(.mono)
                     .foregroundStyle(p.muted)
                 LStatusGlyph(status: task.status)
@@ -369,7 +370,7 @@ private struct UpdateRow: View {
                         .ltype(.meta)
                         .foregroundStyle(p.muted)
                 }
-                Text(message.body)
+                Text(ActivityCopy.preview(message.body))
                     .ltype(.meta)
                     .foregroundStyle(p.muted)
                     .lineLimit(2)

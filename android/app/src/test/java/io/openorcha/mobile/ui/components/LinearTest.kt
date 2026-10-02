@@ -35,32 +35,64 @@ class LinearTest {
         assertEquals(3, levelBars(3))
     }
 
+    private fun style(k: LStatusKind, t: LStatusTone) = k to t
+
     @Test
-    fun statusKindsCoverTheContractStatuses() {
-        assertEquals(LStatusKind.Backlog, lStatusKind("pending"))
-        assertEquals(LStatusKind.Backlog, lStatusKind("backlog"))
-        assertEquals(LStatusKind.Todo, lStatusKind("ready"))
-        assertEquals(LStatusKind.Todo, lStatusKind("todo"))
-        assertEquals(LStatusKind.Progress, lStatusKind("in_progress"))
-        assertEquals(LStatusKind.Progress, lStatusKind("IN_PROGRESS"))
-        assertEquals(LStatusKind.Blocked, lStatusKind("blocked"))
-        assertEquals(LStatusKind.Review, lStatusKind("needs_verification"))
-        assertEquals(LStatusKind.Done, lStatusKind("completed"))
-        assertEquals(LStatusKind.Cancelled, lStatusKind("cancelled"))
-        assertEquals(LStatusKind.Failed, lStatusKind("failed"))
-        assertEquals(LStatusKind.Todo, lStatusKind("something_new"))
-        assertEquals("Needs verification", lStatusLabel("needs_verification"))
-        assertEquals("In progress", lStatusLabel("in_progress"))
+    fun taskStatusesMatchTheWebStatusIcon() {
+        assertEquals(style(LStatusKind.Todo, LStatusTone.Todo), lStatusStyle("ready"))
+        assertEquals(style(LStatusKind.Dashed, LStatusTone.Todo), lStatusStyle("pending"))
+        assertEquals(style(LStatusKind.Progress, LStatusTone.Progress), lStatusStyle("in_progress"))
+        assertEquals(style(LStatusKind.Progress, LStatusTone.Progress), lStatusStyle("IN_PROGRESS"))
+        assertEquals(style(LStatusKind.Review, LStatusTone.Review), lStatusStyle("needs_verification"))
+        assertEquals(style(LStatusKind.Done, LStatusTone.Done), lStatusStyle("completed"))
+        assertEquals(style(LStatusKind.Blocked, LStatusTone.Danger), lStatusStyle("blocked"))
+        assertEquals(style(LStatusKind.Failed, LStatusTone.Danger), lStatusStyle("failed"))
+        assertEquals(style(LStatusKind.Cancelled, LStatusTone.Muted), lStatusStyle("cancelled"))
+        assertEquals(style(LStatusKind.Dashed, LStatusTone.Todo), lStatusStyle("not_ready"))
     }
 
     @Test
-    fun requestStatusesMapOntoGlyphs() {
-        assertEquals(LStatusKind.Todo, lStatusKind(requestGlyphStatus("open")))
-        assertEquals(LStatusKind.Progress, lStatusKind(requestGlyphStatus("accepted")))
-        assertEquals(LStatusKind.Review, lStatusKind(requestGlyphStatus("answered")))
-        assertEquals(LStatusKind.Cancelled, lStatusKind(requestGlyphStatus("rejected")))
-        assertEquals(LStatusKind.Done, lStatusKind(requestGlyphStatus("closed")))
-        assertEquals(LStatusKind.Blocked, lStatusKind(requestGlyphStatus("escalated")))
+    fun requestStatusesMatchTheWebStatusIcon() {
+        assertEquals(style(LStatusKind.Open, LStatusTone.Todo), lStatusStyle(requestGlyphStatus("open")))
+        assertEquals(style(LStatusKind.Accepted, LStatusTone.Accent), lStatusStyle(requestGlyphStatus("accepted")))
+        assertEquals(style(LStatusKind.Done, LStatusTone.Done), lStatusStyle(requestGlyphStatus("answered")))
+        assertEquals(style(LStatusKind.Closed, LStatusTone.Muted), lStatusStyle(requestGlyphStatus("closed")))
+        assertEquals(style(LStatusKind.Rejected, LStatusTone.Danger), lStatusStyle(requestGlyphStatus("rejected")))
+        assertEquals(style(LStatusKind.Escalated, LStatusTone.Danger), lStatusStyle(requestGlyphStatus("escalated")))
+        assertEquals(style(LStatusKind.Converted, LStatusTone.Accent), lStatusStyle(requestGlyphStatus("converted_to_task")))
+    }
+
+    @Test
+    fun agentStatusesMatchTheWebStatusIcon() {
+        assertEquals(style(LStatusKind.Progress, LStatusTone.Progress), lStatusStyle("working"))
+        assertEquals(style(LStatusKind.Dotted, LStatusTone.Faint), lStatusStyle("idle"))
+        assertEquals(style(LStatusKind.Dotted, LStatusTone.Faint), lStatusStyle("offline"))
+        assertEquals(style(LStatusKind.Paused, LStatusTone.Warn), lStatusStyle("awaiting_request"))
+        assertEquals(style(LStatusKind.Attention, LStatusTone.Warn), lStatusStyle("awaiting_human"))
+        assertEquals(style(LStatusKind.Stopped, LStatusTone.Danger), lStatusStyle("terminated"))
+        assertEquals(style(LStatusKind.Stopped, LStatusTone.Muted), lStatusStyle("orphaned"))
+        assertEquals(style(LStatusKind.Paused, LStatusTone.Warn), lStatusStyle("paused"))
+        assertEquals(style(LStatusKind.Paused, LStatusTone.Warn), lStatusStyle("rate_limited"))
+    }
+
+    @Test
+    fun unknownStatusesFallBackToTheFaintRingAndRawLabel() {
+        assertEquals(style(LStatusKind.Unknown, LStatusTone.Faint), lStatusStyle("something_new"))
+        assertEquals("something_new", lStatusLabel("something_new"))
+        assertEquals("unknown", lStatusLabel(""))
+    }
+
+    @Test
+    fun labelsAreTheWebStatLabels() {
+        val expected = mapOf(
+            "in_progress" to "In progress", "working" to "Working", "ready" to "Ready", "pending" to "Pending",
+            "awaiting_request" to "Waiting", "awaiting_human" to "Needs human",
+            "needs_verification" to "Needs verification", "completed" to "Completed",
+            "answered" to "Answered", "closed" to "Closed", "rejected" to "Rejected",
+            "escalated" to "Escalated", "accepted" to "Accepted", "converted_to_task" to "Converted",
+            "terminated" to "Terminated", "not_ready" to "On hold", "rate_limited" to "Rate limited",
+        )
+        for ((status, label) in expected) assertEquals(label, lStatusLabel(status), status)
     }
 
     @Test

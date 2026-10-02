@@ -35,6 +35,7 @@ import io.openorcha.mobile.data.ContainerSnapshot
 import io.openorcha.mobile.data.RequestDto
 import io.openorcha.mobile.data.TaskDto
 import io.openorcha.mobile.data.TaskMessageDto
+import io.openorcha.mobile.domain.ActivityCopy
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.domain.OrchaSelectors
 import io.openorcha.mobile.domain.RequestsView
@@ -136,11 +137,12 @@ internal fun homeActiveWork(tasks: List<TaskDto>): List<TaskDto> = tasks
     .sortedWith(compareBy<TaskDto> { MobileUx.taskGroupRank(it.status) }.thenBy { it.priority ?: 100 })
     .take(8)
 
-/** "5 in progress · 2 to verify · 0 blocked · 2 done" — the header's one-line tally. */
+/** "5 in progress · 2 to verify · 0 blocked · 2 done" — the header's one-line tally.
+ *  "done" counts the same set as the Tasks tab's Done pill ([TaskScope.Done]). */
 internal fun homeTally(tasks: List<TaskDto>): String {
     fun n(s: String) = OrchaSelectors.statusCount(tasks, s)
     return "${n("in_progress")} in progress · ${n("needs_verification")} to verify · " +
-        "${n("blocked")} blocked · ${n("completed")} done"
+        "${n("blocked")} blocked · ${tasks.count { TaskScope.of(it.status) == TaskScope.Done }} done"
 }
 
 // ---------------------------------------------------------------------------- header
@@ -304,7 +306,7 @@ private fun ActiveTaskRow(task: TaskDto, onClick: () -> Unit) {
         leading = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LSpace.s)) {
                 LPriorityGlyph(task.priority)
-                Text(task.id.take(6).uppercase(), style = ltype(LType.Mono), color = p.muted)
+                Text(task.shortId, style = ltype(LType.Mono), color = p.muted)
                 LStatusGlyph(task.status)
             }
         },
@@ -340,7 +342,7 @@ private fun UpdateRow(task: TaskDto, msg: TaskMessageDto, onClick: () -> Unit) {
                 )
                 Text(MobileUx.agoLabel(msg.createdAt) ?: "", style = ltype(LType.Meta), color = p.muted, maxLines = 1)
             }
-            Text(msg.body, style = ltype(LType.Meta), color = p.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(ActivityCopy.preview(msg.body), style = ltype(LType.Meta), color = p.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }

@@ -260,7 +260,7 @@ private fun TaskGroupHeader(status: String, count: Int, collapsed: Boolean, onTo
             .padding(top = LSpace.m)
             .semantics(mergeDescendants = true) {
                 heading()
-                contentDescription = "$label, $count tasks"
+                contentDescription = "$label, ${taskCountLabel(count)}"
                 stateDescription = if (collapsed) "Collapsed" else "Expanded"
             },
         verticalAlignment = Alignment.CenterVertically,
@@ -269,9 +269,12 @@ private fun TaskGroupHeader(status: String, count: Int, collapsed: Boolean, onTo
         Icon(OrchaIcons.ChevronRight, null, tint = p.faint, modifier = Modifier.size(14.dp).rotate(rotation))
         LStatusGlyph(status, size = 13.dp)
         Text(label, style = ltype(LType.Meta), color = p.text2)
-        Text("$count", style = ltype(LType.Meta), color = p.faint)
+        Text(taskCountLabel(count), style = ltype(LType.Meta), color = p.faint)
     }
 }
+
+/** "1 task" / "3 tasks". */
+internal fun taskCountLabel(count: Int): String = if (count == 1) "1 task" else "$count tasks"
 
 /** Linear list row: priority · status glyph · title / id + tags … avatar · age. */
 @Composable

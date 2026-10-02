@@ -1,5 +1,6 @@
 package io.openorcha.mobile.ui.screens
 
+import io.openorcha.mobile.data.StoredContainer
 import io.openorcha.mobile.ui.theme.SkinMode
 import io.openorcha.mobile.ui.theme.ThemeMode
 import kotlin.test.Test
@@ -17,6 +18,20 @@ class SettingsGitHubPairingLinearTest {
         assertEquals("Plan-only", executionSummary(null, "plan"))
         assertEquals("Build to PR", executionSummary(true, "pr"))
         assertEquals("Full", executionSummary(true, "full"))
+    }
+
+    @Test
+    fun devicesGroupOncePerServer() {
+        val a = StoredContainer(id = "a", displayName = "Alpha", baseUrl = "https://box:8001")
+        val b = StoredContainer(id = "b", displayName = "Beta", baseUrl = "https://box:8001")
+        val c = StoredContainer(id = "c", displayName = "Cloud", baseUrl = "https://cloud.example")
+        val groups = groupByServer(listOf(a, c, b))
+        assertEquals(2, groups.size)
+        assertEquals(listOf("a", "b"), groups[0].ids)
+        assertEquals("https://box:8001", groups[0].title)
+        assertEquals("Alpha, Beta", groups[0].subtitle)
+        assertEquals("Cloud", groups[1].title)
+        assertEquals("https://cloud.example", groups[1].subtitle)
     }
 
     @Test

@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.data.TaskDto
 import io.openorcha.mobile.data.TaskMessageDto
+import io.openorcha.mobile.domain.ActivityCopy
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.components.Banner
@@ -155,10 +156,10 @@ private fun ThreadBubble(msg: TaskMessageDto, humanId: String?, tasks: List<Task
     val mine = msg.authorId != null && msg.authorId == humanId
     val system = msg.authorId == null && !msg.isHuman
     when {
-        system -> Bubble(BubbleKind.System, msg.body, tasks = tasks, onOpenTask = onOpenTask)
-        mine -> Bubble(BubbleKind.Mine, msg.body, time = MobileUx.agoLabel(msg.createdAt), tasks = tasks, onOpenTask = onOpenTask)
+        system -> Bubble(BubbleKind.System, ActivityCopy.humanize(msg.body), tasks = tasks, onOpenTask = onOpenTask)
+        mine -> Bubble(BubbleKind.Mine, ActivityCopy.humanize(msg.body), time = MobileUx.agoLabel(msg.createdAt), tasks = tasks, onOpenTask = onOpenTask)
         else -> Bubble(
-            BubbleKind.Theirs, msg.body,
+            BubbleKind.Theirs, ActivityCopy.humanize(msg.body),
             author = msg.authorAlias ?: if (msg.isHuman) "human" else "agent",
             time = MobileUx.agoLabel(msg.createdAt),
             tasks = tasks, onOpenTask = onOpenTask,

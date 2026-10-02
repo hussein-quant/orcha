@@ -32,13 +32,10 @@ class AgentsRequestsLinearTest {
         assertEquals("Open", requestLensLabel(RequestChip.Open))
     }
 
-    @Test fun requestStatusMapsToLinearGlyphs() {
-        assertEquals("blocked", requestGlyphStatus("open", escalated = true))
-        assertEquals("ready", requestGlyphStatus("open", escalated = false))
-        assertEquals("in_progress", requestGlyphStatus("accepted", escalated = false))
-        assertEquals("needs_verification", requestGlyphStatus("answered", escalated = false))
-        assertEquals("completed", requestGlyphStatus("converted_to_task", escalated = false))
-        assertEquals("cancelled", requestGlyphStatus("rejected", escalated = false))
-        assertEquals("pending", requestGlyphStatus("weird", escalated = false))
+    @Test fun requestGlyphUsesTheRequestsOwnStatus() {
+        assertEquals("escalated", requestGlyphStatus("open", escalated = true))
+        assertEquals("open", requestGlyphStatus("open", escalated = false))
+        assertEquals("answered", requestGlyphStatus("answered", escalated = false))
+        assertEquals("rejected", requestGlyphStatus("rejected", escalated = false))
     }
 }

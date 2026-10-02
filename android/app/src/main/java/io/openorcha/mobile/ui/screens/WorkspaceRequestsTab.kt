@@ -74,15 +74,8 @@ internal fun requestLensLabel(chip: RequestChip): String =
     if (chip == RequestChip.Escalations) "To a human" else chip.label
 
 /** Request status → the shared Linear status-glyph vocabulary (iOS `RequestRowCard.glyphStatus`). */
-internal fun requestGlyphStatus(status: String, escalated: Boolean): String = when {
-    escalated -> "blocked"
-    status == "open" -> "ready"
-    status == "accepted" -> "in_progress"
-    status == "answered" -> "needs_verification"
-    status == "closed" || status == "converted_to_task" -> "completed"
-    status in setOf("rejected", "expired", "cancelled") -> "cancelled"
-    else -> "pending"
-}
+/** The request's own status for the glyph (web `StatusIcon` parity); escalated wins. */
+internal fun requestGlyphStatus(status: String, escalated: Boolean): String = if (escalated) "escalated" else status
 
 @Composable
 internal fun RequestsTab(

@@ -154,7 +154,7 @@ private struct ProjectRow: View {
         case nil, "probing": "Checking…"
         case "unreachable": "Unreachable — is this project up?"
         default:
-            "\(health?.agents ?? 0) agents · \(health?.tasks ?? 0) open tasks"
+            "\(health?.agents ?? 0) \((health?.agents ?? 0) == 1 ? "agent" : "agents") · \(health?.tasks ?? 0) open \((health?.tasks ?? 0) == 1 ? "task" : "tasks")"
                 + (health?.githubRepo.map { " · \($0)" } ?? "")
         }
     }

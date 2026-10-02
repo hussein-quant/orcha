@@ -147,7 +147,7 @@ struct TaskDetailScreen: View {
         }
         VStack(alignment: .leading, spacing: LSpace.m) {
             LSegmented(
-                [(DetailPane.activity, "Activity \(model.taskMessages.count)"),
+                [(DetailPane.activity, "Activity \(ActivityTimeline.entries(task: task, messages: model.taskMessages).count)"),
                  (DetailPane.runs, "Runs \(model.taskRuns.count)")],
                 selection: $pane
             )
@@ -300,7 +300,7 @@ private struct VerificationCard: View {
                     Spacer()
                     if let reviewTag { LTag("Review: \(reviewTag)", tint: p.accent) }
                 }
-                if let result = task.result ?? task.messageSummary?.last?.body {
+                if let result = task.result ?? task.messageSummary?.last.map({ ActivityCopy.humanize($0.body) }) {
                     VStack(alignment: .leading, spacing: 4) {
                         caption("Result")
                         Text(ChatMarkdown.inline(result))
@@ -545,7 +545,7 @@ private struct ActivityTimeline: View {
     let agents: [AgentDto]
     let taskId: String
 
-    private struct Entry: Identifiable {
+    fileprivate struct Entry: Identifiable {
         let id: String
         let date: Date?
         let time: String?
@@ -556,7 +556,10 @@ private struct ActivityTimeline: View {
         let isMessage: Bool
     }
 
-    private var entries: [Entry] {
+    private var entries: [Entry] { Self.entries(task: task, messages: messages) }
+
+    /// The rows the timeline lists — the "Activity N" pill counts exactly these.
+    fileprivate static func entries(task: TaskDto, messages: [TaskMessageDto]) -> [Entry] {
         var out: [Entry] = []
         if let c = task.createdAt {
             out.append(Entry(id: "created", date: MobileUx.parseInstant(c), time: MobileUx.agoLabel(c),
@@ -575,7 +578,7 @@ private struct ActivityTimeline: View {
             let author = m.authorAlias ?? (m.isHuman ? "you" : "system")
             out.append(Entry(id: m.messageId ?? "m\(i)", date: MobileUx.parseInstant(m.createdAt),
                              time: MobileUx.agoLabel(m.createdAt), actor: author,
-                             isAI: !m.isHuman && m.authorId != nil, glyph: nil, text: m.body, isMessage: true))
+                             isAI: !m.isHuman && m.authorId != nil, glyph: nil, text: ActivityCopy.humanize(m.body), isMessage: true))
         }
         return out.sorted { ($0.date ?? .distantPast) < ($1.date ?? .distantPast) }
     }
@@ -911,7 +914,7 @@ struct TaskThreadScreen: View {
     private func threadBubble(_ msg: TaskMessageDto) -> some View {
         let tasks = model.snapshot?.tasks ?? []
         if msg.authorId == nil, !msg.isHuman {
-            Bubble(.system, msg.body, tasks: tasks, onTapTask: { linkedTaskId = $0 })
+            Bubble(.system, ActivityCopy.humanize(msg.body), tasks: tasks, onTapTask: { linkedTaskId = $0 })
         } else if msg.authorId != nil, msg.authorId == model.humanId {
             Bubble(.mine, msg.body, time: MobileUx.agoLabel(msg.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 })
         } else {

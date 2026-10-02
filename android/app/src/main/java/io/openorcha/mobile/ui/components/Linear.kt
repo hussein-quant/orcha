@@ -113,8 +113,12 @@ val OrchaPalette.lSelected: Color get() = if (isDark) Color.White.copy(alpha = 0
 val OrchaPalette.lHover: Color get() = if (isDark) Color.White.copy(alpha = 0.045f) else Color(0x0B18191C)
 val OrchaPalette.lPrioEmpty: Color get() = if (isDark) Color(0xFF3A3C42) else Color(0xFFD5D6DA)
 val OrchaPalette.lUrgent: Color get() = if (isDark) Color(0xFFF2994A) else Color(0xFFDE6414)
-val OrchaPalette.lProgress: Color get() = if (isDark) Color(0xFFF0BF00) else Color(0xFFB07D00)
+val OrchaPalette.lProgress: Color get() = if (isDark) Color(0xFFF0BF4C) else Color(0xFFB07D00)
 val OrchaPalette.lStatusNeutral: Color get() = if (isDark) Color(0xFF8A8F98) else Color(0xFF8A8E96)
+/** Web status-glyph tokens (`--v2-st-todo` / `-faint` / `-muted`) — iOS parity. */
+val OrchaPalette.lStatusTodo: Color get() = if (isDark) Color(0xFF9EA2AC) else Color(0xFF8A8E96)
+val OrchaPalette.lStatusFaint: Color get() = if (isDark) Color(0xFF6E727C) else Color(0xFFA3A6AD)
+val OrchaPalette.lStatusMuted: Color get() = if (isDark) Color(0xFF7B7F89) else Color(0xFF8A8E96)
 
 // MARK: Surfaces & structure
 
@@ -585,78 +589,155 @@ fun LAvatar(
 
 // MARK: Status & priority glyphs
 
-/** Linear status kinds, mapped from server status strings (iOS `LStatusGlyph.Kind`). */
-enum class LStatusKind { Backlog, Todo, Progress, Review, Done, Cancelled, Blocked, Failed }
-
-fun lStatusKind(status: String): LStatusKind = when (status.lowercase()) {
-    "pending", "backlog", "draft", "queued", "waiting" -> LStatusKind.Backlog
-    "in_progress", "inprogress", "running", "active", "working", "started", "accepted" -> LStatusKind.Progress
-    "needs_verification", "review", "in_review", "needs_review", "answered", "verifying" -> LStatusKind.Review
-    "completed", "done", "closed", "merged", "passed", "verified", "resolved" -> LStatusKind.Done
-    "cancelled", "canceled", "rejected", "skipped", "refused", "expired" -> LStatusKind.Cancelled
-    "blocked", "escalated" -> LStatusKind.Blocked
-    "failed", "error" -> LStatusKind.Failed
-    else -> LStatusKind.Todo
+/** Web `StatusShape` (portal `components/primitives/StatusIcon.tsx`) — iOS `LStatusGlyph.Kind`. */
+enum class LStatusKind {
+    Todo, Dashed, Dotted, Progress, Paused, Attention, Review, Done,
+    Blocked, Failed, Stopped, Rejected, Escalated, Cancelled, Closed,
+    Open, Accepted, Converted, Unknown,
 }
 
-fun lStatusLabel(status: String): String = when (lStatusKind(status)) {
-    LStatusKind.Backlog -> "Backlog"
-    LStatusKind.Todo -> "To do"
-    LStatusKind.Progress -> "In progress"
-    LStatusKind.Review -> "Needs verification"
-    LStatusKind.Done -> "Done"
-    LStatusKind.Cancelled -> "Cancelled"
-    LStatusKind.Blocked -> "Blocked"
-    LStatusKind.Failed -> "Failed"
+/** Web `StatusColor` — iOS `LStatusGlyph.Tone`. */
+enum class LStatusTone { Todo, Faint, Progress, Warn, Review, Done, Danger, Muted, Accent }
+
+/** Web `SHAPE` table, plus a few legacy mobile aliases mapped onto the same family. */
+fun lStatusStyle(status: String): Pair<LStatusKind, LStatusTone> = when (status.lowercase()) {
+    "ready", "todo" -> LStatusKind.Todo to LStatusTone.Todo
+    "pending", "not_ready", "backlog", "draft", "queued" -> LStatusKind.Dashed to LStatusTone.Todo
+    "idle", "offline" -> LStatusKind.Dotted to LStatusTone.Faint
+    "in_progress", "inprogress", "working", "active", "live", "running", "started" -> LStatusKind.Progress to LStatusTone.Progress
+    "awaiting_request", "paused", "rate_limited", "waiting" -> LStatusKind.Paused to LStatusTone.Warn
+    "awaiting_human" -> LStatusKind.Attention to LStatusTone.Warn
+    "needs_verification", "review", "in_review", "needs_review", "verifying" -> LStatusKind.Review to LStatusTone.Review
+    "completed", "answered", "verified", "done", "merged", "passed", "resolved" -> LStatusKind.Done to LStatusTone.Done
+    "blocked" -> LStatusKind.Blocked to LStatusTone.Danger
+    "failed", "error" -> LStatusKind.Failed to LStatusTone.Danger
+    "terminated" -> LStatusKind.Stopped to LStatusTone.Danger
+    "orphaned" -> LStatusKind.Stopped to LStatusTone.Muted
+    "rejected", "refused" -> LStatusKind.Rejected to LStatusTone.Danger
+    "escalated" -> LStatusKind.Escalated to LStatusTone.Danger
+    "cancelled", "canceled", "archived", "stopped", "killed", "skipped", "expired" -> LStatusKind.Cancelled to LStatusTone.Muted
+    "closed" -> LStatusKind.Closed to LStatusTone.Muted
+    "open" -> LStatusKind.Open to LStatusTone.Todo
+    "accepted" -> LStatusKind.Accepted to LStatusTone.Accent
+    "converted_to_task" -> LStatusKind.Converted to LStatusTone.Accent
+    else -> LStatusKind.Unknown to LStatusTone.Faint
 }
 
-/** Linear task-status icon drawn on a Canvas (crisp at 14dp). */
+fun lStatusKind(status: String): LStatusKind = lStatusStyle(status).first
+fun lStatusTone(status: String): LStatusTone = lStatusStyle(status).second
+
+/** Web `STAT` labels (lib/status.ts); unknown statuses keep their raw value. */
+fun lStatusLabel(status: String): String = when (status.lowercase()) {
+    "working" -> "Working"
+    "in_progress" -> "In progress"
+    "idle" -> "Idle"
+    "pending" -> "Pending"
+    "ready" -> "Ready"
+    "blocked" -> "Blocked"
+    "awaiting_request" -> "Waiting"
+    "awaiting_human" -> "Needs human"
+    "needs_verification" -> "Needs verification"
+    "completed" -> "Completed"
+    "cancelled" -> "Cancelled"
+    "failed" -> "Failed"
+    "terminated" -> "Terminated"
+    "open" -> "Open"
+    "accepted" -> "Accepted"
+    "rejected" -> "Rejected"
+    "answered" -> "Answered"
+    "converted_to_task" -> "Converted"
+    "closed" -> "Closed"
+    "escalated" -> "Escalated"
+    "offline" -> "Offline"
+    "active" -> "Active"
+    "paused" -> "Paused"
+    "rate_limited" -> "Rate limited"
+    "orphaned" -> "Orphaned"
+    "not_ready" -> "On hold"
+    "" -> "unknown"
+    else -> status
+}
+
+private fun OrchaPalette.statusToneColor(tone: LStatusTone): Color = when (tone) {
+    LStatusTone.Todo -> lStatusTodo
+    LStatusTone.Faint -> lStatusFaint
+    LStatusTone.Progress -> lProgress
+    LStatusTone.Warn -> warn
+    LStatusTone.Review, LStatusTone.Done -> ok
+    LStatusTone.Danger -> danger
+    LStatusTone.Muted -> lStatusMuted
+    LStatusTone.Accent -> accent
+}
+
+/**
+ * The web `StatusIcon` glyph drawn on a Canvas using the web's 14×14 grid
+ * (centre 7,7; ring r 5.5 stroke 1.5; inner pie r 2.6; filled disc r 6.25) — iOS parity.
+ */
 @Composable
 fun LStatusGlyph(status: String, modifier: Modifier = Modifier, size: Dp = 14.dp) {
     val p = Orcha.palette
-    val kind = lStatusKind(status)
+    val (kind, tone) = lStatusStyle(status)
     val label = lStatusLabel(status)
-    val inner = if (p.isDark) p.bg else Color.White
-    val neutral = p.lStatusNeutral
-    val progress = p.lProgress
+    val ink = p.statusToneColor(tone)
+    val cut = p.bg
     Canvas(modifier.size(size).semantics { contentDescription = label }) {
-        val s = this.size.minDimension
-        val line = maxOf(1.2.dp.toPx(), s * 0.1f)
-        val r = s / 2f
-        val c = Offset(s / 2f, s / 2f)
-        fun ring(color: Color, effect: PathEffect? = null) =
-            drawCircle(color, radius = r - line / 2f, center = c, style = Stroke(width = line, cap = StrokeCap.Round, pathEffect = effect))
-        fun check(color: Color, inset: Float, w: Float) {
-            val x0 = inset; val y0 = inset; val wd = s - inset * 2; val ht = s - inset * 2
-            val path = Path().apply {
-                moveTo(x0, y0 + ht * 0.55f)
-                lineTo(x0 + wd * 0.38f, y0 + ht * 0.92f)
-                lineTo(x0 + wd, y0 + ht * 0.1f)
+        val k = this.size.minDimension / 14f
+        val c = Offset(7f * k, 7f * k)
+        fun pt(x: Float, y: Float) = Offset(x * k, y * k)
+        fun ring(width: Float = 1.5f, effect: PathEffect? = null, cap: StrokeCap = StrokeCap.Butt, alpha: Float = 1f) =
+            drawCircle(ink, radius = 5.5f * k, center = c, alpha = alpha,
+                style = Stroke(width = width * k, cap = cap, pathEffect = effect))
+        fun strokes(color: Color, width: Float, vararg segs: List<Offset>) {
+            val path = Path()
+            for (seg in segs) {
+                path.moveTo(seg[0].x, seg[0].y)
+                for (o in seg.drop(1)) path.lineTo(o.x, o.y)
             }
-            drawPath(path, color, style = Stroke(width = w, cap = StrokeCap.Round, join = StrokeJoin.Round))
+            drawPath(path, color, style = Stroke(width = width * k, cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
-        fun cross(color: Color, inset: Float, w: Float) {
-            drawLine(color, Offset(inset, inset), Offset(s - inset, s - inset), strokeWidth = w, cap = StrokeCap.Round)
-            drawLine(color, Offset(s - inset, inset), Offset(inset, s - inset), strokeWidth = w, cap = StrokeCap.Round)
+        fun pie(sweep: Float) = drawArc(ink, startAngle = -90f, sweepAngle = sweep, useCenter = true,
+            topLeft = pt(7f - 2.6f, 7f - 2.6f), size = Size(5.2f * k, 5.2f * k))
+        fun filled(width: Float = 1.5f, vararg segs: List<Offset>) {
+            drawCircle(ink, radius = 6.25f * k, center = c)
+            strokes(cut, width, *segs)
         }
         when (kind) {
-            LStatusKind.Backlog -> ring(neutral, PathEffect.dashPathEffect(floatArrayOf(s * 0.08f, s * 0.17f)))
-            LStatusKind.Todo -> ring(neutral)
-            LStatusKind.Progress -> {
-                ring(progress)
-                val pad = s * 0.22f
-                drawArc(progress, startAngle = -90f, sweepAngle = 180f, useCenter = true,
-                    topLeft = Offset(pad, pad), size = Size(s - pad * 2, s - pad * 2))
+            LStatusKind.Todo -> ring()
+            LStatusKind.Dashed -> ring(effect = PathEffect.dashPathEffect(floatArrayOf(2.05f * k, 1.9f * k)))
+            LStatusKind.Dotted -> ring(width = 1.6f, cap = StrokeCap.Round,
+                effect = PathEffect.dashPathEffect(floatArrayOf(0.01f * k, 2.85f * k)))
+            LStatusKind.Progress -> { ring(); pie(180f) }
+            LStatusKind.Review -> { ring(); pie(270f) }
+            LStatusKind.Paused -> {
+                ring()
+                strokes(ink, 1.3f, listOf(pt(5.8f, 5.3f), pt(5.8f, 8.7f)), listOf(pt(8.2f, 5.3f), pt(8.2f, 8.7f)))
             }
-            LStatusKind.Review -> { ring(p.ok); check(p.ok, s * 0.28f, line) }
-            LStatusKind.Done -> { drawCircle(p.ok, r, c); check(inner, s * 0.27f, line * 1.15f) }
-            LStatusKind.Cancelled -> { drawCircle(neutral, r, c); cross(inner, s * 0.32f, line * 1.1f) }
-            LStatusKind.Blocked -> {
-                drawCircle(p.danger, r, c)
-                val w = s * 0.5f; val h = line * 1.2f
-                drawRoundRect(inner, topLeft = Offset((s - w) / 2f, (s - h) / 2f), size = Size(w, h), cornerRadius = CornerRadius(h / 2f))
+            LStatusKind.Attention, LStatusKind.Open -> { ring(); drawCircle(ink, radius = 2f * k, center = c) }
+            LStatusKind.Done, LStatusKind.Closed ->
+                filled(1.5f, listOf(pt(4.4f, 7.2f), pt(6.2f, 9f), pt(9.6f, 5.2f)))
+            LStatusKind.Failed ->
+                filled(1.5f, listOf(pt(5f, 5f), pt(9f, 9f)), listOf(pt(9f, 5f), pt(5f, 9f)))
+            LStatusKind.Cancelled -> filled(1.5f, listOf(pt(4.9f, 9.1f), pt(9.1f, 4.9f)))
+            LStatusKind.Converted ->
+                filled(1.4f, listOf(pt(4.3f, 7f), pt(9.5f, 7f)), listOf(pt(7.4f, 4.9f), pt(9.5f, 7f), pt(7.4f, 9.1f)))
+            LStatusKind.Blocked -> { ring(); strokes(ink, 1.6f, listOf(pt(4.6f, 7f), pt(9.4f, 7f))) }
+            LStatusKind.Stopped -> {
+                ring()
+                drawRoundRect(ink, topLeft = pt(5.1f, 5.1f), size = Size(3.8f * k, 3.8f * k), cornerRadius = CornerRadius(0.8f * k))
             }
-            LStatusKind.Failed -> { drawCircle(p.danger, r, c); cross(inner, s * 0.32f, line * 1.1f) }
+            LStatusKind.Rejected -> {
+                ring()
+                strokes(ink, 1.4f, listOf(pt(5.3f, 5.3f), pt(8.7f, 8.7f)), listOf(pt(8.7f, 5.3f), pt(5.3f, 8.7f)))
+            }
+            LStatusKind.Escalated -> {
+                ring()
+                strokes(ink, 1.4f, listOf(pt(7f, 9.4f), pt(7f, 4.8f)), listOf(pt(5f, 6.6f), pt(7f, 4.6f), pt(9f, 6.6f)))
+            }
+            LStatusKind.Accepted -> {
+                ring()
+                strokes(ink, 1.4f, listOf(pt(4.9f, 7.1f), pt(6.4f, 8.6f), pt(9.2f, 5.5f)))
+            }
+            LStatusKind.Unknown -> ring(alpha = 0.6f)
         }
     }
 }

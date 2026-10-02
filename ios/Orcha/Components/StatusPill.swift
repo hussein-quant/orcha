@@ -84,9 +84,18 @@ private func pillPulses(_ status: String, _ domain: StatusDomain) -> Bool {
     }
 }
 
-/// Status — Linear: a compact glyph + label, no loud tinted pill. Tasks use the
-/// Linear status glyphs (`LStatusGlyph`); other domains a small semantic dot
-/// (pulsing while live). Status is never conveyed by color alone — the word is
+/// Task / request / agent statuses render the web `StatusIcon` glyph + its exact
+/// label; connection / run states keep the (pulsing) presence dot.
+func statusPillUsesGlyph(_ domain: StatusDomain) -> Bool {
+    switch domain {
+    case .task, .request, .agent: true
+    case .connection, .run: false
+    }
+}
+
+/// Status — Linear: a compact glyph + label, no loud tinted pill. Tasks, requests
+/// and agents use the web status glyphs (`LStatusGlyph`); connections / runs a small
+/// semantic dot (pulsing while live). Status is never conveyed by color alone — the word is
 /// always present (foundations §2 accessibility). Swiss keeps its mono caps.
 struct StatusPill: View {
     @Environment(\.palette) private var palette
@@ -96,14 +105,15 @@ struct StatusPill: View {
 
     var body: some View {
         let tint = palette.tint(statusColorName(status, domain))
+        let usesGlyph = statusPillUsesGlyph(domain)
         HStack(spacing: 6) {
-            if domain == .task {
+            if usesGlyph {
                 LStatusGlyph(status: status, size: 12)
                     .accessibilityHidden(true)
             } else {
                 PulseDot(color: tint.color, animated: pillPulses(status, domain) && !reduceMotion)
             }
-            Text(pillLabel(MobileUx.statusCopy(status.lowercased()), palette))
+            Text(pillLabel(usesGlyph ? LStatusGlyph.label(for: status) : MobileUx.statusCopy(status.lowercased()), palette))
                 .font(pillFont(palette))
                 .tracking(pillTracking(palette))
                 .foregroundStyle(palette.text2)
@@ -151,22 +161,19 @@ func pillTracking(_ p: Palette) -> CGFloat {
     p.pillMono ? 0.7 : 0
 }
 
-/// Issue 1 — request status pill with a per-type GLYPH (mobile adaptation of the web's
-/// text pill). `escalated` (open + human-targeted) overrides the tint to danger and shows
-/// an octagon-X, matching the web `requests.html:135` escalated marker.
+/// Request status pill: the web `StatusIcon` glyph + label for the request status.
+/// `escalated` (open + human-targeted) shows the web escalated glyph (red ring + up arrow).
 struct RequestStatusPill: View {
     @Environment(\.palette) private var palette
     let status: String
     var escalated: Bool = false
 
     var body: some View {
-        let name = escalated ? "danger" : statusColorName(status, .request)
-        let tint = palette.tint(name)
-        let label = escalated ? "escalated" : MobileUx.statusCopy(status.lowercased())
+        let shown = escalated ? "escalated" : status.lowercased()
+        let label = LStatusGlyph.label(for: shown)
         return HStack(spacing: 6) {
-            Image(systemName: MobileUx.requestStatusGlyph(status.lowercased(), escalated: escalated))
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(tint.color)
+            LStatusGlyph(status: shown, size: 12)
+                .accessibilityHidden(true)
             Text(pillLabel(label, palette))
                 .font(pillFont(palette))
                 .tracking(pillTracking(palette))

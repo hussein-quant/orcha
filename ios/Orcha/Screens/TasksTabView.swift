@@ -242,7 +242,7 @@ private struct GroupHeader: View {
         }
         .buttonStyle(.plain)
         .listRowInsets(EdgeInsets())
-        .accessibilityLabel("\(MobileUx.statusCopy(status)), \(count) tasks")
+        .accessibilityLabel("\(MobileUx.statusCopy(status)), \(count) \(count == 1 ? "task" : "tasks")")
         .accessibilityValue(collapsed ? "Collapsed" : "Expanded")
         .accessibilityHint(collapsed ? "Shows the tasks" : "Hides the tasks")
     }
@@ -329,7 +329,7 @@ struct TaskListRow: View {
 
 extension TaskDto {
     /// Short, mono-friendly id like the web list ("a1b2c3").
-    var shortId: String { String(id.replacingOccurrences(of: "task-", with: "").prefix(6)) }
+    var shortId: String { String(id.replacingOccurrences(of: "task-", with: "").prefix(6)).lowercased() }
 }
 
 extension String {

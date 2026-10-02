@@ -124,16 +124,16 @@ private fun pillTextStyle(mono: Boolean): androidx.compose.ui.text.TextStyle {
 
 private fun pillLabel(text: String, mono: Boolean): String = if (mono) text.uppercase() else text
 
-/** Request status → the Linear glyph status it reads as (open = to do, answered = review…). */
-internal fun requestGlyphStatus(shown: String): String = when (shown) {
-    "open" -> "ready"
-    "accepted" -> "in_progress"
-    "answered" -> "needs_verification"
-    "converted_to_task", "closed" -> "completed"
-    "rejected" -> "cancelled"
-    "escalated" -> "blocked"
-    else -> "ready"
-}
+/**
+ * Request status → the status the glyph draws. The web `StatusIcon` has a glyph for every
+ * request status (open, accepted, answered, closed, rejected, escalated, converted_to_task),
+ * so the request status is drawn as itself — no remapping onto task glyphs.
+ */
+internal fun requestGlyphStatus(shown: String): String = shown.lowercase()
+
+/** Task / request / agent statuses show the web glyph + label; connection / run keep the dot. */
+internal fun statusPillUsesGlyph(domain: StatusDomain): Boolean =
+    domain == StatusDomain.Task || domain == StatusDomain.Request || domain == StatusDomain.Agent
 
 /** Neutral Linear pill shell: hairline border, transparent fill, compact. */
 @Composable
@@ -152,8 +152,8 @@ private fun LinearPillShell(mono: Boolean, modifier: Modifier, content: @Composa
 }
 
 /**
- * The status pill, Linear style: a status glyph (tasks) or a tinted presence dot
- * (agents / connections / runs) + the word in text2, on a neutral hairline pill.
+ * The status pill, Linear style: the web status glyph (tasks / requests / agents) or a
+ * tinted presence dot (connections / runs) + the word in text2, on a neutral hairline pill.
  * Status is never conveyed by colour alone: the word always renders. Swiss
  * (`palette.pillMono`) squares the pill off and sets the label in uppercase mono.
  */
@@ -162,9 +162,10 @@ fun StatusPill(status: String, domain: StatusDomain, modifier: Modifier = Modifi
     val palette = Orcha.palette
     val tint = palette.tint(statusColorName(status, domain))
     val mono = palette.pillMono
-    val copy = pillLabel(MobileUx.statusCopy(status.lowercase()), mono)
+    val usesGlyph = statusPillUsesGlyph(domain)
+    val copy = pillLabel(if (usesGlyph) lStatusLabel(status) else MobileUx.statusCopy(status.lowercase()), mono)
     LinearPillShell(mono, modifier) {
-        if (domain == StatusDomain.Task) {
+        if (usesGlyph) {
             LStatusGlyph(status, size = 12.dp, modifier = Modifier.clearAndSetSemantics { })
         } else {
             val dotAlpha = if (pulses(status, domain)) pulseAlpha() else 1f
@@ -220,10 +221,9 @@ fun Modifier.pulsing(): Modifier {
 }
 
 /**
- * Request-status pill, Linear style: the request reads as a status glyph (open = to do,
- * accepted = in progress, answered = needs verification, rejected = cancelled,
- * converted/closed = done). `escalated` (an OPEN human-targeted request) relabels the
- * pill and shows the red blocked glyph.
+ * Request-status pill: the web `StatusIcon` glyph + label for the request status.
+ * `escalated` (an OPEN human-targeted request) shows the web escalated glyph
+ * (red ring + up arrow) labelled "Escalated".
  */
 @Composable
 fun RequestStatusPill(status: String, escalated: Boolean = false, modifier: Modifier = Modifier) {
@@ -232,7 +232,7 @@ fun RequestStatusPill(status: String, escalated: Boolean = false, modifier: Modi
     val shown = if (escalated && status.lowercase() == "open") "escalated" else status.lowercase()
     LinearPillShell(mono, modifier) {
         LStatusGlyph(requestGlyphStatus(shown), size = 12.dp, modifier = Modifier.clearAndSetSemantics { })
-        Text(pillLabel(MobileUx.statusCopy(shown), mono), color = palette.text2, style = pillTextStyle(mono))
+        Text(pillLabel(lStatusLabel(shown), mono), color = palette.text2, style = pillTextStyle(mono))
     }
 }
 

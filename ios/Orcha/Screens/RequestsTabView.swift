@@ -280,16 +280,9 @@ struct RequestRowCard: View {
     }
 
     /// Request status → the shared Linear status glyph vocabulary.
+    /// The request's own status for the glyph (web `StatusIcon` parity); escalated wins.
     static func glyphStatus(_ status: String, escalated: Bool) -> String {
-        if escalated { return "blocked" }
-        switch status {
-        case "open": return "ready"
-        case "accepted": return "in_progress"
-        case "answered": return "needs_verification"
-        case "closed", "converted_to_task": return "completed"
-        case "rejected", "expired", "cancelled": return "cancelled"
-        default: return "pending"
-        }
+        escalated ? "escalated" : status
     }
 }
 

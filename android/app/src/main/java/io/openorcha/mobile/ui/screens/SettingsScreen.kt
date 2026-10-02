@@ -93,6 +93,21 @@ internal val THEME_OPTIONS: List<Pair<ThemeMode, String>> = ThemeMode.entries.ma
 internal val SKIN_OPTIONS: List<Pair<SkinMode, String>> =
     (listOf(SkinMode.Classic) + SkinMode.entries.filter { it != SkinMode.Classic }).map { it to it.label }
 
+/** One paired server and the projects stored from it (shared token, remote, connection). */
+internal data class ServerGroup(val primary: StoredContainer, val projects: List<StoredContainer>) {
+    val ids: List<String> get() = projects.map { it.id }
+
+    /** A lone project keeps its own name; a shared server shows its address. */
+    val title: String get() = if (projects.size == 1) primary.displayName else primary.baseUrl
+
+    val subtitle: String
+        get() = if (projects.size == 1) primary.baseUrl else projects.joinToString(", ") { it.displayName }
+}
+
+/** Groups paired projects by server base URL, keeping first-seen order, so each server shows once. */
+internal fun groupByServer(containers: List<StoredContainer>): List<ServerGroup> =
+    containers.groupBy { it.baseUrl }.values.map { ServerGroup(it.first(), it) }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -113,8 +128,8 @@ fun SettingsScreen(
 ) {
     val p = Orcha.palette
     val context = LocalContext.current
-    var remoteDialogFor by remember { mutableStateOf<StoredContainer?>(null) }
-    var tokenDialogFor by remember { mutableStateOf<StoredContainer?>(null) }
+    var remoteDialogFor by remember { mutableStateOf<ServerGroup?>(null) }
+    var tokenDialogFor by remember { mutableStateOf<ServerGroup?>(null) }
     var showExecution by remember { mutableStateOf(false) }
     val selected = state.selectedContainer
     val snapshot = state.snapshot
@@ -212,15 +227,16 @@ fun SettingsScreen(
             }
 
             item {
-                LSection("Devices and pairing", count = state.containers.size) {
+                val groups = groupByServer(state.containers)
+                LSection("Devices and pairing", count = groups.size) {
                   Column(verticalArrangement = Arrangement.spacedBy(LSpace.s)) {
-                    state.containers.forEach { c ->
+                    groups.forEach { g ->
                         DeviceCard(
-                            c = c,
-                            onOpen = { onOpen(c.id) },
-                            onForget = { onForget(c.id) },
-                            onToken = { tokenDialogFor = c },
-                            onRemote = { remoteDialogFor = c },
+                            group = g,
+                            onOpen = { onOpen(g.primary.id) },
+                            onForget = { g.ids.forEach(onForget) },
+                            onToken = { tokenDialogFor = g },
+                            onRemote = { remoteDialogFor = g },
                         )
                     }
                     LButton(
@@ -231,7 +247,7 @@ fun SettingsScreen(
                         size = LSize.Small,
                     )
                     Footnote(
-                        "Cloud deployments authenticate every request with the team access token — update it here when your admin rotates it. " +
+                        "Cloud deployments authenticate every request with the team access token — update it here when your admin rotates it; it applies to every project on that server. " +
                             "The remote address is for self-hosted boxes: add the computer's Tailscale address and the app fails over to whichever answers.",
                     )
                   }
@@ -302,40 +318,41 @@ fun SettingsScreen(
             onSetAutonomy = { onSetAutonomy?.invoke(it) },
         )
     }
-    remoteDialogFor?.let { c ->
+    remoteDialogFor?.let { g ->
         AddRemoteDialog(
-            container = c,
+            container = g.primary,
             onDismiss = { remoteDialogFor = null },
-            onSave = { url -> onSetRemoteUrl(c.id, url); remoteDialogFor = null },
+            onSave = { url -> g.ids.forEach { onSetRemoteUrl(it, url) }; remoteDialogFor = null },
         )
     }
-    tokenDialogFor?.let { c ->
+    tokenDialogFor?.let { g ->
         AccessTokenDialog(
-            container = c,
+            container = g.primary,
             onDismiss = { tokenDialogFor = null },
-            onSave = { token -> onSetAccessToken(c.id, token); tokenDialogFor = null },
-            onSignInAgain = { tokenDialogFor = null; onSignInAgain(c.id) },
+            onSave = { token -> g.ids.forEach { onSetAccessToken(it, token) }; tokenDialogFor = null },
+            onSignInAgain = { tokenDialogFor = null; onSignInAgain(g.primary.id) },
         )
     }
 }
 
 @Composable
 private fun DeviceCard(
-    c: StoredContainer,
+    group: ServerGroup,
     onOpen: () -> Unit,
     onForget: () -> Unit,
     onToken: () -> Unit,
     onRemote: () -> Unit,
 ) {
     val p = Orcha.palette
+    val c = group.primary
     val hasToken = !c.accessToken.isNullOrBlank()
     val remote = c.remoteBaseUrl?.takeIf { it.isNotBlank() }
     RowsCard {
         LRow(
-            title = c.displayName,
-            subtitle = c.baseUrl,
-            onClick = onOpen,
-            leading = { LAvatar(c.displayName, size = 28.dp) },
+            title = group.title,
+            subtitle = group.subtitle,
+            onClick = onOpen.takeIf { group.projects.size == 1 },
+            leading = { LAvatar(group.title, size = 28.dp) },
             trailing = {
                 TextButton(onClick = onForget, modifier = Modifier.heightIn(min = 48.dp)) {
                     Text("Disconnect", style = ltype(LType.Meta), fontWeight = FontWeight.Medium, color = p.danger)
@@ -409,7 +426,7 @@ private fun TrailingValue(text: String, chevron: Boolean = false, mono: Boolean 
 @Composable
 private fun Footnote(text: String) {
     Text(
-        text, style = ltype(LType.Micro), color = Orcha.palette.faint,
+        text, style = ltype(LType.Micro), color = Orcha.palette.muted,
         modifier = Modifier.padding(horizontal = 4.dp),
     )
 }

@@ -77,6 +77,7 @@ import io.openorcha.mobile.data.RunDto
 import io.openorcha.mobile.data.TaskDto
 import io.openorcha.mobile.data.TaskMessageDto
 import io.openorcha.mobile.domain.MarkdownLite
+import io.openorcha.mobile.domain.ActivityCopy
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.components.Banner
@@ -235,7 +236,7 @@ fun TaskDetailScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(LSpace.m)) {
                     LSegmented(
                         options = listOf(
-                            DetailPane.Activity to "Activity ${state.taskMessages.size}",
+                            DetailPane.Activity to "Activity ${activityEntries(task, state.taskMessages).size}",
                             DetailPane.Runs to "Runs ${state.taskRuns.size}",
                         ),
                         selection = pane,
@@ -409,7 +410,7 @@ private fun VerificationCard(task: TaskDto, busy: Boolean, onReview: () -> Unit,
                 LStatusGlyph("needs_verification", size = 14.dp)
                 Text("Awaiting your verification", style = ltype(LType.Headline), color = p.text, modifier = Modifier.semantics { heading() })
             }
-            (task.result ?: task.messageSummary?.last?.body)?.takeIf { it.isNotBlank() }?.let { result ->
+            (task.result ?: task.messageSummary?.last?.body)?.let(ActivityCopy::humanize)?.takeIf { it.isNotBlank() }?.let { result ->
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Result", style = ltype(LType.Micro), color = p.faint)
                     Text(
@@ -582,27 +583,30 @@ private data class ActivityEntry(
     val isMessage: Boolean,
 )
 
+/** Rows the Activity pane lists (lifecycle + the latest [ACTIVITY_MESSAGE_LIMIT] messages); the tab count uses the same list. */
+private const val ACTIVITY_MESSAGE_LIMIT = 8
+
+private fun activityEntries(task: TaskDto, messages: List<TaskMessageDto>): List<ActivityEntry> = buildList {
+    task.createdAt?.let { add(ActivityEntry("created", it, MobileUx.agoLabel(it), null, false, "pending", "Task created", false)) }
+    task.startedAt?.let { add(ActivityEntry("started", it, MobileUx.agoLabel(it), null, false, "in_progress", "Work started", false)) }
+    task.completedAt?.let {
+        val cancelled = task.status == "cancelled"
+        add(ActivityEntry("completed", it, MobileUx.agoLabel(it), null, false, if (cancelled) "cancelled" else "completed", if (cancelled) "Closed" else "Completed", false))
+    }
+    messages.takeLast(ACTIVITY_MESSAGE_LIMIT).forEachIndexed { i, m ->
+        val author = m.authorAlias ?: if (m.isHuman) "you" else "system"
+        add(ActivityEntry(m.messageId ?: "m$i", m.createdAt ?: "", MobileUx.agoLabel(m.createdAt), author, !m.isHuman && m.authorId != null, null, ActivityCopy.humanize(m.body), true))
+    }
+}.sortedBy { it.sortKey }
+
 @Composable
 private fun ActivityTimeline(task: TaskDto, messages: List<TaskMessageDto>, agents: List<AgentDto>, onOpenThread: () -> Unit) {
     val p = Orcha.palette
-    val entries = remember(task, messages) {
-        buildList {
-            task.createdAt?.let { add(ActivityEntry("created", it, MobileUx.agoLabel(it), null, false, "pending", "Task created", false)) }
-            task.startedAt?.let { add(ActivityEntry("started", it, MobileUx.agoLabel(it), null, false, "in_progress", "Work started", false)) }
-            task.completedAt?.let {
-                val cancelled = task.status == "cancelled"
-                add(ActivityEntry("completed", it, MobileUx.agoLabel(it), null, false, if (cancelled) "cancelled" else "completed", if (cancelled) "Closed" else "Completed", false))
-            }
-            messages.takeLast(8).forEachIndexed { i, m ->
-                val author = m.authorAlias ?: if (m.isHuman) "you" else "system"
-                add(ActivityEntry(m.messageId ?: "m$i", m.createdAt ?: "", MobileUx.agoLabel(m.createdAt), author, !m.isHuman && m.authorId != null, null, m.body, true))
-            }
-        }.sortedBy { it.sortKey }
-    }
+    val entries = remember(task, messages) { activityEntries(task, messages) }
     Column {
         if (messages.isNotEmpty()) {
             Text(
-                if (messages.size > 8) "Show all ${messages.size} messages" else "Open thread",
+                if (messages.size > ACTIVITY_MESSAGE_LIMIT) "Show all ${messages.size} messages" else "Open thread",
                 style = ltype(LType.Meta), color = p.accent,
                 modifier = Modifier.clickable(onClick = onOpenThread).heightIn(min = 48.dp).padding(vertical = 14.dp),
             )

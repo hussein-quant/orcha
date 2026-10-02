@@ -15,6 +15,19 @@ class ShellHomeHelpersTest {
         assertEquals("2 in progress · 1 to verify · 0 blocked · 1 done", homeTally(tasks))
     }
 
+    @Test fun tallyDoneMatchesTheDonePill() {
+        val tasks = listOf(t("a", "completed"), t("b", "cancelled"), t("c", "failed"), t("d", "in_progress"))
+        val donePill = tasks.count { TaskScope.of(it.status) == TaskScope.Done }
+        assertEquals("1 in progress · 0 to verify · 0 blocked · $donePill done", homeTally(tasks))
+        assertEquals(3, donePill)
+    }
+
+    @Test fun taskCountPluralises() {
+        assertEquals("1 task", taskCountLabel(1))
+        assertEquals("0 tasks", taskCountLabel(0))
+        assertEquals("4 tasks", taskCountLabel(4))
+    }
+
     @Test fun activeWorkOrdersByGroupThenPriority() {
         val tasks = listOf(t("r", "ready", 1), t("p2", "in_progress", 50), t("p1", "in_progress", 5), t("done", "completed"))
         val ids = homeActiveWork(tasks).map { it.id }

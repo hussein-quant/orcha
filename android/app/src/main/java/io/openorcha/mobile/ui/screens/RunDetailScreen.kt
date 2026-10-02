@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.openorcha.mobile.domain.ActivityCopy
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.components.Banner
@@ -77,7 +78,7 @@ fun RunDetailScreen(
         topBar = {
             LTopBar(
                 title = run?.runId?.take(6) ?: "Run",
-                subtitle = run?.taskTitle ?: run?.wakeEvent,
+                subtitle = run?.taskTitle ?: run?.wakeEvent?.let(ActivityCopy::humanize),
                 monoTitle = run != null,
                 onBack = onBack,
             ) {

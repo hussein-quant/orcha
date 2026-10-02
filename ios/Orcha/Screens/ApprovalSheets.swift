@@ -127,7 +127,7 @@ struct VerifySheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: LSpace.l) {
                         ApprovalHeader(kicker: "Verify task", title: task.title, shortId: task.shortId)
-                        if let claimed = task.result ?? task.messageSummary?.last?.body {
+                        if let claimed = task.result ?? task.messageSummary?.last.map({ ActivityCopy.humanize($0.body) }) {
                             LSection("Result") {
                                 LCard(padding: LSpace.l) {
                                     LinkedMessageText(text: claimed, tasks: model.snapshot?.tasks ?? [], onTapTask: { linkedTaskId = $0 })

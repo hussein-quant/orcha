@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -27,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,12 +42,16 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlin.math.min
 import io.openorcha.mobile.data.StoredContainer
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.WorkspaceTab
-import io.openorcha.mobile.ui.components.LBadgeCount
 import io.openorcha.mobile.ui.components.LDivider
 import io.openorcha.mobile.ui.components.LSpace
 import io.openorcha.mobile.ui.components.LType
@@ -167,8 +173,12 @@ internal fun WorkspaceTopBar(
                 }
             }
             if (showExecution) ExecutionChip(running, onControls)
+            // The + slot is always reserved (an empty 48dp box off Home/Tasks) so the
+            // Running capsule doesn't jump sideways when switching tabs.
             if (showCreate) {
                 IconButton(onClick = onCreateTask) { Icon(OrchaIcons.Add, "Create task", tint = p.accent) }
+            } else {
+                Spacer(Modifier.size(48.dp))
             }
             Box {
                 IconButton(onClick = { menuOpen = true }) { Icon(OrchaIcons.MoreVert, "More", tint = p.text2) }
@@ -273,10 +283,43 @@ private fun RowScope.WorkspaceNavItem(isSelected: Boolean, dest: WorkspaceNavDes
                 Icon(dest.icon, null, tint = tint, modifier = Modifier.size(20.dp))
             }
             if (dest.badge > 0) {
-                LBadgeCount(dest.badge, Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp))
+                NavCountBadge(dest.badge, Modifier.align(Alignment.TopEnd).offset(x = 6.dp, y = (-4).dp))
             }
         }
         Text(dest.label, style = ltype(LType.Micro), color = if (isSelected) p.text else p.muted, maxLines = 1)
+    }
+}
+
+/** Max font scale a nav badge honours — beyond this the count would grow into the icon. */
+private const val NAV_BADGE_MAX_FONT_SCALE = 1.15f
+
+/**
+ * Bottom-nav count badge that stays the same footprint at large font scales: fixed 16dp
+ * height, text font scale capped at [NAV_BADGE_MAX_FONT_SCALE], anchored to the icon's
+ * top-end by the caller. The full count stays available to TalkBack via stateDescription.
+ */
+@Composable
+private fun NavCountBadge(n: Int, modifier: Modifier = Modifier) {
+    val p = Orcha.palette
+    val density = LocalDensity.current
+    val capped = Density(density.density, fontScale = min(density.fontScale, NAV_BADGE_MAX_FONT_SCALE))
+    CompositionLocalProvider(LocalDensity provides capped) {
+        Box(
+            modifier
+                .height(16.dp)
+                .widthIn(min = 16.dp)
+                .background(p.surface3, CircleShape)
+                .padding(horizontal = 4.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                if (n > 99) "99+" else "$n",
+                style = ltype(LType.Micro).copy(fontWeight = FontWeight.SemiBold, fontSize = 10.sp, lineHeight = 12.sp),
+                color = p.text2,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
     }
 }
 

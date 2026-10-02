@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.openorcha.mobile.data.AgentDto
 import io.openorcha.mobile.data.RunDto
+import io.openorcha.mobile.domain.ActivityCopy
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.domain.OrchaSelectors
 import io.openorcha.mobile.ui.OrchaUiState
@@ -149,7 +150,7 @@ internal fun LazyListScope.AgentDetailContent(
                     activeRun?.let { run ->
                         LRow(
                             title = "Run ${run.runId.take(6)}",
-                            subtitle = listOfNotNull((run.wakeKind ?: "headless").replace('_', ' '), run.runtime).joinToString(" · "),
+                            subtitle = listOfNotNull(ActivityCopy.humanizeKind(run.wakeKind ?: "headless"), run.runtime).joinToString(" · "),
                             onClick = {
                                 onOpenRun(
                                     RunDto(

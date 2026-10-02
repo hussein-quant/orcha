@@ -16,12 +16,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.data.AgentDto
@@ -67,6 +71,7 @@ private fun saveRecents(ctx: Context, recents: List<String>) {
 @Composable
 internal fun SearchTab(
     snapshot: ContainerSnapshot?,
+    humanId: String?,
     query: String,
     onQueryChange: (String) -> Unit,
     onOpenTask: (String) -> Unit,
@@ -80,6 +85,13 @@ internal fun SearchTab(
         if (next != recents) { recents = next; saveRecents(ctx, next) }
     }
     val trimmed = query.trim()
+    // Opening the tab puts the caret in the field so typing works immediately (iOS @FocusState parity).
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        runCatching { focusRequester.requestFocus() }
+        keyboard?.show()
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -87,7 +99,12 @@ internal fun SearchTab(
         verticalArrangement = Arrangement.spacedBy(LSpace.xl),
     ) {
         item(key = "search-field") {
-            LSearchField(query, onQueryChange, placeholder = "Search tasks, agents, requests")
+            LSearchField(
+                query, onQueryChange,
+                placeholder = "Search tasks, agents, requests",
+                // LSearchField's modifier sits on its Row; the requester focuses the first focus target inside (the text field).
+                modifier = Modifier.focusRequester(focusRequester),
+            )
         }
         if (trimmed.isEmpty()) {
             if (recents.isEmpty()) {
@@ -157,7 +174,7 @@ internal fun SearchTab(
                     LSection("Requests", count = requests.size) {
                         Column {
                             requests.forEach { r ->
-                                SearchRequestRow(r, snapshot?.agents.orEmpty()) { rememberQuery(); onOpenRequest(r.id) }
+                                SearchRequestRow(r, snapshot?.agents.orEmpty(), humanId) { rememberQuery(); onOpenRequest(r.id) }
                             }
                         }
                     }
@@ -182,7 +199,7 @@ private fun SearchTaskRow(task: TaskDto, onClick: () -> Unit) {
                 LStatusGlyph(task.status)
             }
         },
-        trailingText = task.id.take(6).uppercase(),
+        trailingText = task.shortId,
         trailingMono = true,
     )
 }
@@ -199,12 +216,11 @@ private fun SearchAgentRow(agent: AgentDto, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SearchRequestRow(req: RequestDto, agents: List<AgentDto>, onClick: () -> Unit) {
+private fun SearchRequestRow(req: RequestDto, agents: List<AgentDto>, humanId: String?, onClick: () -> Unit) {
     val from = RequestsView.aliasFor(agents, req.requesterId) ?: req.requesterAlias ?: "agent"
-    val to = req.targetAlias ?: RequestsView.aliasFor(agents, req.targetId) ?: "you"
     LinearListRow(
         title = req.payload,
-        subtitle = "$from → $to",
+        subtitle = RequestsView.directionLabel(req, agents, humanId),
         onClick = onClick,
         leading = { LAvatar(from, isAI = RequestsView.kindFor(agents, req.requesterId) != "human", size = 20.dp) },
         trailingText = MobileUx.agoLabel(req.createdAt),

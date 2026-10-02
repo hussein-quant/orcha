@@ -24,6 +24,8 @@ struct SearchTabView: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: LSpace.xl) {
                 LSearchField("Search tasks, agents, requests", text: $query)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("Search")
                     .onSubmit(rememberQuery)
                 if trimmed.isEmpty {
                     idle
@@ -102,7 +104,7 @@ struct SearchTabView: View {
                                     LStatusGlyph(status: task.status)
                                 }
                             } trailing: {
-                                Text(task.id.prefix(6).uppercased())
+                                Text(task.shortId)
                                     .ltype(.mono)
                             }
                             .accessibilityElement(children: .combine)

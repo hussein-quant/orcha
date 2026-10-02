@@ -180,6 +180,10 @@ extension Palette {
     var lUrgent: Color { isDark ? Color(hex: 0xF2994A) : Color(hex: 0xDE6414) }
     var lProgress: Color { isDark ? Color(hex: 0xF0BF4C) : Color(hex: 0xB07D00) }
     var lStatusNeutral: Color { isDark ? Color(hex: 0x8A8F98) : Color(hex: 0x8A8E96) }
+    /// Web status-glyph tokens (`--v2-st-todo` / `-faint` / `-muted`).
+    var lStatusTodo: Color { isDark ? Color(hex: 0x9EA2AC) : Color(hex: 0x8A8E96) }
+    var lStatusFaint: Color { isDark ? Color(hex: 0x6E727C) : Color(hex: 0xA3A6AD) }
+    var lStatusMuted: Color { isDark ? Color(hex: 0x7B7F89) : Color(hex: 0x8A8E96) }
 }
 
 // MARK: Surfaces & structure
@@ -581,6 +585,7 @@ struct LSearchField: View {
                 .foregroundStyle(p.muted)
                 .accessibilityHidden(true)
             TextField(placeholder, text: $text, prompt: Text(placeholder).foregroundStyle(p.faint))
+                .accessibilityLabel(placeholder)
                 .ltype(.body)
                 .foregroundStyle(p.text)
                 .textInputAutocapitalization(.never)
@@ -702,7 +707,9 @@ struct LAvatar: View {
 
 // MARK: Status & priority glyphs
 
-/// Linear task-status icons drawn with shapes (crisp at 14pt).
+/// The web `StatusIcon` glyph set (portal `components/primitives/StatusIcon.tsx`),
+/// drawn on the same 14×14 grid so every task / request / agent status reads
+/// identically on web, iOS and Android. Shape + colour + label all mirror the web.
 struct LStatusGlyph: View {
     @Environment(\.palette) private var p
     let status: String
@@ -713,72 +720,195 @@ struct LStatusGlyph: View {
         self.size = size
     }
 
-    enum Kind { case backlog, todo, progress, review, done, cancelled, blocked, failed }
+    /// Web `StatusShape`.
+    enum Kind: CaseIterable {
+        case todo, dashed, dotted, progress, paused, attention, review, done
+        case blocked, failed, stopped, rejected, escalated, cancelled, closed
+        case open, accepted, converted, unknown
+    }
 
-    static func kind(for status: String) -> Kind {
+    /// Web `StatusColor` (palette tokens `--v2-st-*` / warn / danger / accent).
+    enum Tone: Equatable { case todo, faint, progress, warn, review, done, danger, muted, accent }
+
+    /// Web `SHAPE` table, plus a few legacy mobile aliases mapped onto the same family.
+    static func style(for status: String) -> (kind: Kind, tone: Tone) {
         switch status.lowercased() {
-        case "pending", "backlog", "draft", "queued", "waiting": .backlog
-        case "in_progress", "inprogress", "running", "active", "working", "started", "accepted": .progress
-        case "needs_verification", "review", "in_review", "needs_review", "answered", "verifying": .review
-        case "completed", "done", "closed", "merged", "passed", "verified", "resolved": .done
-        case "cancelled", "canceled", "rejected", "skipped", "refused", "expired": .cancelled
-        case "blocked", "escalated": .blocked
-        case "failed", "error": .failed
-        default: .todo   // ready / todo / open
+        case "ready", "todo": (.todo, .todo)
+        case "pending", "not_ready", "backlog", "draft", "queued": (.dashed, .todo)
+        case "idle", "offline": (.dotted, .faint)
+        case "in_progress", "inprogress", "working", "active", "live", "running", "started": (.progress, .progress)
+        case "awaiting_request", "paused", "rate_limited", "waiting": (.paused, .warn)
+        case "awaiting_human": (.attention, .warn)
+        case "needs_verification", "review", "in_review", "needs_review", "verifying": (.review, .review)
+        case "completed", "answered", "verified", "done", "merged", "passed", "resolved": (.done, .done)
+        case "blocked": (.blocked, .danger)
+        case "failed", "error": (.failed, .danger)
+        case "terminated": (.stopped, .danger)
+        case "orphaned": (.stopped, .muted)
+        case "rejected", "refused": (.rejected, .danger)
+        case "escalated": (.escalated, .danger)
+        case "cancelled", "canceled", "archived", "stopped", "killed", "skipped", "expired": (.cancelled, .muted)
+        case "closed": (.closed, .muted)
+        case "open": (.open, .todo)
+        case "accepted": (.accepted, .accent)
+        case "converted_to_task": (.converted, .accent)
+        default: (.unknown, .faint)
+        }
+    }
+
+    static func kind(for status: String) -> Kind { style(for: status).kind }
+    static func tone(for status: String) -> Tone { style(for: status).tone }
+
+    /// Web `STAT` labels (lib/status.ts); unknown statuses keep their raw value.
+    static func label(for status: String) -> String {
+        let s = status.lowercased()
+        switch s {
+        case "working": return "Working"
+        case "in_progress": return "In progress"
+        case "idle": return "Idle"
+        case "pending": return "Pending"
+        case "ready": return "Ready"
+        case "blocked": return "Blocked"
+        case "awaiting_request": return "Waiting"
+        case "awaiting_human": return "Needs human"
+        case "needs_verification": return "Needs verification"
+        case "completed": return "Completed"
+        case "cancelled": return "Cancelled"
+        case "failed": return "Failed"
+        case "terminated": return "Terminated"
+        case "open": return "Open"
+        case "accepted": return "Accepted"
+        case "rejected": return "Rejected"
+        case "answered": return "Answered"
+        case "converted_to_task": return "Converted"
+        case "closed": return "Closed"
+        case "escalated": return "Escalated"
+        case "offline": return "Offline"
+        case "active": return "Active"
+        case "paused": return "Paused"
+        case "rate_limited": return "Rate limited"
+        case "orphaned": return "Orphaned"
+        case "not_ready": return "On hold"
+        case "": return "unknown"
+        default: return status
+        }
+    }
+
+    private func color(_ tone: Tone) -> Color {
+        switch tone {
+        case .todo: p.lStatusTodo
+        case .faint: p.lStatusFaint
+        case .progress: p.lProgress
+        case .warn: p.warn
+        case .review, .done: p.ok
+        case .danger: p.danger
+        case .muted: p.lStatusMuted
+        case .accent: p.accent
         }
     }
 
     var body: some View {
-        let k = Self.kind(for: status)
-        let line = max(1.2, size * 0.1)
-        ZStack {
-            switch k {
-            case .backlog:
-                Circle()
-                    .inset(by: line / 2)
-                    .stroke(p.lStatusNeutral, style: StrokeStyle(lineWidth: line, lineCap: .round, dash: [size * 0.08, size * 0.17]))
-            case .todo:
-                Circle().inset(by: line / 2).stroke(p.lStatusNeutral, lineWidth: line)
-            case .progress:
-                Circle().inset(by: line / 2).stroke(p.lProgress, lineWidth: line)
-                LHalfPie().fill(p.lProgress).padding(size * 0.22)
-            case .review:
-                Circle().inset(by: line / 2).stroke(p.ok, lineWidth: line)
-                LCheckmark().stroke(p.ok, style: StrokeStyle(lineWidth: line, lineCap: .round, lineJoin: .round))
-                    .padding(size * 0.28)
-            case .done:
-                Circle().fill(p.ok)
-                LCheckmark().stroke(p.isDark ? p.bg : .white, style: StrokeStyle(lineWidth: line * 1.15, lineCap: .round, lineJoin: .round))
-                    .padding(size * 0.27)
-            case .cancelled:
-                Circle().fill(p.lStatusNeutral)
-                LCross().stroke(p.isDark ? p.bg : .white, style: StrokeStyle(lineWidth: line * 1.1, lineCap: .round))
-                    .padding(size * 0.32)
-            case .blocked:
-                Circle().fill(p.danger)
-                Capsule().fill(p.isDark ? p.bg : .white)
-                    .frame(width: size * 0.5, height: line * 1.2)
-            case .failed:
-                Circle().fill(p.danger)
-                LCross().stroke(p.isDark ? p.bg : .white, style: StrokeStyle(lineWidth: line * 1.1, lineCap: .round))
-                    .padding(size * 0.32)
-            }
+        let (kind, tone) = Self.style(for: status)
+        let ink = color(tone)
+        let cut = p.bg
+        Canvas { ctx, canvasSize in
+            let k = min(canvasSize.width, canvasSize.height) / 14
+            ctx.scaleBy(x: k, y: k)
+            LStatusGlyphDrawing.draw(kind, in: &ctx, ink: ink, cut: cut)
         }
         .frame(width: size, height: size)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Self.label(for: status))
     }
+}
 
-    static func label(for status: String) -> String {
-        switch kind(for: status) {
-        case .backlog: "Backlog"
-        case .todo: "To do"
-        case .progress: "In progress"
-        case .review: "Needs verification"
-        case .done: "Done"
-        case .cancelled: "Cancelled"
-        case .blocked: "Blocked"
-        case .failed: "Failed"
+/// Path data from the web `Shape` switch, in the 14×14 viewBox (centre 7,7;
+/// ring r 5.5 stroke 1.5; inner pie r 2.6; filled disc r 6.25).
+enum LStatusGlyphDrawing {
+    private static let center = CGPoint(x: 7, y: 7)
+
+    private static func circle(_ r: CGFloat) -> Path {
+        Path(ellipseIn: CGRect(x: 7 - r, y: 7 - r, width: r * 2, height: r * 2))
+    }
+
+    private static func lines(_ segments: [[CGPoint]]) -> Path {
+        var path = Path()
+        for seg in segments {
+            guard let first = seg.first else { continue }
+            path.move(to: first)
+            for pt in seg.dropFirst() { path.addLine(to: pt) }
+        }
+        return path
+    }
+
+    private static func pie(sweep: Double) -> Path {
+        var path = Path()
+        path.move(to: center)
+        path.addLine(to: CGPoint(x: 7, y: 4.4))
+        path.addArc(center: center, radius: 2.6, startAngle: .degrees(-90), endAngle: .degrees(-90 + sweep), clockwise: false)
+        path.closeSubpath()
+        return path
+    }
+
+    private static func line(_ w: CGFloat) -> StrokeStyle {
+        StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round)
+    }
+
+    static func draw(_ kind: LStatusGlyph.Kind, in ctx: inout GraphicsContext, ink: Color, cut: Color) {
+        let ring = circle(5.5)
+        func strokeRing(_ style: StrokeStyle = StrokeStyle(lineWidth: 1.5), opacity: Double = 1) {
+            ctx.stroke(ring, with: .color(ink.opacity(opacity)), style: style)
+        }
+        func filled(_ mark: Path, width: CGFloat = 1.5) {
+            ctx.fill(circle(6.25), with: .color(ink))
+            ctx.stroke(mark, with: .color(cut), style: line(width))
+        }
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
+
+        switch kind {
+        case .todo:
+            strokeRing()
+        case .dashed:
+            strokeRing(StrokeStyle(lineWidth: 1.5, dash: [2.05, 1.9]))
+        case .dotted:
+            strokeRing(StrokeStyle(lineWidth: 1.6, lineCap: .round, dash: [0.01, 2.85]))
+        case .progress:
+            strokeRing()
+            ctx.fill(pie(sweep: 180), with: .color(ink))
+        case .review:
+            strokeRing()
+            ctx.fill(pie(sweep: 270), with: .color(ink))
+        case .paused:
+            strokeRing()
+            ctx.stroke(lines([[pt(5.8, 5.3), pt(5.8, 8.7)], [pt(8.2, 5.3), pt(8.2, 8.7)]]), with: .color(ink), style: line(1.3))
+        case .attention, .open:
+            strokeRing()
+            ctx.fill(circle(2), with: .color(ink))
+        case .done, .closed:
+            filled(lines([[pt(4.4, 7.2), pt(6.2, 9), pt(9.6, 5.2)]]))
+        case .failed:
+            filled(lines([[pt(5, 5), pt(9, 9)], [pt(9, 5), pt(5, 9)]]))
+        case .cancelled:
+            filled(lines([[pt(4.9, 9.1), pt(9.1, 4.9)]]))
+        case .converted:
+            filled(lines([[pt(4.3, 7), pt(9.5, 7)], [pt(7.4, 4.9), pt(9.5, 7), pt(7.4, 9.1)]]), width: 1.4)
+        case .blocked:
+            strokeRing()
+            ctx.stroke(lines([[pt(4.6, 7), pt(9.4, 7)]]), with: .color(ink), style: line(1.6))
+        case .stopped:
+            strokeRing()
+            ctx.fill(Path(roundedRect: CGRect(x: 5.1, y: 5.1, width: 3.8, height: 3.8), cornerRadius: 0.8), with: .color(ink))
+        case .rejected:
+            strokeRing()
+            ctx.stroke(lines([[pt(5.3, 5.3), pt(8.7, 8.7)], [pt(8.7, 5.3), pt(5.3, 8.7)]]), with: .color(ink), style: line(1.4))
+        case .escalated:
+            strokeRing()
+            ctx.stroke(lines([[pt(7, 9.4), pt(7, 4.8)], [pt(5, 6.6), pt(7, 4.6), pt(9, 6.6)]]), with: .color(ink), style: line(1.4))
+        case .accepted:
+            strokeRing()
+            ctx.stroke(lines([[pt(4.9, 7.1), pt(6.4, 8.6), pt(9.2, 5.5)]]), with: .color(ink), style: line(1.4))
+        case .unknown:
+            strokeRing(opacity: 0.6)
         }
     }
 }

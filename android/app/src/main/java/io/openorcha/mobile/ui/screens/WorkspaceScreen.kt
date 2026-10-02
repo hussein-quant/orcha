@@ -173,6 +173,7 @@ fun WorkspaceScreen(
                     WorkspaceTab.Agents -> AgentsTab(snapshot.agents, onOpenAgent)
                     WorkspaceTab.Search -> SearchTab(
                         snapshot = snapshot,
+                        humanId = humanId,
                         query = state.searchQuery,
                         onQueryChange = onSearchQueryChange,
                         onOpenTask = onOpenTask,
