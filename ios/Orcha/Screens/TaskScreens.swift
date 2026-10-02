@@ -23,6 +23,8 @@ struct TaskDetailScreen: View {
     @State private var rejectSheetTask: TaskDto?
     @State private var planSheetTask: TaskDto?
     @State private var reviewerPickerTask: TaskDto?
+    @State private var reassignSheetTask: TaskDto?
+    @State private var recurringSheetTask: TaskDto?
     @State private var acceptTick = 0
     @State private var linkedTaskId: String?
 
@@ -66,6 +68,12 @@ struct TaskDetailScreen: View {
                     NavigationLink(value: WorkspaceRoute.thread(taskId)) {
                         Label("Open full thread", systemImage: "bubble.left.and.bubble.right")
                     }
+                    if let task, !task.isRoot {
+                        Button("Reassign…", systemImage: "person.crop.circle.badge.arrow.forward") { reassignSheetTask = task }
+                            .disabled(!model.access.canWrite || !ReassignUx.canReassign(task))
+                        Button("Make recurring…", systemImage: "clock.arrow.circlepath") { recurringSheetTask = task }
+                            .disabled(!model.access.canManage(Grant.manageAgents))
+                    }
                     Button("Close task…", systemImage: "xmark.circle", role: .destructive) { confirmClose = true }
                         .disabled(!closable)
                 } label: {
@@ -99,6 +107,8 @@ struct TaskDetailScreen: View {
         .sheet(item: $rejectSheetTask) { VerifySheet(task: $0, startRejecting: true) }
         .sheet(item: $planSheetTask) { PlanApprovalSheet(task: $0) }
         .sheet(item: $reviewerPickerTask) { ReviewerPickerSheet(task: $0) }
+        .sheet(item: $reassignSheetTask) { ReassignTaskSheet(task: $0) }
+        .sheet(item: $recurringSheetTask) { MakeRecurringSheet(task: $0) }
         .sensoryFeedback(.success, trigger: acceptTick)
         .navigationDestination(item: $linkedTaskId) { TaskDetailScreen(taskId: $0) }
         .task { await model.loadTaskDetail(taskId) }
@@ -111,6 +121,7 @@ struct TaskDetailScreen: View {
     @ViewBuilder
     private func detail(_ task: TaskDto) -> some View {
         let agents = model.snapshot?.agents ?? []
+        TaskGoalChainBar(taskId: task.id)
         TaskDetailHeader(task: task, projectName: model.snapshot?.container.name, agents: agents)
         if task.status == "needs_verification" {
             VerificationCard(
@@ -309,6 +320,8 @@ private struct VerificationCard: View {
                             .lineLimit(6)
                     }
                 }
+                TaskProofOfWork(taskId: task.id, reloadKey: task.status)
+                ManagerReviewRow(task: task)
                 DoneWhenBlock(definitionOfDone: task.definitionOfDone, compact: true)
                 Button("See full review", action: onReview)
                     .buttonStyle(.plain)
@@ -679,10 +692,11 @@ struct RunRowCard: View {
     private var glyphStatus: String {
         switch run.status {
         case "running": "in_progress"
-        case "completed", "succeeded", "ok", "done": "completed"
+        case "completed", "succeeded", "ok", "done", "exited": "completed"
         case "killed", "failed", "error": "failed"
         case "stopped", "cancelled": "cancelled"
-        default: "pending"
+        // Anything else (orphaned, terminated, …) has its own web StatusIcon shape.
+        default: run.status
         }
     }
 
@@ -698,7 +712,7 @@ struct RunRowCard: View {
                         .ltype(.meta)
                         .foregroundStyle(run.status == "running" ? p.warn : p.text2)
                 }
-                Text(run.taskTitle ?? run.wakeEvent ?? "worker run")
+                Text(run.taskTitle ?? run.wakeEvent.map(ActivityCopy.humanize) ?? "Worker run")
                     .ltype(.meta)
                     .foregroundStyle(p.faint)
                     .lineLimit(1)
@@ -1051,7 +1065,7 @@ struct RunDetailScreen: View {
     private var header: some View {
         HStack(spacing: 8) {
             StatusPill(status: run.status, domain: .run)
-            if let wakeKind = run.wakeKind { MetaTag(text: wakeKind) }
+            if let wakeKind = run.wakeKind { MetaTag(text: ActivityCopy.humanize(wakeKind)) }
             if let alias = run.agentAlias { MetaTag(text: alias) }
             Spacer()
             if run.status == "running" {

@@ -49,7 +49,14 @@ import io.openorcha.mobile.ui.theme.Orcha
 private const val AUTO_COLLAPSE_LINE_THRESHOLD = 800
 
 @Composable
-fun DiffViewer(diff: String, modifier: Modifier = Modifier) {
+fun DiffViewer(
+    diff: String,
+    modifier: Modifier = Modifier,
+    /** Renders a preview for a binary file (e.g. an image) instead of "Binary file"; return
+     *  false from [canPreview] to keep the default note for that path. */
+    canPreview: (String) -> Boolean = { false },
+    binaryPreview: (@Composable (path: String) -> Unit)? = null,
+) {
     val files = remember(diff) { DiffParser.parse(diff) }
     val p = Orcha.palette
     if (files.isEmpty()) {
@@ -74,7 +81,10 @@ fun DiffViewer(diff: String, modifier: Modifier = Modifier) {
                 Text("−$totalDels", style = diffCountStyle, color = p.diffDel)
             }
         }
-        files.forEach { file -> DiffFileSection(file) }
+        files.forEach { file ->
+            val preview = binaryPreview?.takeIf { canPreview(file.path) }
+            DiffFileSection(file, preview = preview)
+        }
     }
 }
 
@@ -83,7 +93,11 @@ private val diffCountStyle = TextStyle(
 )
 
 @Composable
-private fun DiffFileSection(file: DiffFile, modifier: Modifier = Modifier) {
+private fun DiffFileSection(
+    file: DiffFile,
+    modifier: Modifier = Modifier,
+    preview: (@Composable (path: String) -> Unit)? = null,
+) {
     val p = Orcha.palette
     val lineCount = remember(file) { file.hunks.sumOf { it.lines.size } }
     var expanded by remember(file.id) { mutableStateOf(lineCount <= AUTO_COLLAPSE_LINE_THRESHOLD) }
@@ -124,7 +138,9 @@ private fun DiffFileSection(file: DiffFile, modifier: Modifier = Modifier) {
 
         if (expanded) {
             LDivider()
-            if (file.isBinary) {
+            if (file.isBinary && preview != null) {
+                Column(Modifier.padding(12.dp)) { preview(file.path) }
+            } else if (file.isBinary) {
                 Text(
                     "Binary file — no textual diff.",
                     style = ltype(LType.Meta),

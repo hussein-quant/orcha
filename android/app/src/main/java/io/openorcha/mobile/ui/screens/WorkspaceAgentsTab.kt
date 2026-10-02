@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -82,8 +84,19 @@ internal fun AgentStatusCapsule(status: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-internal fun AgentsTab(agents: List<AgentDto>, onOpenAgent: (String) -> Unit) {
+internal fun AgentsTab(
+    agents: List<AgentDto>,
+    onOpenAgent: (String) -> Unit,
+    baseUrl: String? = null,
+    containerId: String? = null,
+) {
     val p = Orcha.palette
+    // Budget hard stops (GET /api/containers/{cid}/budgets): a paused agent's row says so.
+    // Without a container key the chips still show what agent-detail visits have loaded.
+    androidx.compose.runtime.LaunchedEffect(baseUrl, containerId) {
+        if (baseUrl != null && containerId != null) io.openorcha.mobile.ui.AgentSliceStore.refreshContainer(baseUrl, containerId)
+    }
+    val budgets by io.openorcha.mobile.ui.AgentSliceStore.budgets.collectAsState()
     val ai = MobileUx.orderAgents(agents.filter { it.kind == "ai" })
     val humans = agents.filter { it.kind == "human" }
     LazyColumn(
@@ -96,7 +109,7 @@ internal fun AgentsTab(agents: List<AgentDto>, onOpenAgent: (String) -> Unit) {
                 LSection("AI agents", count = ai.size) {
                     LCard(padding = 0.dp) {
                         ai.forEachIndexed { i, agent ->
-                            AgentRosterRow(agent) { onOpenAgent(agent.id) }
+                            AgentRosterRow(agent, budgetPaused = budgets[agent.id]?.paused == true) { onOpenAgent(agent.id) }
                             if (i != ai.lastIndex) LDivider(inset = 56.dp)
                         }
                     }
@@ -129,7 +142,7 @@ internal fun AgentsTab(agents: List<AgentDto>, onOpenAgent: (String) -> Unit) {
 }
 
 @Composable
-private fun AgentRosterRow(agent: AgentDto, onClick: () -> Unit) {
+private fun AgentRosterRow(agent: AgentDto, budgetPaused: Boolean = false, onClick: () -> Unit) {
     val p = Orcha.palette
     val dead = agent.status == "terminated" || agent.terminatedAt != null
     val status = if (dead) "retired" else agent.status ?: "idle"
@@ -138,6 +151,7 @@ private fun AgentRosterRow(agent: AgentDto, onClick: () -> Unit) {
     val meta = listOfNotNull(agent.role ?: "agent", MobileUx.agoLabel(agent.lastActive)).joinToString(" · ")
     val a11y = buildList {
         add(agent.alias); add("AI agent"); add(agentStatusLabel(status))
+        if (budgetPaused && !dead) add("Budget paused")
         if (working) add("working on $currentTitle") else agent.role?.let { add(it) }
     }.joinToString(", ")
     Row(
@@ -163,7 +177,7 @@ private fun AgentRosterRow(agent: AgentDto, onClick: () -> Unit) {
                 Text(meta, style = ltype(LType.Meta), color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        AgentStatusCapsule(status)
+        if (budgetPaused && !dead) BudgetPausedCapsule() else AgentStatusCapsule(status)
     }
 }
 

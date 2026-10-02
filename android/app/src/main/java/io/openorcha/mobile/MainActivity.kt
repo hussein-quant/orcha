@@ -17,6 +17,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import io.openorcha.mobile.ui.components.LocalPortalLinkHandler
+import io.openorcha.mobile.ui.components.PortalLinkHandler
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -95,6 +98,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val workspaceState = rememberSaveableStateHolder()
+                // Portal-link chips anywhere (threads, chat, requests) open in-app screens.
+                val portalLinks = PortalLinkHandler(
+                    baseUrl = state.selectedContainer?.baseUrl,
+                    onTask = viewModel::openTask,
+                    onRequest = viewModel::openRequest,
+                    onAgent = { ref -> state.snapshot?.agents?.firstOrNull { it.id == ref || it.alias == ref }?.let { viewModel.openAgent(it.id) } },
+                )
+                CompositionLocalProvider(LocalPortalLinkHandler provides portalLinks) {
                 Box(Modifier.fillMaxSize().paletteChromeBackground()) {
                 when (state.route) {
                     AppRoute.Containers -> ContainersHomeScreen(
@@ -142,6 +153,8 @@ class MainActivity : ComponentActivity() {
                         },
                         onSetWakes = viewModel::setWakes,
                         onSetAutonomy = viewModel::setAutonomy,
+                        onOpenTask = viewModel::openTask,
+                        onRepoChanged = { viewModel.refreshSelected() },
                     )
 
                     // Keep the workspace's saved UI state (tab filters, request lens, scroll) while a
@@ -180,6 +193,7 @@ class MainActivity : ComponentActivity() {
                         onDecidePlan = viewModel::decideSelectedPlan,
                         onOpenRun = viewModel::openRun,
                         onSendMessage = viewModel::sendTaskMessage,
+                        onTaskChanged = viewModel::refreshSelected,
                     )
 
                     AppRoute.TaskThread -> TaskThreadScreen(
@@ -202,6 +216,9 @@ class MainActivity : ComponentActivity() {
                         onRejectTask = viewModel::rejectSelectedTaskRequest,
                         onConvert = viewModel::convertSelectedRequest,
                         onOpenTask = viewModel::openTask,
+                        onOpenRequest = viewModel::openRequest,
+                        onOpenAgent = { ref -> state.snapshot?.agents?.firstOrNull { it.id == ref || it.alias == ref }?.let { viewModel.openAgent(it.id) } },
+                        onResolved = viewModel::refreshSelected,
                     )
 
                     AppRoute.AgentDetail -> AgentDetailScreen(
@@ -219,6 +236,7 @@ class MainActivity : ComponentActivity() {
                             viewModel.selectTab(io.openorcha.mobile.ui.WorkspaceTab.Requests)
                             viewModel.showWorkspace()
                         },
+                        onOpenAgent = viewModel::openAgent,
                     )
 
                     AppRoute.RunDetail -> RunDetailScreen(
@@ -316,6 +334,7 @@ class MainActivity : ComponentActivity() {
                     hostState = snackbarHost,
                     modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 90.dp),
                 )
+                }
                 }
             }
         }

@@ -11,9 +11,16 @@ struct LinkedMessageText: View {
     let text: String
     let tasks: [TaskDto]
     var onTapTask: (String) -> Void
+    /// Portal-link chips (web `portalPaths`): when set, bare portal paths and links on the
+    /// paired portal (`portalBase`) render as their label ("Open task · …") and call this.
+    var portalBase: String? = nil
+    var onTapPortal: ((PortalLink) -> Void)? = nil
 
     private var attributed: AttributedString {
         var attr = MobileUx.linkifyTaskRefs(text, tasks: tasks)
+        if onTapPortal != nil {
+            attr = PortalLinks.rewrite(text, baseURL: portalBase, tasks: tasks, base: attr)
+        }
         let linkRanges = attr.runs.filter { $0.link != nil }.map(\.range)
         for range in linkRanges {
             attr[range].underlineStyle = .single
@@ -26,6 +33,10 @@ struct LinkedMessageText: View {
     var body: some View {
         Text(attributed)
             .environment(\.openURL, OpenURLAction { url in
+                if let link = PortalLinks.link(fromURL: url) {
+                    onTapPortal?(link)
+                    return .handled
+                }
                 guard let taskId = MobileUx.taskIdFromLinkURL(url) else { return .systemAction }
                 onTapTask(taskId)
                 return .handled

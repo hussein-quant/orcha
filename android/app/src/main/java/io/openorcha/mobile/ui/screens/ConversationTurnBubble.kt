@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -56,6 +57,7 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.chatSendFlowItems(
     sendFlow: io.openorcha.mobile.domain.ChatSendFlow,
     agentAlias: String?,
     onRetry: () -> Unit,
+    hideAwaiting: Boolean = false,
 ) {
     if (sendFlow.showsPendingBubble) {
         item(key = "pending-turn") {
@@ -72,7 +74,7 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.chatSendFlowItems(
             )
         }
     }
-    if (sendFlow.showsAwaitingReply) {
+    if (sendFlow.showsAwaitingReply && !hideAwaiting) {
         item(key = "awaiting-reply") {
             Text(
                 if (sendFlow.isFirstTurn) "Waking ${agentAlias ?: "the agent"} — a cold start can take a minute…" else "${agentAlias ?: "The agent"} is replying…",
@@ -149,6 +151,7 @@ internal fun AgentTurn(
     tasks: List<TaskDto>,
     onOpenTask: (String) -> Unit,
     onWorkLog: (() -> Unit)?,
+    workedFor: String? = null,
 ) {
     val p = Orcha.palette
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -162,8 +165,25 @@ internal fun AgentTurn(
             time?.let { Text(it, style = ltype(LType.Meta), color = p.faint) }
         }
         MarkdownText(body, tasks = tasks, onOpenTask = onOpenTask)
-        onWorkLog?.let {
-            LChip("Work log ›", icon = OrchaIcons.Terminal, onClick = it, modifier = Modifier.padding(top = 2.dp))
+        // iOS TurnFooter parity: "Worked for …" + the work-log link on one compact row
+        if (workedFor != null || onWorkLog != null) {
+            Row(
+                Modifier.padding(top = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LSpace.s),
+            ) {
+                workedFor?.let {
+                    Row(
+                        Modifier.semantics(mergeDescendants = true) {},
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        androidx.compose.material3.Icon(OrchaIcons.Schedule, null, tint = p.faint, modifier = Modifier.size(12.dp))
+                        Text(it, style = ltype(LType.Micro), color = p.faint)
+                    }
+                }
+                onWorkLog?.let { LChip("Work log ›", icon = OrchaIcons.Terminal, onClick = it) }
+            }
         }
     }
 }
@@ -177,6 +197,7 @@ internal fun TurnBubble(
     agentId: String?,
     tasks: List<TaskDto>,
     onOpenTask: (String) -> Unit,
+    workedFor: String? = null,
 ) {
     val p = Orcha.palette
     val mine = turn.authorAgentId == humanId || turn.role == "human"
@@ -196,6 +217,7 @@ internal fun TurnBubble(
             tasks = tasks,
             onOpenTask = onOpenTask,
             onWorkLog = turn.runId?.let { rid -> { onOpenRun(RunDto(runId = rid, agentId = agentId, status = "exited")) } },
+            workedFor = workedFor,
         )
     }
 }

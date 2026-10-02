@@ -387,7 +387,7 @@ struct OrchaApiClient {
         return pairs.isEmpty ? "" : "?" + pairs.joined(separator: "&")
     }
 
-    private func raw(_ base: String, _ path: String) async throws -> (Data, HTTPURLResponse) {
+    func raw(_ base: String, _ path: String) async throws -> (Data, HTTPURLResponse) {
         let (data, response) = try await session.data(for: makeRequest(base, path))
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         try Self.checkPerimeter(http, data)
@@ -432,7 +432,7 @@ struct OrchaApiClient {
         _ = try await send(base, path, method: "PATCH", body)
     }
 
-    private func putDecoding<T: Decodable>(_ base: String, _ path: String, _ body: [String: Any?]) async throws -> T {
+    func putDecoding<T: Decodable>(_ base: String, _ path: String, _ body: [String: Any?]) async throws -> T {
         let data = try await send(base, path, method: "PUT", body)
         return try decoder.decode(T.self, from: data)
     }

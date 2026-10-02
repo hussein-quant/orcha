@@ -63,6 +63,7 @@ struct AgentDetailScreen: View {
                 }
                 attentionBanners(agent)
                 header(agent)
+                AgentReportsToRow(agentId: agent.id)
                 if agent.kind == "ai" && !dead {
                     NavigationLink(value: WorkspaceRoute.converse(agent.id)) {
                         Label("Converse", systemImage: "bubble.left.and.text.bubble.right")
@@ -72,7 +73,11 @@ struct AgentDetailScreen: View {
                     .buttonStyle(LButtonStyle(kind: .primary))
                 }
                 nowSection(agent)
-                if agent.kind == "ai" { controls(agent) }
+                if agent.kind == "ai" {
+                    controls(agent)
+                    AgentBudgetSection(agentId: agent.id, alias: agent.alias)
+                    historyLink(agent)
+                }
                 persona(agent)
                 memory()
                 requestsSummary()
@@ -221,10 +226,47 @@ struct AgentDetailScreen: View {
             }
             .buttonStyle(.plain)
             liveRunRow(liveRun)
+            liveChanges(agent, liveRun)
         } else if let liveRun {
             SectionH(title: "Now")
             liveRunRow(liveRun)
+            liveChanges(agent, liveRun)
         }
+    }
+
+    /// Live changes while the agent works — the running run's changed files.
+    @ViewBuilder
+    private func liveChanges(_ agent: AgentDto, _ run: RunDto?) -> some View {
+        if let run {
+            AgentLiveChangesSection(agentId: agent.id, runId: run.runId)
+        }
+    }
+
+    /// Config history ("History") — revisions with restore.
+    private func historyLink(_ agent: AgentDto) -> some View {
+        NavigationLink {
+            AgentConfigHistoryScreen(agentId: agent.id, alias: agent.alias)
+        } label: {
+            LCard {
+                HStack(spacing: LSpace.s) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(p.text2)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("History").ltype(.bodyEmph).foregroundStyle(p.text)
+                        Text("Every settings change, with restore").ltype(.meta).foregroundStyle(p.muted)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(p.faint)
+                        .accessibilityHidden(true)
+                }
+                .frame(minHeight: 32)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -240,7 +282,7 @@ struct AgentDetailScreen: View {
                         Text(run.runId.prefix(6))
                             .ltype(.mono)
                             .foregroundStyle(p.text2)
-                        LTag(run.wakeKind ?? "headless")
+                        LTag(ActivityCopy.humanize(run.wakeKind ?? "headless"))
                         Spacer()
                         Text("Live").ltype(.micro).foregroundStyle(p.accent)
                     }
@@ -570,6 +612,8 @@ struct ConversationScreen: View {
     /// Set once the first `loadConversation` for this screen finishes — the empty state
     /// (and its hint chips) only shows after that, so it never flashes over loading turns.
     @State private var hasLoaded = false
+    /// Live chat streaming: follows the agent's running run over SSE while a reply is due.
+    @State private var stream = ChatRunStream()
 
     private var agent: AgentDto? {
         model.snapshot?.agents.first { $0.id == agentId }
@@ -609,6 +653,15 @@ struct ConversationScreen: View {
                 await model.loadConversation(agentId)
                 hasLoaded = true
             }
+            .task(id: streamActive) {
+                guard streamActive else { return }
+                await stream.follow(model: model, agentId: agentId)
+            }
+    }
+
+    /// A reply is in flight (just sent) or the agent is working: stream its run.
+    private var streamActive: Bool {
+        model.sendFlow.showsAwaitingReply || working
     }
 
     // MARK: working strip (top inset)
@@ -664,15 +717,17 @@ struct ConversationScreen: View {
                     // One status row at a time: awaiting-reply (just sent) is the most
                     // specific, then the overdue note, then the ambient "working" pulse.
                     if model.sendFlow.showsAwaitingReply {
-                        LiveWorkingRow(alias: agent?.alias ?? "Agent", text: awaitingReplyCopy)
+                        LiveWorkingRow(alias: agent?.alias ?? "Agent", text: stream.headline ?? awaitingReplyCopy)
                             .transition(insertion)
+                        ChatLiveSteps(rows: stream.rows)
                     } else if model.sendFlow.showsOverdueNote {
                         Text("No reply yet — \(alias) may still be starting up. Pull down to refresh.")
                             .ltype(.meta)
                             .foregroundStyle(p.muted)
                     } else if working {
-                        LiveWorkingRow(alias: agent?.alias ?? "Agent", text: "Working…")
+                        LiveWorkingRow(alias: agent?.alias ?? "Agent", text: stream.headline ?? "Working…")
                             .transition(insertion)
+                        ChatLiveSteps(rows: stream.rows)
                     }
                     if let error = model.error {
                         Banner(kind: .danger, text: error)
@@ -709,6 +764,8 @@ struct ConversationScreen: View {
                 }
             }
             .onChange(of: model.sendFlow.phase) { scrollToBottom(proxy) }
+            // Streamed steps grow the live row without a new turn: stay pinned if at bottom.
+            .onChange(of: stream.rows) { if atBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
                 scrollToBottom(proxy)
             }

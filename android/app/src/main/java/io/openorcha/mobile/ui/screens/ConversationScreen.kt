@@ -125,13 +125,26 @@ fun ConversationScreen(
     var reveal by remember(agent?.id) { mutableStateOf(CONV_REVEAL_INITIAL) }
     val visibleTurns = if (state.turns.size > reveal) state.turns.takeLast(reveal) else state.turns
     val imeVisible = WindowInsets.isImeVisible
+    val working = agent?.status == "working"
+    // iOS parity: "Worked for …" under each agent reply (time since the human turn it answers)
+    val workedFor = remember(state.turns, state.selectedContainer?.humanAgentId) {
+        io.openorcha.mobile.domain.AgentInsights.workedFor(state.turns, state.selectedContainer?.humanAgentId)
+    }
+    // Live reply over the run SSE while a reply is in flight (turns polling stays the fallback)
+    val lastIsHuman = state.turns.lastOrNull()?.let { it.role == "human" || it.authorAgentId == state.selectedContainer?.humanAgentId } == true
+    val liveReply = rememberChatLiveReply(
+        baseUrl = state.selectedContainer?.baseUrl,
+        agentId = agent?.id,
+        conversationId = state.conversation?.id,
+        active = sendFlow.showsAwaitingReply || (lastIsHuman && working),
+        onRunEnded = onRefresh,
+    )
     // issue 2: keep the newest turns in view when the keyboard opens, a turn lands, or the
     // pending bubble appears/changes (chat send-UX: a new send scrolls the composer into view).
-    LaunchedEffect(state.turns.size, imeVisible, sendFlow.showsPendingBubble) {
+    LaunchedEffect(state.turns.size, imeVisible, sendFlow.showsPendingBubble, liveReply.showing) {
         val last = listState.layoutInfo.totalItemsCount - 1
         if (last >= 0 && (imeVisible || state.turns.isNotEmpty())) listState.animateScrollToItem(last)
     }
-    val working = agent?.status == "working"
 
     // Mic: the system speech recognizer (no RECORD_AUDIO permission needed) — the
     // transcript lands in the composer for review before sending.
@@ -226,13 +239,22 @@ fun ConversationScreen(
                         item(key = "day-$day") { ChatDateSeparator(MobileUx.dayLabel(turn.createdAt) ?: day) }
                     }
                     item(key = turn.id ?: "${turn.seq}") {
-                        TurnBubble(turn, state.selectedContainer?.humanAgentId, agent?.alias, onOpenRun, agent?.id, state.snapshot?.tasks.orEmpty(), onOpenTask)
+                        TurnBubble(
+                            turn, state.selectedContainer?.humanAgentId, agent?.alias, onOpenRun, agent?.id,
+                            state.snapshot?.tasks.orEmpty(), onOpenTask, workedFor = workedFor[turn.seq],
+                        )
                     }
                 }
                 // Chat send-UX (iOS `ChatSendFlow` parity): pending bubble, awaiting-reply
                 // indicator, and the overdue note — see ConversationTurnBubble.kt.
-                chatSendFlowItems(sendFlow, agentAlias = agent?.alias, onRetry = { onRetry()?.let { draft = it } })
-                if (working && !sendFlow.showsAwaitingReply) {
+                chatSendFlowItems(
+                    sendFlow, agentAlias = agent?.alias, onRetry = { onRetry()?.let { draft = it } },
+                    hideAwaiting = liveReply.showing,
+                )
+                if (liveReply.showing) {
+                    item(key = "live-reply") { ChatLiveReplyBlock(liveReply, agent?.alias ?: "agent") }
+                }
+                if (working && !sendFlow.showsAwaitingReply && !liveReply.showing) {
                     item {
                         Text(
                             "${agent?.alias ?: "The agent"} is working…",

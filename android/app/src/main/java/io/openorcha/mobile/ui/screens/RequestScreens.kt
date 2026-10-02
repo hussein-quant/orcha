@@ -39,6 +39,17 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import io.openorcha.mobile.ui.components.LocalPortalLinkHandler
+import io.openorcha.mobile.ui.components.PortalLinkHandler
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -96,9 +107,37 @@ fun RequestDetailScreen(
     onRejectTask: (String) -> Unit,
     onConvert: (String, String, String?, Int) -> Unit,
     onOpenTask: (String) -> Unit,
+    // Portal link chips + post-resolve refresh (optional; MainActivity may wire them).
+    onOpenRequest: ((String) -> Unit)? = null,
+    onOpenAgent: ((String) -> Unit)? = null,
+    onResolved: () -> Unit = {},
 ) {
     val p = Orcha.palette
     val req = state.selectedRequest
+    val baseUrl = state.selectedContainer?.baseUrl
+    val portalHandler = LocalPortalLinkHandler.current ?: PortalLinkHandler(baseUrl, onOpenTask, onOpenRequest, onOpenAgent)
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    // A refreshed snapshot that shows the close lets the optimistic "resolved" go.
+    LaunchedEffect(state.snapshot) { ResolveUndoStore.reconcile(state.snapshot?.requests.orEmpty()) }
+    val resolve: () -> Unit = resolve@{
+        val r = req ?: return@resolve
+        val actor = humanIdOf(state) ?: return@resolve
+        val base = baseUrl ?: return@resolve
+        ResolveUndoStore.schedule(base, r.id, actor, onDone = onResolved)
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val shown = launch {
+                val result = snackbar.showSnackbar("Resolved", actionLabel = "Undo", duration = SnackbarDuration.Indefinite)
+                if (result == SnackbarResult.ActionPerformed && ResolveUndoStore.undo(r.id)) {
+                    snackbar.showSnackbar("Kept open", duration = SnackbarDuration.Short)
+                }
+            }
+            delay(RESOLVE_UNDO_MS)
+            if (snackbar.currentSnackbarData?.visuals?.message == "Resolved") snackbar.currentSnackbarData?.dismiss()
+            shown.join()
+        }
+    }
     val humanId = state.selectedContainer?.humanAgentId
     // server rows never carry aliases — resolve from snapshot.agents (web data.js:118-119)
     val agents = state.snapshot?.agents.orEmpty()
@@ -108,8 +147,10 @@ fun RequestDetailScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var confirmOwnerClose by remember { mutableStateOf(false) }
 
+    CompositionLocalProvider(LocalPortalLinkHandler provides portalHandler) {
     Scaffold(
         containerColor = p.bg,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             Column {
                 CenterAlignedTopAppBar(
@@ -158,6 +199,8 @@ fun RequestDetailScreen(
                 isRequester = isRequester, isTarget = isTarget,
                 onSheet = { sheet = it },
                 onConfirmOwnerClose = { confirmOwnerClose = true },
+                onResolve = resolve,
+                onUndoResolve = { ResolveUndoStore.undo(req.id); snackbar.currentSnackbarData?.dismiss() },
                 onAcceptTask = onAcceptTask, onOpenTask = onOpenTask,
             )
         }
@@ -217,6 +260,7 @@ fun RequestDetailScreen(
         }
     }
 }
+}
 
 @Composable
 internal fun TimelineDot(label: String, at: String?, reached: Boolean) {
@@ -227,10 +271,12 @@ internal fun TimelineDot(label: String, at: String?, reached: Boolean) {
         modifier = Modifier.padding(vertical = 6.dp),
     ) {
         Box(Modifier.size(7.dp).background(if (reached) p.muted else p.border2, CircleShape))
-        Text(label, style = ltype(LType.Body), color = if (reached) p.text2 else p.faint)
-        Spacer(Modifier.weight(1f))
+        Text(label, style = ltype(LType.Body), color = if (reached) p.text2 else p.faint, modifier = Modifier.weight(1f))
         Text(MobileUx.agoLabel(at) ?: "", style = ltype(LType.Meta), color = p.faint)
     }
 }
 
 /** Shared one-field bottom sheet (respond / reject / nudge / close-with-reason). */
+
+/** The paired human acting on requests (the requester for a Resolve). */
+internal fun humanIdOf(state: OrchaUiState): String? = state.selectedContainer?.humanAgentId

@@ -22,6 +22,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
@@ -87,7 +91,15 @@ internal fun HomeTab(
         verticalArrangement = Arrangement.spacedBy(LSpace.xl),
     ) {
         item(key = "home-header") {
-            HomeHeader(snapshot, onOpenAgent = onOpenAgent, onAgents = { onTab(WorkspaceTab.Agents) }, onRepo = onOpenGithubHub)
+            // Unbound: "Connect repo" opens the Connect-repository sheet (iOS parity); bound: the GitHub hub.
+            var connectRepo by remember { mutableStateOf(false) }
+            val repo = InboxRepoBinding.bound(snapshot.container.id, snapshot.container.githubRepo)
+            HomeHeader(
+                snapshot.copy(container = snapshot.container.copy(githubRepo = repo)),
+                onOpenAgent = onOpenAgent, onAgents = { onTab(WorkspaceTab.Agents) },
+                onRepo = { if (repo == null && state.selectedContainer != null) connectRepo = true else onOpenGithubHub() },
+            )
+            if (connectRepo) InboxConnectRepoHost(state, onDismiss = { connectRepo = false })
         }
 
         item(key = "home-needs") {

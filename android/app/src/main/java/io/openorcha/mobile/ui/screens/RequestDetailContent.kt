@@ -17,6 +17,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.domain.RequestsView
+import io.openorcha.mobile.domain.RequestHumanText
 import io.openorcha.mobile.ui.OrchaUiState
 import io.openorcha.mobile.ui.components.Banner
 import io.openorcha.mobile.ui.components.BannerKind
@@ -52,6 +53,8 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.RequestDetailContent
     isTarget: Boolean,
     onSheet: (RequestSheet) -> Unit,
     onConfirmOwnerClose: () -> Unit,
+    onResolve: () -> Unit = onConfirmOwnerClose,
+    onUndoResolve: () -> Unit = {},
     onAcceptTask: (String?) -> Unit,
     onOpenTask: (String) -> Unit,
 ) {
@@ -60,9 +63,16 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.RequestDetailContent
     val fromHuman = isRequester || RequestsView.kindFor(agents, req.requesterId) == "human"
     val toHuman = isTarget || RequestsView.kindFor(agents, req.targetId) == "human"
     val knownTasks = state.snapshot?.tasks.orEmpty()
-    val lines = req.payload.trim().lines()
-    val title = lines.firstOrNull { it.isNotBlank() }?.trim() ?: req.payload
-    val rest = lines.dropWhile { it.isBlank() }.drop(1).joinToString("\n").trim()
+    // People read the human text only — agent instructions (agent_payload, or the legacy
+    // combined code-thread blocks) are never shown (web lib/requestText.ts).
+    val human = RequestHumanText.humanize(req.payload, req.detail)
+    val lines = human.body.trim().lines()
+    val firstLine = lines.firstOrNull { it.isNotBlank() }?.trim() ?: human.body
+    val title = human.title ?: firstLine
+    val rest = (if (human.title != null) human.body.trim() else lines.dropWhile { it.isBlank() }.drop(1).joinToString("\n")).trim()
+    val resolving = ResolveUndoStore.isResolving(req.id)
+    val shownStatus = ResolveUndoStore.displayStatus(req)
+    val autoResolved = if (req.status == "closed") RequestHumanText.autoResolvedText(req.detail) else null
 
     // ── requester → you · type tag · status ──
     item(key = "req-head") {
@@ -81,9 +91,9 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.RequestDetailContent
                 if (req.chainDepth > 0) LTag("↳ chain")
                 Spacer(Modifier.weight(1f))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    LStatusGlyph(requestGlyphStatus(req.status, escalated))
+                    LStatusGlyph(requestGlyphStatus(shownStatus, escalated))
                     Text(
-                        if (escalated) "To a human" else MobileUx.statusCopy(req.status).replaceFirstChar { it.uppercase() },
+                        if (escalated) "To a human" else if (resolving) "Resolved" else MobileUx.statusCopy(shownStatus).replaceFirstChar { it.uppercase() },
                         style = ltype(LType.Meta), color = p.text2, maxLines = 1,
                     )
                 }
@@ -141,7 +151,22 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.RequestDetailContent
         val ops = RequestsView.operatorActions(req, humanId)
         val busy = state.actionInFlight
         val answeredMine = isRequester && req.status == "answered"
+        val failure = ResolveUndoStore.failure?.takeIf { it.first == req.id }?.second
         Column(verticalArrangement = Arrangement.spacedBy(LSpace.s)) {
+            failure?.let { Banner(BannerKind.Danger, it) }
+            if (answeredMine && resolving) {
+                // The answered card after Resolve: undo stays available for the deferral window.
+                LCard {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LSpace.s)) {
+                        LStatusGlyph("closed")
+                        Text("Resolved", style = ltype(LType.BodyEmph), color = p.text, modifier = Modifier.weight(1f))
+                        if (ResolveUndoStore.isPending(req.id)) {
+                            LButton("Undo", onUndoResolve, kind = LButtonKind.Secondary, size = io.openorcha.mobile.ui.components.LSize.Small)
+                        }
+                    }
+                }
+                return@Column
+            }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(LSpace.s), verticalArrangement = Arrangement.spacedBy(LSpace.s)) {
                 if (req.status == "open" && isTarget && req.type == "info") {
                     LButton("Respond", { onSheet(RequestSheet.Respond) }, icon = OrchaIcons.Send, kind = LButtonKind.Primary, enabled = !busy)
@@ -151,7 +176,7 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.RequestDetailContent
                     LButton("Reject…", { onSheet(RequestSheet.Reject) }, kind = LButtonKind.Secondary, enabled = !busy)
                 }
                 if (answeredMine) {
-                    LButton("Resolve", { onConfirmOwnerClose() }, icon = OrchaIcons.Check, kind = LButtonKind.Primary, enabled = !busy)
+                    LButton("Resolve", { onResolve() }, icon = OrchaIcons.Check, kind = LButtonKind.Primary, enabled = !busy)
                     LButton("Turn into a task", { onSheet(RequestSheet.Convert) }, icon = OrchaIcons.Checklist, kind = LButtonKind.Secondary, enabled = !busy)
                 }
                 if (ops.showNudge) {
@@ -181,7 +206,10 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.RequestDetailContent
                 TimelineDot("Created", req.createdAt, true)
                 if (req.status in setOf("accepted", "answered", "closed", "converted_to_task") && req.type == "task") TimelineDot("Accepted", null, true)
                 if (req.respondedAt != null || req.status in setOf("answered", "closed", "converted_to_task")) TimelineDot("Answered", req.respondedAt, true)
-                if (req.closedAt != null || req.status in setOf("closed", "rejected", "converted_to_task")) {
+                if (autoResolved != null) {
+                    // backend auto-resolve: the code thread IS the conversation (web wording)
+                    TimelineDot(autoResolved, req.closedAt ?: req.respondedAt, true)
+                } else if (req.closedAt != null || req.status in setOf("closed", "rejected", "converted_to_task")) {
                     TimelineDot(MobileUx.statusCopy(req.status).replaceFirstChar { it.uppercase() }, req.closedAt, true)
                 }
             }

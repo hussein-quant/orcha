@@ -163,6 +163,17 @@ struct SettingsScreen: View {
                     }
                 }
                 .buttonStyle(.lRow)
+                LDivider(inset: LSpace.m)
+                NavigationLink {
+                    OrchaThemed(mode: model.themeMode, skin: model.skinMode) { RoutinesScreen() }
+                } label: {
+                    LRow(title: "Routines", subtitle: "Tasks created on a schedule") {
+                        rowIcon("repeat")
+                    } trailing: {
+                        chevron()
+                    }
+                }
+                .buttonStyle(.lRow)
             }
         }
     }
@@ -317,6 +328,19 @@ struct SettingsScreen: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(LSpace.m)
+                }
+                if model.selectedContainer != nil {
+                    LDivider()
+                    NavigationLink {
+                        OrchaThemed(mode: model.themeMode, skin: model.skinMode) { NotificationPrefsScreen() }
+                    } label: {
+                        LRow(title: "Notification preferences", subtitle: "What you're notified about, pause, quiet hours") {
+                            rowIcon("bell.badge")
+                        } trailing: {
+                            chevron()
+                        }
+                    }
+                    .buttonStyle(.lRow)
                 }
             }
         }

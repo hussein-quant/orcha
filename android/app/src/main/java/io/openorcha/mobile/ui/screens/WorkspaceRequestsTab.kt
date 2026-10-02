@@ -210,11 +210,14 @@ fun RequestRow(req: RequestDto, agents: List<AgentDto>, humanId: String?, onOpen
     val fromLabel = if (fromIsYou) "You" else fromAlias ?: "agent"
     val toLabel = if (toIsYou) "you" else toAlias ?: "agent"
     val escalated = RequestsView.isEscalatedOpen(req, agents)
-    val title = req.payload.lineSequence().firstOrNull { it.isNotBlank() } ?: req.payload
+    // Human text only (agent instructions never shown); an optimistic Resolve reads as closed.
+    val human = io.openorcha.mobile.domain.RequestHumanText.humanize(req.payload, req.detail)
+    val title = human.title ?: human.body.lineSequence().firstOrNull { it.isNotBlank() } ?: human.body
+    val shownStatus = ResolveUndoStore.displayStatus(req)
     val kind = if (req.type == "task") "Task" else "Question"
     val a11y = listOfNotNull(
         "$title. $fromLabel to $toLabel, ${if (req.type == "task") "task request" else "question"}",
-        if (escalated) "to a human" else MobileUx.statusCopy(req.status),
+        if (escalated) "to a human" else MobileUx.statusCopy(shownStatus),
         MobileUx.agoLabel(req.createdAt),
     ).joinToString(", ")
     Row(
@@ -246,7 +249,7 @@ fun RequestRow(req: RequestDto, agents: List<AgentDto>, humanId: String?, onOpen
             }
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            LStatusGlyph(requestGlyphStatus(req.status, escalated))
+            LStatusGlyph(requestGlyphStatus(shownStatus, escalated))
             Text(MobileUx.agoLabel(req.createdAt) ?: "", style = ltype(LType.Micro), color = p.faint, maxLines = 1)
         }
     }

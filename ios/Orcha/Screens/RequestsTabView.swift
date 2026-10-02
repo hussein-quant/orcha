@@ -77,7 +77,8 @@ struct RequestsTabView: View {
     private var groupedView: some View {
         group("Needs your answer", groups.needsYourAnswer)
         group("Waiting on others", groups.waitingOnOthers)
-        group("Answered — act on it", groups.answeredActOnIt)
+        // A Resolve inside its undo window leaves the queue at once (web resolveUndo.ts).
+        group("Answered — act on it", groups.answeredActOnIt.filter { !ResolveUndoQueue.shared.isResolving($0.id) })
         if !groups.done.isEmpty {
             let doneOnly = groups.needsYourAnswer.isEmpty && groups.waitingOnOthers.isEmpty &&
                 groups.answeredActOnIt.isEmpty
@@ -232,7 +233,9 @@ struct RequestRowCard: View {
     private var fromLabel: String { fromIsYou ? "You" : (requesterAlias ?? "agent") }
     private var toLabel: String { toIsYou ? "you" : (targetAlias ?? "agent") }
     private var title: String {
-        request.payload.split(whereSeparator: \.isNewline).first.map(String.init) ?? request.payload
+        // Human text only: a legacy combined code-thread payload loses its agent-only blocks.
+        let human = InboxRequestText.humanize(payload: request.payload, detail: nil).question
+        return human.split(whereSeparator: \.isNewline).first.map(String.init) ?? human
     }
 
     var body: some View {

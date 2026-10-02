@@ -170,7 +170,7 @@ fun WorkspaceScreen(
                     )
                     WorkspaceTab.Tasks -> TasksTab(snapshot.tasks, snapshot.agents, onOpenTask)
                     WorkspaceTab.Requests -> RequestsTab(snapshot.requests, snapshot.agents, humanId, onOpenRequest)
-                    WorkspaceTab.Agents -> AgentsTab(snapshot.agents, onOpenAgent)
+                    WorkspaceTab.Agents -> AgentsTab(snapshot.agents, onOpenAgent, baseUrl = selected?.baseUrl, containerId = selected?.id)
                     WorkspaceTab.Search -> SearchTab(
                         snapshot = snapshot,
                         humanId = humanId,

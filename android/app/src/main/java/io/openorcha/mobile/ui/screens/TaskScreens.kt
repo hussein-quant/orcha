@@ -46,6 +46,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import io.openorcha.mobile.domain.TaskInsightsUx
+import io.openorcha.mobile.ui.rememberTaskInsights
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -126,6 +130,8 @@ fun TaskDetailScreen(
     onOpenRun: (RunDto) -> Unit,
     /** Posts to the task thread from the bottom composer. When null, the composer opens the thread. */
     onSendMessage: ((String) -> Unit)? = null,
+    /** Reloads the workspace snapshot after a reassign / reviewer change (wire `viewModel::refreshSelected`). */
+    onTaskChanged: (() -> Unit)? = null,
 ) {
     val p = Orcha.palette
     val task = state.selectedTask
@@ -139,6 +145,20 @@ fun TaskDetailScreen(
     var paneName by rememberSaveable { mutableStateOf(DetailPane.Activity.name) }
     val pane = DetailPane.valueOf(paneName)
     val closable = task != null && !task.isRoot && task.status !in setOf("completed", "cancelled")
+    // Parity features (evidence, Verdikt, goal chain, routines, reassign, reviewer): own state, see TaskInsightsController.
+    val insights = rememberTaskInsights()
+    val ins by insights.state.collectAsState()
+    val container = state.selectedContainer
+    var sheet by remember { mutableStateOf<InsightSheetKind?>(null) }
+    LaunchedEffect(task?.id, task?.status, container?.baseUrl) {
+        if (task != null && container != null) insights.load(container, task.id)
+    }
+    LaunchedEffect(ins.notice) {
+        if (ins.notice != null) { delay(4_000); insights.clearNotice() }
+    }
+    val afterChange: () -> Unit = { sheet = null; onTaskChanged?.invoke() ?: onRefresh() }
+    val actingHuman = agents.firstOrNull { it.id == container?.humanAgentId }
+    val canAssignReviewer = container?.humanAgentId != null && actingHuman?.memberRole != "viewer"
 
     Scaffold(
         containerColor = p.bg,
@@ -155,6 +175,18 @@ fun TaskDetailScreen(
                             text = { Text("Refresh", style = ltype(LType.Body), color = p.text) },
                             onClick = { menuOpen = false; onRefresh() },
                         )
+                        if (task != null && closable) {
+                            DropdownMenuItem(
+                                text = { Text("Reassign…", style = ltype(LType.Body), color = p.text) },
+                                onClick = { menuOpen = false; insights.clearError(); sheet = InsightSheetKind.Reassign },
+                            )
+                        }
+                        if (task != null && !task.isRoot) {
+                            DropdownMenuItem(
+                                text = { Text("Make recurring…", style = ltype(LType.Body), color = p.text) },
+                                onClick = { menuOpen = false; insights.clearError(); sheet = InsightSheetKind.Recurring },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Close task…", style = ltype(LType.Body), color = if (closable) p.danger else p.faint) },
                             enabled = closable,
@@ -207,6 +239,10 @@ fun TaskDetailScreen(
             contentPadding = PaddingValues(horizontal = LSpace.l, vertical = LSpace.m),
             verticalArrangement = Arrangement.spacedBy(LSpace.xl),
         ) {
+            ins.notice?.let { item(key = "notice") { Banner(BannerKind.Info, it) } }
+            if (TaskInsightsUx.hasAncestry(ins.goalChain)) {
+                item(key = "goal") { GoalChainBreadcrumb(ins.goalChain, onOpenTask) }
+            }
             item(key = "header") { TaskDetailHeader(task, state.snapshot?.container?.name ?: state.selectedContainer?.displayName, agents) }
             if (task.status == "needs_verification") {
                 item(key = "verify") {
@@ -216,7 +252,30 @@ fun TaskDetailScreen(
                         onReview = { verifyRejecting = false; showVerify = true },
                         onReject = { verifyRejecting = true; showVerify = true },
                         onAccept = { onVerify(true, null) },
+                        review = { ManagerReviewNote(task, reviewerName(task, agents)) },
+                        proof = {
+                            EvidenceProofBlock(
+                                insights = ins,
+                                baseUrl = container?.baseUrl,
+                                canRunVerdikt = container?.humanAgentId != null,
+                                onRetry = { container?.let { insights.load(it, task.id) } },
+                                onRunVerdikt = { container?.let { insights.runVerdikt(it, task.id) {} } },
+                            )
+                        },
                     )
+                }
+            }
+            if (task.status != "needs_verification" && TaskInsightsUx.managerReviewLine(task.managerReview) != null) {
+                item(key = "mgr") { LCard(padding = LSpace.l) { ManagerReviewNote(task, reviewerName(task, agents)) } }
+            }
+            val latestVerdikt = ins.verdikt?.runs?.maxByOrNull { it.createdAt.orEmpty() }
+            if (task.status != "needs_verification" && latestVerdikt != null) {
+                item(key = "verdikt") {
+                    LCard(padding = LSpace.l) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            VerdiktSection(latestVerdikt, ins.verdikt?.settings, task.id, container?.baseUrl, canRun = false, busy = ins.busy, onRun = {})
+                        }
+                    }
                 }
             }
             if (isPlanWaiting(task)) {
@@ -228,7 +287,15 @@ fun TaskDetailScreen(
             if (task.status != "needs_verification") {
                 item(key = "dod") { DoneWhenBlock(task.definitionOfDone) }
             }
-            item(key = "props") { TaskPropertiesSection(task, agents) }
+            item(key = "props") {
+                TaskPropertiesSection(
+                    task, agents,
+                    routineText = ins.routines.firstOrNull()?.let { r ->
+                        (if (r.enabled) "Recurring" else "Recurring · paused") + r.scheduleText.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+                    },
+                    onPickReviewer = if (canAssignReviewer) ({ insights.clearError(); sheet = InsightSheetKind.Reviewer }) else null,
+                )
+            }
             if (task.dependsOn.isNotEmpty()) {
                 item(key = "deps") { DependenciesSection(task.dependsOn, state.snapshot?.tasks.orEmpty(), onOpenTask) }
             }
@@ -265,6 +332,23 @@ fun TaskDetailScreen(
     if (showVerify && task != null) {
         VerifySheet(task, state.actionInFlight, onDismiss = { showVerify = false }, startRejecting = verifyRejecting) { approve, feedback ->
             showVerify = false; onVerify(approve, feedback)
+        }
+    }
+    if (task != null && container != null) {
+        when (sheet) {
+            InsightSheetKind.Reassign -> ReassignSheet(task, agents, ins.busy, ins.actionError, onDismiss = { sheet = null }) { agent ->
+                insights.reassign(container, task.id, agent.id, agent.alias, afterChange)
+            }
+            InsightSheetKind.Reviewer -> ReviewerPickerSheet(task, agents, ins.busy, ins.actionError, onDismiss = { sheet = null }) { id ->
+                insights.setReviewer(container, task.id, id, afterChange)
+            }
+            InsightSheetKind.Recurring -> MakeRecurringSheet(
+                task, agents, ins.busy, ins.actionError,
+                onDismiss = { sheet = null },
+                onPreview = { cron, tz -> insights.preview(container, cron, tz) },
+                onCreate = { build -> insights.createRoutine(container, build) { sheet = null } },
+            )
+            null -> Unit
         }
     }
     if (showPlan && task != null) {
@@ -402,7 +486,15 @@ private fun TaskMetaRow(task: TaskDto, agents: List<AgentDto>) {
 /* ---------- verification + plan cards ---------- */
 
 @Composable
-private fun VerificationCard(task: TaskDto, busy: Boolean, onReview: () -> Unit, onReject: () -> Unit, onAccept: () -> Unit) {
+private fun VerificationCard(
+    task: TaskDto,
+    busy: Boolean,
+    onReview: () -> Unit,
+    onReject: () -> Unit,
+    onAccept: () -> Unit,
+    review: @Composable () -> Unit = {},
+    proof: @Composable () -> Unit = {},
+) {
     val p = Orcha.palette
     LCard(padding = LSpace.l) {
         Column(verticalArrangement = Arrangement.spacedBy(LSpace.m)) {
@@ -419,6 +511,8 @@ private fun VerificationCard(task: TaskDto, busy: Boolean, onReview: () -> Unit,
                     )
                 }
             }
+            proof()
+            review()
             DoneWhenBlock(task.definitionOfDone, compact = true)
             Text(
                 "See full review",
@@ -504,7 +598,12 @@ internal fun inlineMarkdown(text: String): AnnotatedString {
 /* ---------- properties + dependencies ---------- */
 
 @Composable
-private fun TaskPropertiesSection(task: TaskDto, agents: List<AgentDto>) {
+private fun TaskPropertiesSection(
+    task: TaskDto,
+    agents: List<AgentDto>,
+    routineText: String? = null,
+    onPickReviewer: (() -> Unit)? = null,
+) {
     val p = Orcha.palette
     LSection("Properties") {
         LCard(padding = 0.dp) {
@@ -527,6 +626,15 @@ private fun TaskPropertiesSection(task: TaskDto, agents: List<AgentDto>) {
                     Text("Unassigned", style = ltype(LType.Meta), color = p.faint)
                 }
             }
+            LDivider()
+            ReviewerPropertyRow(task, agents, onPickReviewer)
+            routineText?.let {
+                LDivider()
+                PropertyRow("Routine") {
+                    Icon(OrchaIcons.Schedule, null, tint = p.faint, modifier = Modifier.size(14.dp))
+                    Text(it, style = ltype(LType.Meta), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
             MobileUx.agoLabel(task.createdAt)?.let { created ->
                 LDivider()
                 PropertyRow("Created") { Text(created, style = ltype(LType.Meta), color = p.text2) }
@@ -535,11 +643,39 @@ private fun TaskPropertiesSection(task: TaskDto, agents: List<AgentDto>) {
     }
 }
 
+private enum class InsightSheetKind { Reassign, Reviewer, Recurring }
+
+/** The reviewer's display name: the snapshot member for `reviewer_agent_id`, else the routed alias. */
+private fun reviewerName(task: TaskDto, agents: List<AgentDto>): String? =
+    task.reviewerAgentId?.let { id -> agents.firstOrNull { it.id == id }?.let { it.githubLogin ?: it.alias } }
+        ?: task.reviewRouting?.reviewerAlias
+
+/** iOS parity: "Reviewer" property; tappable (picker) for owners / members who may assign reviewers. */
 @Composable
-private fun PropertyRow(label: String, value: @Composable RowScope.() -> Unit) {
+private fun ReviewerPropertyRow(task: TaskDto, agents: List<AgentDto>, onPick: (() -> Unit)?) {
+    val p = Orcha.palette
+    val name = task.reviewerAgentId?.let { id -> agents.firstOrNull { it.id == id }?.let { it.githubLogin ?: it.alias } ?: "Member" }
+    PropertyRow(
+        "Reviewer",
+        modifier = if (onPick != null) {
+            Modifier.clickable(role = Role.Button, onClickLabel = if (name == null) "Assign a reviewer" else "Change the reviewer", onClick = onPick)
+        } else Modifier,
+    ) {
+        if (name != null) {
+            LAvatar(name, isAI = false, size = 18.dp)
+            Text(name, style = ltype(LType.Meta), color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        } else {
+            Text("Anyone", style = ltype(LType.Meta), color = p.faint)
+        }
+        if (onPick != null) Icon(OrchaIcons.ExpandMore, null, tint = p.faint, modifier = Modifier.size(14.dp))
+    }
+}
+
+@Composable
+private fun PropertyRow(label: String, modifier: Modifier = Modifier, value: @Composable RowScope.() -> Unit) {
     val p = Orcha.palette
     Row(
-        Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = LSpace.m, vertical = 6.dp).semantics(mergeDescendants = true) {},
+        modifier.fillMaxWidth().heightIn(min = 44.dp).padding(horizontal = LSpace.m, vertical = 6.dp).semantics(mergeDescendants = true) {},
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(LSpace.s),
     ) {

@@ -32,7 +32,8 @@ internal fun runGlyphStatus(status: String): String = when (status) {
     "completed", "succeeded", "ok", "done", "exited", "finished" -> "completed"
     "killed", "failed", "error" -> "failed"
     "stopped", "cancelled" -> "cancelled"
-    else -> "pending"
+    // Anything else (orphaned, terminated, …) has its own web StatusIcon shape.
+    else -> status
 }
 
 @Composable

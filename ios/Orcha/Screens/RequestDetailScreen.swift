@@ -8,6 +8,7 @@ struct RequestDetailScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     let requestId: String
 
     private enum Sheet: Identifiable {
@@ -19,6 +20,12 @@ struct RequestDetailScreen: View {
     @State private var showCloseConfirm = false
     /// GH #140 — a tapped task-id link in the payload/response/rejection text pushes here.
     @State private var linkedTaskId: String?
+    /// Portal-link chips that open in the app (task / request / agent / GitHub).
+    @State private var portalRoute: WorkspaceRoute?
+    /// Fields the snapshot row leaves out: `detail` (auto-resolve, display title, code
+    /// thread) and close attribution. `agent_payload` is decoded there but never shown.
+    @State private var extras: InboxRequestExtrasDto?
+    private var undo: ResolveUndoQueue { .shared }
 
     private var request: RequestDto? {
         model.snapshot?.requests.first { $0.id == requestId }
@@ -45,6 +52,9 @@ struct RequestDetailScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarMenu }
         .navigationDestination(item: $linkedTaskId) { TaskDetailScreen(taskId: $0) }
+        .navigationDestination(item: $portalRoute) { route in portalDestination(route) }
+        .overlay(alignment: .bottom) { resolveUndoToast }
+        .task(id: "\(requestId)|\(request?.status ?? "")") { await loadExtras() }
         .sheet(item: $sheet) { which in sheetView(which) }
         .confirmationDialog("Close this request?", isPresented: $showCloseConfirm, titleVisibility: .visible) {
             Button("Close request", role: .destructive, action: closeNow)
@@ -66,9 +76,25 @@ struct RequestDetailScreen: View {
         RequestFlowHeader(request: req, isRequester: isRequester, isTarget: isTarget, agents: agents)
 
         // The question itself — the clean title + any further lines as body.
-        RequestQuestion(payload: req.payload, tasks: tasks, onTapTask: { linkedTaskId = $0 })
+        let human = InboxRequestText.humanize(payload: req.payload, detail: extras?.detail)
+        RequestQuestion(
+            payload: human.question, displayTitle: human.title, tasks: tasks,
+            portalBase: portalBase, onTapPortal: openPortal, onTapTask: { linkedTaskId = $0 }
+        )
 
-        PortalLinkChips(texts: [req.payload, req.response, req.rejectionReason].compactMap { $0 })
+        RequestLinkChips(
+            portalLinks: portalLinks(req, human: human),
+            externalTexts: [human.question, req.response, req.rejectionReason].compactMap { $0 },
+            portalBase: portalBase,
+            tasks: tasks,
+            onTap: openPortal
+        )
+
+        if req.status == "closed", let auto = InboxRequestText.autoResolvedCopy(extras?.detail?.autoResolved) {
+            Label(auto, systemImage: "checkmark.circle")
+                .ltype(.meta)
+                .foregroundStyle(p.ok)
+        }
 
         if req.parentRequestId != nil {
             Label("Part of a request chain · depth \(req.chainDepth)", systemImage: "arrow.turn.down.right")
@@ -106,6 +132,9 @@ struct RequestDetailScreen: View {
                 answeredAgo: MobileUx.agoLabel(req.respondedAt),
                 text: response,
                 tasks: tasks,
+                resolving: undo.isResolving(req.id),
+                portalBase: portalBase,
+                onTapPortal: openPortal,
                 onTapTask: { linkedTaskId = $0 }
             ) {
                 answerActions(req, isRequester: isRequester)
@@ -117,13 +146,15 @@ struct RequestDetailScreen: View {
                 Label("Rejected", systemImage: "xmark.circle")
                     .ltype(.micro)
                     .foregroundStyle(p.danger)
-                LinkedMessageText(text: rejection, tasks: tasks, onTapTask: { linkedTaskId = $0 })
+                LinkedMessageText(text: rejection, tasks: tasks, onTapTask: { linkedTaskId = $0 }, portalBase: portalBase, onTapPortal: openPortal)
                     .ltype(.body)
                     .foregroundStyle(p.text2)
             }
         }
 
-        actionBar(req, isRequester: isRequester, isTarget: isTarget)
+        if !undo.isResolving(req.id) {
+            actionBar(req, isRequester: isRequester, isTarget: isTarget)
+        }
 
         LSection("Activity") {
             timeline(req)
@@ -143,7 +174,7 @@ struct RequestDetailScreen: View {
                 TimelineDotRow(label: "Answered", at: req.respondedAt, reached: true)
             }
             if req.closedAt != nil || ["closed", "rejected", "converted_to_task"].contains(s) {
-                TimelineDotRow(label: MobileUx.statusCopy(s).capitalized, at: req.closedAt, reached: true)
+                TimelineDotRow(label: closedTimelineLabel(req), at: req.closedAt ?? req.respondedAt, reached: true)
             }
         }
     }
@@ -152,10 +183,17 @@ struct RequestDetailScreen: View {
 
     @ViewBuilder
     private func answerActions(_ req: RequestDto, isRequester: Bool) -> some View {
-        if req.status == "answered" && isRequester {
+        if req.status == "answered" && isRequester && undo.isResolving(req.id) {
+            HStack(spacing: LSpace.s) {
+                LButton("Undo", icon: "arrow.uturn.backward", size: .small) { undoResolve(req.id) }
+                Text("Leaves every queue now; the close is sent in a few seconds unless you undo.")
+                    .ltype(.micro)
+                    .foregroundStyle(p.muted)
+            }
+        } else if req.status == "answered" && isRequester {
             let busy = model.actionInFlight
             HStack(spacing: LSpace.s) {
-                LButton("Resolve", icon: "checkmark", kind: .primary, size: .small) { showCloseConfirm = true }
+                LButton("Resolve", icon: "checkmark", kind: .primary, size: .small) { resolve(req.id) }
                     .disabled(busy)
                 LButton("Turn into a task", icon: "arrow.triangle.branch", size: .small) { sheet = .convert }
                     .disabled(busy)
@@ -305,6 +343,120 @@ struct RequestDetailScreen: View {
         Task { _ = await model.escalateRequest(requestId, reason: nil) }
     }
 
+    /// One tap, no dialog: the close is deferred for the undo window (web resolveUndo.ts).
+    private func resolve(_ id: String) {
+        let model = model
+        undo.schedule(id) {
+            _ = await model.closeRequest(id, reason: nil)
+        }
+    }
+
+    private func undoResolve(_ id: String) {
+        if undo.undo(id) { model.toast = "Kept open" }
+    }
+
+    // MARK: resolve undo toast
+
+    @ViewBuilder
+    private var resolveUndoToast: some View {
+        if undo.isResolving(requestId) {
+            HStack(spacing: LSpace.m) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(p.ok)
+                    .accessibilityHidden(true)
+                Text("Resolved")
+                    .ltype(.bodyEmph)
+                    .foregroundStyle(p.text)
+                Spacer(minLength: 0)
+                Button("Undo") { undoResolve(requestId) }
+                    .font(p.uiFont(14, .semibold))
+                    .foregroundStyle(p.accent)
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .padding(.horizontal, LSpace.l)
+            .background(p.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(p.border2, lineWidth: 1))
+            .padding(.horizontal, LSpace.l)
+            .padding(.bottom, LSpace.m)
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            .accessibilityElement(children: .contain)
+            .onAppear {
+                UIAccessibility.post(notification: .announcement, argument: "Resolved. Undo available for 5 seconds.")
+            }
+        }
+    }
+
+    // MARK: request extras + portal links
+
+    private var portalBase: String? { model.selectedContainer?.baseUrl }
+
+    private func loadExtras() async {
+        guard let sel = model.selectedContainer, let req = request else { return }
+        do {
+            let list = try await model.api.inboxRequestExtras(sel.baseUrl, sel.id, status: req.status)
+            extras = list.requests.first { $0.id == requestId }
+        } catch {
+            // Extras only enrich the screen (titles, auto-resolve copy) — the snapshot row still renders.
+        }
+    }
+
+    private func closedTimelineLabel(_ req: RequestDto) -> String {
+        if req.status == "closed" {
+            if let auto = InboxRequestText.autoResolvedCopy(extras?.detail?.autoResolved) { return auto }
+            if extras != nil {
+                return InboxRequestText.closedCopy(closedBy: extras?.closedByAlias, reason: extras?.closeDecision?.reason)
+            }
+        }
+        return MobileUx.statusCopy(req.status).capitalized
+    }
+
+    private func portalLinks(_ req: RequestDto, human: InboxRequestText.Human) -> [PortalLink] {
+        var links = PortalLinks.links(
+            in: [human.question, req.response, req.rejectionReason].compactMap { $0 },
+            baseURL: portalBase
+        )
+        if let thread = human.threadLink, let link = PortalLinks.parse(thread),
+           !links.contains(where: { $0.path == link.path }) {
+            links.insert(link, at: 0)
+        }
+        return links
+    }
+
+    private func openPortal(_ link: PortalLink) {
+        switch link.target {
+        case let .task(id):
+            let tasks = model.snapshot?.tasks ?? []
+            linkedTaskId = MobileUx.resolveTaskRef(id, in: tasks)?.id ?? id
+        case let .request(id):
+            let match = model.snapshot?.requests.first { $0.id == id || $0.id.hasPrefix(id) }
+            portalRoute = .request(match?.id ?? id)
+        case let .agent(alias):
+            if let agent = model.snapshot?.agents.first(where: { $0.alias == alias }) {
+                portalRoute = .agent(agent.id)
+            } else if let url = link.absoluteURL(base: portalBase) {
+                openURL(url)
+            }
+        case let .githubPull(n): portalRoute = .githubPull(n)
+        case let .githubIssue(n): portalRoute = .githubIssue(n)
+        case .web:
+            if let url = link.absoluteURL(base: portalBase) { openURL(url) }
+        }
+    }
+
+    @ViewBuilder
+    private func portalDestination(_ route: WorkspaceRoute) -> some View {
+        OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
+            switch route {
+            case let .task(id): TaskDetailScreen(taskId: id)
+            case let .request(id): RequestDetailScreen(requestId: id)
+            case let .agent(id): AgentDetailScreen(agentId: id)
+            case let .githubPull(n): GitHubPullDetailScreen(number: n)
+            case let .githubIssue(n): GitHubIssueDetailScreen(number: n)
+            default: EmptyView()
+            }
+        }
+    }
+
     // MARK: state-routed sheet copy (§5)
 
     /// Nudge sub-copy names who wakes: open → the target (owes the answer); answered → the
@@ -399,11 +551,16 @@ private struct RequestFlowHeader: View {
 private struct RequestQuestion: View {
     @Environment(\.palette) private var p
     let payload: String
+    /// A stored display title (code-thread questions) — then the whole payload is the body.
+    var displayTitle: String?
     let tasks: [TaskDto]
+    var portalBase: String?
+    var onTapPortal: ((PortalLink) -> Void)?
     let onTapTask: (String) -> Void
 
     private var parts: (title: String, rest: String?) {
         let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let displayTitle { return (displayTitle, trimmed.isEmpty ? nil : trimmed) }
         guard let nl = trimmed.firstIndex(where: \.isNewline) else { return (trimmed, nil) }
         let rest = trimmed[nl...].trimmingCharacters(in: .whitespacesAndNewlines)
         return (String(trimmed[..<nl]), rest.isEmpty ? nil : rest)
@@ -412,12 +569,12 @@ private struct RequestQuestion: View {
     var body: some View {
         let (title, rest) = parts
         VStack(alignment: .leading, spacing: LSpace.s) {
-            LinkedMessageText(text: title, tasks: tasks, onTapTask: onTapTask)
+            LinkedMessageText(text: title, tasks: tasks, onTapTask: onTapTask, portalBase: portalBase, onTapPortal: onTapPortal)
                 .ltype(.title)
                 .foregroundStyle(p.text)
                 .accessibilityAddTraits(.isHeader)
             if let rest {
-                LinkedMessageText(text: rest, tasks: tasks, onTapTask: onTapTask)
+                LinkedMessageText(text: rest, tasks: tasks, onTapTask: onTapTask, portalBase: portalBase, onTapPortal: onTapPortal)
                     .ltype(.body)
                     .foregroundStyle(p.text2)
             }
@@ -435,6 +592,10 @@ private struct AnswerCard<Actions: View>: View {
     let answeredAgo: String?
     let text: String
     let tasks: [TaskDto]
+    /// Inside the Resolve undo window: the card reads "Resolved" and offers only Undo.
+    var resolving = false
+    var portalBase: String?
+    var onTapPortal: ((PortalLink) -> Void)?
     let onTapTask: (String) -> Void
     @ViewBuilder var actions: Actions
 
@@ -442,60 +603,28 @@ private struct AnswerCard<Actions: View>: View {
         LCard(padding: LSpace.l) {
             VStack(alignment: .leading, spacing: LSpace.m) {
                 HStack(spacing: 6) {
-                    LAvatar(name: responder, isAI: !responderIsHuman, size: 20)
-                        .accessibilityHidden(true)
-                    Text(responder).ltype(.bodyEmph).foregroundStyle(p.text)
-                    Text(["answered", answeredAgo].compactMap { $0 }.joined(separator: " · "))
-                        .ltype(.meta)
-                        .foregroundStyle(p.muted)
-                }
-                .accessibilityElement(children: .combine)
-                LinkedMessageText(text: text, tasks: tasks, onTapTask: onTapTask)
-                    .ltype(.body)
-                    .foregroundStyle(p.text)
-                    .textSelection(.enabled)
-                actions
-            }
-        }
-    }
-}
-
-/// Every http(s) link in the request's text, as tappable chips (portal links etc.).
-private struct PortalLinkChips: View {
-    @Environment(\.openURL) private var openURL
-    let texts: [String]
-
-    private var urls: [URL] {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return [] }
-        var seen = Set<String>()
-        var out: [URL] = []
-        for text in texts {
-            let range = NSRange(text.startIndex..., in: text)
-            for match in detector.matches(in: text, range: range) {
-                guard let url = match.url, ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
-                      seen.insert(url.absoluteString).inserted else { continue }
-                out.append(url)
-            }
-        }
-        return out
-    }
-
-    private func label(_ url: URL) -> String {
-        let host = url.host() ?? url.absoluteString
-        let path = url.path()
-        return path.isEmpty || path == "/" ? host : "\(host)\(path.count > 24 ? String(path.prefix(24)) + "…" : path)"
-    }
-
-    var body: some View {
-        let urls = urls
-        if !urls.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: LSpace.s) {
-                    ForEach(urls, id: \.absoluteString) { url in
-                        LChip(label(url), icon: "link") { openURL(url) }
-                            .accessibilityLabel("Open link \(url.host() ?? "")")
+                    if resolving {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(p.ok)
+                            .accessibilityHidden(true)
+                        Text("Resolved").ltype(.bodyEmph).foregroundStyle(p.text)
+                    } else {
+                        LAvatar(name: responder, isAI: !responderIsHuman, size: 20)
+                            .accessibilityHidden(true)
+                        Text(responder).ltype(.bodyEmph).foregroundStyle(p.text)
+                        Text(["answered", answeredAgo].compactMap { $0 }.joined(separator: " · "))
+                            .ltype(.meta)
+                            .foregroundStyle(p.muted)
                     }
                 }
+                .accessibilityElement(children: .combine)
+                if !resolving {
+                    LinkedMessageText(text: text, tasks: tasks, onTapTask: onTapTask, portalBase: portalBase, onTapPortal: onTapPortal)
+                        .ltype(.body)
+                        .foregroundStyle(p.text)
+                        .textSelection(.enabled)
+                }
+                actions
             }
         }
     }

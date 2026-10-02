@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import UserNotifications
 
 @main
@@ -30,6 +31,15 @@ struct OrchaApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background, model.notificationsEnabled {
                         NotificationCoordinator.scheduleAppRefresh()
+                    }
+                    if phase == .background {
+                        // Resolves still inside their undo window go out now, with a little
+                        // background time so the request isn't cut off mid-flight.
+                        let bg = UIApplication.shared.beginBackgroundTask(withName: "resolve-flush")
+                        Task {
+                            await ResolveUndoQueue.shared.flushAll()
+                            UIApplication.shared.endBackgroundTask(bg)
+                        }
                     }
                 }
                 .onOpenURL { url in

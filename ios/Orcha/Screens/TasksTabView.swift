@@ -15,6 +15,7 @@ struct TasksTabView: View {
     @State private var shown = TASKS_PAGE
     @State private var verifySheetTask: TaskDto?
     @State private var planSheetTask: TaskDto?
+    @State private var reassignSheetTask: TaskDto?
 
     private static let TASKS_PAGE = 30
 
@@ -37,6 +38,7 @@ struct TasksTabView: View {
         }
         .sheet(item: $verifySheetTask) { VerifySheet(task: $0) }
         .sheet(item: $planSheetTask) { PlanApprovalSheet(task: $0) }
+        .sheet(item: $reassignSheetTask) { ReassignTaskSheet(task: $0) }
     }
 
     // MARK: derived data
@@ -176,6 +178,12 @@ struct TasksTabView: View {
             if isPlanWaiting(task), model.access.canWrite {
                 Button("Review plan", systemImage: "doc.text.magnifyingglass") { planSheetTask = task }
                     .tint(p.accent)
+            }
+        }
+        .swipeActions(edge: .leading) {
+            if ReassignUx.canReassign(task), model.access.canWrite {
+                Button("Reassign", systemImage: "person.crop.circle.badge.arrow.forward") { reassignSheetTask = task }
+                    .tint(p.violet)
             }
         }
     }

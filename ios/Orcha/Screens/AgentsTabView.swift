@@ -5,6 +5,9 @@ import SwiftUI
 struct AgentsTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
+    /// This month's budget verdict per agent id (spend line + "Paused · budget").
+    @State private var budgets: [String: AgentBudgetDto] = [:]
+    @State private var view: AgentsRosterMode = .roster
 
     var body: some View {
         Group {
@@ -15,6 +18,18 @@ struct AgentsTabView: View {
             }
         }
         .background(p.bg)
+        .task(id: model.selectedContainer?.id) {
+            while !Task.isCancelled {
+                await loadBudgets()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
+
+    private func loadBudgets() async {
+        guard let sel = model.selectedContainer,
+              let data = try? await model.api.containerBudgets(sel.baseUrl, sel.id) else { return }
+        budgets = Dictionary(data.agents.compactMap { b in b.agentId.map { ($0, b) } }, uniquingKeysWith: { a, _ in a })
     }
 
     private var content: some View {
@@ -25,25 +40,32 @@ struct AgentsTabView: View {
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: LSpace.xl) {
                 ConnectionBanners()
-                if !ai.isEmpty {
-                    LSection("AI agents", count: ai.count) {
-                        RosterList {
-                            ForEach(ai) { agent in
-                                NavigationLink(value: WorkspaceRoute.agent(agent.id)) {
-                                    AgentRosterRow(agent: agent)
+                if !agents.isEmpty {
+                    LSegmented([(AgentsRosterMode.roster, "Roster"), (.org, "Org")], selection: $view)
+                }
+                if view == .org {
+                    AgentsOrgView(agents: agents, budgets: budgets)
+                } else {
+                    if !ai.isEmpty {
+                        LSection("AI agents", count: ai.count) {
+                            RosterList {
+                                ForEach(ai) { agent in
+                                    NavigationLink(value: WorkspaceRoute.agent(agent.id)) {
+                                        AgentRosterRow(agent: agent, budget: budgets[agent.id])
+                                    }
+                                    .buttonStyle(.plain)
+                                    if agent.id != ai.last?.id { LDivider().padding(.leading, 56) }
                                 }
-                                .buttonStyle(.plain)
-                                if agent.id != ai.last?.id { LDivider().padding(.leading, 56) }
                             }
                         }
                     }
-                }
-                if !humans.isEmpty {
-                    LSection("Humans", count: humans.count) {
-                        RosterList {
-                            ForEach(humans) { human in
-                                HumanRosterRow(human: human)
-                                if human.id != humans.last?.id { LDivider().padding(.leading, 56) }
+                    if !humans.isEmpty {
+                        LSection("Humans", count: humans.count) {
+                            RosterList {
+                                ForEach(humans) { human in
+                                    HumanRosterRow(human: human)
+                                    if human.id != humans.last?.id { LDivider().padding(.leading, 56) }
+                                }
                             }
                         }
                     }
@@ -59,7 +81,7 @@ struct AgentsTabView: View {
             .padding(.horizontal, LSpace.l)
             .padding(.vertical, LSpace.m)
         }
-        .refreshable { await model.refresh() }
+        .refreshable { await model.refresh(); await loadBudgets() }
     }
 }
 
@@ -77,9 +99,10 @@ private struct RosterList<Content: View>: View {
 
 /// AI agent row: avatar (✦ + presence), name, one meta line (current task with its
 /// status glyph, or the role), status capsule.
-private struct AgentRosterRow: View {
+struct AgentRosterRow: View {
     @Environment(\.palette) private var p
     let agent: AgentDto
+    var budget: AgentBudgetDto?
 
     private var dead: Bool { agent.status == "terminated" || agent.terminatedAt != nil }
     private var status: String { dead ? "retired" : (agent.status ?? "idle") }
@@ -98,7 +121,20 @@ private struct AgentRosterRow: View {
                 metaLine
             }
             Spacer(minLength: LSpace.s)
-            AgentStatusCapsule(status: status)
+            VStack(alignment: .trailing, spacing: 4) {
+                if budget?.paused == true {
+                    BudgetPausedCapsule()
+                } else {
+                    AgentStatusCapsule(status: status)
+                }
+                if let budget, let line = AgentBudgetUx.rosterLine(budget) {
+                    Text(line)
+                        .ltype(.micro)
+                        .monospacedDigit()
+                        .foregroundStyle(spendTint(budget))
+                        .lineLimit(1)
+                }
+            }
         }
         .padding(.horizontal, LSpace.m)
         .padding(.vertical, LSpace.m)
@@ -128,8 +164,18 @@ private struct AgentRosterRow: View {
         }
     }
 
+    private func spendTint(_ b: AgentBudgetDto) -> Color {
+        switch AgentBudgetUx.tone(AgentBudgetUx.worstRatio(b)) {
+        case .ok: p.faint
+        case .warn: p.warn
+        case .over: p.danger
+        }
+    }
+
     private var accessibilityText: String {
         var parts = [agent.alias, "AI agent", AgentStatusCapsule.label(for: status)]
+        if budget?.paused == true { parts.append("paused by budget") }
+        if let budget, let line = AgentBudgetUx.rosterLine(budget) { parts.append("spend \(line)") }
         if agent.status == "working", let title = currentTitle { parts.append("working on \(title)") }
         else if let role = agent.role { parts.append(role) }
         return parts.joined(separator: ", ")

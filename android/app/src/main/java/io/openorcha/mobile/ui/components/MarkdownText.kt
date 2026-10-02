@@ -37,6 +37,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.platform.LocalUriHandler
+import io.openorcha.mobile.domain.PortalLinks
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.openorcha.mobile.data.TaskDto
@@ -126,10 +128,21 @@ private fun InlineText(spans: List<MdSpan>, color: androidx.compose.ui.graphics.
 @Composable
 private fun annotate(spans: List<MdSpan>, linker: TaskLinker? = null): AnnotatedString {
     val p = Orcha.palette
+    val handler = LocalPortalLinkHandler.current
+    val uri = LocalUriHandler.current
+    val onOpenTask = linker?.onOpenTask
+    val tasks = linker?.tasks.orEmpty()
+    val chipStyle = portalChipStyles(p.accent, p.surface2)
     return buildAnnotatedString {
-        val plain = spans.joinToString("") { it.text }
+        // Task refs are matched against the text as rendered (chips replace portal paths).
         spans.forEach { s ->
+            val portalLink = s.link?.let { PortalLinks.find(it, handler?.baseUrl, tasks).singleOrNull()?.takeIf { m -> m.range.first == 0 && m.range.last == it.length - 1 } }
             when {
+                portalLink != null -> withLink(
+                    LinkAnnotation.Clickable("md-portal-$length", TextLinkStyles(SpanStyle(color = p.accent))) {
+                        openPortalTarget(portalLink.target, portalLink.path, handler, onOpenTask, uri)
+                    },
+                ) { append(s.text) }
                 s.link != null -> withLink(
                     LinkAnnotation.Url(
                         s.link,
@@ -145,9 +158,23 @@ private fun annotate(spans: List<MdSpan>, linker: TaskLinker? = null): Annotated
                         fontStyle = if (s.italic) FontStyle.Italic else null,
                         color = if (s.bold) p.text else androidx.compose.ui.graphics.Color.Unspecified,
                     ),
-                ) { append(s.text) }
+                ) {
+                    // Portal paths in prose become labelled link chips (web lib/format.ts).
+                    var cursor = 0
+                    PortalLinks.find(s.text, handler?.baseUrl, tasks).forEach { m ->
+                        append(s.text.substring(cursor, m.range.first))
+                        withLink(
+                            LinkAnnotation.Clickable("md-portal-$length", chipStyle) {
+                                openPortalTarget(m.target, m.path, handler, onOpenTask, uri)
+                            },
+                        ) { append(PORTAL_CHIP_PREFIX + m.label) }
+                        cursor = m.range.last + 1
+                    }
+                    append(s.text.substring(cursor))
+                }
             }
         }
+        val plain = toAnnotatedString().text
         linker?.let { l ->
             OrchaSelectors.taskRefMatches(plain, l.tasks).forEach { m ->
                 addLink(

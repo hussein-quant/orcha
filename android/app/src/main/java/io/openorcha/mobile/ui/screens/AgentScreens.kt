@@ -103,6 +103,7 @@ fun AgentDetailScreen(
     onOpenTask: (String) -> Unit,
     onOpenRun: (RunDto) -> Unit,
     onOpenRequests: () -> Unit,
+    onOpenAgent: ((String) -> Unit)? = null,
 ) {
     val p = Orcha.palette
     val agent = state.selectedAgent
@@ -171,6 +172,7 @@ fun AgentDetailScreen(
                 onOpenRun = onOpenRun,
                 onOpenRequests = onOpenRequests,
                 onConversation = onConversation,
+                onOpenAgent = onOpenAgent,
             )
         }
     }

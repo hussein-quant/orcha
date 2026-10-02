@@ -75,6 +75,7 @@ internal fun LazyListScope.AgentDetailContent(
     onOpenRun: (RunDto) -> Unit,
     onOpenRequests: () -> Unit,
     onConversation: (String) -> Unit,
+    onOpenAgent: ((String) -> Unit)? = null,
 ) {
     val p = palette
     if (dead) {
@@ -204,6 +205,18 @@ internal fun LazyListScope.AgentDetailContent(
                 }
             }
         }
+    }
+    // Budget (month spend vs limit, hard stop, one-time override) + org chart line
+    val baseUrl = state.selectedContainer?.baseUrl
+    if (baseUrl != null && agent.kind == "ai" && !dead) {
+        item(key = "agent-budget") {
+            val me = state.selectedContainer?.humanAgentId
+            val myRole = state.snapshot?.agents?.firstOrNull { it.id == me }?.memberRole
+            AgentBudgetSection(baseUrl, agent.id, agent.alias, actorId = me, memberRole = myRole)
+        }
+    }
+    if (baseUrl != null) {
+        item(key = "agent-reports-to") { AgentReportsToSection(baseUrl, agent.id, onOpenAgent) }
     }
     // persona — collapsed preview; expanding shows the full system prompt (flow 09 §6)
     val personaFull = state.agentExtras.persona?.systemPrompt

@@ -108,6 +108,12 @@ fun RunDetailScreen(
                     }
                 }
             }
+            // Live changes while the agent works (polled; a finished run's changes read once)
+            val changesBase = state.selectedContainer?.baseUrl
+            val changesAgent = run?.agentId ?: state.selectedAgent?.id
+            if (run != null && changesBase != null && changesAgent != null) {
+                RunChangesBar(changesBase, changesAgent, run.runId, running = run.status == "running")
+            }
             state.runStreamNote?.let { Text(it, style = ltype(LType.Meta), color = p.faint) }
             LCard(Modifier.weight(1f)) {
                 if (state.runFeed.isEmpty()) {

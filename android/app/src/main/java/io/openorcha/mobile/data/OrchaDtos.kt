@@ -128,6 +128,12 @@ data class TaskDto(
     @Serializable(with = FlexiblePlanDecisionSerializer::class)
     val planDecision: String? = null,
     @SerialName("depends_on") val dependsOn: List<String> = emptyList(),
+    /** Collab v1: the assigned human reviewer (null = anyone). Shapes in DtosTask.kt. */
+    @SerialName("reviewer_agent_id") val reviewerAgentId: String? = null,
+    /** mig 057: how the reviewer was chosen (manager chain / owner / fallback). */
+    @SerialName("review_routing") val reviewRouting: ReviewRoutingDto? = null,
+    /** mig 057: the AI manager's advisory pre-review (a human still verifies). */
+    @SerialName("manager_review") val managerReview: ManagerReviewDto? = null,
 )
 
 @Serializable

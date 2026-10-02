@@ -29,6 +29,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import io.openorcha.mobile.data.InboxApi
+import io.openorcha.mobile.data.InboxMembersResponse
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -125,17 +133,46 @@ fun SettingsScreen(
     // Execution (Notifier & autonomy) — the same human actions the workspace sheet uses.
     onSetWakes: ((Boolean) -> Unit)? = null,
     onSetAutonomy: ((String) -> Unit)? = null,
+    // Routines history rows open the created task (optional).
+    onOpenTask: ((String) -> Unit)? = null,
+    // After Connect repo saves, so the caller can refresh the snapshot (optional).
+    onRepoChanged: (String?) -> Unit = {},
 ) {
     val p = Orcha.palette
     val context = LocalContext.current
     var remoteDialogFor by remember { mutableStateOf<ServerGroup?>(null) }
     var tokenDialogFor by remember { mutableStateOf<ServerGroup?>(null) }
     var showExecution by remember { mutableStateOf(false) }
+    var showConnectRepo by remember { mutableStateOf(false) }
+    var subPage by rememberSaveable { mutableStateOf<String?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val selected = state.selectedContainer
     val snapshot = state.snapshot
+    // Synced prefs (iOS AppModel.syncPrefs): server theme/skin win when the server keeps prefs.
+    val syncedTheme: (ThemeMode) -> Unit = { mode -> onTheme(mode); InboxPrefsSync.push(selected?.baseUrl, mode, state.skinMode) }
+    val syncedSkin: (SkinMode) -> Unit = { skin -> onSkin(skin); InboxPrefsSync.push(selected?.baseUrl, state.themeMode, skin) }
+    LaunchedEffect(selected?.baseUrl) {
+        val base = selected?.baseUrl ?: return@LaunchedEffect
+        InboxPrefsSync.pull(base, state.themeMode, state.skinMode, onTheme, onSkin)
+    }
+    var members by remember(selected?.id) { mutableStateOf<InboxMembersResponse?>(null) }
+    LaunchedEffect(selected?.id) {
+        val sel = selected ?: return@LaunchedEffect
+        members = runCatching { InboxApi.members(sel.baseUrl, sel.id) }.getOrNull()
+    }
+    if (selected != null && subPage == "notifications") {
+        InboxNotificationPrefsScreen(selected, onBack = { subPage = null })
+        return
+    }
+    if (selected != null && subPage == "routines") {
+        InboxRoutinesScreen(selected, onBack = { subPage = null }, onOpenTask = onOpenTask)
+        return
+    }
 
     Scaffold(
         containerColor = p.bg,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             Column {
                 CenterAlignedTopAppBar(
@@ -190,12 +227,38 @@ fun SettingsScreen(
                                         TrailingValue(executionSummary(wakes, snapshot.container.autonomyLevel), chevron = true)
                                     },
                                 )
+                                LDivider()
+                                LRow(
+                                    title = "Routines",
+                                    subtitle = "Recurring work on a schedule",
+                                    onClick = { subPage = "routines" },
+                                    leading = { RowIcon(OrchaIcons.Schedule) },
+                                    trailing = { TrailingValue("", chevron = true) },
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        val bound = InboxRepoBinding.bound(selected.id, snapshot.container.githubRepo)
+                        LSection("GitHub") {
+                            RowsCard {
+                                LRow(
+                                    title = "Repository",
+                                    subtitle = if (bound == null) "Connect a repo to start work from issues and PRs" else null,
+                                    onClick = { showConnectRepo = true },
+                                    leading = { RowIcon(OrchaIcons.GitHub, tint = if (bound != null) p.accent else null) },
+                                    trailing = { TrailingValue(bound ?: "Connect repo", chevron = true, mono = bound != null) },
+                                )
                             }
                         }
                     }
                 }
                 item { GroupHeader("Access") }
-                val humans = snapshot?.agents.orEmpty().filter { it.kind == "human" && it.terminatedAt == null }
+                val roster = members
+                if (roster != null) {
+                    item { InboxMembersSection(roster, selected.humanAgentId) }
+                }
+                val humans = if (roster != null) emptyList() else snapshot?.agents.orEmpty().filter { it.kind == "human" && it.terminatedAt == null }
                 if (humans.isNotEmpty()) {
                     item {
                         LSection("Members", count = humans.size) {
@@ -259,7 +322,7 @@ fun SettingsScreen(
             item {
                 LSection("Appearance") {
                     LCard {
-                        LSegmented(THEME_OPTIONS, state.themeMode, onTheme)
+                        LSegmented(THEME_OPTIONS, state.themeMode, syncedTheme)
                         Text(
                             "System follows your phone's setting. Changes apply instantly.",
                             style = ltype(LType.Meta), color = p.muted,
@@ -271,9 +334,19 @@ fun SettingsScreen(
             item {
                 LSection("Notifications") {
                     RowsCard {
+                        if (selected != null) {
+                            LRow(
+                                title = "Notification settings",
+                                subtitle = "What reaches you, where — pause, mute and quiet hours",
+                                onClick = { subPage = "notifications" },
+                                leading = { RowIcon(OrchaIcons.Inbox) },
+                                trailing = { TrailingValue("", chevron = true) },
+                            )
+                            LDivider()
+                        }
                         LRow(
-                            title = "Needs-you alerts",
-                            subtitle = "Plans, verifications and requests waiting on you",
+                            title = "System notification settings",
+                            subtitle = "Sounds and banners for Quorate on this phone",
                             onClick = {
                                 runCatching {
                                     context.startActivity(
@@ -283,8 +356,8 @@ fun SettingsScreen(
                                     )
                                 }
                             },
-                            leading = { RowIcon(OrchaIcons.Inbox) },
-                            trailing = { TrailingValue("System", chevron = true) },
+                            leading = { RowIcon(OrchaIcons.Settings) },
+                            trailing = { Icon(OrchaIcons.OpenInNew, null, tint = p.faint, modifier = Modifier.size(16.dp)) },
                         )
                     }
                 }
@@ -292,7 +365,7 @@ fun SettingsScreen(
             item {
                 LSection("Interface") {
                     LCard {
-                        LSegmented(SKIN_OPTIONS, state.skinMode, onSkin)
+                        LSegmented(SKIN_OPTIONS, state.skinMode, syncedSkin)
                         Text(
                             state.skinMode.blurb, style = ltype(LType.Meta), color = p.muted,
                             modifier = Modifier.padding(top = LSpace.m),
@@ -316,6 +389,16 @@ fun SettingsScreen(
             onDismiss = { showExecution = false },
             onSetWakes = { onSetWakes?.invoke(it) },
             onSetAutonomy = { onSetAutonomy?.invoke(it) },
+        )
+    }
+    if (showConnectRepo && selected != null) {
+        InboxConnectRepoHost(
+            state = state,
+            onDismiss = { showConnectRepo = false },
+            onSaved = { repo ->
+                onRepoChanged(repo)
+                scope.launch { snackbar.showSnackbar(repo?.let { "Repo connected — $it" } ?: "Repo unbound") }
+            },
         )
     }
     remoteDialogFor?.let { g ->
