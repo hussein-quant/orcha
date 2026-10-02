@@ -57,6 +57,7 @@ from portal_backend import (
     orphan_lease_routes,
     persona_protocol_routes,
     plan_routes,
+    plan_usage_routes,  # desktop plan-usage snapshots for mobile (mig 069)
     project_export_library_routes,  # DoD presets + skills library (mig 059)
     project_export_routes,  # portable project templates (mig 059)
     provider_key_routes,
@@ -153,6 +154,7 @@ ROUTE_MODULES = (
     orphan_lease_routes,
     persona_protocol_routes,
     plan_routes,
+    plan_usage_routes,  # desktop plan-usage snapshots for mobile (mig 069)
     project_export_library_routes,  # DoD presets + skills library (mig 059)
     project_export_routes,  # portable project templates (mig 059)
     provider_key_routes,

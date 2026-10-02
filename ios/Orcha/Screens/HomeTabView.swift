@@ -7,10 +7,13 @@ struct HomeTabView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
     @Binding var showCreateTask: Bool
+    @Binding var showMetrics: Bool
     @State private var planSheetTask: TaskDto?
     @State private var verifySheetTask: TaskDto?
     @State private var showRepoConnect = false
     @State private var showObjectiveEditor = false
+    @State private var usage: MetricsSummaryDto?
+    @State private var usageLoaded = false
 
     var body: some View {
         Group {
@@ -40,6 +43,24 @@ struct HomeTabView: View {
         .sheet(isPresented: $showObjectiveEditor) {
             ObjectiveEditorSheet(current: model.snapshot?.container.description ?? "")
         }
+        .task(id: model.selectedContainer?.id) {
+            usage = nil
+            usageLoaded = false
+            await loadUsage()
+        }
+    }
+
+    /// `GET …/metrics?days=7` for the "This week" card; any failure reads as no runs.
+    private func loadUsage() async {
+        guard let sel = model.selectedContainer else { usageLoaded = true; return }
+        do {
+            usage = try await model.api.metricsSummary(sel.baseUrl, sel.id, days: 7)
+        } catch is CancellationError {
+            return
+        } catch {
+            usage = nil
+        }
+        usageLoaded = true
     }
 
     private var skeleton: some View {
@@ -84,6 +105,7 @@ struct HomeTabView: View {
                         onConnectRepo: { showRepoConnect = true },
                         onEditObjective: { showObjectiveEditor = true }
                     )
+                    HomeUsageCard(summary: usage, loaded: usageLoaded) { showMetrics = true }
                     if let cu = model.catchUp {
                         CatchUpCard(
                             previous: cu.previous,
@@ -167,7 +189,11 @@ struct HomeTabView: View {
             .padding(.horizontal, LSpace.l)
             .padding(.vertical, LSpace.m)
         }
-        .refreshable { await model.refresh() }
+        .refreshable {
+            async let snapshot: Void = model.refresh()
+            async let week: Void = loadUsage()
+            _ = await (snapshot, week)
+        }
     }
 }
 

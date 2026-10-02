@@ -12,6 +12,9 @@ struct ContainersHomeScreen: View {
     @State private var renaming: StoredContainer?
     @State private var newName = ""
     @State private var disconnecting: StoredContainer?
+    @State private var showPlanUsage = false
+
+    private var pairedBases: [String] { Array(Set(model.containers.map(\.baseUrl))).sorted() }
 
     var body: some View {
         NavigationStack {
@@ -36,7 +39,20 @@ struct ContainersHomeScreen: View {
             .background(p.bg)
         }
         .task { model.probeContainers() }
-        .refreshable { model.probeContainers() }
+        // Plan usage: read now, then every 2 minutes while the Projects screen is visible.
+        .task(id: pairedBases) {
+            while !Task.isCancelled {
+                await model.planUsage.refresh(bases: pairedBases)
+                try? await Task.sleep(for: PlanUsageUx.pollInterval)
+            }
+        }
+        .refreshable {
+            model.probeContainers()
+            await model.planUsage.refresh(bases: pairedBases)
+        }
+        .sheet(isPresented: $showPlanUsage) {
+            PlanUsageSheet()
+        }
         .fullScreenCover(isPresented: $showScanner) {
             ScannerScreen(
                 onManualEntry: {
@@ -105,6 +121,11 @@ struct ContainersHomeScreen: View {
     private var containerList: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: LSpace.m) {
+                PlanUsageCard(
+                    providers: model.planUsage.providers,
+                    loaded: model.planUsage.loaded,
+                    onOpen: { showPlanUsage = true }
+                )
                 LSection("All projects", count: model.containers.count) {
                     LCard(padding: 0) {
                         VStack(spacing: 0) {

@@ -83,6 +83,7 @@ fun WorkspaceScreen(
     var planSheetTask by remember { mutableStateOf<TaskDto?>(null) }
     var verifySheetTask by remember { mutableStateOf<TaskDto?>(null) }
     var controlsSheetOpen by remember { mutableStateOf(false) }
+    var metricsOpen by remember { mutableStateOf(false) }
 
     val dotState = workspaceDotState(snapshot != null, state.loading, containerPaused)
     val running = !containerPaused && wakesEnabled
@@ -107,6 +108,7 @@ fun WorkspaceScreen(
                 onCreateTask = onCreateTask,
                 onSettings = onSettings,
                 onDisconnect = onForget,
+                onOpenMetrics = { metricsOpen = true },
             )
         },
         bottomBar = {
@@ -169,6 +171,7 @@ fun WorkspaceScreen(
                         onOpenTask, onOpenRequest, onOpenAgent, onTab,
                         onPlanSheet = { planSheetTask = it }, onVerifySheet = { verifySheetTask = it },
                         onOpenGithubHub = onOpenGithubHub,
+                        onOpenMetrics = { metricsOpen = true },
                     )
                     WorkspaceTab.Tasks -> TasksTab(snapshot.tasks, snapshot.agents, onOpenTask, container = state.selectedContainer, onTaskChanged = onRefresh)
                     WorkspaceTab.Requests -> RequestsTab(snapshot.requests, snapshot.agents, humanId, onOpenRequest)
@@ -188,6 +191,12 @@ fun WorkspaceScreen(
         }
     }
 
+    selected?.takeIf { metricsOpen }?.let { sel ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { metricsOpen = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) { ProjectMetricsScreen(sel, onBack = { metricsOpen = false }) }
+    }
     planSheetTask?.let { task ->
         PlanApprovalSheet(
             task = task,

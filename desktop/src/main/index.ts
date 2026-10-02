@@ -16,6 +16,7 @@ import { shouldShowAttention } from './notifyPrefs'
 import { createTray, type TrayController } from './tray'
 import { AppStatsLedger, parseStatsFile } from './usage/appStats'
 import { UsageService } from './usage/service'
+import { createPlanUsagePublisher } from './usage/planUsagePublisher'
 import { createScanClient, readClaudeCredentials, readUsagePrefsFile, writeUsagePrefsFile } from './usage/usageHost'
 import { formatResetIn, peakWindow, trayUsageTitle, USAGE_CHANNELS, type UsageSnapshot } from '../shared/usage'
 import { buildStatus, writeStatusFile } from './statusFile'
@@ -1023,7 +1024,17 @@ function createPopoverWindow(): BrowserWindow {
 }
 
 /** Push a usage snapshot to the manager, the tray popovers and the menu-bar title. */
+/** Mirrors the Usage panel's plan limits to each running portal for the mobile apps
+ *  (portal mig 069). Throttled per portal, fire-and-forget, never blocks the UI. */
+const planUsagePublisher = createPlanUsagePublisher({
+  listStacks: () => listStacks(),
+  fetch: (input, init) => fetch(input, init),
+  host: () => os.hostname(),
+  now: () => Date.now()
+})
+
 function publishUsage(snap: UsageSnapshot): void {
+  void planUsagePublisher.publish(snap)
   sendToManager(USAGE_CHANNELS.changed, snap)
   for (const w of popoverWindows) if (!w.isDestroyed()) w.webContents.send(USAGE_CHANNELS.changed, snap)
   const now = Date.now()

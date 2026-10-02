@@ -76,6 +76,8 @@ internal fun HomeTab(
     onPlanSheet: (TaskDto) -> Unit,
     onVerifySheet: (TaskDto) -> Unit,
     onOpenGithubHub: () -> Unit = {},
+    /** Opens Metrics & usage (the usage card under the header). */
+    onOpenMetrics: () -> Unit = {},
 ) {
     val snapshot = state.snapshot ?: return
     val needsCount = planApprovals.size + verifications.size + requestsForMe.size
@@ -100,6 +102,10 @@ internal fun HomeTab(
                 onRepo = { if (repo == null && state.selectedContainer != null) connectRepo = true else onOpenGithubHub() },
             )
             if (connectRepo) InboxConnectRepoHost(state, onDismiss = { connectRepo = false })
+            state.selectedContainer?.let { c ->
+                Spacer(Modifier.height(LSpace.m))
+                HomeUsageCard(c, refreshing = state.loading, onOpen = onOpenMetrics)
+            }
             HomeObjectiveEditor(state)
         }
 

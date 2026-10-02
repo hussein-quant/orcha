@@ -106,17 +106,12 @@ internal fun WorkspaceTopBar(
     onDisconnect: () -> Unit,
     /** D14 project icons by container id (null / absent = the default glyph). */
     icons: Map<String, io.openorcha.mobile.domain.ProjectIconValue?> = emptyMap(),
+    /** Opens Metrics & usage (hosted by WorkspaceScreen so the Home usage card shares it). */
+    onOpenMetrics: () -> Unit = {},
 ) {
     val p = Orcha.palette
     var switcherOpen by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
-    var metricsOpen by remember { mutableStateOf(false) }
-    containers.firstOrNull { it.id == selectedId }?.takeIf { metricsOpen }?.let { sel ->
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { metricsOpen = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-        ) { ProjectMetricsScreen(sel, onBack = { metricsOpen = false }) }
-    }
     Column(Modifier.fillMaxWidth().background(p.bg).statusBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = LSpace.xs),
@@ -203,7 +198,7 @@ internal fun WorkspaceTopBar(
                         DropdownMenuItem(
                             text = { Text("Metrics & usage", style = ltype(LType.Body), color = p.text) },
                             leadingIcon = { Icon(OrchaIcons.Verified, null, tint = p.muted, modifier = Modifier.size(16.dp)) },
-                            onClick = { menuOpen = false; metricsOpen = true },
+                            onClick = { menuOpen = false; onOpenMetrics() },
                         )
                     }
                     DropdownMenuItem(

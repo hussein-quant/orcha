@@ -85,7 +85,7 @@ struct WorkspaceScreen: View {
         @Bindable var model = model
         return TabView(selection: $model.selectedTab) {
             Tab("Home", systemImage: "house", value: WorkspaceTab.home) {
-                workspaceTab(path: $model.homePath) { HomeTabView(showCreateTask: $showCreateTask) }
+                workspaceTab(path: $model.homePath) { HomeTabView(showCreateTask: $showCreateTask, showMetrics: $showMetrics) }
             }
             .badge(needsYouCount)
 
@@ -111,7 +111,7 @@ struct WorkspaceScreen: View {
     private var legacyTabs: some View {
         @Bindable var model = model
         return TabView(selection: $model.selectedTab) {
-            workspaceTab(path: $model.homePath) { HomeTabView(showCreateTask: $showCreateTask) }
+            workspaceTab(path: $model.homePath) { HomeTabView(showCreateTask: $showCreateTask, showMetrics: $showMetrics) }
                 .tabItem { Label("Home", systemImage: "house") }
                 .badge(needsYouCount)
                 .tag(WorkspaceTab.home)

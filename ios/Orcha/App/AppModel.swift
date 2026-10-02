@@ -49,6 +49,8 @@ final class AppModel {
     // `internal` (not `private`): the per-feature `AppModel+*` extensions live in their
     // own files and drive their loads through this same client (github hub).
     let api = OrchaApiClient()
+    /// Desktop-published Claude / Codex plan limits (Projects card, Settings › Plan usage).
+    let planUsage = PlanUsageModel()
     private let webAuth = WebAuthSession()
     private var pollTask: Task<Void, Never>?
     /// Issue 3 — the live run-log collector; cancelled on leaving RunDetailScreen.

@@ -30,6 +30,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +65,7 @@ import io.openorcha.mobile.ui.components.OrchaField
 import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContainersHomeScreen(
     state: OrchaUiState,
@@ -75,6 +78,11 @@ fun ContainersHomeScreen(
     onSettings: () -> Unit,
 ) {
     val p = Orcha.palette
+    // Plan usage (desktop Usage panel parity): read from every paired portal, polled while visible.
+    val planUsage = rememberPlanUsage(state.containers.map { it.baseUrl })
+    var showPlanUsage by remember { mutableStateOf(false) }
+    val refreshAll = { onRefresh(); planUsage.refresh() }
+    if (showPlanUsage) PlanUsageSheet(planUsage, onDismiss = { showPlanUsage = false })
     Scaffold(
         containerColor = p.bg,
         topBar = {
@@ -89,7 +97,7 @@ fun ContainersHomeScreen(
                         color = p.text,
                         modifier = Modifier.weight(1f).semantics { heading() },
                     )
-                    IconButton(onClick = onRefresh) { Icon(OrchaIcons.Refresh, "Refresh", tint = p.text2) }
+                    IconButton(onClick = refreshAll) { Icon(OrchaIcons.Refresh, "Refresh", tint = p.text2) }
                     IconButton(onClick = onSettings) { Icon(OrchaIcons.Settings, "Settings", tint = p.text2) }
                     IconButton(onClick = onScan) { Icon(OrchaIcons.Add, "Add project", tint = p.accent) }
                 }
@@ -100,11 +108,17 @@ fun ContainersHomeScreen(
         if (state.containers.isEmpty()) {
             PairingEmptyState(onScan = onScan, onAdd = onAdd, modifier = Modifier.padding(padding))
         } else {
-            LazyColumn(
+            PullToRefreshBox(
+                isRefreshing = planUsage.refreshing,
+                onRefresh = refreshAll,
                 modifier = Modifier.fillMaxSize().padding(padding),
+            ) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = LSpace.l, vertical = LSpace.m),
                 verticalArrangement = Arrangement.spacedBy(LSpace.m),
             ) {
+                item(key = "plan-usage") { PlanUsageCard(planUsage, onOpen = { showPlanUsage = true }) }
                 item(key = "projects") {
                     LSection("All projects", count = state.containers.size) {
                         LCard(padding = 0.dp) {
@@ -129,6 +143,7 @@ fun ContainersHomeScreen(
                         modifier = Modifier.padding(horizontal = LSpace.xs),
                     )
                 }
+            }
             }
         }
     }

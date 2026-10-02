@@ -150,6 +150,11 @@ fun SettingsScreen(
     // Optimistic local copy so the row repaints before the snapshot refresh lands.
     var savedIcon by remember(state.selectedContainer?.id) { mutableStateOf<Pair<Boolean, io.openorcha.mobile.domain.ProjectIconValue?>>(false to null) }
     var subPage by rememberSaveable { mutableStateOf<String?>(null) }
+    var showPlanUsage by remember { mutableStateOf(false) }
+    if (showPlanUsage) {
+        val planUsage = rememberPlanUsage(state.containers.map { it.baseUrl })
+        PlanUsageSheet(planUsage, onDismiss = { showPlanUsage = false })
+    }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val selected = state.selectedContainer
@@ -356,6 +361,20 @@ fun SettingsScreen(
             state.error?.let { item { Banner(BannerKind.Danger, it) } }
 
             item { GroupHeader("Personal") }
+            item {
+                // Plan usage (desktop Usage panel parity) — Claude and Codex plan limits.
+                LSection("Plan usage") {
+                    RowsCard {
+                        LRow(
+                            title = "Plan usage",
+                            subtitle = "Claude and Codex limits from the Quorate desktop app",
+                            onClick = { showPlanUsage = true },
+                            leading = { RowIcon(OrchaIcons.Schedule) },
+                            trailing = { TrailingValue("", chevron = true) },
+                        )
+                    }
+                }
+            }
             item {
                 LSection("Appearance") {
                     LCard {

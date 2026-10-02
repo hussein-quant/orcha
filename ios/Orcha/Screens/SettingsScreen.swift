@@ -27,6 +27,7 @@ struct SettingsScreen: View {
                         }
                         containersSection
                         groupHeader("Personal")
+                        planUsageSection
                         appearanceSection
                         notificationsSection
                         interfaceSection
@@ -219,6 +220,30 @@ struct SettingsScreen: View {
 
     private var executionTint: Color {
         (model.snapshot?.container.wakesEnabled ?? true) ? p.ok : p.warn
+    }
+
+    // MARK: Personal → Plan usage
+
+    private var planUsageSection: some View {
+        LSection("Usage") {
+            rowsCard {
+                NavigationLink {
+                    OrchaThemed(mode: model.themeMode, skin: model.skinMode) { PlanUsageScreen() }
+                } label: {
+                    LRow(title: "Plan usage", subtitle: "Claude and Codex limits from your desktop") {
+                        rowIcon("gauge.with.dots.needle.33percent")
+                    } trailing: {
+                        HStack(spacing: 6) {
+                            if let overall = PlanUsageUx.overallPercent(model.planUsage.providers) {
+                                Text("\(overall)%").monospacedDigit()
+                            }
+                            chevron()
+                        }
+                    }
+                }
+                .buttonStyle(.lRow)
+            }
+        }
     }
 
     // MARK: Personal → Appearance
