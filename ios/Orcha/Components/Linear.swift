@@ -408,7 +408,10 @@ struct LButton: View {
                 Text(title)
                     .ltype(size == .small ? .meta : .bodyEmph)
                     .fontWeight(.medium)
-                    .lineLimit(1)
+                    // Large Dynamic Type: shrink slightly, then wrap, instead of "Acc…".
+                    .lineLimit(1...2)
+                    .minimumScaleFactor(0.85)
+                    .multilineTextAlignment(.center)
             }
         }
         .buttonStyle(LButtonStyle(kind: kind, size: size))
@@ -590,7 +593,7 @@ struct LSearchField: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(p.faint)
-                        .frame(width: 32, height: 32)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -682,7 +685,8 @@ struct LAvatar: View {
         guard let s = status?.lowercased(), !s.isEmpty else { return nil }
         switch s {
         case "online", "active", "working", "busy", "running", "live", "in_progress": return p.ok
-        case "idle", "away", "waiting", "paused": return p.warn
+        // Same meaning as the status pill: waiting (on a request or on you) is warn, idle is quiet.
+        case "waiting", "paused", "awaiting_request", "awaiting_human": return p.warn
         case "error", "failed", "blocked", "stuck": return p.danger
         default: return p.faint
         }

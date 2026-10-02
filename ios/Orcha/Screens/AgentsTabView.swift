@@ -200,7 +200,8 @@ struct AgentStatusCapsule: View {
     private var tint: Color {
         switch status {
         case "working": p.accent
-        case "waiting", "blocked": p.warn
+        // Matches the web StatusIcon and Android: waiting on a request or on you reads as warn.
+        case "waiting", "blocked", "awaiting_request", "awaiting_human": p.warn
         case "retired", "terminated", "offline": p.faint
         default: p.muted
         }

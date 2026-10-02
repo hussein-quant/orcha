@@ -36,6 +36,7 @@ import io.openorcha.mobile.ui.components.LinkifiedText
 import io.openorcha.mobile.ui.components.MarkdownText
 import io.openorcha.mobile.ui.components.ltype
 import io.openorcha.mobile.ui.components.pulseAlpha
+import io.openorcha.mobile.ui.components.pulsing
 import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.Orcha
 
@@ -77,7 +78,7 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.chatSendFlowItems(
                 if (sendFlow.isFirstTurn) "Waking ${agentAlias ?: "the agent"} — a cold start can take a minute…" else "${agentAlias ?: "The agent"} is replying…",
                 style = ltype(LType.Meta),
                 color = Orcha.palette.muted,
-                modifier = Modifier.alpha(pulseAlpha()),
+                modifier = Modifier.pulsing(),
             )
         }
     }

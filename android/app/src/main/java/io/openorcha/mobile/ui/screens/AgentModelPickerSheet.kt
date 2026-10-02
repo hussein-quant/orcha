@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -113,7 +114,7 @@ fun ModelPickerSheet(
 ) {
     val p = Orcha.palette
     var picked by remember { mutableStateOf(current) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.statusBarsPadding(), sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
         Column(
             Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp).padding(bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(LSpace.m),

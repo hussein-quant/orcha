@@ -315,9 +315,9 @@ struct ManualConnectSheet: View {
                 PairingStepper(current: model.connectNeedsToken ? .signIn : .address)
                 VStack(alignment: .leading, spacing: LSpace.m) {
                     PairingStepCard(number: 1, title: "Scan the QR", detail: "Open your portal → Settings → Devices and pairing → Pair phone. Scanning fills this in for you.")
-                    PairingStepCard(number: 2, title: "Or enter the address", detail: "For a cloud deployment that's the portal domain, like orcha.yourteam.com.")
+                    PairingStepCard(number: 2, title: "Or enter the address", detail: "For a cloud deployment that's the portal domain, like quorate.yourteam.com.")
                     VStack(spacing: LSpace.s) {
-                        TextField("Address or QR payload", text: $address, prompt: Text("orcha.yourteam.com"), axis: .vertical)
+                        TextField("Address or QR payload", text: $address, prompt: Text("quorate.yourteam.com"), axis: .vertical)
                             .lineLimit(1...5)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()

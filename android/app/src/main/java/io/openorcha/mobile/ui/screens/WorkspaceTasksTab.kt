@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -103,31 +104,45 @@ internal fun TasksTab(tasks: List<TaskDto>, agents: List<AgentDto>, onOpenTask: 
     var shown by rememberSaveable { mutableStateOf(TASKS_PAGE) }
     var lensOpen by rememberSaveable { mutableStateOf(false) }
     val aiAgents = agents.filter { it.kind == "ai" }
-    LaunchedEffect(filter, query, scopeName) { shown = TASKS_PAGE }
+    // Reset paging only when the filters really change, not on the first run after a rotation.
+    var pagedFor by rememberSaveable { mutableStateOf("$filter|$query|$scopeName") }
+    LaunchedEffect(filter, query, scopeName) {
+        val key = "$filter|$query|$scopeName"
+        if (key != pagedFor) { pagedFor = key; shown = TASKS_PAGE }
+    }
+    // The Done pill would otherwise open on two collapsed headers and look empty.
+    LaunchedEffect(scopeName) {
+        if (scope == TaskScope.Done) collapsed = collapsed - setOf("completed", "cancelled")
+    }
 
-    val lensScoped = when (filter) {
-        "All" -> tasks
-        "Needs me" -> MobileUx.needsMe(tasks)
-        else -> tasks.filter { it.assignees.contains(filter) || it.ownerAlias == filter }
+    // Filtering, counting and sorting run only when their inputs change, not on every recomposition.
+    val derived = remember(tasks, filter, query, scope, shown) {
+        val lensScoped = when (filter) {
+            "All" -> tasks
+            "Needs me" -> MobileUx.needsMe(tasks)
+            else -> tasks.filter { it.assignees.contains(filter) || it.ownerAlias == filter }
+        }
+        val lensed = if (query.isBlank()) lensScoped else lensScoped.filter {
+            it.title.contains(query, ignoreCase = true) ||
+                (it.description ?: "").contains(query, ignoreCase = true) ||
+                it.id.contains(query, ignoreCase = true)
+        }
+        val counts = lensed.groupingBy { TaskScope.of(it.status) }.eachCount()
+        val filtered = if (scope == TaskScope.All) lensed else lensed.filter { TaskScope.of(it.status) == scope }
+        // issue 4: cap the flat status/priority-ordered list, then group that slice (web mechanism)
+        val ordered = filtered.sortedWith(
+            compareBy<TaskDto> { MobileUx.taskGroupRank(it.status) }
+                .thenBy { it.priority ?: 100 }
+                .thenByDescending { it.createdAt ?: "" },
+        )
+        val visible = ordered.take(shown)
+        val groups = visible.groupBy { it.status }.toList().sortedBy { MobileUx.taskGroupRank(it.first) }
+        val options = TaskScope.entries.map { s ->
+            s to "${s.label} ${if (s == TaskScope.All) lensed.size else counts[s] ?: 0}"
+        }
+        TasksDerived(lensed.size, filtered.isEmpty(), visible.size, ordered.size, groups, options)
     }
-    val lensed = if (query.isBlank()) lensScoped else lensScoped.filter {
-        it.title.contains(query, ignoreCase = true) ||
-            (it.description ?: "").contains(query, ignoreCase = true) ||
-            it.id.contains(query, ignoreCase = true)
-    }
-    val counts = lensed.groupingBy { TaskScope.of(it.status) }.eachCount()
-    val filtered = if (scope == TaskScope.All) lensed else lensed.filter { TaskScope.of(it.status) == scope }
-    // issue 4: cap the flat status/priority-ordered list, then group that slice (web mechanism)
-    val ordered = filtered.sortedWith(
-        compareBy<TaskDto> { MobileUx.taskGroupRank(it.status) }
-            .thenBy { it.priority ?: 100 }
-            .thenByDescending { it.createdAt ?: "" },
-    )
-    val visible = ordered.take(shown)
-    val groups = visible.groupBy { it.status }.toList().sortedBy { MobileUx.taskGroupRank(it.first) }
-    val options = TaskScope.entries.map { s ->
-        s to "${s.label} ${if (s == TaskScope.All) lensed.size else counts[s] ?: 0}"
-    }
+    val (lensedCount, filteredEmpty, visibleCount, orderedCount, groups, options) = derived
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(p.bg),
@@ -199,10 +214,10 @@ internal fun TasksTab(tasks: List<TaskDto>, agents: List<AgentDto>, onOpenTask: 
                 }
             }
         }
-        if (ordered.size > visible.size) {
+        if (orderedCount > visibleCount) {
             item(key = "tasks-load-more") {
                 Text(
-                    "Load more · ${visible.size} of ${ordered.size}",
+                    "Load more · $visibleCount of $orderedCount",
                     style = ltype(LType.BodyEmph),
                     color = p.accent,
                     modifier = Modifier
@@ -214,7 +229,7 @@ internal fun TasksTab(tasks: List<TaskDto>, agents: List<AgentDto>, onOpenTask: 
                 )
             }
         }
-        if (filtered.isEmpty()) {
+        if (filteredEmpty) {
             item(key = "empty") {
                 LEmptyState(
                     icon = OrchaIcons.Checklist,
@@ -304,3 +319,13 @@ fun TaskRow(task: TaskDto, onOpenTask: (String) -> Unit, agents: List<AgentDto> 
         }
     }
 }
+
+/** Memoized slice of the Tasks tab: everything the list renders, computed once per input change. */
+private data class TasksDerived(
+    val lensedCount: Int,
+    val filteredEmpty: Boolean,
+    val visibleCount: Int,
+    val orderedCount: Int,
+    val groups: List<Pair<String, List<TaskDto>>>,
+    val options: List<Pair<TaskScope, String>>,
+)

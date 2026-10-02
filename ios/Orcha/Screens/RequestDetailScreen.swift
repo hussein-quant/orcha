@@ -241,7 +241,7 @@ struct RequestDetailScreen: View {
             if isRequester && ["open", "answered"].contains(req.status) {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button("Escalate", action: escalate)
+                        Button("Escalate to a human", action: escalate)
                     } label: {
                         Label("Request actions", systemImage: "ellipsis.circle")
                             .labelStyle(.iconOnly)

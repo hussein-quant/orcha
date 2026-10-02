@@ -168,20 +168,20 @@ class OrchaPaletteTest {
     fun linearPalettesCarryTheContractHexes() {
         val d = OrchaLinearDarkPalette
         assertEquals(Color(0xFF0E0F10), d.bg)
-        assertEquals(Color(0xFF141516), d.surface)
-        assertEquals(Color(0xFF1A1B1E), d.surface2)
-        assertEquals(Color(0xFF1F2023), d.raised)
-        assertEquals(Color(0xFF232427), d.border)
-        assertEquals(Color(0xFF2E3035), d.border2)
+        assertEquals(Color(0xFF151618), d.surface)
+        assertEquals(Color(0xFF1C1D21), d.surface2)
+        assertEquals(Color(0xFF1E1F23), d.raised)
+        assertEquals(Color(0xFF25262A), d.border)
+        assertEquals(Color(0xFF33353A), d.border2)
         assertEquals(Color(0xFFEEEFF1), d.text)
-        assertEquals(Color(0xFFB4B8BF), d.text2)
+        assertEquals(Color(0xFFB4B7BE), d.text2)
         assertEquals(Color(0xFF8A8F98), d.muted)
-        assertEquals(Color(0xFF6B6F76), d.faint)
+        assertEquals(Color(0xFF82868D), d.faint)
         assertEquals(Color(0xFF8D93F7), d.accent)
         assertEquals(Color(0xFF5E6AD2), d.primaryFill)
         assertEquals(Color(0xFF4CB782), d.ok)
-        assertEquals(Color(0xFFF2994A), d.warn)
-        assertEquals(Color(0xFFEB5757), d.danger)
+        assertEquals(Color(0xFFE2A336), d.warn)
+        assertEquals(Color(0xFFEE7070), d.danger)
 
         val l = OrchaLinearLightPalette
         assertEquals(Color(0xFFF4F4F5), l.bg)
@@ -192,6 +192,7 @@ class OrchaPaletteTest {
         assertEquals(Color(0xFF1C1D1F), l.text)
         assertEquals(Color(0xFF4E525A), l.text2)
         assertEquals(Color(0xFF62666E), l.muted)
+        assertEquals(Color(0xFF6D7077), l.faint)
         assertEquals(Color(0xFF505AC9), l.accent)
         assertEquals(Color(0xFF5E6AD2), l.primaryFill)
     }

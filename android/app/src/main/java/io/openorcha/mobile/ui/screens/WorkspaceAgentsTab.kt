@@ -64,7 +64,7 @@ internal fun AgentStatusCapsule(status: String, modifier: Modifier = Modifier) {
     val tint = when (status) {
         "working" -> p.accent
         "waiting", "blocked", "awaiting_request" -> p.warn
-        "awaiting_human" -> p.danger
+        "awaiting_human" -> p.warn
         "retired", "terminated", "offline" -> p.faint
         else -> p.muted
     }

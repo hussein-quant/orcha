@@ -91,6 +91,7 @@ import io.openorcha.mobile.ui.components.OrchaField
 import io.openorcha.mobile.ui.components.StatusDomain
 import io.openorcha.mobile.ui.components.StatusPill
 import io.openorcha.mobile.ui.components.pulseAlpha
+import io.openorcha.mobile.ui.components.pulsing
 import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.Orcha
@@ -237,7 +238,7 @@ fun ConversationScreen(
                             "${agent?.alias ?: "The agent"} is working…",
                             style = ltype(LType.Meta),
                             color = p.muted,
-                            modifier = Modifier.alpha(pulseAlpha()),
+                            modifier = Modifier.pulsing(),
                         )
                     }
                 }

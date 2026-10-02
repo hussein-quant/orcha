@@ -83,7 +83,8 @@ class LinearTest {
         assertEquals(null, presenceKind(null))
         assertEquals(null, presenceKind(""))
         assertEquals(0, presenceKind("working"))
-        assertEquals(1, presenceKind("idle"))
+        assertEquals(1, presenceKind("awaiting_request"))
+        assertEquals(3, presenceKind("idle"))
         assertEquals(2, presenceKind("blocked"))
         assertEquals(3, presenceKind("terminated"))
     }

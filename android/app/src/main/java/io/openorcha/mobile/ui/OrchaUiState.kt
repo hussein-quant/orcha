@@ -89,6 +89,8 @@ data class AgentExtras(
 
 data class OrchaUiState(
     val route: AppRoute = AppRoute.Containers,
+    /** Where Settings was opened from, so Done/back returns there (workspace or projects). */
+    val settingsFrom: AppRoute = AppRoute.Containers,
     val themeMode: io.openorcha.mobile.ui.theme.ThemeMode = io.openorcha.mobile.ui.theme.ThemeMode.Auto,
     val skinMode: io.openorcha.mobile.ui.theme.SkinMode = io.openorcha.mobile.ui.theme.SkinMode.Classic,
     val containerHealth: Map<String, ContainerHealth> = emptyMap(),

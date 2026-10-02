@@ -318,7 +318,7 @@ private struct VerificationCard: View {
                 HStack(spacing: LSpace.s) {
                     Spacer()
                     LButton("Reject…", kind: .secondary, action: onReject)
-                        .disabled(!canWrite)
+                        .disabled(!canWrite || busy)
                     LButton("Accept", icon: "checkmark", kind: .primary, action: onAccept)
                         .disabled(!canWrite || busy)
                 }

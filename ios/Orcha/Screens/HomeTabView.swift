@@ -140,7 +140,7 @@ struct HomeTabView: View {
                 if !activity.isEmpty {
                     LSection("Updates", count: activity.count) {
                         VStack(spacing: 0) {
-                            ForEach(Array(activity.enumerated()), id: \.element.1.messageId) { index, item in
+                            ForEach(Array(activity.enumerated()), id: \.element.0.id) { index, item in  // one row per task; summary messages often carry no message_id
                                 NavigationLink(value: WorkspaceRoute.task(item.0.id)) {
                                     UpdateRow(task: item.0, message: item.1)
                                 }

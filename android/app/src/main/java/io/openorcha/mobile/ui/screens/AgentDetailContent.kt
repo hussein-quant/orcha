@@ -36,6 +36,7 @@ import io.openorcha.mobile.ui.components.SectionH
 import io.openorcha.mobile.ui.components.StatusDomain
 import io.openorcha.mobile.ui.components.StatusPill
 import io.openorcha.mobile.ui.components.pulseAlpha
+import io.openorcha.mobile.ui.components.pulsing
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.MonoStyle
 import io.openorcha.mobile.ui.theme.Orcha
@@ -148,7 +149,7 @@ internal fun LazyListScope.AgentDetailContent(
                     activeRun?.let { run ->
                         LRow(
                             title = "Run ${run.runId.take(6)}",
-                            subtitle = listOfNotNull(run.wakeKind ?: "headless", run.runtime).joinToString(" · "),
+                            subtitle = listOfNotNull((run.wakeKind ?: "headless").replace('_', ' '), run.runtime).joinToString(" · "),
                             onClick = {
                                 onOpenRun(
                                     RunDto(
@@ -167,7 +168,7 @@ internal fun LazyListScope.AgentDetailContent(
                             },
                             leading = { LStatusGlyph("running") },
                             trailing = {
-                                Text("Streaming", style = ltype(LType.Meta), color = p.accent, modifier = Modifier.alpha(pulseAlpha()))
+                                Text("Streaming", style = ltype(LType.Meta), color = p.accent, modifier = Modifier.pulsing())
                             },
                         )
                     }

@@ -100,7 +100,12 @@ internal fun RequestsTab(
     var shown by rememberSaveable { mutableStateOf(REQUESTS_PAGE) }
     var showDone by rememberSaveable { mutableStateOf(false) }
     val sortKey = SortKey.valueOf(sortKeyName)
-    LaunchedEffect(lens, sortKeyName, sortAsc) { shown = REQUESTS_PAGE }
+    // Reset paging only when the lens or sort really changes, not on the first run after a rotation.
+    var pagedFor by rememberSaveable { mutableStateOf("$lens|$sortKeyName|$sortAsc") }
+    LaunchedEffect(lens, sortKeyName, sortAsc) {
+        val key = "$lens|$sortKeyName|$sortAsc"
+        if (key != pagedFor) { pagedFor = key; shown = REQUESTS_PAGE }
+    }
 
     val lensOptions = listOf(REQUESTS_LENS_YOURS to "Yours") + RequestChip.entries.map { it.name to requestLensLabel(it) }
 

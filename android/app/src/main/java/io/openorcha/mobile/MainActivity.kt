@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,11 +88,13 @@ class MainActivity : ComponentActivity() {
                         AppRoute.GitHubIssueDetail, AppRoute.GitHubPullDetail -> viewModel.showGithubHub()
                         AppRoute.TaskDetail, AppRoute.RequestDetail, AppRoute.AgentDetail, AppRoute.CreateTask, AppRoute.GitHubHub ->
                             viewModel.showWorkspace()
-                        AppRoute.Workspace, AppRoute.AddContainer, AppRoute.Settings, AppRoute.Scanner ->
+                        AppRoute.Settings -> viewModel.closeSettings()
+                        AppRoute.Workspace, AppRoute.AddContainer, AppRoute.Scanner ->
                             viewModel.showContainers()
                         AppRoute.Containers -> Unit
                     }
                 }
+                val workspaceState = rememberSaveableStateHolder()
                 Box(Modifier.fillMaxSize().paletteChromeBackground()) {
                 when (state.route) {
                     AppRoute.Containers -> ContainersHomeScreen(
@@ -125,7 +128,7 @@ class MainActivity : ComponentActivity() {
 
                     AppRoute.Settings -> SettingsScreen(
                         state = state,
-                        onBack = viewModel::showContainers,
+                        onBack = viewModel::closeSettings,
                         onTheme = viewModel::setThemeMode,
                         onSkin = viewModel::setSkinMode,
                         onOpen = viewModel::openContainer,
@@ -141,25 +144,29 @@ class MainActivity : ComponentActivity() {
                         onSetAutonomy = viewModel::setAutonomy,
                     )
 
-                    AppRoute.Workspace -> WorkspaceScreen(
-                        state = state,
-                        onBack = viewModel::showContainers,
-                        onRefresh = viewModel::refreshSelected,
-                        onForget = viewModel::forgetSelectedContainer,
-                        onSettings = viewModel::showSettings,
-                        onTab = viewModel::selectTab,
-                        onOpenTask = viewModel::openTask,
-                        onOpenRequest = viewModel::openRequest,
-                        onOpenAgent = viewModel::openAgent,
-                        onCreateTask = viewModel::showCreateTask,
-                        onDecidePlanFor = viewModel::decidePlanById,
-                        onVerifyFor = viewModel::verifyTaskById,
-                        onSetWakes = viewModel::setWakes,
-                        onSetAutonomy = viewModel::setAutonomy,
-                        onOpenGithubHub = viewModel::showGithubHub,
-                        onSearchQueryChange = viewModel::setSearchQuery,
-                        onSwitchProject = viewModel::openContainer,
-                    )
+                    // Keep the workspace's saved UI state (tab filters, request lens, scroll) while a
+                    // detail screen is open, so back returns to the same view — per project.
+                    AppRoute.Workspace -> workspaceState.SaveableStateProvider("workspace-${state.selectedContainer?.id}") {
+                        WorkspaceScreen(
+                            state = state,
+                            onBack = viewModel::showContainers,
+                            onRefresh = viewModel::refreshSelected,
+                            onForget = viewModel::forgetSelectedContainer,
+                            onSettings = viewModel::showSettings,
+                            onTab = viewModel::selectTab,
+                            onOpenTask = viewModel::openTask,
+                            onOpenRequest = viewModel::openRequest,
+                            onOpenAgent = viewModel::openAgent,
+                            onCreateTask = viewModel::showCreateTask,
+                            onDecidePlanFor = viewModel::decidePlanById,
+                            onVerifyFor = viewModel::verifyTaskById,
+                            onSetWakes = viewModel::setWakes,
+                            onSetAutonomy = viewModel::setAutonomy,
+                            onOpenGithubHub = viewModel::showGithubHub,
+                            onSearchQueryChange = viewModel::setSearchQuery,
+                            onSwitchProject = viewModel::openContainer,
+                        )
+                    }
 
                     AppRoute.TaskDetail -> TaskDetailScreen(
                         state = state,

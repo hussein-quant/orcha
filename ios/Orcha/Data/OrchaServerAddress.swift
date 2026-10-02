@@ -13,7 +13,7 @@ enum OrchaServerAddress {
             case .localhost:
                 "Use your computer's Wi-Fi address instead of localhost. Localhost points at the phone."
             case .invalid:
-                "That doesn't look like an address. Try something like orcha.yourteam.com or 192.168.1.24:8001."
+                "That doesn't look like an address. Try something like quorate.yourteam.com or 192.168.1.24:8001."
             case .notPairingCode:
                 "That's not an Quorate pairing code."
             }

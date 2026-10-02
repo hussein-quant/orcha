@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -105,7 +106,7 @@ fun AutoWakeSheet(
     val p = Orcha.palette
     val presets = listOf<Pair<String, Int?>>("Off" to null, "5m" to 300, "15m" to 900, "1h" to 3600)
     var picked by remember { mutableStateOf(current) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = Modifier.statusBarsPadding(), sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
         Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 30.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Auto-wake", style = ltype(LType.Headline), color = p.text, modifier = Modifier.semantics { heading() })
             Text("Wakes the agent on a clock while idle. Off relies on events only.", style = ltype(LType.Meta), color = p.muted)

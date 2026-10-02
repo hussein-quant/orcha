@@ -44,6 +44,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -163,11 +165,27 @@ fun TaskDetailScreen(
         },
         bottomBar = {
             if (task != null) {
+                // Draft survives rotation, and a failed send puts the text back instead of losing it.
+                var draft by rememberSaveable(task.id) { mutableStateOf("") }
+                var pending by rememberSaveable(task.id) { mutableStateOf<String?>(null) }
+                var sawInFlight by remember { mutableStateOf(false) }
+                LaunchedEffect(state.actionInFlight, state.error) {
+                    val sent = pending ?: return@LaunchedEffect
+                    when {
+                        state.actionInFlight -> sawInFlight = true
+                        state.error != null -> {
+                            if (draft.isEmpty()) draft = sent
+                            pending = null; sawInFlight = false
+                        }
+                        sawInFlight -> { pending = null; sawInFlight = false }
+                    }
+                }
                 TaskCommentComposer(
                     assignee = task.assignees.firstOrNull() ?: task.ownerAlias,
                     busy = state.actionInFlight,
-                    onSend = onSendMessage,
+                    onSend = onSendMessage?.let { send -> { text: String -> pending = text; send(text) } },
                     onOpenThread = onOpenThread,
+                    draftState = draft to { draft = it },
                 )
             }
         },
@@ -426,7 +444,8 @@ private fun PlanWaitingCard(task: TaskDto, onReview: () -> Unit) {
                 task.planMessage?.authorAlias?.let { LAvatar(it, isAI = true, size = 20.dp) }
             }
             Text(
-                inlineMarkdown(task.planMessage?.body.orEmpty()),
+                // Preview: drop markdown heading markers ("## Plan") so the card reads as prose.
+                inlineMarkdown(task.planMessage?.body.orEmpty().lines().joinToString("\n") { it.trimStart().trimStart('#').trimStart() }),
                 style = ltype(LType.Body), color = p.text2, maxLines = 4, overflow = TextOverflow.Ellipsis,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -650,7 +669,7 @@ internal fun TaskCommentComposer(
     draftState: Pair<String, (String) -> Unit>? = null,
 ) {
     val p = Orcha.palette
-    var localDraft by remember { mutableStateOf("") }
+    var localDraft by rememberSaveable { mutableStateOf("") }
     val draft = draftState?.first ?: localDraft
     val setDraft: (String) -> Unit = draftState?.second ?: { localDraft = it }
     val canSend = draft.isNotBlank() && !busy && onSend != null
@@ -668,7 +687,7 @@ internal fun TaskCommentComposer(
                     .padding(vertical = 4.dp)
                     .background(p.surface2, shape)
                     .border(1.dp, p.border, shape)
-                    .then(if (onSend == null) Modifier.clickable(onClick = onOpenThread) else Modifier)
+                    .then(if (onSend == null) Modifier.clickable(role = Role.Button, onClickLabel = "Open thread", onClick = onOpenThread) else Modifier)
                     .heightIn(min = 40.dp)
                     .padding(horizontal = LSpace.m, vertical = 9.dp),
                 contentAlignment = Alignment.CenterStart,

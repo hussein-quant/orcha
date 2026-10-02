@@ -46,7 +46,13 @@ fun showContainers() {
 }
 
 fun showSettings() {
-    _uiState.update { it.copy(route = AppRoute.Settings, error = null) }
+    _uiState.update { it.copy(route = AppRoute.Settings, settingsFrom = it.route, error = null) }
+}
+
+/** Leaves Settings back to where it was opened: the open workspace, else the projects list. */
+fun closeSettings() {
+    val s = _uiState.value
+    if (s.settingsFrom == AppRoute.Workspace && s.selectedContainer != null) showWorkspace() else showContainers()
 }
 
 fun setThemeMode(mode: io.openorcha.mobile.ui.theme.ThemeMode) {

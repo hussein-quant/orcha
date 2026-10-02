@@ -215,7 +215,7 @@ private fun ProjectRow(
                     contentDescription = container.displayName
                     stateDescription = listOfNotNull(stateLabel, meta, if (needs > 0) "$needs need you" else null).joinToString(", ")
                 }
-                .padding(horizontal = LSpace.m, vertical = LSpace.s),
+                .padding(start = LSpace.m, top = LSpace.s, bottom = LSpace.s),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(LSpace.m),
         ) {
@@ -232,6 +232,10 @@ private fun ProjectRow(
             }
             if (needs > 0) LBadgeCount(needs)
             StatusDot(dotColorFor(health?.state ?: "probing"))
+            // Visible way to Rename / Disconnect (long-press alone is undiscoverable).
+            IconButton(onClick = { menu = true }) {
+                Icon(OrchaIcons.MoreVert, "More options for ${container.displayName}", tint = p.muted)
+            }
         }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = p.raised) {
             DropdownMenuItem(text = { Text("Open", style = ltype(LType.Body)) }, onClick = { menu = false; onOpen(container.id) })

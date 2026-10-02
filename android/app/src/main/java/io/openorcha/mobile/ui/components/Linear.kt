@@ -335,7 +335,9 @@ fun LButton(
                 title,
                 style = ltype(if (small) LType.Meta else LType.BodyEmph).copy(fontWeight = FontWeight.Medium),
                 color = fg.copy(alpha = fg.alpha * alpha),
-                maxLines = 1,
+                // Large font scales wrap to a second line instead of clipping to "Acc…".
+                maxLines = 2,
+                textAlign = TextAlign.Center,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -512,7 +514,8 @@ internal fun presenceKind(status: String?): Int? {
     val s = status?.lowercase()?.takeIf { it.isNotBlank() } ?: return null
     return when (s) {
         "online", "active", "working", "busy", "running", "live", "in_progress" -> 0
-        "idle", "away", "waiting", "paused" -> 1
+        // Same meaning as the status pill: waiting (on a request or on you) is warn, idle is quiet.
+        "waiting", "paused", "awaiting_request", "awaiting_human" -> 1
         "error", "failed", "blocked", "stuck" -> 2
         else -> 3
     }

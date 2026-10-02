@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import io.openorcha.mobile.domain.MobileUx
@@ -192,6 +193,30 @@ fun pulseAlpha(): Float {
         label = "pulseAlpha",
     )
     return alpha
+}
+
+/**
+ * The same pulse as a modifier that reads the animation in the draw phase, so the
+ * pulsing element redraws each frame without recomposing (unlike `alpha(pulseAlpha())`).
+ */
+@Composable
+fun Modifier.pulsing(): Modifier {
+    val transition = rememberInfiniteTransition(label = "pulse")
+    val alpha = transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 2000
+                1f at 0
+                0.35f at 1000
+                1f at 2000
+            },
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "pulsing",
+    )
+    return this.graphicsLayer { this.alpha = alpha.value }
 }
 
 /**
