@@ -50,8 +50,11 @@ private struct DictationMicCore: View {
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(micColor)
                     .frame(width: 34, height: 34)
-                    .contentShape(Circle())
             }
+            // 44pt hit target without growing the 34pt visual in the composer.
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
+            .padding(-5)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(engine.state == .recording ? "Stop dictation" : "Dictate a message")

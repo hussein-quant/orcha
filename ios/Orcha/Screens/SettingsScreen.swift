@@ -331,7 +331,7 @@ struct SettingsScreen: View {
                         let granted = await NotificationCoordinator.shared.requestPermission()
                         model.setNotificationsEnabled(granted)
                         if !granted {
-                            model.error = "Notifications are blocked for Orcha — enable them in iOS Settings, then flip this back on."
+                            model.error = "Notifications are blocked for Quorate — enable them in iOS Settings, then flip this back on."
                         }
                     }
                 } else {
@@ -409,7 +409,7 @@ struct SettingsScreen: View {
             }
             Button("Cancel", role: .cancel) { tokenEditing = nil }
         } message: {
-            Text("Sent as the bearer credential on every request to this Orcha, and applied to all its projects. Needed for cloud deployments; leave unset for an unprotected local server.")
+            Text("Sent as the bearer credential on every request to this Quorate, and applied to all its projects. Needed for cloud deployments; leave unset for an unprotected local server.")
         }
         .alert("Remote address (Tailscale)", isPresented: remoteAlertShown) {
             TextField("e.g. my-mac.tailnet.ts.net:8001", text: $remoteDraft)

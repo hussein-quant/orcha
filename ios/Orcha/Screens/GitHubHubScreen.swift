@@ -377,7 +377,7 @@ private struct PullsFilterRow: View {
                     .foregroundStyle(p.faint)
                     .accessibilityHidden(true)
                 TextField("", text: $model.githubPullsFilter.author, prompt: Text("Filter by author"))
-                    .font(p.uiFont(13))
+                    .ltype(.meta)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .accessibilityLabel("Filter by author")
@@ -392,7 +392,7 @@ private struct PullsFilterRow: View {
             }
             if involvementDisabled {
                 Text(detail ?? "Sign in with GitHub to use \u{201C}Assigned to me\u{201D} and \u{201C}My reviews.\u{201D}")
-                    .font(p.uiFont(11))
+                    .ltype(.micro)
                     .foregroundStyle(p.faint)
             }
 
@@ -402,7 +402,7 @@ private struct PullsFilterRow: View {
                     .foregroundStyle(p.faint)
                     .accessibilityHidden(true)
                 TextField("", text: $model.githubPullsFilter.q, prompt: Text("Search title and body"))
-                    .font(p.uiFont(13))
+                    .ltype(.meta)
                     .textInputAutocapitalization(.never)
                     .accessibilityLabel("Search pull requests")
             }

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The Connect-repo sheet — the portal's Connect-repo modal (`home-github.js`)
-/// in house sheet form: loading skeletons → the graceful "App isn't wired" off
-/// state, or a searchable repo list with the current binding checkmarked and an
+/// in house sheet form: loading skeletons → the graceful "GitHub isn't connected"
+/// off state, or a searchable repo list with the current binding checkmarked and an
 /// Unbind row. Picking a row PUTs the binding; the snapshot refresh then updates
 /// every surface (Home chip, containers-home card) through the normal machinery.
 struct ConnectRepoSheet: View {
@@ -38,8 +38,8 @@ struct ConnectRepoSheet: View {
         switch phase {
         case .loading:
             loadingState
-        case let .unavailable(detail):
-            offState(detail)
+        case .unavailable:
+            offState
         case let .failed(message):
             failedState(message)
         case let .ready(repos):
@@ -63,22 +63,17 @@ struct ConnectRepoSheet: View {
 
     // MARK: off state — self-hosters without the App land here, on purpose
 
-    private func offState(_ detail: String?) -> some View {
+    private var offState: some View {
         StateLayout(
-            title: "The GitHub App isn't wired on the server yet",
-            sub: "No installation token was found, so this Orcha can't list repositories. Self-hosting without the App is fully supported — everything else keeps working; repo-connect simply stays off."
+            title: "GitHub isn't connected on this server",
+            sub: "An admin can install the Quorate GitHub App from the portal under Settings › GitHub."
         ) {
             GitHubMark()
                 .frame(width: 34, height: 34)
                 .foregroundStyle(p.muted)
+                .accessibilityHidden(true)
         } actions: {
-            if let detail, detail.isEmpty == false {
-                Text(detail)
-                    .ltype(.mono)
-                    .foregroundStyle(p.faint)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 290)
-            }
+            EmptyView()
         }
     }
 
@@ -109,7 +104,7 @@ struct ConnectRepoSheet: View {
         let visible = RepoConnect.filter(repos, query: query)
         return ScrollView {
             VStack(alignment: .leading, spacing: LSpace.l) {
-                Text("Bind this workspace to a repository the Orcha GitHub App is installed on.")
+                Text("Bind this workspace to a repository the Quorate GitHub App is installed on.")
                     .ltype(.meta)
                     .foregroundStyle(p.muted)
                 if repos.isEmpty {

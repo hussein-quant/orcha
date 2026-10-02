@@ -56,7 +56,7 @@ struct GitHubStartPickerSheet: View {
                         LSection("Agents", count: agents.count) {
                             if agents.isEmpty {
                                 LCard {
-                                    Text("No AI agents are active in this Orcha yet.")
+                                    Text("No AI agents are active in this Quorate yet.")
                                         .ltype(.meta)
                                         .foregroundStyle(p.faint)
                                 }

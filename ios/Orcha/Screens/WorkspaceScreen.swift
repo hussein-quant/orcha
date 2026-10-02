@@ -147,7 +147,7 @@ struct WorkspaceScreen: View {
         OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 content()
             }
-            .navigationTitle(model.selectedContainer?.displayName ?? "Orcha")
+            .navigationTitle(model.selectedContainer?.displayName ?? "Quorate")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(p.surface, for: .navigationBar)
             .toolbar {
@@ -327,7 +327,7 @@ struct ConnectionBanners: View {
     var body: some View {
         if let snapshot = model.snapshot {
             if snapshot.container.status != "active" {
-                Banner(kind: .info, text: "This Orcha is paused or stopped on the laptop — resume it there to continue.")
+                Banner(kind: .info, text: "This Quorate is paused or stopped on the laptop — resume it there to continue.")
             } else if !(snapshot.container.wakesEnabled ?? true) {
                 Banner(kind: .warn, text: "Notifier paused — agents won't wake.", action: "Resume") {
                     model.showContainerControls = true
@@ -346,7 +346,7 @@ struct UnreachableState: View {
 
     var body: some View {
         StateLayout(
-            title: "Can't reach this Orcha",
+            title: "Can't reach this Quorate",
             sub: "\(model.selectedContainer?.baseUrl ?? "The container") didn't answer. Your work is safe — the phone just can't see it right now.",
             danger: true
         ) {
@@ -357,7 +357,7 @@ struct UnreachableState: View {
             VStack(spacing: 12) {
                 OrchaCard {
                     Text("1  Are you online? The portal needs an internet connection.")
-                    Text("2  Is the deployment up — or, self-hosting, is the computer awake with Orcha running?")
+                    Text("2  Is the deployment up — or, self-hosting, is the computer awake with Quorate running?")
                     Text("3  Access token rotated? Update it in Settings → Containers.")
                 }
                 .font(p.uiFont(13))

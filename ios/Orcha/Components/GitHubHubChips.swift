@@ -18,7 +18,9 @@ struct ChecksChip: View {
                 Image(systemName: verdictGlyph(summary.verdict))
                     .font(.system(size: 9, weight: .bold))
                 Text(summary.label)
-                    .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                    .ltype(.micro)
+                    .monospaced()
+                    .fontWeight(.semibold)
             }
             .foregroundStyle(tint)
             .padding(.horizontal, 6)
@@ -70,7 +72,8 @@ struct MergeStateChip: View {
                     .fill(tintColor)
                     .frame(width: 6, height: 6)
                 Text(label)
-                    .font(.system(size: 10.5, weight: .medium))
+                    .ltype(.micro)
+                    .fontWeight(.medium)
                     .foregroundStyle(p.text2)
                     .lineLimit(1)
             }
@@ -107,7 +110,8 @@ struct GitHubLabelChip: View {
                 .frame(width: 7, height: 7)
                 .accessibilityHidden(true)
             Text(label.name)
-                .font(.system(size: 11, weight: .medium))
+                .ltype(.micro)
+                .fontWeight(.medium)
                 .foregroundStyle(p.text2)
                 .lineLimit(1)
         }

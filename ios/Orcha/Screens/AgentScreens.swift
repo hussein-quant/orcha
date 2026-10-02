@@ -441,47 +441,65 @@ struct ModelPickerSheet: View {
             .sorted { $0.key < $1.key }
     }
 
+    private var canConfirm: Bool { picked != nil && picked != current && !model.actionInFlight }
+
     var body: some View {
         NavigationStack {
             OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("MODEL").font(p.uiFont(11, .bold)).tracking(0.8).foregroundStyle(p.accent)
-                        Text("Applies at the next wake.").font(p.uiFont(13)).foregroundStyle(p.muted)
+                    VStack(alignment: .leading, spacing: LSpace.l) {
+                        Text("Applies at the next wake.")
+                            .ltype(.meta)
+                            .foregroundStyle(p.muted)
                         ForEach(groups, id: \.0) { group, rows in
-                            SectionH(title: group)
-                            ForEach(rows) { m in
-                                Button { picked = m.id } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: picked == m.id ? "largecircle.fill.circle" : "circle")
-                                            .foregroundStyle(picked == m.id ? p.accent : p.border2)
-                                        VStack(alignment: .leading, spacing: 1) {
-                                            Text(m.name ?? m.id).font(p.uiFont(15, .semibold)).foregroundStyle(p.text)
-                                            Text(m.id).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(p.muted)
+                            LSection(group, count: rows.count) {
+                                LCard(padding: 0) {
+                                    VStack(spacing: 0) {
+                                        ForEach(rows) { m in
+                                            if m.id != rows.first?.id { LDivider(inset: LSpace.m) }
+                                            modelRow(m)
                                         }
-                                        Spacer()
-                                        if m.id == current { MetaTag(text: "current") }
                                     }
                                 }
-                                .buttonStyle(.plain)
                             }
                         }
                         let name = model.models.first { $0.id == picked }.map { $0.name ?? $0.id }
-                        KitButton(
-                            title: (picked != nil && picked != current) ? "Change to \(name ?? "model")" : "Pick a different model",
-                            role: .primary,
-                            enabled: picked != nil && picked != current && !model.actionInFlight
+                        LButton(
+                            (picked != nil && picked != current) ? "Change to \(name ?? "model")" : "Pick a different model",
+                            kind: .primary
                         ) {
                             if let picked { onConfirm(picked) }
                         }
+                        .disabled(!canConfirm)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    .padding(16)
+                    .padding(LSpace.l)
                 }
+                .background(p.bg)
             }
+            .navigationTitle("Model")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(p.bg)
         .onAppear { picked = current }
+    }
+
+    private func modelRow(_ m: ModelDto) -> some View {
+        let isPicked = picked == m.id
+        return Button { picked = m.id } label: {
+            LRow(title: m.name ?? m.id, subtitle: m.id) {
+                Image(systemName: isPicked ? "largecircle.fill.circle" : "circle")
+                    .font(.body)
+                    .foregroundStyle(isPicked ? p.accent : p.border2)
+                    .accessibilityHidden(true)
+            } trailing: {
+                if m.id == current { LTag("current") }
+            }
+        }
+        .buttonStyle(.lRow)
+        .accessibilityAddTraits(isPicked ? .isSelected : [])
     }
 }
 
@@ -503,25 +521,25 @@ struct AutoWakeSheet: View {
         NavigationStack {
             OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("AUTO-WAKE").font(p.uiFont(11, .bold)).tracking(0.8).foregroundStyle(p.accent)
+                    VStack(alignment: .leading, spacing: LSpace.l) {
                         Text("Wakes the agent on a clock while idle. Off relies on events only.")
-                            .font(p.uiFont(13)).foregroundStyle(p.muted)
-                        HStack(spacing: 8) {
-                            ForEach(presets, id: \.0) { label, secs in
-                                PillChip(label: label, selected: picked == secs) { picked = secs }
-                            }
-                        }
-                        KitButton(title: "Apply", role: .primary, enabled: picked != current && !model.actionInFlight) {
-                            onConfirm(picked)
-                        }
+                            .ltype(.meta)
+                            .foregroundStyle(p.muted)
+                        LSegmented(presets.map { ($0.1, $0.0) }, selection: $picked)
+                        LButton("Apply", kind: .primary) { onConfirm(picked) }
+                            .disabled(picked == current || model.actionInFlight)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
-                    .padding(16)
+                    .padding(LSpace.l)
                 }
+                .background(p.bg)
             }
+            .navigationTitle("Auto-wake")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
         .presentationDetents([.medium, .large])
+        .presentationBackground(p.bg)
         .onAppear { picked = current }
     }
 }

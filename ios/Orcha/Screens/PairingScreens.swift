@@ -47,7 +47,7 @@ struct ScannerScreen: View {
                 // I2 — camera unavailable / permission denied
                 StateLayout(
                     title: "Camera access needed",
-                    sub: "Orcha uses the camera only to read the pairing QR from your portal. Grant access in Settings, or type the address instead.",
+                    sub: "Quorate uses the camera only to read the pairing QR from your portal. Grant access in Settings, or type the address instead.",
                     danger: true
                 ) {
                     Image(systemName: "camera.slash")
@@ -136,8 +136,8 @@ struct AuthOptionsSheet: View {
     private var host: String {
         guard let draft = model.connectDraft,
               let base = try? OrchaServerAddress.parse(draft).baseUrl,
-              let url = URL(string: base) else { return "This Orcha" }
-        return url.host ?? "This Orcha"
+              let url = URL(string: base) else { return "This Quorate" }
+        return url.host ?? "This Quorate"
     }
 
     private var phase: DeviceAuthFlow.Phase { model.deviceAuth.phase }
@@ -373,7 +373,7 @@ struct ManualConnectSheet: View {
     private var selfHostHelp: some View {
         LCard {
           VStack(alignment: .leading, spacing: LSpace.m) {
-            PairingDisclosure(title: "Running Orcha on your own computer?", icon: "desktopcomputer", expanded: $showSelfHostHelp)
+            PairingDisclosure(title: "Running Quorate on your own computer?", icon: "desktopcomputer", expanded: $showSelfHostHelp)
             if showSelfHostHelp {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("A cloud portal works from anywhere and none of this applies. Self-hosting on your own machine instead? Then the phone talks straight to that computer:")
@@ -404,7 +404,7 @@ struct ManualConnectSheet: View {
 
     private var unreachable: some View {
         StateLayout(
-            title: "Can't reach this Orcha",
+            title: "Can't reach this Quorate",
             sub: "\(address.isEmpty ? "That address" : address) didn't answer. Your work is safe — the phone just can't see it right now.",
             danger: true
         ) {
@@ -416,7 +416,7 @@ struct ManualConnectSheet: View {
                 LCard {
                     VStack(alignment: .leading, spacing: LSpace.s) {
                         step(1, "Is the address right? A cloud portal needs no port.")
-                        step(2, "Is the deployment up — or, self-hosting, is the computer awake with Orcha running?")
+                        step(2, "Is the deployment up — or, self-hosting, is the computer awake with Quorate running?")
                         step(3, "On a local address: same Wi-Fi, and no firewall or VPN in the way?")
                     }
                     .ltype(.meta)

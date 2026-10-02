@@ -15,7 +15,7 @@ enum OrchaServerAddress {
             case .invalid:
                 "That doesn't look like an address. Try something like orcha.yourteam.com or 192.168.1.24:8001."
             case .notPairingCode:
-                "That's not an Orcha pairing code."
+                "That's not an Quorate pairing code."
             }
         }
     }

@@ -232,7 +232,9 @@ private struct AgentStack: View {
     var body: some View {
         HStack(spacing: -6) {
             ForEach(agents.prefix(5)) { agent in
-                LAvatar(name: agent.alias, isAI: true, size: 24, status: agent.status)
+                // Plain faces in an overlapping stack: the ✦ badge and presence dot
+                // sit where the next avatar overlaps and render as clipped fragments.
+                LAvatar(name: agent.alias, size: 24)
                     .padding(1.5)
                     .background(p.bg, in: Circle())
             }

@@ -448,7 +448,7 @@ private extension CharacterSet {
 /// caller needs a — correct — access token, not a different address.
 struct OrchaAuthRequiredError: LocalizedError, Equatable {
     var errorDescription: String? {
-        "This Orcha requires a team access token. Add or update it under Settings → Containers."
+        "This Quorate requires a team access token. Add or update it under Settings → Containers."
     }
 }
 
@@ -459,9 +459,9 @@ struct OrchaApiError: LocalizedError {
     var errorDescription: String? {
         switch status {
         case 403: "You don't have access to do this in this project."
-        case 409: "Orcha rejected this action because the item changed. Refresh and try again."
-        case 422: "Orcha needs more information for this action."
-        default: "Orcha answered with an error (\(status))."
+        case 409: "Quorate rejected this action because the item changed. Refresh and try again."
+        case 422: "Quorate needs more information for this action."
+        default: "Quorate answered with an error (\(status))."
         }
     }
 }

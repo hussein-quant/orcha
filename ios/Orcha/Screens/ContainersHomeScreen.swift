@@ -84,19 +84,19 @@ struct ContainersHomeScreen: View {
             }
             Button("Cancel", role: .cancel) { disconnecting = nil }
         } message: {
-            Text("This removes the pairing — and every project sharing its address — from this phone only. The Orcha keeps running, and you can pair again anytime from the portal.")
+            Text("This removes the pairing — and every project sharing its address — from this phone only. The Quorate keeps running, and you can pair again anytime from the portal.")
         }
     }
 
     private var emptyState: some View {
         StateLayout(
-            title: "Add your Orcha",
-            sub: "Open your Orcha portal and choose Pair phone, then scan the QR here — or type the portal address, like orcha.yourteam.com. One pairing brings in every project on that Orcha."
+            title: "Add your Quorate",
+            sub: "Open your Quorate portal and choose Pair phone, then scan the QR here — or type the portal address, like orcha.yourteam.com. One pairing brings in every project on that Quorate."
         ) {
             BrandMark(size: 44)
         } actions: {
             VStack(spacing: LSpace.s) {
-                LButton("Add your Orcha", icon: "qrcode.viewfinder", kind: .primary) { showScanner = true }
+                LButton("Add your Quorate", icon: "qrcode.viewfinder", kind: .primary) { showScanner = true }
                 LButton("Enter address manually", kind: .ghost) { showManualEntry = true }
             }
         }

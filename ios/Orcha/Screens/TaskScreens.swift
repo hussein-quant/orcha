@@ -766,9 +766,9 @@ private struct TaskCommentComposer: View {
                     Button(action: sendDraft) {
                         Image(systemName: "arrow.up")
                             .font(.callout.weight(.bold))
-                            .foregroundStyle(canSend ? Color.white : p.faint)
+                            .foregroundStyle(canSend ? p.lPrimaryText : p.faint)
                             .frame(width: 36, height: 36)
-                            .background(canSend ? p.accent : p.surface2, in: Circle())
+                            .background(canSend ? p.lPrimaryFill : p.surface2, in: Circle())
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }

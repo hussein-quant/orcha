@@ -188,7 +188,7 @@ struct BrandMark: View {
                 ),
                 in: RoundedRectangle(cornerRadius: size * 10 / 34)
             )
-            .accessibilityLabel("Orcha")
+            .accessibilityLabel("Quorate")
     }
 }
 
