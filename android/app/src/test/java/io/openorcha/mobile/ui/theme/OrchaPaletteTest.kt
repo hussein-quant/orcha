@@ -154,4 +154,67 @@ class OrchaPaletteTest {
         assertTrue(!OrchaDarkPalette.pillMono)
         assertTrue(!OrchaDarkPalette.flatChrome)
     }
+
+    @Test
+    fun classicSkinIsTheDefaultAndResolvesToLinear() {
+        // iOS parity: the classic slot is the Linear skin (label "Linear").
+        assertEquals("Linear", SkinMode.Classic.label)
+        assertEquals("classic", SkinMode.Classic.storageValue)
+        assertEquals(OrchaLinearDarkPalette, paletteFor(SkinMode.Classic, dark = true))
+        assertEquals(OrchaLinearLightPalette, paletteFor(SkinMode.Classic, dark = false))
+    }
+
+    @Test
+    fun linearPalettesCarryTheContractHexes() {
+        val d = OrchaLinearDarkPalette
+        assertEquals(Color(0xFF0E0F10), d.bg)
+        assertEquals(Color(0xFF141516), d.surface)
+        assertEquals(Color(0xFF1A1B1E), d.surface2)
+        assertEquals(Color(0xFF1F2023), d.raised)
+        assertEquals(Color(0xFF232427), d.border)
+        assertEquals(Color(0xFF2E3035), d.border2)
+        assertEquals(Color(0xFFEEEFF1), d.text)
+        assertEquals(Color(0xFFB4B8BF), d.text2)
+        assertEquals(Color(0xFF8A8F98), d.muted)
+        assertEquals(Color(0xFF6B6F76), d.faint)
+        assertEquals(Color(0xFF8D93F7), d.accent)
+        assertEquals(Color(0xFF5E6AD2), d.primaryFill)
+        assertEquals(Color(0xFF4CB782), d.ok)
+        assertEquals(Color(0xFFF2994A), d.warn)
+        assertEquals(Color(0xFFEB5757), d.danger)
+
+        val l = OrchaLinearLightPalette
+        assertEquals(Color(0xFFF4F4F5), l.bg)
+        assertEquals(Color(0xFFFFFFFF), l.surface)
+        assertEquals(Color(0xFFF7F7F8), l.surface2)
+        assertEquals(Color(0xFFE6E6E9), l.border)
+        assertEquals(Color(0xFFD5D6DA), l.border2)
+        assertEquals(Color(0xFF1C1D1F), l.text)
+        assertEquals(Color(0xFF4E525A), l.text2)
+        assertEquals(Color(0xFF62666E), l.muted)
+        assertEquals(Color(0xFF505AC9), l.accent)
+        assertEquals(Color(0xFF5E6AD2), l.primaryFill)
+    }
+
+    @Test
+    fun linearIsFlatInterAndTenRadius() {
+        for (p in listOf(OrchaLinearDarkPalette, OrchaLinearLightPalette)) {
+            assertTrue(p.flatChrome)
+            assertEquals(Color.Transparent, p.bgGrad1)
+            assertEquals(Color.Transparent, p.bgGrad2)
+            assertEquals(10f, p.radiusCard)
+            assertEquals(7f, p.radiusButton)
+            assertTrue(!p.pillMono)
+            assertNull(p.displayFontFamily) // null = Inter (the base face)
+        }
+        assertTrue(OrchaLinearDarkPalette.isDark)
+        assertTrue(!OrchaLinearLightPalette.isDark)
+    }
+
+    @Test
+    fun onlyLinearCarriesASeparatePrimaryFill() {
+        assertNull(OrchaSwissDarkPalette.primaryFill)
+        assertNull(OrchaMinimalDarkPalette.primaryFill)
+        assertNull(OrchaDarkPalette.primaryFill)
+    }
 }

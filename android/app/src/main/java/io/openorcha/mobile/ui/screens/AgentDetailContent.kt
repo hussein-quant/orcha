@@ -39,6 +39,24 @@ import io.openorcha.mobile.ui.components.pulseAlpha
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.MonoStyle
 import io.openorcha.mobile.ui.theme.Orcha
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import io.openorcha.mobile.ui.components.LAvatar
+import io.openorcha.mobile.ui.components.LButton
+import io.openorcha.mobile.ui.components.LButtonKind
+import io.openorcha.mobile.ui.components.LCard
+import io.openorcha.mobile.ui.components.LDivider
+import io.openorcha.mobile.ui.components.LRow
+import io.openorcha.mobile.ui.components.LSection
+import io.openorcha.mobile.ui.components.LSize
+import io.openorcha.mobile.ui.components.LSpace
+import io.openorcha.mobile.ui.components.LStatusGlyph
+import io.openorcha.mobile.ui.components.LTag
+import io.openorcha.mobile.ui.components.LType
+import io.openorcha.mobile.ui.components.ltype
+import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.OrchaPalette
 
 /** Builds the identity, activity, controls, memory, requests, and runs sections of agent detail. */
@@ -73,26 +91,41 @@ internal fun LazyListScope.AgentDetailContent(
             onAction = { onOpenTask(t.id) },
         )
     }
-    // header
-    item {
-        OrchaCard(Modifier.alpha(if (dead) 0.55f else 1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Avatar(agent.alias, human = agent.kind == "human", size = AvatarSize.Lg)
-                Column(Modifier.weight(1f)) {
-                    Text(agent.alias, style = MaterialTheme.typography.titleLarge)
-                    Text(agent.role ?: if (agent.kind == "human") "Human authority" else "agent", color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    // header card — avatar (✦ + presence), name, role, status capsule
+    item(key = "agent-head") {
+        val status = if (dead) "retired" else agent.status ?: if (agent.kind == "human") "idle" else "idle"
+        LCard(Modifier.alpha(if (dead) 0.55f else 1f), padding = LSpace.l) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LSpace.m)) {
+                LAvatar(agent.alias, isAI = agent.kind == "ai", size = 44.dp, status = if (agent.kind == "ai") status else null)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        agent.alias, style = ltype(LType.Title), color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics { heading() },
+                    )
+                    Text(
+                        agent.role ?: if (agent.kind == "human") "Human authority" else "agent",
+                        style = ltype(LType.Meta), color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                StatusPill(agent.status ?: agent.kind, StatusDomain.Agent)
+                if (agent.kind == "ai") AgentStatusCapsule(status)
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                agent.model?.let { MetaTag(it, mono = true) }
-                Spacer(Modifier.weight(1f))
-                Text(MobileUx.agoLabel(agent.lastActive) ?: "", style = MonoSmStyle, color = p.faint)
+        }
+    }
+    if (agent.model != null || agent.lastActive != null) {
+        item(key = "agent-meta") {
+            LCard(padding = LSpace.l) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LSpace.s)) {
+                    agent.model?.let { LTag(it) }
+                    Spacer(Modifier.weight(1f))
+                    MobileUx.agoLabel(agent.lastActive)?.let { Text("Active $it", style = ltype(LType.Meta), color = p.faint) }
+                }
             }
         }
     }
     if (agent.kind == "ai" && !dead) {
-        item { PrimaryButton("Converse", { onConversation(agent.id) }, Modifier.fillMaxWidth()) }
+        item(key = "agent-converse") {
+            LButton("Converse", { onConversation(agent.id) }, Modifier.fillMaxWidth(), icon = OrchaIcons.Forum, kind = LButtonKind.Primary)
+        }
     }
     // Now (flow 09 §4): live run's task wins over a stale current_task claim (GH #125/#126)
     val activeRun = agent.activeRun
@@ -100,44 +133,43 @@ internal fun LazyListScope.AgentDetailContent(
     val nowTaskId = nowTask?.taskId
     val nowTaskTitle = nowTask?.title
     if (nowTaskId != null || activeRun != null) {
-        item { SectionH("Now") }
-        nowTaskId?.let { tid ->
-            item {
-                OrchaCard(onClick = { onOpenTask(tid) }) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("▸", color = p.accent, fontWeight = FontWeight.W800)
-                        Text(nowTaskTitle ?: tid, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-        }
-        activeRun?.let { run ->
-            item {
-                OrchaCard(
-                    onClick = {
-                        onOpenRun(
-                            RunDto(
-                                runId = run.runId,
-                                agentId = agent.id,
-                                agentAlias = agent.alias,
-                                taskId = run.taskId,
-                                taskTitle = run.taskTitle,
-                                status = "running",
-                                wakeKind = run.wakeKind,
-                                wakeEvent = run.wakeEvent,
-                                runtime = run.runtime,
-                                startedAt = run.startedAt,
-                            ),
+        item(key = "agent-now") {
+            LSection("Now") {
+                LCard(padding = 0.dp) {
+                    nowTaskId?.let { tid ->
+                        LRow(
+                            title = nowTaskTitle ?: tid,
+                            onClick = { onOpenTask(tid) },
+                            leading = { LStatusGlyph("in_progress") },
+                            trailing = { Icon(OrchaIcons.ChevronRight, null, tint = p.faint, modifier = Modifier.size(16.dp)) },
                         )
-                    },
-                    borderColor = p.accentLine,
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(run.runId.take(6), style = MonoStyle)
-                        StatusPill("running", StatusDomain.Run)
-                        MetaTag(run.wakeKind ?: "headless")
-                        Spacer(Modifier.weight(1f))
-                        Text("streaming", style = MaterialTheme.typography.labelMedium, color = p.accent, modifier = Modifier.alpha(pulseAlpha()))
+                    }
+                    if (nowTaskId != null && activeRun != null) LDivider(inset = LSpace.m)
+                    activeRun?.let { run ->
+                        LRow(
+                            title = "Run ${run.runId.take(6)}",
+                            subtitle = listOfNotNull(run.wakeKind ?: "headless", run.runtime).joinToString(" · "),
+                            onClick = {
+                                onOpenRun(
+                                    RunDto(
+                                        runId = run.runId,
+                                        agentId = agent.id,
+                                        agentAlias = agent.alias,
+                                        taskId = run.taskId,
+                                        taskTitle = run.taskTitle,
+                                        status = "running",
+                                        wakeKind = run.wakeKind,
+                                        wakeEvent = run.wakeEvent,
+                                        runtime = run.runtime,
+                                        startedAt = run.startedAt,
+                                    ),
+                                )
+                            },
+                            leading = { LStatusGlyph("running") },
+                            trailing = {
+                                Text("Streaming", style = ltype(LType.Meta), color = p.accent, modifier = Modifier.alpha(pulseAlpha()))
+                            },
+                        )
                     }
                 }
             }
@@ -145,35 +177,28 @@ internal fun LazyListScope.AgentDetailContent(
     }
     // Controls (flow 09 §5) — human-only; disabled once retired
     if (agent.kind == "ai") {
-        item { SectionH("Controls", "human authority") }
-        item {
-            OrchaCard(Modifier.alpha(if (dead) 0.55f else 1f)) {
-                Row(
-                    Modifier.fillMaxWidth().let { if (!dead) it.clickable { onOpenModel() } else it },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Model", style = MaterialTheme.typography.titleSmall)
-                        Text("Applies at the next wake", style = MaterialTheme.typography.bodyMedium, color = p.muted)
-                    }
-                    MetaTag(agent.model ?: "default", mono = true)
-                }
-                Row(
-                    Modifier.fillMaxWidth().let { if (!dead) it.clickable { onOpenWake() } else it },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Auto-wake", style = MaterialTheme.typography.titleSmall)
-                        Text("Clock-driven wakes while idle", style = MaterialTheme.typography.bodyMedium, color = p.muted)
-                    }
-                    MetaTag(agent.autoWakeIntervalSecs?.let { formatCadence(it) } ?: "Off")
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Wake daemon", style = MaterialTheme.typography.titleSmall)
-                        Text("Managed from the laptop", style = MaterialTheme.typography.bodyMedium, color = p.muted)
-                    }
-                    MetaTag(if (agent.wakeEnabled == false) "off" else "on")
+        item(key = "agent-controls") {
+            LSection("Controls", trailing = { Text("human authority", style = ltype(LType.Meta), color = p.faint) }) {
+                LCard(Modifier.alpha(if (dead) 0.55f else 1f), padding = 0.dp) {
+                    LRow(
+                        title = "Model",
+                        subtitle = "Applies at the next wake",
+                        onClick = if (dead) null else onOpenModel,
+                        trailing = { LTag(agent.model ?: "default") },
+                    )
+                    LDivider(inset = LSpace.m)
+                    LRow(
+                        title = "Auto-wake",
+                        subtitle = "Clock-driven wakes while idle",
+                        onClick = if (dead) null else onOpenWake,
+                        trailing = { LTag(agent.autoWakeIntervalSecs?.let { formatCadence(it) } ?: "Off") },
+                    )
+                    LDivider(inset = LSpace.m)
+                    LRow(
+                        title = "Wake daemon",
+                        subtitle = "Managed from the laptop",
+                        trailing = { LTag(if (agent.wakeEnabled == false) "Off" else "On", tint = if (agent.wakeEnabled == false) null else p.ok, dot = true) },
+                    )
                 }
             }
         }
@@ -182,61 +207,78 @@ internal fun LazyListScope.AgentDetailContent(
     val personaFull = state.agentExtras.persona?.systemPrompt
     val preview = agent.promptPreview ?: personaFull?.take(160)
     if (!preview.isNullOrBlank()) {
-        item {
-            SectionH("Persona", trailing = {
-                if (!personaFull.isNullOrBlank()) Text(
-                    if (personaOpen) "collapse" else "expand",
-                    style = MaterialTheme.typography.labelMedium, color = p.accent,
-                    modifier = Modifier.clickable { onTogglePersona() },
-                )
-            })
-        }
-        item {
-            OrchaCard {
-                if (personaOpen && !personaFull.isNullOrBlank()) {
-                    Text(personaFull, color = p.text2, style = MonoSmStyle.copy(fontSize = 12.sp, lineHeight = 17.sp))
-                } else {
-                    Text(preview, color = p.text2, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        item(key = "agent-persona") {
+            LSection(
+                "Persona",
+                trailing = if (personaFull.isNullOrBlank()) null else {
+                    {
+                        LButton(if (personaOpen) "Collapse" else "Expand", onTogglePersona, kind = LButtonKind.Ghost, size = LSize.Small)
+                    }
+                },
+            ) {
+                LCard(padding = LSpace.l) {
+                    if (personaOpen && !personaFull.isNullOrBlank()) {
+                        Text(personaFull, color = p.text2, style = ltype(LType.Mono))
+                    } else {
+                        Text(preview, color = p.text2, style = ltype(LType.Body), maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
                 }
             }
         }
     }
     // memory digest (flow 09 §7)
     state.agentExtras.digest?.let { d ->
-        item { SectionH("Memory", MobileUx.agoLabel(d.createdAt) ?: "") }
-        item {
-            OrchaCard {
-                d.currentFocus?.takeIf { it.isNotBlank() }?.let {
-                    Text("FOCUS", style = MaterialTheme.typography.labelMedium, color = p.accent)
-                    Text(it, color = p.text, style = MaterialTheme.typography.bodyMedium)
-                }
-                if (d.decisions.isNotEmpty()) {
-                    Text("DECISIONS · ${d.decisions.size}", style = MaterialTheme.typography.labelMedium, color = p.muted)
-                    d.decisions.take(3).forEach { Text("• ${it.text}", color = p.text2, style = MaterialTheme.typography.bodyMedium) }
-                }
-                if (d.openThreads.isNotEmpty()) {
-                    Text("OPEN THREADS · ${d.openThreads.size}", style = MaterialTheme.typography.labelMedium, color = p.muted)
-                    d.openThreads.take(3).forEach { Text("• ${it.text}", color = p.text2, style = MaterialTheme.typography.bodyMedium) }
+        item(key = "agent-memory") {
+            LSection("Memory", trailing = MobileUx.agoLabel(d.createdAt)?.let { ago -> { Text(ago, style = ltype(LType.Meta), color = p.faint) } }) {
+                LCard(padding = LSpace.l) {
+                    Column(verticalArrangement = Arrangement.spacedBy(LSpace.xs)) {
+                        d.currentFocus?.takeIf { it.isNotBlank() }?.let {
+                            Text("Focus", style = ltype(LType.Micro), color = p.muted)
+                            Text(it, color = p.text, style = ltype(LType.Body))
+                        }
+                        if (d.decisions.isNotEmpty()) {
+                            Text("Decisions · ${d.decisions.size}", style = ltype(LType.Micro), color = p.muted, modifier = Modifier.padding(top = LSpace.xs))
+                            d.decisions.take(3).forEach { Text("• ${it.text}", color = p.text2, style = ltype(LType.Meta)) }
+                        }
+                        if (d.openThreads.isNotEmpty()) {
+                            Text("Open threads · ${d.openThreads.size}", style = ltype(LType.Micro), color = p.muted, modifier = Modifier.padding(top = LSpace.xs))
+                            d.openThreads.take(3).forEach { Text("• ${it.text}", color = p.text2, style = ltype(LType.Meta)) }
+                        }
+                    }
                 }
             }
         }
     }
     // requests summary rows (flow 09 §8)
     if (state.agentExtras.inboxCount != null || state.agentExtras.outboxOpen != null) {
-        item { SectionH("Requests") }
-        item {
-            OrchaCard(onClick = onOpenRequests) {
-                KVRow("Incoming open", "${state.agentExtras.inboxCount ?: 0}")
-                state.agentExtras.inboxPreview?.let {
-                    Text("“$it”", color = p.muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        item(key = "agent-requests") {
+            LSection("Requests") {
+                LCard(padding = 0.dp) {
+                    LRow(
+                        title = "Incoming open",
+                        subtitle = state.agentExtras.inboxPreview?.let { "“$it”" },
+                        onClick = onOpenRequests,
+                        trailing = { Text("${state.agentExtras.inboxCount ?: 0}", style = ltype(LType.BodyEmph), color = p.text) },
+                    )
+                    LDivider(inset = LSpace.m)
+                    LRow(
+                        title = "Outgoing open / answered",
+                        onClick = onOpenRequests,
+                        trailing = {
+                            Text(
+                                "${state.agentExtras.outboxOpen ?: 0} / ${state.agentExtras.outboxAnswered ?: 0}",
+                                style = ltype(LType.BodyEmph), color = p.text,
+                            )
+                        },
+                    )
                 }
-                KVRow("Outgoing open / answered", "${state.agentExtras.outboxOpen ?: 0} / ${state.agentExtras.outboxAnswered ?: 0}")
             }
         }
     }
-    item { SectionH("Recent runs", "${state.agentRuns.size}") }
-    if (state.agentRuns.isEmpty()) {
-        item { OrchaCard { Text("No recent runs.", color = p.muted) } }
+    item(key = "agent-runs-head") {
+        LSection("Recent runs", count = state.agentRuns.size) {
+            if (state.agentRuns.isEmpty()) Text("No recent runs.", style = ltype(LType.Meta), color = p.muted)
+        }
     }
     items(state.agentRuns.take(5), key = { it.runId }) { run ->
         RunRow(run.copy(agentId = run.agentId ?: agent.id, agentAlias = run.agentAlias ?: agent.alias), onOpenRun)

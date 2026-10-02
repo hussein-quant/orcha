@@ -83,6 +83,8 @@ data class AgentDto(
     /** The signed-in GitHub login for a human agent, or null (self-host / unmapped).
      *  Drives the GitHub hub's "Mine" filter (iOS `AgentDto.githubLogin`). */
     @SerialName("github_login") val githubLogin: String? = null,
+    /** Owner / member / viewer for a human on this project (iOS `memberRole`). */
+    @SerialName("member_role") val memberRole: String? = null,
 )
 
 @Serializable

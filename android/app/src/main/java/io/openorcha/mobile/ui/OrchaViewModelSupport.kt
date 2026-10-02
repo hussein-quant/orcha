@@ -40,7 +40,7 @@ internal interface OrchaViewModelSupport : OrchaViewModelAccess {
 override fun runHumanAction(success: String, block: suspend (StoredContainer, String) -> Unit) {
     val selected = _uiState.value.selectedContainer ?: return
     val actor = selected.humanAgentId ?: run {
-        _uiState.update { it.copy(error = "Pairing is missing the human identity. Reconnect this Orcha first.") }
+        _uiState.update { it.copy(error = "Pairing is missing the human identity. Reconnect this Quorate first.") }
         return
     }
     scope.launch {
@@ -68,10 +68,10 @@ override fun pairingBaseUrl(raw: String): String {
         val obj = json.parseToJsonElement(trimmed).jsonObject
         val kind = obj["kind"]?.jsonPrimitive?.content
         if (kind != null && kind != "orcha-pair") {
-            throw IllegalArgumentException("That QR code is not an Orcha pairing code.")
+            throw IllegalArgumentException("That QR code is not an Quorate pairing code.")
         }
         obj["baseUrl"]?.jsonPrimitive?.content ?: throw IllegalArgumentException(
-            "That pairing code does not include an Orcha address.",
+            "That pairing code does not include an Quorate address.",
         )
     }.getOrElse { err ->
         if (err is IllegalArgumentException) throw err

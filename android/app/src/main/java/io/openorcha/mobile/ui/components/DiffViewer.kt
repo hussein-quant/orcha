@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,8 +53,8 @@ fun DiffViewer(diff: String, modifier: Modifier = Modifier) {
     val files = remember(diff) { DiffParser.parse(diff) }
     val p = Orcha.palette
     if (files.isEmpty()) {
-        OrchaCard(modifier) {
-            Text("No net change (empty diff).", color = p.muted, style = MaterialTheme.typography.bodyMedium)
+        LCard(modifier) {
+            Text("No net change (empty diff).", color = p.faint, style = ltype(LType.Meta))
         }
         return
     }
@@ -63,7 +64,7 @@ fun DiffViewer(diff: String, modifier: Modifier = Modifier) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
                 "${files.size} file${if (files.size == 1) "" else "s"} changed",
-                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.W700),
+                style = ltype(LType.BodyEmph),
                 color = p.text,
             )
             if (totalAdds > 0) {
@@ -78,7 +79,7 @@ fun DiffViewer(diff: String, modifier: Modifier = Modifier) {
 }
 
 private val diffCountStyle = TextStyle(
-    fontFamily = FontFamily.Monospace, fontWeight = FontWeight.W700, fontSize = 13.sp,
+    fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium, fontSize = 12.sp,
 )
 
 @Composable
@@ -90,15 +91,15 @@ private fun DiffFileSection(file: DiffFile, modifier: Modifier = Modifier) {
     Column(
         modifier
             .fillMaxWidth()
-            .background(p.surface, RoundedCornerShape(12.dp))
-            .border(BorderStroke(1.dp, p.border), RoundedCornerShape(12.dp)),
+            .background(p.surface, RoundedCornerShape(p.radiusCard.dp))
+            .border(BorderStroke(1.dp, p.border), RoundedCornerShape(p.radiusCard.dp)),
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(p.surface2, RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
-                .clickable { expanded = !expanded }
-                .padding(horizontal = 12.dp, vertical = 10.dp),
+                .clickable(onClickLabel = if (expanded) "Collapse file" else "Expand file") { expanded = !expanded }
+                .heightIn(min = 44.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -110,7 +111,7 @@ private fun DiffFileSection(file: DiffFile, modifier: Modifier = Modifier) {
             )
             Text(
                 file.path,
-                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.W600, fontSize = 12.5.sp),
+                style = ltype(LType.Mono).copy(fontWeight = FontWeight.Medium),
                 color = p.text,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -122,18 +123,19 @@ private fun DiffFileSection(file: DiffFile, modifier: Modifier = Modifier) {
         }
 
         if (expanded) {
+            LDivider()
             if (file.isBinary) {
                 Text(
                     "Binary file — no textual diff.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = p.muted,
+                    style = ltype(LType.Meta),
+                    color = p.faint,
                     modifier = Modifier.padding(12.dp),
                 )
             } else if (file.hunks.isEmpty()) {
                 Text(
                     "No diff available for this file.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = p.muted,
+                    style = ltype(LType.Meta),
+                    color = p.faint,
                     modifier = Modifier.padding(12.dp),
                 )
             } else {
@@ -142,7 +144,7 @@ private fun DiffFileSection(file: DiffFile, modifier: Modifier = Modifier) {
         } else if (!file.isBinary) {
             Text(
                 "$lineCount lines — tap to expand",
-                style = MaterialTheme.typography.labelMedium,
+                style = ltype(LType.Meta),
                 color = p.faint,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             )

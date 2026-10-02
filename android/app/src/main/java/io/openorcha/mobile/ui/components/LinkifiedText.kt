@@ -77,12 +77,14 @@ fun LinkifiedText(
         Text(body, modifier = modifier, style = effectiveStyle, maxLines = maxLines, overflow = overflow)
         return
     }
-    val annotated = remember(body, matches) {
+    // Linear skin: task refs read as accent-coloured links (no heavy underline).
+    val linkColor = Orcha.palette.accent
+    val annotated = remember(body, matches, linkColor) {
         buildAnnotatedString {
             append(body)
             matches.forEach { m ->
                 addStyle(
-                    SpanStyle(textDecoration = TextDecoration.Underline, fontWeight = FontWeight.SemiBold),
+                    SpanStyle(color = linkColor, fontWeight = FontWeight.Medium),
                     m.range.first, m.range.last + 1,
                 )
                 addStringAnnotation(TASK_REF_ANNOTATION_TAG, m.task.id, m.range.first, m.range.last + 1)

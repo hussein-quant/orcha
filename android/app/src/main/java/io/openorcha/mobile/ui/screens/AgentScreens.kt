@@ -77,6 +77,12 @@ import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.MonoStyle
 import io.openorcha.mobile.ui.theme.Orcha
+import androidx.compose.material3.CenterAlignedTopAppBar
+import io.openorcha.mobile.ui.components.LDivider
+import io.openorcha.mobile.ui.components.LEmptyState
+import io.openorcha.mobile.ui.components.LSpace
+import io.openorcha.mobile.ui.components.LType
+import io.openorcha.mobile.ui.components.ltype
 
 /* =============================================================================
    Flow 09 — Agent detail (header, Now, Controls, persona, runs) + pickers.
@@ -110,39 +116,47 @@ fun AgentDetailScreen(
     val dead = agent?.status == "terminated" || agent?.terminatedAt != null
 
     Scaffold(
-        containerColor = Color.Transparent,
+        containerColor = p.bg,
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                title = { Text(agent?.alias ?: "Agent") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(OrchaIcons.ArrowBack, "Back") } },
-                actions = {
-                    IconButton(onClick = onRefresh) { Icon(OrchaIcons.Refresh, "Refresh") }
-                    if (agent?.kind == "ai" && !dead) {
-                        IconButton(onClick = { menuOpen = true }) { Icon(OrchaIcons.MoreVert, "More") }
+            Column {
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = p.bg, titleContentColor = p.text),
+                    title = { Text(agent?.alias ?: "Agent", style = ltype(LType.Headline), maxLines = 1) },
+                    navigationIcon = { IconButton(onClick = onBack) { Icon(OrchaIcons.ArrowBack, "Back", tint = p.text2) } },
+                    actions = {
+                        IconButton(onClick = { menuOpen = true }) { Icon(OrchaIcons.MoreVert, "More actions", tint = p.accent) }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                            DropdownMenuItem(
-                                text = { Text("Rename") },
-                                onClick = { menuOpen = false; newAlias = agent.alias; renaming = true },
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Retire agent…", color = p.danger) },
-                                onClick = { menuOpen = false; confirmRetire = true },
-                            )
+                            DropdownMenuItem(text = { Text("Refresh") }, onClick = { menuOpen = false; onRefresh() })
+                            if (agent?.kind == "ai" && !dead) {
+                                DropdownMenuItem(
+                                    text = { Text("Rename") },
+                                    onClick = { menuOpen = false; newAlias = agent.alias; renaming = true },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Retire agent…", color = p.danger) },
+                                    onClick = { menuOpen = false; confirmRetire = true },
+                                )
+                            }
                         }
-                    }
-                },
-            )
+                    },
+                )
+                LDivider()
+            }
         },
     ) { padding ->
         if (agent == null) {
-            OrchaCard(Modifier.padding(padding).padding(16.dp)) { Text("Agent not found — refresh the workspace.", color = p.muted) }
+            LEmptyState(
+                icon = OrchaIcons.SmartToy,
+                title = "Agent not found",
+                message = "Refresh the workspace.",
+                modifier = Modifier.padding(padding).padding(16.dp),
+            )
             return@Scaffold
         }
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = LSpace.l, vertical = LSpace.l),
+            verticalArrangement = Arrangement.spacedBy(LSpace.l),
         ) {
             AgentDetailContent(
                 state = state,

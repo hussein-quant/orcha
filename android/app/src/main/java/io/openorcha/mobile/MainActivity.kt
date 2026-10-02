@@ -137,6 +137,8 @@ class MainActivity : ComponentActivity() {
                             viewModel.beginSignInAgain(id)
                             viewModel.signInWithGitHub(this@MainActivity)
                         },
+                        onSetWakes = viewModel::setWakes,
+                        onSetAutonomy = viewModel::setAutonomy,
                     )
 
                     AppRoute.Workspace -> WorkspaceScreen(
@@ -156,6 +158,7 @@ class MainActivity : ComponentActivity() {
                         onSetAutonomy = viewModel::setAutonomy,
                         onOpenGithubHub = viewModel::showGithubHub,
                         onSearchQueryChange = viewModel::setSearchQuery,
+                        onSwitchProject = viewModel::openContainer,
                     )
 
                     AppRoute.TaskDetail -> TaskDetailScreen(
@@ -169,6 +172,7 @@ class MainActivity : ComponentActivity() {
                         onVerify = viewModel::verifySelectedTask,
                         onDecidePlan = viewModel::decideSelectedPlan,
                         onOpenRun = viewModel::openRun,
+                        onSendMessage = viewModel::sendTaskMessage,
                     )
 
                     AppRoute.TaskThread -> TaskThreadScreen(

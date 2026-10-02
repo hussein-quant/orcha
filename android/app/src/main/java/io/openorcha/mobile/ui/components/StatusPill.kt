@@ -25,6 +25,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.semantics
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoFontFamily
@@ -111,7 +113,7 @@ private fun pillShape(mono: Boolean): RoundedCornerShape =
 /** Swiss uppercases + widens tracking on mono pill text — iOS `pillLabel`/`pillTracking` parity. */
 @Composable
 private fun pillTextStyle(mono: Boolean): androidx.compose.ui.text.TextStyle {
-    val base = MaterialTheme.typography.labelMedium
+    val base = ltype(LType.Meta).copy(fontSize = 12.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
     return if (mono) {
         base.copy(fontFamily = MonoFontFamily, letterSpacing = 0.7.sp, fontSize = 10.sp)
     } else {
@@ -121,31 +123,53 @@ private fun pillTextStyle(mono: Boolean): androidx.compose.ui.text.TextStyle {
 
 private fun pillLabel(text: String, mono: Boolean): String = if (mono) text.uppercase() else text
 
+/** Request status → the Linear glyph status it reads as (open = to do, answered = review…). */
+internal fun requestGlyphStatus(shown: String): String = when (shown) {
+    "open" -> "ready"
+    "accepted" -> "in_progress"
+    "answered" -> "needs_verification"
+    "converted_to_task", "closed" -> "completed"
+    "rejected" -> "cancelled"
+    "escalated" -> "blocked"
+    else -> "ready"
+}
+
+/** Neutral Linear pill shell: hairline border, transparent fill, compact. */
+@Composable
+private fun LinearPillShell(mono: Boolean, modifier: Modifier, content: @Composable () -> Unit) {
+    val p = Orcha.palette
+    val shape = pillShape(mono)
+    Row(
+        modifier = modifier
+            .background(p.surface2, shape)
+            .border(BorderStroke(1.dp, p.border), shape)
+            .padding(start = 6.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
+            .semantics(mergeDescendants = true) {},
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+    ) { content() }
+}
+
 /**
- * The status pill — `.pill` in the mockup kit: word + dot, color text on Soft fill with
- * Line border, 11/700, radius 999, padding 3/10/3/8, 7dp dot. Status is never conveyed
- * by color alone: the word always renders (foundations §2 accessibility). Swiss
- * (`palette.pillMono`) squares the pill off and sets the label in uppercase mono, iOS
- * `StatusPill`/`PillShape` parity.
+ * The status pill, Linear style: a status glyph (tasks) or a tinted presence dot
+ * (agents / connections / runs) + the word in text2, on a neutral hairline pill.
+ * Status is never conveyed by colour alone: the word always renders. Swiss
+ * (`palette.pillMono`) squares the pill off and sets the label in uppercase mono.
  */
 @Composable
 fun StatusPill(status: String, domain: StatusDomain, modifier: Modifier = Modifier) {
     val palette = Orcha.palette
     val tint = palette.tint(statusColorName(status, domain))
     val mono = palette.pillMono
-    val shape = pillShape(mono)
     val copy = pillLabel(MobileUx.statusCopy(status.lowercase()), mono)
-    Row(
-        modifier = modifier
-            .background(tint.soft, shape)
-            .border(BorderStroke(1.dp, tint.line), shape)
-            .padding(start = 8.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        val dotAlpha = if (pulses(status, domain)) pulseAlpha() else 1f
-        Box(Modifier.size(7.dp).alpha(dotAlpha).background(tint.color, CircleShape))
-        Text(copy, color = tint.color, style = pillTextStyle(mono))
+    LinearPillShell(mono, modifier) {
+        if (domain == StatusDomain.Task) {
+            LStatusGlyph(status, size = 12.dp, modifier = Modifier.clearAndSetSemantics { })
+        } else {
+            val dotAlpha = if (pulses(status, domain)) pulseAlpha() else 1f
+            Box(Modifier.size(7.dp).alpha(dotAlpha).background(tint.color, CircleShape))
+        }
+        Text(copy, color = palette.text2, style = pillTextStyle(mono))
     }
 }
 
@@ -171,40 +195,19 @@ fun pulseAlpha(): Float {
 }
 
 /**
- * Request-status pill with a status GLYPH (web STAT/glyph parity, app.js:320-353):
- * open=warning-triangle, accepted=play, answered=check, rejected=✕, converted=arrow,
- * closed=neutral dot. `escalated` (an OPEN human-targeted request, requests.html:135)
- * relabels the pill and tints it danger. Tints stay on the app's binding token map.
+ * Request-status pill, Linear style: the request reads as a status glyph (open = to do,
+ * accepted = in progress, answered = needs verification, rejected = cancelled,
+ * converted/closed = done). `escalated` (an OPEN human-targeted request) relabels the
+ * pill and shows the red blocked glyph.
  */
 @Composable
 fun RequestStatusPill(status: String, escalated: Boolean = false, modifier: Modifier = Modifier) {
     val palette = Orcha.palette
     val mono = palette.pillMono
-    val shape = pillShape(mono)
     val shown = if (escalated && status.lowercase() == "open") "escalated" else status.lowercase()
-    val tint = palette.tint(if (shown == "escalated") "danger" else statusColorName(status, StatusDomain.Request))
-    val icon: androidx.compose.ui.graphics.vector.ImageVector? = when (shown) {
-        "open" -> OrchaIcons.WarningAmber
-        "accepted" -> OrchaIcons.PlayArrow
-        "answered" -> OrchaIcons.Check
-        "rejected", "escalated" -> OrchaIcons.Close
-        "converted_to_task" -> OrchaIcons.ArrowForward
-        else -> null // closed & unknown keep the neutral dot
-    }
-    Row(
-        modifier = modifier
-            .background(tint.soft, shape)
-            .border(BorderStroke(1.dp, tint.line), shape)
-            .padding(start = 8.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp),
-    ) {
-        if (icon != null) {
-            Icon(icon, contentDescription = null, tint = tint.color, modifier = Modifier.size(12.dp))
-        } else {
-            Box(Modifier.size(7.dp).background(tint.color, CircleShape))
-        }
-        Text(pillLabel(MobileUx.statusCopy(shown), mono), color = tint.color, style = pillTextStyle(mono))
+    LinearPillShell(mono, modifier) {
+        LStatusGlyph(requestGlyphStatus(shown), size = 12.dp, modifier = Modifier.clearAndSetSemantics { })
+        Text(pillLabel(MobileUx.statusCopy(shown), mono), color = palette.text2, style = pillTextStyle(mono))
     }
 }
 

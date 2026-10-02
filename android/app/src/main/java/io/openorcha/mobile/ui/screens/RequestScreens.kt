@@ -35,7 +35,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -70,6 +70,11 @@ import io.openorcha.mobile.ui.components.TonalButton
 import io.openorcha.mobile.ui.icons.OrchaIcons
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.Orcha
+import io.openorcha.mobile.ui.components.LDivider
+import io.openorcha.mobile.ui.components.LEmptyState
+import io.openorcha.mobile.ui.components.LSpace
+import io.openorcha.mobile.ui.components.LType
+import io.openorcha.mobile.ui.components.ltype
 
 /* =============================================================================
    Flow 07 — Request detail: flow header, chain context, payload, response quote,
@@ -104,31 +109,38 @@ fun RequestDetailScreen(
     var confirmOwnerClose by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = Color.Transparent,
+        containerColor = p.bg,
         topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                title = { Text("Request") },
-                navigationIcon = { IconButton(onClick = onBack) { Icon(OrchaIcons.ArrowBack, "Back") } },
-                actions = {
-                    if (req != null) {
-                        // Escalate is the only overflow action left — Nudge + Close now live in
-                        // the universal operator tier below (flow 07a). The daemon-only
-                        // "Triage-close" is retired; a stale request is closed with a reason.
-                        val isRequester = req.requesterId == humanId
-                        if (req.status in setOf("open", "answered") && isRequester) {
-                            IconButton(onClick = { menuOpen = true }) { Icon(OrchaIcons.MoreVert, "More") }
-                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                DropdownMenuItem(text = { Text("Escalate") }, onClick = { menuOpen = false; onEscalate(null) })
+            Column {
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = p.bg, titleContentColor = p.text),
+                    title = { Text("Request", style = ltype(LType.Headline)) },
+                    navigationIcon = { IconButton(onClick = onBack) { Icon(OrchaIcons.ArrowBack, "Back", tint = p.text2) } },
+                    actions = {
+                        if (req != null) {
+                            // Escalate is the only overflow action left — Nudge + Close live in the
+                            // universal operator tier (flow 07a).
+                            val isRequester = req.requesterId == humanId
+                            if (req.status in setOf("open", "answered") && isRequester) {
+                                IconButton(onClick = { menuOpen = true }) { Icon(OrchaIcons.MoreVert, "More actions", tint = p.text2) }
+                                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                    DropdownMenuItem(text = { Text("Escalate to a human") }, onClick = { menuOpen = false; onEscalate(null) })
+                                }
                             }
                         }
-                    }
-                },
-            )
+                    },
+                )
+                LDivider()
+            }
         },
     ) { padding ->
         if (req == null) {
-            OrchaCard(Modifier.padding(padding).padding(16.dp)) { Text("Request not found — refresh the workspace.", color = p.muted) }
+            LEmptyState(
+                icon = OrchaIcons.Inbox,
+                title = "Request not found",
+                message = "Refresh the workspace.",
+                modifier = Modifier.padding(padding).padding(16.dp),
+            )
             return@Scaffold
         }
         val isRequester = req.requesterId == humanId
@@ -136,8 +148,8 @@ fun RequestDetailScreen(
 
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = LSpace.l, vertical = LSpace.l),
+            verticalArrangement = Arrangement.spacedBy(LSpace.l),
         ) {
             RequestDetailContent(
                 state = state, req = req, agents = agents, humanId = humanId,
@@ -192,10 +204,15 @@ fun RequestDetailScreen(
         if (confirmOwnerClose) {
             AlertDialog(
                 onDismissRequest = { confirmOwnerClose = false },
-                title = { Text("Close this request?") },
+                title = { Text(if (req.status == "answered") "Resolve this request?" else "Close this request?") },
                 text = { Text("${toAlias ?: "The other party"} sees it closed on the next sync.") },
-                confirmButton = { TextButton(onClick = { confirmOwnerClose = false; onClose(null) }) { Text("Close") } },
-                dismissButton = { TextButton(onClick = { confirmOwnerClose = false }) { Text("Cancel") } },
+                confirmButton = {
+                    TextButton(onClick = { confirmOwnerClose = false; onClose(null) }) {
+                        Text(if (req.status == "answered") "Resolve" else "Close", color = p.accent)
+                    }
+                },
+                dismissButton = { TextButton(onClick = { confirmOwnerClose = false }) { Text("Cancel", color = p.muted) } },
+                containerColor = p.raised,
             )
         }
     }
@@ -204,11 +221,15 @@ fun RequestDetailScreen(
 @Composable
 internal fun TimelineDot(label: String, at: String?, reached: Boolean) {
     val p = Orcha.palette
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 3.dp)) {
-        Box(Modifier.size(9.dp).background(if (reached) p.accent else p.border2, CircleShape))
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = if (reached) p.text else p.faint)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(LSpace.m),
+        modifier = Modifier.padding(vertical = 6.dp),
+    ) {
+        Box(Modifier.size(7.dp).background(if (reached) p.muted else p.border2, CircleShape))
+        Text(label, style = ltype(LType.Body), color = if (reached) p.text2 else p.faint)
         Spacer(Modifier.weight(1f))
-        Text(MobileUx.agoLabel(at) ?: "", style = MonoSmStyle, color = p.faint)
+        Text(MobileUx.agoLabel(at) ?: "", style = ltype(LType.Meta), color = p.faint)
     }
 }
 

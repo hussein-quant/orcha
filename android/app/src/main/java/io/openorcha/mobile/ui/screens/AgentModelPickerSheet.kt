@@ -76,6 +76,26 @@ import androidx.compose.ui.unit.sp
 import io.openorcha.mobile.ui.theme.MonoSmStyle
 import io.openorcha.mobile.ui.theme.MonoStyle
 import io.openorcha.mobile.ui.theme.Orcha
+import io.openorcha.mobile.ui.components.LButton
+import io.openorcha.mobile.ui.components.LButtonKind
+import io.openorcha.mobile.ui.components.LCard
+import io.openorcha.mobile.ui.components.LDivider
+import io.openorcha.mobile.ui.components.LSegmented
+import io.openorcha.mobile.ui.components.LSpace
+import io.openorcha.mobile.ui.components.LTag
+import io.openorcha.mobile.ui.components.LType
+import io.openorcha.mobile.ui.components.ltype
+import io.openorcha.mobile.ui.icons.OrchaIcons
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
+import androidx.compose.ui.semantics.Role
 
 /* =============================================================================
    Flow 09 — Agent detail (header, Now, Controls, persona, runs) + pickers.
@@ -93,36 +113,46 @@ fun ModelPickerSheet(
 ) {
     val p = Orcha.palette
     var picked by remember { mutableStateOf(current) }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.raised) {
-        Column(Modifier.padding(horizontal = 18.dp).padding(bottom = 30.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("MODEL", style = MaterialTheme.typography.labelMedium, color = p.accent)
-            Text("Applies at the next wake.", style = MaterialTheme.typography.bodyMedium, color = p.muted)
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 18.dp).padding(bottom = 30.dp),
+            verticalArrangement = Arrangement.spacedBy(LSpace.m),
+        ) {
+            Text("Model", style = ltype(LType.Headline), color = p.text, modifier = Modifier.semantics { heading() })
+            Text("Applies at the next wake.", style = ltype(LType.Meta), color = p.muted)
             models.groupBy { it.runtime ?: it.provider ?: "models" }.forEach { (group, rows) ->
-                SectionH(group)
-                rows.forEach { m ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        RadioButton(
-                            selected = picked == m.id,
-                            onClick = { picked = m.id },
-                            colors = RadioButtonDefaults.colors(selectedColor = p.accent, unselectedColor = p.border2),
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(m.name ?: m.id, style = MaterialTheme.typography.titleSmall)
-                            Text(m.id, style = MonoSmStyle, color = p.muted)
+                Text(group, style = ltype(LType.Meta), color = p.muted, modifier = Modifier.semantics { heading() })
+                LCard(padding = 0.dp) {
+                    rows.forEachIndexed { idx, m ->
+                        val selected = picked == m.id
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 52.dp)
+                                .selectable(selected = selected, role = Role.RadioButton) { picked = m.id }
+                                .padding(horizontal = LSpace.m, vertical = LSpace.s),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(LSpace.s),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(m.name ?: m.id, style = ltype(LType.BodyEmph), color = p.text)
+                                Text(m.id, style = ltype(LType.Mono), color = p.muted)
+                            }
+                            if (m.id == current) LTag("Current")
+                            Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                                if (selected) Icon(OrchaIcons.Check, null, tint = p.accent, modifier = Modifier.size(18.dp))
+                            }
                         }
-                        if (m.id == current) MetaTag("current")
+                        if (idx != rows.lastIndex) LDivider(inset = LSpace.m)
                     }
                 }
             }
             val name = models.firstOrNull { it.id == picked }?.let { it.name ?: it.id }
-            PrimaryButton(
+            LButton(
                 if (picked != null && picked != current) "Change to $name" else "Pick a different model",
                 { picked?.let(onConfirm) },
                 Modifier.fillMaxWidth(),
+                kind = LButtonKind.Primary,
                 enabled = picked != null && picked != current && !busy,
             )
         }
