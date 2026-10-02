@@ -164,3 +164,174 @@ object AgentInsights {
         else -> detail ?: "Changes aren't available for this run."
     }
 }
+
+/** Agent config history copy — web `configHistoryModel.ts` / iOS `AgentConfigHistoryUx` parity. */
+object AgentConfigHistoryUx {
+    fun fieldLabel(field: String): String = when (field) {
+        "alias" -> "Name"
+        "role" -> "Role"
+        "system_prompt" -> "Prompt"
+        "model" -> "Model"
+        "reasoning_effort" -> "Reasoning effort"
+        "auto_wake_interval_secs" -> "Auto-wake"
+        "autonomy_override" -> "Autonomy"
+        "provider" -> "Provider"
+        else -> field.split('_').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
+    }
+
+    private fun interval(secs: Long): String = when {
+        secs > 0 && secs % 86400 == 0L -> if (secs == 86400L) "Daily" else "Every ${secs / 86400} days"
+        secs > 0 && secs % 3600 == 0L -> if (secs == 3600L) "Hourly" else "Every ${secs / 3600} h"
+        secs > 0 && secs % 60 == 0L -> "Every ${secs / 60} min"
+        else -> "Every $secs s"
+    }
+
+    /** A value the way the Configuration screen shows it. Unset ≠ empty. */
+    fun value(field: String, v: kotlinx.serialization.json.JsonElement?): String {
+        val prim = v as? kotlinx.serialization.json.JsonPrimitive
+        val text: String? = if (prim == null || prim is kotlinx.serialization.json.JsonNull) null else {
+            val d = prim.content.toDoubleOrNull()
+            if (!prim.isString && d != null && d == Math.rint(d)) d.toLong().toString() else prim.content
+        }
+        return when (field) {
+            "auto_wake_interval_secs" -> text?.toDoubleOrNull()?.let { interval(it.toLong()) } ?: "Off"
+            "autonomy_override" -> if (text == null) "Inherit project" else mapOf("plan" to "Plan", "pr" to "PR", "full" to "Full")[text] ?: text
+            "reasoning_effort" -> if (text.isNullOrEmpty()) "Default" else text.replaceFirstChar { it.uppercase() }
+            "model" -> text ?: "Default"
+            "provider" -> if (text == null) "Unknown" else mapOf("claude" to "Claude", "codex" to "Codex")[text] ?: text
+            else -> if (text.isNullOrEmpty()) "Not set" else text
+        }
+    }
+
+    fun changedSummary(r: io.openorcha.mobile.data.ConfigRevisionDto): String =
+        r.changes.filterNot { it.derived }.joinToString(", ") { fieldLabel(it.field).lowercase() }
+
+    fun actorName(r: io.openorcha.mobile.data.ConfigRevisionDto): String =
+        if (r.kind == "initial") "Quorate" else r.actor?.alias ?: "Unattributed"
+
+    /** One sentence per revision, as the web history list reads. */
+    fun sentence(r: io.openorcha.mobile.data.ConfigRevisionDto): String = when (r.kind) {
+        "initial" -> "Initial configuration captured"
+        "restore" -> "${actorName(r)} restored ${changedSummary(r)} from #${r.restoredFrom ?: "?"}"
+        else -> "${actorName(r)} changed ${changedSummary(r)}"
+    }
+}
+
+/** Org chart helpers — iOS `AgentOrgUx` / web OrgPage parity. */
+object AgentOrgUx {
+    data class Node(val id: String, val depth: Int)
+
+    private fun reachesSelf(id: String, managerOf: Map<String, String>): Boolean {
+        var cur = managerOf[id]
+        val seen = HashSet<String>()
+        while (cur != null && seen.add(cur)) {
+            if (cur == id) return true
+            cur = managerOf[cur]
+        }
+        return false
+    }
+
+    /** Depth-first: roots (no manager, a manager outside the set, or a loop) first, each followed by its reports. */
+    fun flatten(order: List<String>, managerOf: Map<String, String>): List<Node> {
+        val ids = order.toSet()
+        val children = LinkedHashMap<String, MutableList<String>>()
+        val roots = ArrayList<String>()
+        for (id in order) {
+            val m = managerOf[id]
+            if (m != null && m in ids && m != id && !reachesSelf(id, managerOf)) children.getOrPut(m) { ArrayList() }.add(id)
+            else roots.add(id)
+        }
+        val out = ArrayList<Node>()
+        val seen = HashSet<String>()
+        fun walk(id: String, depth: Int) {
+            if (!seen.add(id)) return
+            out.add(Node(id, depth))
+            children[id]?.forEach { walk(it, depth + 1) }
+        }
+        roots.forEach { walk(it, 0) }
+        return out
+    }
+
+    /** Every id below [id] (its reports, their reports, …) — cycle-safe. */
+    fun descendants(id: String, managerOf: Map<String, String>): Set<String> {
+        val down = HashMap<String, MutableList<String>>()
+        managerOf.forEach { (child, manager) -> down.getOrPut(manager) { ArrayList() }.add(child) }
+        val out = HashSet<String>()
+        val stack = ArrayDeque(down[id].orEmpty())
+        while (stack.isNotEmpty()) {
+            val c = stack.removeLast()
+            if (c == id || !out.add(c)) continue
+            stack.addAll(down[c].orEmpty())
+        }
+        return out
+    }
+
+    data class Person(val id: String, val isHuman: Boolean, val retired: Boolean)
+
+    /** Who [agentId] may report to: live people, never itself or one of its own reports (a loop). Humans first. */
+    fun managerCandidates(agentId: String, people: List<Person>, managerOf: Map<String, String>): List<String> {
+        val below = descendants(agentId, managerOf)
+        val live = people.filter { it.id != agentId && !it.retired && it.id !in below }
+        return live.filter { it.isHuman }.map { it.id } + live.filterNot { it.isHuman }.map { it.id }
+    }
+
+    fun changedToast(alias: String, managerAlias: String?): String =
+        if (managerAlias != null) "$alias now reports to $managerAlias" else "$alias has no manager"
+}
+
+/** Budget limit editing + member gating (iOS `AgentBudgetUx.parseLimit` / `Access` parity). */
+object AgentControlsUx {
+    sealed interface Limit {
+        data object None : Limit
+        data object Invalid : Limit
+        data class Value(val v: Double) : Limit
+    }
+
+    /** Blank = no limit; "$1,250.5" → 1250.5; tokens round to a whole number. */
+    fun parseLimit(raw: String, integer: Boolean): Limit {
+        val t = raw.trim().replace("$", "").replace(",", "").replace(" ", "")
+        if (t.isEmpty()) return Limit.None
+        val n = t.toDoubleOrNull() ?: return Limit.Invalid
+        if (n.isNaN() || n.isInfinite() || n < 0) return Limit.Invalid
+        return Limit.Value(if (integer) Math.rint(n) else Math.rint(n * 100) / 100)
+    }
+
+    /**
+     * PUT body for the limits editor: both limits always sent — a blank field is an
+     * explicit null (the server clears that limit), a key left OUT would be unchanged.
+     */
+    fun budgetLimitsJson(actorId: String, usd: Limit, tokens: Limit): kotlinx.serialization.json.JsonObject =
+        kotlinx.serialization.json.buildJsonObject {
+            put("actor_agent_id", kotlinx.serialization.json.JsonPrimitive(actorId))
+            put("monthly_limit_usd", (usd as? Limit.Value)?.let { kotlinx.serialization.json.JsonPrimitive(it.v) } ?: kotlinx.serialization.json.JsonNull)
+            put("monthly_limit_tokens", (tokens as? Limit.Value)?.let { kotlinx.serialization.json.JsonPrimitive(it.v.toLong()) } ?: kotlinx.serialization.json.JsonNull)
+        }
+
+    fun overrideJson(actorId: String, grant: Boolean): kotlinx.serialization.json.JsonObject =
+        kotlinx.serialization.json.buildJsonObject {
+            put("actor_agent_id", kotlinx.serialization.json.JsonPrimitive(actorId))
+            put("override", kotlinx.serialization.json.JsonPrimitive(if (grant) "grant" else "revoke"))
+        }
+
+    /** "1250.00" for the editor's initial text; blank when unset. */
+    fun usdField(v: Double?): String = v?.let { String.format(Locale.US, "%.2f", it) }.orEmpty()
+
+    /**
+     * Owner-or-grant gate over `/api/me` (honest UI only; the server still enforces 403).
+     * Unknown / trust-off = permissive (the paired-human convention); not a member or a
+     * viewer = no management writes.
+     */
+    fun canManage(me: io.openorcha.mobile.data.MeDto?, grant: String): Boolean {
+        if (me == null || !me.trusted) return true
+        val id = me.identity ?: return false
+        if (id.memberRole == "viewer") return false
+        return id.memberRole == "owner" || grant in id.grants
+    }
+
+    /** Headless + resident runs, de-duplicated, newest first (iOS `loadAgentDetail`). */
+    fun mergeRuns(
+        headless: List<io.openorcha.mobile.data.RunDto>,
+        resident: List<io.openorcha.mobile.data.RunDto>,
+    ): List<io.openorcha.mobile.data.RunDto> =
+        (headless + resident).distinctBy { it.runId }.sortedByDescending { it.startedAt.orEmpty() }
+}

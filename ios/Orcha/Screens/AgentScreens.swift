@@ -63,7 +63,7 @@ struct AgentDetailScreen: View {
                 }
                 attentionBanners(agent)
                 header(agent)
-                AgentReportsToRow(agentId: agent.id)
+                AgentReportsToRow(agentId: agent.id, alias: agent.alias, retired: dead)
                 if agent.kind == "ai" && !dead {
                     NavigationLink(value: WorkspaceRoute.converse(agent.id)) {
                         Label("Converse", systemImage: "bubble.left.and.text.bubble.right")
@@ -163,7 +163,7 @@ struct AgentDetailScreen: View {
                 AgentStatusCapsule(status: status)
             }
             HStack(spacing: LSpace.s) {
-                if let m = agent.model { LTag(m) }
+                if let m = agent.model { LTag(m, markModel: m) }
                 Spacer()
                 if let ago = MobileUx.agoLabel(agent.lastActive) {
                     Text("Active \(ago)").ltype(.micro).foregroundStyle(p.faint)
@@ -304,7 +304,7 @@ struct AgentDetailScreen: View {
             OrchaCard {
                 controlRow(
                     title: "Model", sub: canAgents ? "Applies at the next wake" : "Needs the 'manage agents' permission",
-                    tag: MetaTag(text: agent.model ?? "default", mono: true),
+                    tag: MetaTag(text: agent.model ?? "default", mono: true, markModel: agent.model),
                     enabled: !dead && canAgents
                 ) { showModelPicker = true }
                 controlRow(
@@ -479,8 +479,11 @@ struct ModelPickerSheet: View {
     @State private var picked: String?
 
     private var groups: [(String, [ModelDto])] {
-        Dictionary(grouping: model.models) { $0.runtime ?? $0.provider ?? "models" }
-            .sorted { $0.key < $1.key }
+        Dictionary(grouping: model.models) { m in
+            let raw = m.runtime ?? m.provider
+            return ModelProvider.for(raw ?? m.id)?.label ?? raw ?? "Other models"
+        }
+        .sorted { $0.key < $1.key }
     }
 
     private var canConfirm: Bool { picked != nil && picked != current && !model.actionInFlight }
@@ -494,7 +497,7 @@ struct ModelPickerSheet: View {
                             .ltype(.meta)
                             .foregroundStyle(p.muted)
                         ForEach(groups, id: \.0) { group, rows in
-                            LSection(group, count: rows.count) {
+                            LSection(group, count: rows.count, markModel: group) {
                                 LCard(padding: 0) {
                                     VStack(spacing: 0) {
                                         ForEach(rows) { m in
@@ -537,7 +540,10 @@ struct ModelPickerSheet: View {
                     .foregroundStyle(isPicked ? p.accent : p.border2)
                     .accessibilityHidden(true)
             } trailing: {
-                if m.id == current { LTag("current") }
+                HStack(spacing: LSpace.s) {
+                    if m.id == current { LTag("current") }
+                    ModelProviderMark(model: m.runtime ?? m.provider ?? m.id)
+                }
             }
         }
         .buttonStyle(.lRow)
@@ -606,6 +612,9 @@ struct ConversationScreen: View {
     private static let revealStep = 20
     /// GH #140 — a tapped task-id link pushes onto the tab's NavigationStack.
     @State private var linkedTaskId: String?
+    /// Portal-link chips in a message (task / request / agent / GitHub) push here.
+    @State private var portalRoute: WorkspaceRoute?
+    @Environment(\.openURL) private var openURL
     /// Whether the bottom sentinel is on screen — drives auto-scroll vs the "New messages" pill.
     @State private var atBottom = true
     @State private var hasUnseen = false
@@ -633,6 +642,17 @@ struct ConversationScreen: View {
             .navigationTitle(agent?.alias ?? "Conversation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        ModelProviderMark(model: agent?.model)
+                        Text(agent?.alias ?? "Conversation")
+                            .font(p.uiFont(15, .semibold))
+                            .foregroundStyle(p.text)
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityAddTraits(.isHeader)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("End conversation", role: .destructive) { confirmEnd = true }
@@ -649,6 +669,7 @@ struct ConversationScreen: View {
                 Text("\(agent?.alias ?? "The agent") goes back to their own work. The transcript stays here.")
             }
             .navigationDestination(item: $linkedTaskId) { TaskDetailScreen(taskId: $0) }
+            .portalLinkNavigation($portalRoute)
             .task {
                 await model.loadConversation(agentId)
                 hasLoaded = true
@@ -837,9 +858,9 @@ struct ConversationScreen: View {
         let tasks = model.snapshot?.tasks ?? []
         let author = agent?.alias ?? "agent"
         if turn.role == "system" {
-            Bubble(.system, turn.content, tasks: tasks, onTapTask: { linkedTaskId = $0 })
+            Bubble(.system, turn.content, tasks: tasks, onTapTask: { linkedTaskId = $0 }, portalBase: model.portalBase, onTapPortal: openPortal)
         } else if mine {
-            Bubble(.mine, turn.content, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 })
+            Bubble(.mine, turn.content, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 }, portalBase: model.portalBase, onTapPortal: openPortal)
         } else if ChatSendFlow.isBlankReply(turn.content) {
             // A blank agent turn (the session restarted mid-reply and no output was
             // captured) must never render as an empty message — show a muted notice.
@@ -851,9 +872,17 @@ struct ConversationScreen: View {
         } else {
             // Web parity: agent turn content renders as chat-scale markdown
             // (headings, bold/italic, code, lists, links, rules).
-            Bubble(.theirs, turn.content, author: author, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 }, markdown: true) {
+            Bubble(.theirs, turn.content, author: author, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 }, markdown: true, portalBase: model.portalBase, onTapPortal: openPortal) {
                 TurnFooter(workedFor: workedFor, runRoute: turn.runId.map(workLogRoute))
             }
+        }
+    }
+
+    private func openPortal(_ link: PortalLink) {
+        switch model.portalDestination(link) {
+        case let .route(route): portalRoute = route
+        case let .browser(url): openURL(url)
+        case .none: break
         }
     }
 

@@ -75,6 +75,8 @@ data class ContainerHealth(
     val needsYou: Int = 0,
     /** The bound GitHub repo ("owner/name"), shown on the card's secondary line. */
     val githubRepo: String? = null,
+    /** D14 project icon from the snapshot's container (null = default glyph). */
+    val icon: io.openorcha.mobile.domain.ProjectIconValue? = null,
 )
 
 /** Flow 09: lazily-fetched agent-detail sections (each best-effort, absent on failure). */

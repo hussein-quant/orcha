@@ -20,6 +20,10 @@ import java.util.Locale
  */
 object TaskInsightsUx {
 
+    /** iOS `ReassignUx.canReassign`: the server refuses to (re)assign the root, a finished, in-review or cancelled task. */
+    fun canReassign(isRoot: Boolean, status: String): Boolean =
+        !isRoot && status !in setOf("completed", "needs_verification", "cancelled")
+
     enum class Tone { Ok, Warn, Bad, Muted, Plain }
 
     data class Part(val key: String, val text: String, val tone: Tone)

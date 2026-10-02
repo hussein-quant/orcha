@@ -170,7 +170,10 @@ fun ConversationScreen(
                             LAvatar(agent?.alias ?: "?", isAI = true, size = 20.dp, status = agent?.status)
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text(agent?.alias ?: "Conversation", style = ltype(LType.Headline), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(agentStatusLabel(agent?.status ?: "idle"), style = ltype(LType.Micro), color = p.muted, maxLines = 1)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    io.openorcha.mobile.ui.components.ModelProviderMark(agent?.model, size = 12.dp)
+                                    Text(agentStatusLabel(agent?.status ?: "idle"), style = ltype(LType.Micro), color = p.muted, maxLines = 1)
+                                }
                             }
                         }
                     },

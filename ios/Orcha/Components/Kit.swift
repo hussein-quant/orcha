@@ -56,6 +56,8 @@ struct MetaTag: View {
     let text: String
     var mono = false
     var tint: Color?
+    /// A model id / runtime: shows its provider mark (Claude / OpenAI) before the text.
+    var markModel: String?
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: p.radiusTag, style: .continuous)
@@ -63,6 +65,7 @@ struct MetaTag: View {
             if let tint {
                 Circle().fill(tint).frame(width: 6, height: 6).accessibilityHidden(true)
             }
+            ModelProviderMark(model: markModel, size: 11)
             Text(text)
                 .font(mono ? .system(size: 11, design: .monospaced) : p.uiFont(11, .medium))
                 .foregroundStyle(p.text2)

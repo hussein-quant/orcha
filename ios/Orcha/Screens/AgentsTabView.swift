@@ -157,10 +157,13 @@ struct AgentRosterRow: View {
                     .lineLimit(1)
             }
         } else {
-            Text([agent.role ?? "agent", MobileUx.agoLabel(agent.lastActive)].compactMap { $0 }.joined(separator: " · "))
-                .ltype(.meta)
-                .foregroundStyle(p.muted)
-                .lineLimit(1)
+            HStack(spacing: 5) {
+                ModelProviderMark(model: agent.model, size: 12)
+                Text([agent.role ?? "agent", MobileUx.agoLabel(agent.lastActive)].compactMap { $0 }.joined(separator: " · "))
+                    .ltype(.meta)
+                    .foregroundStyle(p.muted)
+                    .lineLimit(1)
+            }
         }
     }
 
@@ -178,6 +181,7 @@ struct AgentRosterRow: View {
         if let budget, let line = AgentBudgetUx.rosterLine(budget) { parts.append("spend \(line)") }
         if agent.status == "working", let title = currentTitle { parts.append("working on \(title)") }
         else if let role = agent.role { parts.append(role) }
+        if let provider = ModelProvider.for(agent.model) { parts.append(provider.label) }
         return parts.joined(separator: ", ")
     }
 }

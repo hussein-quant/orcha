@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -99,11 +100,41 @@ internal fun AgentsTab(
     val budgets by io.openorcha.mobile.ui.AgentSliceStore.budgets.collectAsState()
     val ai = MobileUx.orderAgents(agents.filter { it.kind == "ai" })
     val humans = agents.filter { it.kind == "human" }
+    var mode by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(AgentsRosterMode.Roster) }
+    val orgByProject by io.openorcha.mobile.ui.AgentSliceStore.org.collectAsState()
+    androidx.compose.runtime.LaunchedEffect(baseUrl, containerId, mode) {
+        if (mode == AgentsRosterMode.Org && baseUrl != null && containerId != null) {
+            io.openorcha.mobile.ui.AgentSliceStore.refreshOrg(baseUrl, containerId)
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(p.bg),
         contentPadding = PaddingValues(horizontal = LSpace.l, vertical = LSpace.m),
         verticalArrangement = Arrangement.spacedBy(LSpace.xl),
     ) {
+        if (containerId != null && (ai.isNotEmpty() || humans.isNotEmpty())) {
+            item(key = "roster-mode") {
+                io.openorcha.mobile.ui.components.LSegmented(
+                    options = listOf(AgentsRosterMode.Roster to "Roster", AgentsRosterMode.Org to "Org"),
+                    selection = mode,
+                    onSelect = { mode = it },
+                )
+            }
+        }
+        if (mode == AgentsRosterMode.Org && containerId != null) {
+            val managerOf = orgByProject[containerId]
+            item(key = "org") {
+                AgentsOrgPanel(
+                    humans = humans,
+                    ai = ai,
+                    managerOf = managerOf,
+                    budgets = budgets,
+                    onOpenAgent = onOpenAgent,
+                )
+            }
+            item { Spacer(Modifier.height(72.dp)) }
+            return@LazyColumn
+        }
         if (ai.isNotEmpty()) {
             item(key = "ai-agents") {
                 LSection("AI agents", count = ai.size) {
@@ -153,6 +184,7 @@ private fun AgentRosterRow(agent: AgentDto, budgetPaused: Boolean = false, onCli
         add(agent.alias); add("AI agent"); add(agentStatusLabel(status))
         if (budgetPaused && !dead) add("Budget paused")
         if (working) add("working on $currentTitle") else agent.role?.let { add(it) }
+        io.openorcha.mobile.domain.providerFor(agent.model)?.let { add(it.label) }
     }.joinToString(", ")
     Row(
         Modifier
@@ -174,7 +206,10 @@ private fun AgentRosterRow(agent: AgentDto, budgetPaused: Boolean = false, onCli
                     Text(currentTitle.orEmpty(), style = ltype(LType.Meta), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             } else {
-                Text(meta, style = ltype(LType.Meta), color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    io.openorcha.mobile.ui.components.ModelProviderMark(agent.model, size = 12.dp)
+                    Text(meta, style = ltype(LType.Meta), color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         if (budgetPaused && !dead) BudgetPausedCapsule() else AgentStatusCapsule(status)
@@ -213,3 +248,43 @@ private fun HumanRosterRow(human: AgentDto, onClick: () -> Unit) {
  */
 internal fun humanRoleTag(human: AgentDto): String? =
     (human.memberRole ?: human.role)?.lowercase()?.takeIf { it in setOf("owner", "member", "viewer") }?.replaceFirstChar { it.uppercase() }
+
+internal enum class AgentsRosterMode { Roster, Org }
+
+/**
+ * Agents tab "Org": the reporting lines as an indented tree (web `/org` parity, read-only)
+ * — each agent under its manager from the snapshot's `reports_to`.
+ */
+@Composable
+private fun AgentsOrgPanel(
+    humans: List<AgentDto>,
+    ai: List<AgentDto>,
+    managerOf: Map<String, String>?,
+    budgets: Map<String, io.openorcha.mobile.data.AgentBudgetDto>,
+    onOpenAgent: (String) -> Unit,
+) {
+    val p = Orcha.palette
+    val byId = (humans + ai).associateBy { it.id }
+    val nodes = io.openorcha.mobile.domain.AgentOrgUx.flatten((humans + ai).map { it.id }, managerOf.orEmpty())
+    Column(verticalArrangement = Arrangement.spacedBy(LSpace.s)) {
+        if (managerOf != null && managerOf.isEmpty()) {
+            Text(
+                "No reporting lines yet — set who an agent reports to from its \"Reports to\" section.",
+                style = ltype(LType.Meta), color = p.muted,
+            )
+        }
+        LCard(padding = 0.dp) {
+            nodes.forEachIndexed { i, node ->
+                val a = byId[node.id] ?: return@forEachIndexed
+                if (i > 0) LDivider(inset = 56.dp)
+                Box(Modifier.padding(start = (minOf(node.depth, 4) * 18).dp)) {
+                    if (a.kind == "ai") {
+                        AgentRosterRow(a, budgetPaused = budgets[a.id]?.paused == true) { onOpenAgent(a.id) }
+                    } else {
+                        HumanRosterRow(a) { onOpenAgent(a.id) }
+                    }
+                }
+            }
+        }
+    }
+}

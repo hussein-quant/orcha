@@ -217,18 +217,23 @@ struct LSection<Content: View>: View {
     let title: String
     var count: Int?
     var trailing: AnyView?
+    /// A model id / runtime / provider: shows its provider mark before the title.
+    var markModel: String?
     @ViewBuilder var content: Content
 
-    init(_ title: String, count: Int? = nil, trailing: AnyView? = nil, @ViewBuilder content: () -> Content) {
+    init(_ title: String, count: Int? = nil, trailing: AnyView? = nil, markModel: String? = nil,
+         @ViewBuilder content: () -> Content) {
         self.title = title
         self.count = count
         self.trailing = trailing
+        self.markModel = markModel
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: LSpace.s) {
             HStack(spacing: 6) {
+                ModelProviderMark(model: markModel, size: 13)
                 Text(title)
                     .ltype(.meta)
                     .fontWeight(.medium)
@@ -1043,10 +1048,13 @@ struct LTag: View {
     @Environment(\.palette) private var p
     let text: String
     var tint: Color?
+    /// A model id / runtime: shows its provider mark (Claude / OpenAI) before the text.
+    var markModel: String?
 
-    init(_ text: String, tint: Color? = nil) {
+    init(_ text: String, tint: Color? = nil, markModel: String? = nil) {
         self.text = text
         self.tint = tint
+        self.markModel = markModel
     }
 
     var body: some View {
@@ -1054,6 +1062,7 @@ struct LTag: View {
             if let tint {
                 Circle().fill(tint).frame(width: 6, height: 6).accessibilityHidden(true)
             }
+            ModelProviderMark(model: markModel, size: 11)
             Text(text)
                 .ltype(.micro)
                 .fontWeight(.medium)

@@ -38,6 +38,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -115,6 +116,16 @@ fun AgentDetailScreen(
     var modelSheet by remember { mutableStateOf(false) }
     var wakeSheet by remember { mutableStateOf(false) }
     val dead = agent?.status == "terminated" || agent?.terminatedAt != null
+    var historyOpen by remember { mutableStateOf(false) }
+    val baseUrl = state.selectedContainer?.baseUrl
+    val containerId = state.selectedContainer?.id
+    LaunchedEffect(baseUrl, containerId) {
+        if (baseUrl != null && containerId != null) io.openorcha.mobile.ui.AgentSliceStore.refreshMe(baseUrl, containerId)
+    }
+    val meByProject by io.openorcha.mobile.ui.AgentSliceStore.me.collectAsState()
+    val me = containerId?.let { meByProject[it] }
+    val canManageAgents = io.openorcha.mobile.domain.AgentControlsUx.canManage(me, "manage_agents")
+    val canManageAutonomy = io.openorcha.mobile.domain.AgentControlsUx.canManage(me, "manage_autonomy")
 
     Scaffold(
         containerColor = p.bg,
@@ -173,8 +184,23 @@ fun AgentDetailScreen(
                 onOpenRequests = onOpenRequests,
                 onConversation = onConversation,
                 onOpenAgent = onOpenAgent,
+                onOpenHistory = if (agent.kind == "ai" && baseUrl != null) ({ historyOpen = true }) else null,
+                canManageAgents = canManageAgents,
+                canManageAutonomy = canManageAutonomy,
             )
         }
+    }
+
+    if (historyOpen && agent != null && baseUrl != null) {
+        AgentConfigHistorySheet(
+            baseUrl = baseUrl,
+            agentId = agent.id,
+            alias = agent.alias,
+            actorId = state.selectedContainer?.humanAgentId,
+            canRestore = !dead && (canManageAgents || canManageAutonomy),
+            onDismiss = { historyOpen = false },
+            onRestored = onRefresh,
+        )
     }
 
     if (renaming && agent != null) {

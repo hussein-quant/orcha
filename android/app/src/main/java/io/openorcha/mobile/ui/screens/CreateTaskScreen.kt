@@ -168,7 +168,7 @@ fun CreateTaskScreen(
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(LSpace.s)) {
                             item { CreateAssigneeChip("Unassigned", assignee == null) { assignee = null } }
                             items(agents, key = { it.id }) { a ->
-                                CreateAssigneeChip(a.alias, assignee == a.alias, avatar = true, status = a.status) { assignee = a.alias }
+                                CreateAssigneeChip(a.alias, assignee == a.alias, avatar = true, status = a.status, model = a.model) { assignee = a.alias }
                             }
                         }
                         agents.firstOrNull { it.alias == assignee && it.status == "working" }?.let {
@@ -251,7 +251,7 @@ fun CreateTaskScreen(
 
 /** Compact Linear assignee chip: optional avatar + alias, accent ring when selected. */
 @Composable
-private fun CreateAssigneeChip(label: String, selected: Boolean, avatar: Boolean = false, status: String? = null, onClick: () -> Unit) {
+private fun CreateAssigneeChip(label: String, selected: Boolean, avatar: Boolean = false, status: String? = null, model: String? = null, onClick: () -> Unit) {
     val p = Orcha.palette
     val shape = RoundedCornerShape(999.dp)
     Row(
@@ -271,6 +271,7 @@ private fun CreateAssigneeChip(label: String, selected: Boolean, avatar: Boolean
         ) {
             if (avatar) LAvatar(label, isAI = true, size = 18.dp, status = status)
             Text(label, style = ltype(LType.Meta), color = if (selected) p.text else p.text2, maxLines = 1)
+            io.openorcha.mobile.ui.components.ModelProviderMark(model, size = 12.dp)
         }
     }
 }

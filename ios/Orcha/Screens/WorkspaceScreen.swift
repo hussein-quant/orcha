@@ -25,7 +25,10 @@ struct WorkspaceScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
     @State private var showCreateTask = false
-    @State private var showSettings = false
+    // Dev/UI-test seam: `-orchaOpenSettings` opens Settings over the workspace on launch
+    // (the toolbar menu isn't reachable from UI automation behind the glass group).
+    @State private var showSettings = ProcessInfo.processInfo.arguments.contains("-orchaOpenSettings")
+    @State private var showMetrics = false
 
     private var requestGroups: RequestGroups {
         MobileUx.requestGroups(model.snapshot?.requests ?? [], humanId: model.humanId)
@@ -63,6 +66,9 @@ struct WorkspaceScreen: View {
         }
         .sheet(isPresented: $showSettings) {
             SettingsScreen()
+        }
+        .sheet(isPresented: $showMetrics) {
+            MetricsScreen()
         }
         .sheet(isPresented: Bindable(model).showContainerControls) {
             ContainerControlsSheet()
@@ -168,6 +174,7 @@ struct WorkspaceScreen: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button("Metrics & usage", systemImage: "chart.bar") { showMetrics = true }
                         Button("Settings", systemImage: "gearshape") { showSettings = true }
                         Button("All projects", systemImage: "square.grid.2x2") { model.closeWorkspace() }
                         Button("Disconnect", systemImage: "xmark.circle", role: .destructive) {
@@ -242,34 +249,58 @@ private struct ProjectSwitcherMenu: View {
                             model.openContainer(container.id)
                         }
                     } label: {
-                        if container.id == model.selectedContainer?.id {
-                            Label(container.displayName, systemImage: "checkmark")
-                        } else {
-                            Text(container.displayName)
-                        }
+                        projectMenuLabel(container)
                     }
                 }
             }
             Button("All projects", systemImage: "square.grid.2x2") { model.closeWorkspace() }
         } label: {
             HStack(spacing: 6) {
-                Circle()
-                    .fill(dotColor)
-                    .frame(width: 7, height: 7)
+                // The status dot rides on the icon's corner so the switcher stays compact
+                // next to a crowded toolbar (Tasks adds filter + new).
+                ProjectIconView(icon: model.projectIcon(for: model.selectedContainer?.id), size: 20, tile: false)
+                    .overlay(alignment: .bottomTrailing) {
+                        Circle()
+                            .fill(dotColor)
+                            .frame(width: 7, height: 7)
+                            .overlay(Circle().strokeBorder(p.bg, lineWidth: 1.5))
+                            .offset(x: 2, y: 2)
+                    }
+                    .accessibilityHidden(true)
                 Text(name)
                     .ltype(.headline)
                     .foregroundStyle(p.text)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.7)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 120, alignment: .leading)
+                    .layoutPriority(1)
                 Image(systemName: "chevron.down")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(p.muted)
             }
+            // Leave a gap before the trailing toolbar group so the chevron never touches it.
+            .padding(.trailing, LSpace.s)
             .contentShape(.rect)
         }
         .accessibilityLabel("\(name), \(dotState)")
         .accessibilityHint("Switch project")
         .accessibilityShowsLargeContentViewer()
+    }
+
+    /// Menu row: the project's icon (emoji inline, glyph as its SF Symbol); a checkmark
+    /// marks the open project. Menus render only Text/Image, so the glyph tint is dropped.
+    @ViewBuilder
+    private func projectMenuLabel(_ container: StoredContainer) -> some View {
+        let icon = model.projectIcon(for: container.id)
+        let isOpen = container.id == model.selectedContainer?.id
+        if isOpen {
+            Label(container.displayName, systemImage: "checkmark")
+        } else if case let .emoji(value) = icon {
+            Text("\(value)  \(container.displayName)")
+        } else {
+            Label(container.displayName, systemImage: ProjectIconUx.sfSymbol(for: icon))
+        }
     }
 }
 

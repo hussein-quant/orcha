@@ -93,6 +93,8 @@ fun WorkspaceScreen(
                 projectName = selected?.displayName ?: "Quorate",
                 containers = state.containers,
                 selectedId = selected?.id,
+                icons = state.containerHealth.mapValues { it.value.icon } +
+                    listOfNotNull(snapshot?.let { it.container.id to it.container.projectIcon }),
                 dotState = dotState,
                 showExecution = snapshot != null,
                 running = running,
@@ -168,7 +170,7 @@ fun WorkspaceScreen(
                         onPlanSheet = { planSheetTask = it }, onVerifySheet = { verifySheetTask = it },
                         onOpenGithubHub = onOpenGithubHub,
                     )
-                    WorkspaceTab.Tasks -> TasksTab(snapshot.tasks, snapshot.agents, onOpenTask)
+                    WorkspaceTab.Tasks -> TasksTab(snapshot.tasks, snapshot.agents, onOpenTask, container = state.selectedContainer, onTaskChanged = onRefresh)
                     WorkspaceTab.Requests -> RequestsTab(snapshot.requests, snapshot.agents, humanId, onOpenRequest)
                     WorkspaceTab.Agents -> AgentsTab(snapshot.agents, onOpenAgent, baseUrl = selected?.baseUrl, containerId = selected?.id)
                     WorkspaceTab.Search -> SearchTab(

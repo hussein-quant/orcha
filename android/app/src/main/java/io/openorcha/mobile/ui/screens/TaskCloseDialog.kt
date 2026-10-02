@@ -45,7 +45,7 @@ internal fun TaskCloseDialog(
                     }
                 } else {
                     Text(
-                        "The task is force-closed and anything waiting on it unblocks. A reason is routed to the assignee.",
+                        "Closes it as cancelled and unblocks anything waiting on it. A running worker isn't stopped. A reason is sent to the assignee.",
                         style = ltype(LType.Body), color = p.text2,
                     )
                 }
@@ -53,7 +53,7 @@ internal fun TaskCloseDialog(
             }
         },
         confirmButton = { LButton("Close task", onClose, kind = LButtonKind.Danger) },
-        dismissButton = { LButton("Cancel", onDismiss, kind = LButtonKind.Ghost) },
+        dismissButton = { LButton("Keep task", onDismiss, kind = LButtonKind.Ghost) },
         containerColor = p.surface,
     )
 }

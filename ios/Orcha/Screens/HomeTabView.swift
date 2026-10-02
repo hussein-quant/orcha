@@ -10,6 +10,7 @@ struct HomeTabView: View {
     @State private var planSheetTask: TaskDto?
     @State private var verifySheetTask: TaskDto?
     @State private var showRepoConnect = false
+    @State private var showObjectiveEditor = false
 
     var body: some View {
         Group {
@@ -35,6 +36,9 @@ struct HomeTabView: View {
         }
         .sheet(isPresented: $showRepoConnect) {
             ConnectRepoSheet()
+        }
+        .sheet(isPresented: $showObjectiveEditor) {
+            ObjectiveEditorSheet(current: model.snapshot?.container.description ?? "")
         }
     }
 
@@ -74,7 +78,12 @@ struct HomeTabView: View {
             LazyVStack(alignment: .leading, spacing: LSpace.xl) {
                 VStack(alignment: .leading, spacing: LSpace.m) {
                     ConnectionBanners()
-                    HomeHeader(snapshot: snapshot, onConnectRepo: { showRepoConnect = true })
+                    HomeHeader(
+                        snapshot: snapshot,
+                        canEditObjective: model.access.canManage(Grant.manageAutonomy),
+                        onConnectRepo: { showRepoConnect = true },
+                        onEditObjective: { showObjectiveEditor = true }
+                    )
                     if let cu = model.catchUp {
                         CatchUpCard(
                             previous: cu.previous,
@@ -167,7 +176,9 @@ struct HomeTabView: View {
 private struct HomeHeader: View {
     @Environment(\.palette) private var p
     let snapshot: ContainerSnapshot
+    let canEditObjective: Bool
     let onConnectRepo: () -> Void
+    let onEditObjective: () -> Void
 
     private var aiAgents: [AgentDto] {
         MobileUx.orderAgents(snapshot.agents.filter { $0.kind == "ai" })
@@ -183,18 +194,43 @@ private struct HomeHeader: View {
         return "\(inProgress) in progress · \(verify) to verify · \(blocked) blocked · \(done) done"
     }
 
+    /// The objective; owners / manage_autonomy tap it to edit (web ObjectiveRow).
+    @ViewBuilder
+    private var objective: some View {
+        let text = (snapshot.container.description ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if canEditObjective {
+            Button(action: onEditObjective) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(text.isEmpty ? "Add an objective…" : text)
+                        .ltype(.body)
+                        .foregroundStyle(text.isEmpty ? p.muted : p.text2)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
+                    Image(systemName: "pencil")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(p.faint)
+                        .accessibilityHidden(true)
+                }
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(text.isEmpty ? "Add an objective" : "Edit objective: \(text)")
+        } else if !text.isEmpty {
+            Text(text)
+                .ltype(.body)
+                .foregroundStyle(p.text2)
+                .lineLimit(3)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: LSpace.s) {
             Text(snapshot.container.name)
                 .ltype(.title)
                 .foregroundStyle(p.text)
                 .accessibilityAddTraits(.isHeader)
-            if let objective = snapshot.container.description, !objective.isEmpty {
-                Text(objective)
-                    .ltype(.body)
-                    .foregroundStyle(p.text2)
-                    .lineLimit(3)
-            }
+            objective
             Text(tally)
                 .ltype(.meta)
                 .foregroundStyle(p.muted)

@@ -26,6 +26,16 @@ extension OrchaApiClient {
         try await get(base, "/api/agents/\(aid)/reports-to")
     }
 
+    /// `PUT /api/agents/{aid}/reports-to` — set the manager, or clear it with `nil`
+    /// (sent as an explicit JSON null: the field is required). Owner / manage_agents only;
+    /// 422 = not a live agent in this project, 409 = it would make a loop.
+    func setReportsTo(_ base: String, _ aid: String, managerId: String?, actor: String) async throws -> ReportsToDto {
+        try await putDecoding(base, "/api/agents/\(aid)/reports-to", [
+            "reports_to_agent_id": managerId.map { $0 as Any } ?? NSNull(),
+            "actor_agent_id": actor,
+        ])
+    }
+
     /// The reporting line of every agent in one read (a projection of the snapshot).
     func orgLines(_ base: String, _ cid: String) async throws -> OrgSnapshotDto {
         try await get(base, "/api/containers/\(cid)" + query(["task_limit": "1", "request_limit": "1"]))

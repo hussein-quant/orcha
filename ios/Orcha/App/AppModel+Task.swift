@@ -31,9 +31,14 @@ extension AppModel {
 
     /// The AI manager's pre-review for one task (nil when none / older server).
     func fetchManagerReview(_ task: TaskDto) async -> ManagerReviewDto? {
+        await fetchReviewExtras(task)?.managerReview
+    }
+
+    /// The manager pre-review plus the review routing ("Reviewer: X · via Atlas's manager").
+    func fetchReviewExtras(_ task: TaskDto) async -> TaskReviewExtrasDto? {
         guard let t = taskSliceTarget else { return nil }
         let rows = try? await api.taskReviewExtras(t.base, t.cid, status: task.status)
-        return rows?.first { $0.id == task.id }?.managerReview
+        return rows?.first { $0.id == task.id }
     }
 
     func previewTaskRoutine(cron: String, timezone: String) async -> TaskRoutinePreviewDto? {
@@ -100,5 +105,79 @@ extension AppModel {
         await taskSliceAction({ (_: VerdiktRunDto) in "Sent to Verdikt" }) { base, _, actor in
             try await api.triggerVerdikt(base, taskId, actor: actor)
         }
+    }
+}
+
+// MARK: - close implications + deliverables (Task2 slice)
+
+/// One file picked on the phone, ready to attach as a deliverable.
+struct DeliverableUpload: Sendable {
+    let fileName: String
+    let data: Data
+}
+
+extension AppModel {
+
+    /// The close confirm's blast radius; nil (generic copy) when the read fails or is slow.
+    func fetchCloseImplications(_ taskId: String) async -> CloseImplicationsDto? {
+        guard let t = taskSliceTarget else { return nil }
+        return try? await api.closeImplications(t.base, taskId)
+    }
+
+    func fetchDeliverables(_ taskId: String) async throws -> DeliverableListDto? {
+        guard let t = taskSliceTarget else { return nil }
+        return try await api.taskDeliverables(t.base, taskId)
+    }
+
+    func fetchDeliverable(_ taskId: String, _ did: String) async throws -> DeliverableDto? {
+        guard let t = taskSliceTarget else { return nil }
+        return try await api.taskDeliverable(t.base, taskId, did)
+    }
+
+    func fetchDeliverableText(_ taskId: String, _ did: String, version: Int) async throws -> DeliverableTextDto? {
+        guard let t = taskSliceTarget else { return nil }
+        return try await api.deliverableText(t.base, taskId, did, version: version)
+    }
+
+    func fetchDeliverableRaw(_ taskId: String, _ did: String, version: Int) async throws -> Data? {
+        guard let t = taskSliceTarget else { return nil }
+        return try await api.deliverableRaw(t.base, taskId, did, version: version)
+    }
+
+    func fetchDeliverableDiff(_ taskId: String, _ did: String, from: Int, to: Int) async throws -> DeliverableDiffDto? {
+        guard let t = taskSliceTarget else { return nil }
+        return try await api.deliverableDiff(t.base, taskId, did, from: from, to: to)
+    }
+
+    /// Attach files to a task (human actor). Returns true when at least one landed.
+    /// Per-file failures surface in `error`; the summary goes to `toast` (web wording).
+    func uploadDeliverables(_ taskId: String, _ files: [DeliverableUpload]) async -> Bool {
+        guard let sel = selectedContainer, !files.isEmpty else { return false }
+        guard let actor = sel.humanAgentId else {
+            error = "Pairing is missing the human identity. Reconnect this Quorate first."
+            return false
+        }
+        actionInFlight = true
+        error = nil
+        defer { actionInFlight = false }
+        var added = 0
+        var unchanged = 0
+        for file in files {
+            do {
+                let r = try await api.uploadDeliverable(
+                    sel.baseUrl, taskId, actor: actor,
+                    fileName: file.fileName,
+                    mimeType: DeliverableUx.mimeType(for: file.fileName),
+                    data: file.data
+                )
+                if r.deduplicated { unchanged += 1 } else { added += 1 }
+            } catch {
+                let detail = (error as? OrchaApiError).flatMap { DeliverableUx.serverDetail($0.body) }
+                self.error = "Couldn't attach \(file.fileName) — \(detail ?? friendly(error))"
+            }
+        }
+        guard added + unchanged > 0 else { return false }
+        toast = DeliverableUx.uploadToast(added: added, unchanged: unchanged)
+        return true
     }
 }

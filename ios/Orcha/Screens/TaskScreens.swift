@@ -8,7 +8,7 @@ import UIKit   // UIResponder keyboard notifications (Issue 2 — scroll compose
    bottom comment composer. The tab's NavigationStack owns navigation.
    ============================================================================= */
 
-/// Flow 05 T4 — task detail. Destructive close path: dialog → optional reason alert → cancelTask.
+/// Flow 05 T4 — task detail. Destructive close path: impact preview → confirm (+ optional reason) → cancelTask.
 struct TaskDetailScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
@@ -17,8 +17,9 @@ struct TaskDetailScreen: View {
 
     @State private var pane: DetailPane = .activity
     @State private var confirmClose = false
-    @State private var reasonAlert = false
     @State private var closeReason = ""
+    @State private var closeImpact: CloseImplicationsDto?
+    @State private var loadingImpact = false
     @State private var verifySheetTask: TaskDto?
     @State private var rejectSheetTask: TaskDto?
     @State private var planSheetTask: TaskDto?
@@ -27,6 +28,9 @@ struct TaskDetailScreen: View {
     @State private var recurringSheetTask: TaskDto?
     @State private var acceptTick = 0
     @State private var linkedTaskId: String?
+    /// Portal-link chips in the description (task / request / agent / GitHub) push here.
+    @State private var portalRoute: WorkspaceRoute?
+    @Environment(\.openURL) private var openURL
 
     private var task: TaskDto? { model.snapshot?.tasks.first { $0.id == taskId } }
 
@@ -74,34 +78,25 @@ struct TaskDetailScreen: View {
                         Button("Make recurring…", systemImage: "clock.arrow.circlepath") { recurringSheetTask = task }
                             .disabled(!model.access.canManage(Grant.manageAgents))
                     }
-                    Button("Close task…", systemImage: "xmark.circle", role: .destructive) { confirmClose = true }
-                        .disabled(!closable)
+                    Button("Close task…", systemImage: "xmark.circle", role: .destructive) { prepareClose() }
+                        .disabled(!closable || loadingImpact)
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
                 .accessibilityLabel("Task actions")
             }
         }
-        .confirmationDialog(
-            "Close \(task?.title ?? "task")?",
-            isPresented: $confirmClose,
-            titleVisibility: .visible
-        ) {
-            Button("Close task", role: .destructive) { close(reason: nil) }
-            Button("Add reason & close…") { reasonAlert = true }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("The task is force-closed and anything waiting on it unblocks. A reason is routed to the assignee.")
-        }
-        .alert("Close task", isPresented: $reasonAlert) {
+        // Android TaskCloseDialog parity: one confirm listing the blast radius, with the
+        // reason field inline (recommended, routed to the assignee).
+        .alert("Close \(task?.title ?? "task")?", isPresented: $confirmClose) {
             TextField("Reason (recommended)", text: $closeReason)
             Button("Close task", role: .destructive) {
                 let trimmed = closeReason.trimmingCharacters(in: .whitespacesAndNewlines)
                 close(reason: trimmed.isEmpty ? nil : trimmed)
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Keep task", role: .cancel) {}
         } message: {
-            Text("The assignee sees this reason on their next wake.")
+            Text(CloseImplicationsUx.message(closeImpact))
         }
         .sheet(item: $verifySheetTask) { VerifySheet(task: $0) }
         .sheet(item: $rejectSheetTask) { VerifySheet(task: $0, startRejecting: true) }
@@ -111,10 +106,19 @@ struct TaskDetailScreen: View {
         .sheet(item: $recurringSheetTask) { MakeRecurringSheet(task: $0) }
         .sensoryFeedback(.success, trigger: acceptTick)
         .navigationDestination(item: $linkedTaskId) { TaskDetailScreen(taskId: $0) }
+        .portalLinkNavigation($portalRoute)
         .task { await model.loadTaskDetail(taskId) }
         .refreshable {
             await model.refresh()
             await model.loadTaskDetail(taskId)
+        }
+    }
+
+    private func openPortal(_ link: PortalLink) {
+        switch model.portalDestination(link) {
+        case let .route(route): portalRoute = route
+        case let .browser(url): openURL(url)
+        case .none: break
         }
     }
 
@@ -140,7 +144,11 @@ struct TaskDetailScreen: View {
         }
         if let description = task.description,
            !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            ChatMarkdownView(text: description, tasks: model.snapshot?.tasks ?? []) { linkedTaskId = $0 }
+            ChatMarkdownView(
+                text: description, tasks: model.snapshot?.tasks ?? [],
+                onTapTask: { linkedTaskId = $0 },
+                portalBase: model.portalBase, onTapPortal: openPortal
+            )
                 .ltype(.body)
                 .foregroundStyle(p.text2)
         }
@@ -156,6 +164,7 @@ struct TaskDetailScreen: View {
         if !task.dependsOn.isEmpty {
             DependenciesSection(dependsOn: task.dependsOn, tasks: model.snapshot?.tasks ?? [])
         }
+        TaskDeliverablesSection(task: task)
         VStack(alignment: .leading, spacing: LSpace.m) {
             LSegmented(
                 [(DetailPane.activity, "Activity \(ActivityTimeline.entries(task: task, messages: model.taskMessages).count)"),
@@ -177,6 +186,18 @@ struct TaskDetailScreen: View {
             if await model.verifyTask(task.id, approve: true, feedback: nil) {
                 acceptTick += 1
             }
+        }
+    }
+
+    /// Read the close's blast radius (dependents, agents mid-run, open requests) first,
+    /// so the confirm lists what will be affected; a slow/failed read keeps the generic copy.
+    private func prepareClose() {
+        loadingImpact = true
+        closeReason = ""
+        Task {
+            closeImpact = await model.fetchCloseImplications(taskId)
+            loadingImpact = false
+            confirmClose = true
         }
     }
 
@@ -834,6 +855,9 @@ struct TaskThreadScreen: View {
     /// GH #140 — a tapped task-id link pushes here, in addition to the tab's own
     /// `WorkspaceRoute.task` destination; both target the same `TaskDetailScreen`.
     @State private var linkedTaskId: String?
+    /// Portal-link chips in a message (task / request / agent / GitHub) push here.
+    @State private var portalRoute: WorkspaceRoute?
+    @Environment(\.openURL) private var openURL
 
     private var task: TaskDto? { model.snapshot?.tasks.first { $0.id == taskId } }
     private var assignee: String? { task?.assignees.first ?? task?.ownerAlias }
@@ -922,21 +946,37 @@ struct TaskThreadScreen: View {
         .task { await model.loadTaskDetail(taskId) }
         .refreshable { await model.loadTaskDetail(taskId) }
         .navigationDestination(item: $linkedTaskId) { TaskDetailScreen(taskId: $0) }
+        .portalLinkNavigation($portalRoute)
+    }
+
+    private func openPortal(_ link: PortalLink) {
+        switch model.portalDestination(link) {
+        case let .route(route): portalRoute = route
+        case let .browser(url): openURL(url)
+        case .none: break
+        }
     }
 
     @ViewBuilder
     private func threadBubble(_ msg: TaskMessageDto) -> some View {
         let tasks = model.snapshot?.tasks ?? []
         if msg.authorId == nil, !msg.isHuman {
-            Bubble(.system, ActivityCopy.humanize(msg.body), tasks: tasks, onTapTask: { linkedTaskId = $0 })
+            Bubble(
+                .system, ActivityCopy.humanize(msg.body), tasks: tasks, onTapTask: { linkedTaskId = $0 },
+                portalBase: model.portalBase, onTapPortal: openPortal
+            )
         } else if msg.authorId != nil, msg.authorId == model.humanId {
-            Bubble(.mine, msg.body, time: MobileUx.agoLabel(msg.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 })
+            Bubble(
+                .mine, msg.body, time: MobileUx.agoLabel(msg.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 },
+                portalBase: model.portalBase, onTapPortal: openPortal
+            )
         } else {
             Bubble(
                 .theirs, msg.body,
                 author: msg.authorAlias ?? (msg.isHuman ? "human" : "agent"),
                 time: MobileUx.agoLabel(msg.createdAt),
-                tasks: tasks, onTapTask: { linkedTaskId = $0 }
+                tasks: tasks, onTapTask: { linkedTaskId = $0 },
+                portalBase: model.portalBase, onTapPortal: openPortal
             )
         }
     }
@@ -1093,7 +1133,13 @@ struct RunDetailScreen: View {
     /// rendered per file with hunks, line numbers, and add/del row tints.
     @ViewBuilder
     private var changesPane: some View {
-        if let diff = run.diff, !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let agentId = run.agentId {
+            // Live changes (web LiveChangesPanel): polls while running, one read once finished.
+            ScrollView {
+                AgentLiveChangesSection(agentId: agentId, runId: run.runId, live: run.status == "running")
+                    .padding(.bottom, 12)
+            }
+        } else if let diff = run.diff, !diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             ScrollView {
                 DiffViewer(diff: diff)
                     .padding(.bottom, 12)

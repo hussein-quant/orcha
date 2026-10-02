@@ -32,7 +32,9 @@ import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.data.AgentBudgetDto
 import io.openorcha.mobile.data.getAgentBudget
 import io.openorcha.mobile.data.setBudgetOverride
+import io.openorcha.mobile.domain.AgentControlsUx
 import io.openorcha.mobile.domain.AgentInsights
+import io.openorcha.mobile.data.updateAgentBudget
 import io.openorcha.mobile.domain.ConnectionErrorCopy
 import io.openorcha.mobile.ui.AgentSliceStore
 import io.openorcha.mobile.ui.components.Banner
@@ -65,8 +67,11 @@ internal fun AgentBudgetSection(
     alias: String,
     actorId: String?,
     memberRole: String?,
+    canEditLimits: Boolean = false,
 ) {
     val p = Orcha.palette
+    val canEdit = canEditLimits && actorId != null && memberRole?.lowercase() != "viewer"
+    var editOpen by remember { mutableStateOf(false) }
     val cached by AgentSliceStore.budgets.collectAsState()
     var budget by remember(agentId) { mutableStateOf(cached[agentId]) }
     var unsupported by remember(agentId) { mutableStateOf(false) }
@@ -98,8 +103,60 @@ internal fun AgentBudgetSection(
                     onAction = { writeError = null; overrideOpen = true },
                 )
             }
-            BudgetCard(b, alias)
+            BudgetCard(b, alias, editable = canEdit)
+            if (canEdit) {
+                Row(horizontalArrangement = Arrangement.spacedBy(LSpace.s), verticalAlignment = Alignment.CenterVertically) {
+                    val hasLimit = b.limits.usd != null || b.limits.tokens != null
+                    LButton(
+                        if (hasLimit) "Edit limits" else "Set budget",
+                        { writeError = null; editOpen = true },
+                        kind = if (hasLimit) LButtonKind.Secondary else LButtonKind.Primary,
+                        size = LSize.Small,
+                        enabled = !busy,
+                    )
+                    if (b.override.active) {
+                        LButton(
+                            "Revoke override",
+                            {
+                                busy = true
+                                writeError = null
+                                scope.launch {
+                                    runCatching {
+                                        AgentSliceStore.api.updateAgentBudget(baseUrl, agentId, AgentControlsUx.overrideJson(actorId!!, grant = false))
+                                    }
+                                        .onSuccess { budget = it; AgentSliceStore.put(agentId, it) }
+                                        .onFailure { err -> writeError = "Budget change failed — " + ConnectionErrorCopy.friendly(err) }
+                                    busy = false
+                                }
+                            },
+                            kind = LButtonKind.Ghost,
+                            size = LSize.Small,
+                            enabled = !busy,
+                        )
+                    }
+                }
+            }
             writeError?.let { Text(it, style = ltype(LType.Meta), color = p.danger) }
+        }
+    }
+
+    if (editOpen && actorId != null) {
+        BudgetLimitsDialog(
+            alias = alias,
+            budget = b,
+            busy = busy,
+            onDismiss = { editOpen = false },
+        ) { usd, tokens ->
+            busy = true
+            scope.launch {
+                runCatching { AgentSliceStore.api.updateAgentBudget(baseUrl, agentId, AgentControlsUx.budgetLimitsJson(actorId, usd, tokens)) }
+                    .onSuccess { budget = it; AgentSliceStore.put(agentId, it); editOpen = false }
+                    .onFailure { err ->
+                        writeError = "Budget change failed — " + ConnectionErrorCopy.friendly(err)
+                        editOpen = false
+                    }
+                busy = false
+            }
         }
     }
 
@@ -144,7 +201,7 @@ internal fun AgentBudgetSection(
 }
 
 @Composable
-private fun BudgetCard(b: AgentBudgetDto, alias: String) {
+private fun BudgetCard(b: AgentBudgetDto, alias: String, editable: Boolean = false) {
     val p = Orcha.palette
     val u = b.usage
     val hasLimit = b.limits.usd != null || b.limits.tokens != null
@@ -211,8 +268,8 @@ private fun BudgetCard(b: AgentBudgetDto, alias: String) {
                     style = ltype(LType.Meta), color = p.faint,
                 )
             }
-            if (hasLimit) {
-                Text("Edit limits from the web portal.", style = ltype(LType.Micro), color = p.faint)
+            if (hasLimit && !editable) {
+                Text("Human-only · read-only here", style = ltype(LType.Micro), color = p.faint)
             }
         }
     }
@@ -249,4 +306,58 @@ private fun BudgetMeter(ratio: Double?, label: String) {
 internal fun BudgetPausedCapsule(modifier: Modifier = Modifier) {
     val p = Orcha.palette
     LTag("Budget paused", modifier = modifier, tint = p.danger, dot = true)
+}
+
+/** Set / edit the monthly limits. Blank = no limit (sent as an explicit null that clears it). */
+@Composable
+private fun BudgetLimitsDialog(
+    alias: String,
+    budget: AgentBudgetDto,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onSave: (AgentControlsUx.Limit, AgentControlsUx.Limit) -> Unit,
+) {
+    val p = Orcha.palette
+    var usd by remember { mutableStateOf(AgentControlsUx.usdField(budget.limits.usd)) }
+    var tokens by remember { mutableStateOf(budget.limits.tokens?.toString().orEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("Budget", style = ltype(LType.Headline), color = p.text) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(LSpace.s)) {
+                OrchaField(
+                    usd, { usd = it; error = null },
+                    label = "Monthly limit (USD)", placeholder = "No limit",
+                )
+                OrchaField(
+                    tokens, { tokens = it; error = null },
+                    label = "Token cap", placeholder = "No cap",
+                )
+                Text(
+                    "At 80% you get a Needs-you notice. At 100% $alias is paused for new runs; a run already in progress is not stopped. Leave a field blank for no limit.",
+                    style = ltype(LType.Meta), color = p.muted,
+                )
+                error?.let { Text(it, style = ltype(LType.Meta), color = p.danger) }
+            }
+        },
+        confirmButton = {
+            LButton(
+                "Save",
+                {
+                    val u = AgentControlsUx.parseLimit(usd, integer = false)
+                    val t = AgentControlsUx.parseLimit(tokens, integer = true)
+                    if (u == AgentControlsUx.Limit.Invalid || t == AgentControlsUx.Limit.Invalid) {
+                        error = "Enter a positive number, or leave blank for no limit."
+                    } else {
+                        onSave(u, t)
+                    }
+                },
+                kind = LButtonKind.Primary,
+                enabled = !busy,
+            )
+        },
+        dismissButton = { LButton("Cancel", onDismiss, kind = LButtonKind.Ghost, enabled = !busy) },
+        containerColor = p.surface,
+    )
 }

@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Routines (web `/routines`): each routine with its schedule in words, next run and last
-/// result; pause/resume, Run now and Delete; tap for recent runs. Creating and editing
-/// routines stays on the web. Pushed from Settings › Execution.
+/// result; pause/resume, Run now and Delete; tap for recent runs. New routine / Edit open
+/// `RoutineEditorSheet`. Pushed from Settings › Execution.
 struct RoutinesScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
@@ -15,6 +15,9 @@ struct RoutinesScreen: View {
     @State private var busy: Set<String> = []
     @State private var confirm: RoutineConfirm?
     @State private var notice: String?
+    @State private var editor: RoutineEditorTarget?
+
+    private var canManage: Bool { model.access.canManage(RoutineScheduleUx.grant) }
 
     var body: some View {
         ScrollView {
@@ -41,6 +44,16 @@ struct RoutinesScreen: View {
             }
         }
         .routineConfirmation($confirm, perform: perform)
+        .toolbar {
+            if canManage {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("New routine", systemImage: "plus") { editor = .create }
+                }
+            }
+        }
+        .sheet(item: $editor) { target in
+            RoutineEditorSheet(routineId: target.routineId, onSaved: { await load() })
+        }
     }
 
     @ViewBuilder
@@ -57,7 +70,9 @@ struct RoutinesScreen: View {
             LEmptyState(
                 icon: "repeat",
                 title: "No routines yet",
-                message: "A routine creates a normal task on a schedule — a weekly dependency audit, a daily triage. Every task still goes through plan approval and verification. Create one from the web portal."
+                message: "Routines create a task on a schedule. Create one here, or use “Make recurring…” on any task.",
+                actionTitle: canManage ? "New routine" : nil,
+                action: canManage ? { editor = .create } : nil
             )
         } else {
             if lastTickAt == nil {
@@ -78,6 +93,7 @@ struct RoutinesScreen: View {
                             RoutineRow(
                                 routine: routine,
                                 busy: busy.contains(routine.id),
+                                onEdit: canManage ? { editor = .edit(routine.id) } : nil,
                                 onToggle: { Task { await setEnabled(routine, !routine.enabled) } },
                                 onRun: { confirm = .run(routine) },
                                 onDelete: { confirm = .delete(routine) }
@@ -196,6 +212,7 @@ private struct RoutineRow: View {
     @Environment(\.palette) private var p
     let routine: RoutineDto
     let busy: Bool
+    let onEdit: (() -> Void)?
     let onToggle: () -> Void
     let onRun: () -> Void
     let onDelete: () -> Void
@@ -232,6 +249,9 @@ private struct RoutineRow: View {
                 ProgressView().frame(width: 44, height: 44)
             } else {
                 Menu {
+                    if let onEdit {
+                        Button("Edit", systemImage: "pencil", action: onEdit)
+                    }
                     Button(routine.enabled ? "Pause" : "Enable", systemImage: routine.enabled ? "pause" : "play", action: onToggle)
                     Button("Run now", systemImage: "play.circle", action: onRun)
                     Button("Delete routine", systemImage: "trash", role: .destructive, action: onDelete)
@@ -293,6 +313,7 @@ struct RoutineDetailScreen: View {
     @State private var notice: String?
     @State private var busy = false
     @State private var confirm: RoutineConfirm?
+    @State private var editing = false
 
     var body: some View {
         ScrollView {
@@ -340,6 +361,25 @@ struct RoutineDetailScreen: View {
         .refreshable { await loadRuns() }
         .task { await loadRuns() }
         .routineConfirmation($confirm, perform: perform)
+        .toolbar {
+            if model.access.canManage(RoutineScheduleUx.grant) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit") { editing = true }
+                }
+            }
+        }
+        .sheet(isPresented: $editing) {
+            RoutineEditorSheet(routineId: routine.id, onSaved: { await reloadRoutine() })
+        }
+    }
+
+    /// After an edit: the list row (schedule words, next run) comes back from the list read.
+    private func reloadRoutine() async {
+        await onChanged()
+        guard let sel = model.selectedContainer,
+              let fresh = try? await model.api.routines(sel.baseUrl, sel.id).routines.first(where: { $0.id == routine.id })
+        else { return }
+        routine = fresh
     }
 
     @ViewBuilder
@@ -438,5 +478,23 @@ struct RoutineDetailScreen: View {
         } catch {
             actionError = "Couldn't \(action.id.hasPrefix("run") ? "run" : "delete") the routine — " + InboxErrorText.describe(error)
         }
+    }
+}
+
+/// Which routine editor to present.
+enum RoutineEditorTarget: Identifiable, Hashable {
+    case create
+    case edit(String)
+
+    var id: String {
+        switch self {
+        case .create: "create"
+        case let .edit(rid): rid
+        }
+    }
+
+    var routineId: String? {
+        if case let .edit(rid) = self { return rid }
+        return nil
     }
 }

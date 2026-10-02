@@ -49,6 +49,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import io.openorcha.mobile.domain.TaskInsightsUx
 import io.openorcha.mobile.ui.rememberTaskInsights
+import io.openorcha.mobile.ui.rememberTaskDeliverables
+import io.openorcha.mobile.domain.DeliverablesUx
+import io.openorcha.mobile.data.DeliverableDto
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -156,6 +159,19 @@ fun TaskDetailScreen(
     LaunchedEffect(ins.notice) {
         if (ins.notice != null) { delay(4_000); insights.clearNotice() }
     }
+    // Deliverables (web P2): own state too, see TaskDeliverablesController.
+    val deliverables = rememberTaskDeliverables()
+    val dlv by deliverables.state.collectAsState()
+    var openDeliverable by remember { mutableStateOf<DeliverableDto?>(null) }
+    LaunchedEffect(task?.id, task?.status, container?.baseUrl) {
+        if (task != null && container != null) deliverables.load(container, task.id)
+    }
+    LaunchedEffect(dlv.notice) {
+        if (dlv.notice != null) { delay(4_000); deliverables.clearNotice() }
+    }
+    val attachDeliverable = rememberDeliverablePicker { name, mime, read ->
+        if (task != null && container != null) deliverables.upload(container, task.id, name, mime, read)
+    }
     val afterChange: () -> Unit = { sheet = null; onTaskChanged?.invoke() ?: onRefresh() }
     val actingHuman = agents.firstOrNull { it.id == container?.humanAgentId }
     val canAssignReviewer = container?.humanAgentId != null && actingHuman?.memberRole != "viewer"
@@ -173,11 +189,18 @@ fun TaskDetailScreen(
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }, containerColor = p.raised) {
                         DropdownMenuItem(
                             text = { Text("Refresh", style = ltype(LType.Body), color = p.text) },
-                            onClick = { menuOpen = false; onRefresh() },
+                            onClick = {
+                                menuOpen = false
+                                onRefresh()
+                                if (task != null && container != null) deliverables.load(container, task.id)
+                            },
                         )
                         if (task != null && closable) {
+                            // Same rule as iOS and the server: no reassign while it awaits review.
+                            val canReassign = TaskInsightsUx.canReassign(task.isRoot, task.status)
                             DropdownMenuItem(
-                                text = { Text("Reassign…", style = ltype(LType.Body), color = p.text) },
+                                enabled = canReassign,
+                                text = { Text("Reassign…", style = ltype(LType.Body), color = if (canReassign) p.text else p.faint) },
                                 onClick = { menuOpen = false; insights.clearError(); sheet = InsightSheetKind.Reassign },
                             )
                         }
@@ -240,6 +263,7 @@ fun TaskDetailScreen(
             verticalArrangement = Arrangement.spacedBy(LSpace.xl),
         ) {
             ins.notice?.let { item(key = "notice") { Banner(BannerKind.Info, it) } }
+            dlv.notice?.let { item(key = "dlv-notice") { Banner(BannerKind.Info, it) } }
             if (TaskInsightsUx.hasAncestry(ins.goalChain)) {
                 item(key = "goal") { GoalChainBreadcrumb(ins.goalChain, onOpenTask) }
             }
@@ -299,6 +323,16 @@ fun TaskDetailScreen(
             if (task.dependsOn.isNotEmpty()) {
                 item(key = "deps") { DependenciesSection(task.dependsOn, state.snapshot?.tasks.orEmpty(), onOpenTask) }
             }
+            if (dlv.available && !task.isRoot) {
+                item(key = "deliverables") {
+                    TaskDeliverablesSection(
+                        state = dlv,
+                        canAttach = DeliverablesUx.canAttach(task, container?.humanAgentId != null && actingHuman?.memberRole != "viewer"),
+                        onAttach = attachDeliverable,
+                        onOpen = { openDeliverable = it },
+                    )
+                }
+            }
             item(key = "panes") {
                 Column(verticalArrangement = Arrangement.spacedBy(LSpace.m)) {
                     LSegmented(
@@ -350,6 +384,18 @@ fun TaskDetailScreen(
             )
             null -> Unit
         }
+    }
+    val opened = openDeliverable
+    if (opened != null && task != null && container != null) {
+        DeliverableSheet(
+            controller = deliverables,
+            container = container,
+            taskId = task.id,
+            deliverable = opened,
+            tasks = state.snapshot?.tasks.orEmpty(),
+            onOpenTask = { openDeliverable = null; onOpenTask(it) },
+            onDismiss = { openDeliverable = null },
+        )
     }
     if (showPlan && task != null) {
         PlanApprovalSheet(task, state.actionInFlight, onDismiss = { showPlan = false }) { approve, reason ->

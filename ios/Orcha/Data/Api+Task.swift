@@ -74,3 +74,98 @@ extension OrchaApiClient {
 private struct TaskReviewExtrasPage: Decodable {
     var tasks: [TaskReviewExtrasDto] = []
 }
+
+// MARK: - close implications + deliverables (Task2 slice)
+
+extension OrchaApiClient {
+
+    /// `GET /api/tasks/{tid}/close-implications` — read-only blast radius of closing a task.
+    func closeImplications(_ base: String, _ tid: String) async throws -> CloseImplicationsDto {
+        try await get(base, "/api/tasks/\(tid)/close-implications")
+    }
+
+    /// `GET /api/tasks/{tid}/deliverables` — every deliverable, each with its latest version.
+    func taskDeliverables(_ base: String, _ tid: String) async throws -> DeliverableListDto {
+        try await get(base, "/api/tasks/\(tid)/deliverables")
+    }
+
+    /// `GET /api/tasks/{tid}/deliverables/{did}` — one deliverable with its full history.
+    func taskDeliverable(_ base: String, _ tid: String, _ did: String) async throws -> DeliverableDto {
+        try await get(base, "/api/tasks/\(tid)/deliverables/\(did)")
+    }
+
+    /// `GET …/versions/{v}/text` — UTF-8 preview of a text-kind version.
+    func deliverableText(_ base: String, _ tid: String, _ did: String, version: Int) async throws -> DeliverableTextDto {
+        try await get(base, "/api/tasks/\(tid)/deliverables/\(did)/versions/\(version)/text")
+    }
+
+    /// `GET …/versions/{v}/raw` — the stored bytes (image / PDF preview).
+    func deliverableRaw(_ base: String, _ tid: String, _ did: String, version: Int) async throws -> Data {
+        try await raw(base, "/api/tasks/\(tid)/deliverables/\(did)/versions/\(version)/raw").0
+    }
+
+    /// `GET …/diff?from=&to=` — compare two versions.
+    func deliverableDiff(_ base: String, _ tid: String, _ did: String, from: Int, to: Int) async throws -> DeliverableDiffDto {
+        try await get(base, "/api/tasks/\(tid)/deliverables/\(did)/diff" + query([
+            "from": String(from), "to": String(to),
+        ]))
+    }
+
+    /// `POST /api/tasks/{tid}/deliverables` (multipart) — a human attaches a file, or a new
+    /// version of one with the same name. Attributed to `actor` (`author_agent_id`), as the web does.
+    func uploadDeliverable(
+        _ base: String, _ tid: String, actor: String, fileName: String, mimeType: String, data: Data
+    ) async throws -> DeliverableUploadResultDto {
+        guard let url = URL(string: base + "/api/tasks/\(tid)/deliverables") else { throw URLError(.badURL) }
+        var request = URLRequest(url: url, timeoutInterval: 60)
+        request.httpMethod = "POST"
+        if let token = BearerTokens.token(for: base) {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        let boundary = "QuorateBoundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.httpBody = DeliverableMultipart.body(
+            boundary: boundary,
+            fields: ["author_agent_id": actor],
+            fileName: fileName,
+            mimeType: mimeType,
+            data: data
+        )
+        let (body, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        if Self.perimeterIntercepted(
+            status: http.statusCode,
+            contentType: http.value(forHTTPHeaderField: "Content-Type"),
+            body: body
+        ) {
+            throw OrchaAuthRequiredError()
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw OrchaApiError(status: http.statusCode, body: String(decoding: body.prefix(300), as: UTF8.self))
+        }
+        return try JSONDecoder().decode(DeliverableUploadResultDto.self, from: body)
+    }
+}
+
+/// Builds a `multipart/form-data` body — pure, so it is unit-tested.
+enum DeliverableMultipart {
+    static func body(boundary: String, fields: [String: String], fileName: String, mimeType: String, data: Data) -> Data {
+        var out = Data()
+        func line(_ s: String) { out.append(Data((s + "\r\n").utf8)) }
+        for (key, value) in fields.sorted(by: { $0.key < $1.key }) {
+            line("--\(boundary)")
+            line("Content-Disposition: form-data; name=\"\(key)\"")
+            line("")
+            line(value)
+        }
+        let safeName = fileName.replacingOccurrences(of: "\"", with: "_")
+        line("--\(boundary)")
+        line("Content-Disposition: form-data; name=\"file\"; filename=\"\(safeName)\"")
+        line("Content-Type: \(mimeType)")
+        line("")
+        out.append(data)
+        line("")
+        line("--\(boundary)--")
+        return out
+    }
+}

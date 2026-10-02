@@ -9,6 +9,7 @@ struct SettingsScreen: View {
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
     @State private var showExecution = false
+    @State private var showProjectIcon = false
 
     var body: some View {
         NavigationStack {
@@ -49,6 +50,9 @@ struct SettingsScreen: View {
             }
             .sheet(isPresented: $showExecution) {
                 ContainerControlsSheet()
+            }
+            .sheet(isPresented: $showProjectIcon) {
+                ProjectIconSheet()
             }
         }
     }
@@ -136,12 +140,19 @@ struct SettingsScreen: View {
                 }
                 if let container = model.selectedContainer {
                     LDivider()
-                    LRow(title: "Project") {
-                        rowIcon("square.stack.3d.up")
-                    } trailing: {
-                        Text(container.displayName).lineLimit(1)
+                    Button { showProjectIcon = true } label: {
+                        LRow(title: "Project", subtitle: container.displayName) {
+                            ProjectIconView(icon: model.projectIcon(for: container.id), size: 26)
+                        } trailing: {
+                            HStack(spacing: 6) {
+                                Text("Icon")
+                                chevron()
+                            }
+                        }
                     }
+                    .buttonStyle(.lRow)
                     .accessibilityElement(children: .combine)
+                    .accessibilityHint(model.canEditProjectIcon ? "Change the project icon" : "View the project icon")
                 }
             }
         }
@@ -169,6 +180,28 @@ struct SettingsScreen: View {
                 } label: {
                     LRow(title: "Routines", subtitle: "Tasks created on a schedule") {
                         rowIcon("repeat")
+                    } trailing: {
+                        chevron()
+                    }
+                }
+                .buttonStyle(.lRow)
+                LDivider(inset: LSpace.m)
+                NavigationLink {
+                    OrchaThemed(mode: model.themeMode, skin: model.skinMode) { ProjectBudgetLimitsScreen() }
+                } label: {
+                    LRow(title: "Budget & limits", subtitle: "Project monthly budget and agent limit") {
+                        rowIcon("dollarsign.circle")
+                    } trailing: {
+                        chevron()
+                    }
+                }
+                .buttonStyle(.lRow)
+                LDivider(inset: LSpace.m)
+                NavigationLink {
+                    OrchaThemed(mode: model.themeMode, skin: model.skinMode) { AgentWorktreesScreen() }
+                } label: {
+                    LRow(title: "Agent worktrees", subtitle: "Automatic clean-up and grace period") {
+                        rowIcon("arrow.triangle.branch")
                     } trailing: {
                         chevron()
                     }

@@ -13,6 +13,8 @@ struct ContainerHealth: Equatable {
     var needsYou: Int = 0
     /// The bound GitHub repo ("owner/name"), shown on the card's secondary line.
     var githubRepo: String?
+    /// D14 project icon from the snapshot's container (nil = unset).
+    var icon: ProjectIcon?
 }
 
 /// Flow 09: lazily-fetched agent-detail sections (each best-effort).
@@ -568,7 +570,8 @@ final class AppModel {
                 containerHealth[stored.id] = ContainerHealth(
                     state: "polling", agents: snap.agents.count, tasks: snap.taskOpenTotal,
                     needsYou: plans.count + verifs.count + reqs.count,
-                    githubRepo: snap.container.githubRepo
+                    githubRepo: snap.container.githubRepo,
+                    icon: snap.container.icon
                 )
             } catch {
                 containerHealth[stored.id] = ContainerHealth(state: "unreachable")

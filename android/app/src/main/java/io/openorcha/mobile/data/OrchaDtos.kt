@@ -62,7 +62,13 @@ data class ContainerDto(
     /** The container's currently-bound repo ("owner/name"), or null. GitHub hub entry
      *  point parity (iOS `ContainerDto.githubRepo`). */
     @SerialName("github_repo") val githubRepo: String? = null,
-)
+    /** D14 project icon, kept raw (any shape decodes) and read via [projectIcon]. */
+    val icon: kotlinx.serialization.json.JsonElement? = null,
+) {
+    /** The validated icon, or null (unset / malformed → the neutral default glyph). */
+    val projectIcon: io.openorcha.mobile.domain.ProjectIconValue?
+        get() = io.openorcha.mobile.domain.ProjectIcons.parse(icon)
+}
 
 @Serializable
 data class AgentDto(

@@ -76,6 +76,9 @@ internal fun LazyListScope.AgentDetailContent(
     onOpenRequests: () -> Unit,
     onConversation: (String) -> Unit,
     onOpenAgent: ((String) -> Unit)? = null,
+    onOpenHistory: (() -> Unit)? = null,
+    canManageAgents: Boolean = true,
+    canManageAutonomy: Boolean = true,
 ) {
     val p = palette
     if (dead) {
@@ -118,7 +121,7 @@ internal fun LazyListScope.AgentDetailContent(
         item(key = "agent-meta") {
             LCard(padding = LSpace.l) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LSpace.s)) {
-                    agent.model?.let { LTag(it) }
+                    agent.model?.let { io.openorcha.mobile.ui.components.ModelTag(it) }
                     Spacer(Modifier.weight(1f))
                     MobileUx.agoLabel(agent.lastActive)?.let { Text("Active $it", style = ltype(LType.Meta), color = p.faint) }
                 }
@@ -170,7 +173,10 @@ internal fun LazyListScope.AgentDetailContent(
                             },
                             leading = { LStatusGlyph("running") },
                             trailing = {
-                                Text("Streaming", style = ltype(LType.Meta), color = p.accent, modifier = Modifier.pulsing())
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(LSpace.s)) {
+                                    io.openorcha.mobile.ui.components.ModelProviderMark(run.runtime)
+                                    Text("Streaming", style = ltype(LType.Meta), color = p.accent, modifier = Modifier.pulsing())
+                                }
                             },
                         )
                     }
@@ -187,7 +193,7 @@ internal fun LazyListScope.AgentDetailContent(
                         title = "Model",
                         subtitle = "Applies at the next wake",
                         onClick = if (dead) null else onOpenModel,
-                        trailing = { LTag(agent.model ?: "default") },
+                        trailing = { io.openorcha.mobile.ui.components.ModelTag(agent.model) },
                     )
                     LDivider(inset = LSpace.m)
                     LRow(
@@ -197,6 +203,15 @@ internal fun LazyListScope.AgentDetailContent(
                         trailing = { LTag(agent.autoWakeIntervalSecs?.let { formatCadence(it) } ?: "Off") },
                     )
                     LDivider(inset = LSpace.m)
+                    if (onOpenHistory != null) {
+                        LRow(
+                            title = "History",
+                            subtitle = "Who changed which setting, and restore",
+                            onClick = onOpenHistory,
+                            trailing = { Icon(OrchaIcons.ChevronRight, null, tint = p.faint, modifier = Modifier.size(16.dp)) },
+                        )
+                        LDivider(inset = LSpace.m)
+                    }
                     LRow(
                         title = "Wake daemon",
                         subtitle = "Managed from the laptop",
@@ -212,11 +227,19 @@ internal fun LazyListScope.AgentDetailContent(
         item(key = "agent-budget") {
             val me = state.selectedContainer?.humanAgentId
             val myRole = state.snapshot?.agents?.firstOrNull { it.id == me }?.memberRole
-            AgentBudgetSection(baseUrl, agent.id, agent.alias, actorId = me, memberRole = myRole)
+            AgentBudgetSection(baseUrl, agent.id, agent.alias, actorId = me, memberRole = myRole, canEditLimits = canManageAutonomy)
         }
     }
     if (baseUrl != null) {
-        item(key = "agent-reports-to") { AgentReportsToSection(baseUrl, agent.id, onOpenAgent) }
+        item(key = "agent-reports-to") {
+            AgentReportsToSection(
+                baseUrl, agent.id, onOpenAgent,
+                alias = agent.alias,
+                people = state.snapshot?.agents.orEmpty(),
+                containerId = state.selectedContainer?.id,
+                actorId = if (canManageAgents && agent.kind == "ai" && !dead) state.selectedContainer?.humanAgentId else null,
+            )
+        }
     }
     // persona — collapsed preview; expanding shows the full system prompt (flow 09 §6)
     val personaFull = state.agentExtras.persona?.systemPrompt

@@ -156,6 +156,19 @@ enum EvidenceUx {
 
 enum ManagerReviewUx {
     /// The one line every surface shows (web `managerReviewLine`). Nil when there is none.
+    /// Web `reviewVia`: why this reviewer ("via Atlas’s manager"); nil when nothing was routed.
+    static func via(_ routing: ReviewRoutingDto?) -> String? {
+        guard let routing else { return nil }
+        let who = routing.assigneeAlias ?? "the assignee"
+        switch routing.routedVia {
+        case "reports_to": return "via \(who)’s " + ((routing.managerDepth ?? 1) > 1 ? "manager chain" : "manager")
+        case "owner": return "project owner"
+        case "fallback": return "no manager in \(who)’s chain can verify — anyone may"
+        case "manual": return routing.setByAlias.map { "set by \($0)" } ?? "set by a person"
+        default: return nil
+        }
+    }
+
     static func line(_ mr: ManagerReviewDto?) -> (text: String, tone: EvidenceTone)? {
         guard let mr, let status = mr.status else { return nil }
         let name = mr.managerAlias ?? "The manager"
@@ -224,8 +237,16 @@ enum GoalChainUx {
     }
 
     /// Worth showing only when there is more than "This task" alone.
+    /// Hidden when nothing sits above the task but the bare project (no objective, no
+    /// parent) — the page breadcrumb already says that (Android/web rule).
     static func isWorthShowing(_ crumbs: [GoalCrumb]) -> Bool {
-        crumbs.contains { if case .this = $0 { false } else { true } }
+        crumbs.contains {
+            switch $0 {
+            case .this: false
+            case .objective(let text, _): !(text ?? "").isEmpty
+            case .gap, .parent: true
+            }
+        }
     }
 
     /// One plain sentence for VoiceOver: "Goal chain: Ship v1 › Parent › This task".
@@ -332,4 +353,136 @@ enum ReassignUx {
     static func canReassign(_ task: TaskDto) -> Bool {
         !task.isRoot && !["completed", "needs_verification", "cancelled"].contains(task.status)
     }
+}
+
+// MARK: - close implications (Android CloseImplicationsUx parity)
+
+enum CloseImplicationsUx {
+    static let genericCopy = "Closes it as cancelled and unblocks anything waiting on it. A running worker isn't stopped. A reason is sent to the assignee."
+
+    /// The lines the destructive close confirm lists. Empty when nothing is worth warning about.
+    static func lines(_ response: CloseImplicationsDto?) -> [String] {
+        guard let response else { return [] }
+        var out: [String] = []
+        if let s = response.summary {
+            if s.completesContainer {
+                out.append("This is the root task — closing it marks the whole project complete.")
+            }
+            if s.downstreamTotal > 0 {
+                out.append("\(count(s.downstreamTotal, "downstream task")) depend on it: \(s.wouldUnblock) would unblock, \(s.stillBlocked) stay blocked.")
+            }
+            if s.inFlightAgents > 0 {
+                out.append("\(count(s.inFlightAgents, "agent")) \(s.inFlightAgents == 1 ? "is" : "are") working on it right now.")
+            }
+            if s.openRequests > 0 {
+                out.append("\(count(s.openRequests, "open request")) from its assignees would be orphaned.")
+            }
+        }
+        out += response.implications.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return out
+    }
+
+    /// The confirm's message: the bulleted impact lines, else the generic copy.
+    static func message(_ response: CloseImplicationsDto?) -> String {
+        let l = lines(response)
+        return l.isEmpty ? genericCopy : l.map { "· " + $0 }.joined(separator: "\n")
+    }
+
+    private static func count(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
+}
+
+// MARK: - deliverables (web deliverables/api.ts parity)
+
+enum DeliverableUx {
+    static let textKinds: Set<String> = ["markdown", "text", "csv", "json"]
+    static let closedStatuses: Set<String> = ["completed", "cancelled"]
+
+    static func isText(_ kind: String) -> Bool { textKinds.contains(kind) }
+
+    /// Web `KIND_LABEL`.
+    static func kindLabel(_ kind: String) -> String {
+        switch kind {
+        case "markdown": "Markdown document"
+        case "text": "Text file"
+        case "json": "JSON file"
+        case "csv": "Table (CSV)"
+        case "pdf": "PDF document"
+        case "image": "Image"
+        default: "File"
+        }
+    }
+
+    static func glyph(_ kind: String) -> String {
+        switch kind {
+        case "csv": "tablecells"
+        case "pdf": "doc.richtext"
+        case "image": "photo"
+        case "json": "curlybraces"
+        default: "doc.text"
+        }
+    }
+
+    /// Web `formatBytes`.
+    static func formatBytes(_ n: Int?) -> String {
+        guard let n, n >= 0 else { return "—" }
+        if n < 1024 { return "\(n) B" }
+        if n < 1024 * 1024 {
+            let kb = Double(n) / 1024
+            return n < 10 * 1024 ? String(format: "%.1f KB", kb) : String(format: "%.0f KB", kb)
+        }
+        return String(format: "%.1f MB", Double(n) / (1024 * 1024))
+    }
+
+    /// Web `dirOf` — "reports/" for "reports/q3.md", "" at the top level.
+    static func dirOf(_ path: String) -> String {
+        guard let i = path.lastIndex(of: "/"), i > path.startIndex else { return "" }
+        return String(path[...i])
+    }
+
+    /// Web `sourceLabel` — "Run output · dev" / "Attached · Hussein".
+    static func sourceLabel(_ v: DeliverableVersionDto?) -> String {
+        guard let v else { return "" }
+        let isRun = v.source == "run_output"
+        let who = v.authorAlias ?? (isRun ? "agent run" : "")
+        return (isRun ? "Run output" : "Attached") + (who.isEmpty ? "" : " · " + who)
+    }
+
+    /// Humans attach only to open, non-root tasks (the server re-checks).
+    static func canAttach(status: String, isRoot: Bool, canWrite: Bool) -> Bool {
+        canWrite && !isRoot && !closedStatuses.contains(status)
+    }
+
+    /// Upload toast copy (web `onFiles`).
+    static func uploadToast(added: Int, unchanged: Int) -> String {
+        if added == 0 { return "No changes — identical to the latest version" }
+        return "Attached \(added) file\(added == 1 ? "" : "s")" + (unchanged > 0 ? " · \(unchanged) unchanged" : "")
+    }
+
+    /// MIME type for an upload by extension (the server keys the kind off the extension).
+    static func mimeType(for fileName: String) -> String {
+        switch (fileName as NSString).pathExtension.lowercased() {
+        case "md", "markdown": "text/markdown"
+        case "txt", "log", "yaml", "yml": "text/plain"
+        case "csv": "text/csv"
+        case "tsv": "text/tab-separated-values"
+        case "json": "application/json"
+        case "pdf": "application/pdf"
+        case "png": "image/png"
+        case "jpg", "jpeg": "image/jpeg"
+        case "gif": "image/gif"
+        case "webp": "image/webp"
+        default: "application/octet-stream"
+        }
+    }
+
+    /// The server's `{"detail": "…"}` string ("file too large (max 25 MiB)"), when present.
+    static func serverDetail(_ body: String) -> String? {
+        guard let data = body.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let detail = obj["detail"] as? String,
+              !detail.isEmpty else { return nil }
+        return detail
+    }
+
+    static let defaultExtensions = ["md", "markdown", "txt", "log", "yaml", "yml", "csv", "tsv", "json", "pdf", "png", "jpg", "jpeg", "gif", "webp"]
 }

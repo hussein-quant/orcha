@@ -192,30 +192,38 @@ private fun annotate(spans: List<MdSpan>, linker: TaskLinker? = null): Annotated
 @Composable
 private fun MdTable(table: MdBlock.Table) {
     val p = Orcha.palette
+    // Size each column to its own content (clamped), not equal shares of the widest cell —
+    // equal weights made a 5-column table several screens wide with the extra columns
+    // hidden off to the right. Long cells wrap inside their column; wide tables still scroll.
+    val columns = maxOf(table.header.size, table.rows.maxOfOrNull { it.size } ?: 0)
+    val widths = (0 until columns).map { c ->
+        val longest = (listOf(table.header.getOrNull(c).orEmpty()) + table.rows.map { it.getOrNull(c).orEmpty() })
+            .maxOf { cell -> MarkdownLite.inline(cell).sumOf { it.text.length } }
+        (longest * 7 + 20).coerceIn(36, 220).dp
+    }
     Column(
         Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
             .border(BorderStroke(1.dp, p.border), RoundedCornerShape(8.dp))
-            .padding(1.dp)
-            .width(IntrinsicSize.Max),
+            .horizontalScroll(rememberScrollState())
+            .padding(1.dp),
     ) {
         Row(Modifier.background(p.surface2)) {
-            table.header.forEach { cell ->
+            widths.forEachIndexed { c, w ->
                 Text(
-                    cell, style = ltype(LType.Meta).copy(fontWeight = FontWeight.Medium), color = p.text,
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 6.dp),
+                    table.header.getOrNull(c).orEmpty(), style = ltype(LType.Meta).copy(fontWeight = FontWeight.Medium), color = p.text,
+                    modifier = Modifier.width(w).padding(horizontal = 8.dp, vertical = 6.dp),
                 )
             }
         }
         table.rows.forEach { row ->
             Row {
-                row.forEach { cell ->
+                widths.forEachIndexed { c, w ->
                     Text(
-                        annotate(MarkdownLite.inline(cell)),
+                        annotate(MarkdownLite.inline(row.getOrNull(c).orEmpty())),
                         style = ltype(LType.Meta),
                         color = p.text2,
-                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp, vertical = 5.dp),
+                        modifier = Modifier.width(w).padding(horizontal = 8.dp, vertical = 5.dp),
                     )
                 }
             }

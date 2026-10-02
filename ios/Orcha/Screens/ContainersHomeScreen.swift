@@ -170,7 +170,8 @@ private struct ProjectRow: View {
 
     var body: some View {
         LRow(title: container.displayName, subtitle: meta) {
-            ProjectGlyph(name: container.displayName)
+            ProjectIconView(icon: health?.icon, size: 32)
+                .accessibilityHidden(true)
         } trailing: {
             HStack(spacing: LSpace.s) {
                 if let needs = health?.needsYou, needs > 0 {
@@ -189,25 +190,3 @@ private struct ProjectRow: View {
     }
 }
 
-/// Round project tile: the name's leading emoji if it has one, else its initial.
-private struct ProjectGlyph: View {
-    @Environment(\.palette) private var p
-    let name: String
-
-    private var glyph: String {
-        if let first = name.first, first.unicodeScalars.first?.properties.isEmojiPresentation == true {
-            return String(first)
-        }
-        return name.first.map { String($0).uppercased() } ?? "•"
-    }
-
-    var body: some View {
-        Text(glyph)
-            .ltype(.bodyEmph)
-            .foregroundStyle(p.text2)
-            .frame(width: 32, height: 32)
-            .background(p.surface2, in: Circle())
-            .overlay(Circle().strokeBorder(p.border, lineWidth: 1))
-            .accessibilityHidden(true)
-    }
-}

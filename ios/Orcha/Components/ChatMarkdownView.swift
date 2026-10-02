@@ -10,6 +10,10 @@ struct ChatMarkdownView: View {
     let text: String
     var tasks: [TaskDto] = []
     var onTapTask: ((String) -> Void)?
+    /// Portal-link chips (request-screen parity): when set, portal paths and links on the
+    /// paired portal (`portalBase`) render as "↗ Open task · …" and call this on tap.
+    var portalBase: String? = nil
+    var onTapPortal: ((PortalLink) -> Void)? = nil
 
     var body: some View {
         let blocks = ChatMarkdown.blocks(text)
@@ -19,6 +23,10 @@ struct ChatMarkdownView: View {
             }
         }
         .environment(\.openURL, OpenURLAction { url in
+            if let link = PortalLinks.link(fromURL: url) {
+                onTapPortal?(link)
+                return .handled
+            }
             if let taskId = MobileUx.taskIdFromLinkURL(url) {
                 onTapTask?(taskId)
                 return .handled
@@ -76,7 +84,9 @@ struct ChatMarkdownView: View {
     /// Inline markdown + task-ref links, with every link run made visually
     /// distinct (accent + underline) whatever the ambient foreground.
     private func styledInline(_ text: String) -> AttributedString {
-        var attr = ChatMarkdown.inline(text, tasks: tasks)
+        var attr = onTapPortal == nil
+            ? ChatMarkdown.inline(text, tasks: tasks)
+            : ChatMarkdown.inline(text, tasks: tasks, portalBase: portalBase)
         let linkRanges = attr.runs.filter { $0.link != nil }.map(\.range)
         for range in linkRanges {
             attr[range].underlineStyle = .single

@@ -121,8 +121,19 @@ fun ModelPickerSheet(
         ) {
             Text("Model", style = ltype(LType.Headline), color = p.text, modifier = Modifier.semantics { heading() })
             Text("Applies at the next wake.", style = ltype(LType.Meta), color = p.muted)
-            models.groupBy { it.runtime ?: it.provider ?: "models" }.forEach { (group, rows) ->
-                Text(group, style = ltype(LType.Meta), color = p.muted, modifier = Modifier.semantics { heading() })
+            models.groupBy { modelGroupKey(it) }.forEach { (group, rows) ->
+                val provider = io.openorcha.mobile.domain.providerFor(group)
+                Row(
+                    Modifier.semantics(mergeDescendants = true) { heading() },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    provider?.let { io.openorcha.mobile.ui.components.ProviderMark(it, decorative = true) }
+                    Text(
+                        provider?.label ?: group.replaceFirstChar { it.uppercase() },
+                        style = ltype(LType.Meta), color = p.muted,
+                    )
+                }
                 LCard(padding = 0.dp) {
                     rows.forEachIndexed { idx, m ->
                         val selected = picked == m.id
@@ -135,6 +146,7 @@ fun ModelPickerSheet(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(LSpace.s),
                         ) {
+                            io.openorcha.mobile.ui.components.ModelProviderMark(m.runtime ?: m.provider ?: m.id)
                             Column(Modifier.weight(1f)) {
                                 Text(m.name ?: m.id, style = ltype(LType.BodyEmph), color = p.text)
                                 Text(m.id, style = ltype(LType.Mono), color = p.muted)
@@ -159,5 +171,10 @@ fun ModelPickerSheet(
         }
     }
 }
+
+/** Groups picker rows by provider (Claude / OpenAI) when known, else by runtime/provider. */
+private fun modelGroupKey(m: ModelDto): String =
+    (io.openorcha.mobile.domain.providerFor(m.runtime ?: m.provider) ?: io.openorcha.mobile.domain.providerFor(m.id))?.label
+        ?: m.runtime ?: m.provider ?: "models"
 
 /* Flow 09 — auto-wake cadence picker: Off / 5m / 15m / 1h presets. */

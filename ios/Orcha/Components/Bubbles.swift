@@ -22,6 +22,9 @@ struct Bubble<Trailing: View>: View {
     /// Web parity — agent turn content renders as chat-scale markdown. Only `theirs`
     /// bubbles honor this; mine/system (and pending/failed) stay plain.
     var markdown = false
+    /// Portal-link chips: portal links open in the app via this handler (nil = plain text).
+    var portalBase: String?
+    var onTapPortal: ((PortalLink) -> Void)?
     @ViewBuilder var trailing: Trailing
 
     init(
@@ -32,6 +35,8 @@ struct Bubble<Trailing: View>: View {
         tasks: [TaskDto] = [],
         onTapTask: ((String) -> Void)? = nil,
         markdown: Bool = false,
+        portalBase: String? = nil,
+        onTapPortal: ((PortalLink) -> Void)? = nil,
         @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) {
         self.kind = kind
@@ -41,6 +46,8 @@ struct Bubble<Trailing: View>: View {
         self.tasks = tasks
         self.onTapTask = onTapTask
         self.markdown = markdown
+        self.portalBase = portalBase
+        self.onTapPortal = onTapPortal
         self.trailing = trailing()
     }
 
@@ -99,7 +106,7 @@ struct Bubble<Trailing: View>: View {
                 }
                 Group {
                     if markdown {
-                        ChatMarkdownView(text: body_, tasks: tasks, onTapTask: onTapTask)
+                        ChatMarkdownView(text: body_, tasks: tasks, onTapTask: onTapTask, portalBase: portalBase, onTapPortal: onTapPortal)
                     } else {
                         messageText
                     }
@@ -115,7 +122,7 @@ struct Bubble<Trailing: View>: View {
     @ViewBuilder
     private var messageText: some View {
         if let onTapTask {
-            LinkedMessageText(text: body_, tasks: tasks, onTapTask: onTapTask)
+            LinkedMessageText(text: body_, tasks: tasks, onTapTask: onTapTask, portalBase: portalBase, onTapPortal: onTapPortal)
         } else {
             Text(body_)
         }

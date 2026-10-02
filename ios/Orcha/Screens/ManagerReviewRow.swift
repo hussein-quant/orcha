@@ -9,11 +9,24 @@ struct ManagerReviewRow: View {
     let task: TaskDto
 
     @State private var review: ManagerReviewDto?
+    @State private var routing: ReviewRoutingDto?
 
     var body: some View {
         // A stack, not a Group: an empty Group renders nothing, so `.task` would never
         // fire and the row could never load itself.
-        VStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: LSpace.xs) {
+            if let via = ManagerReviewUx.via(routing) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Review")
+                        .ltype(.micro)
+                        .foregroundStyle(p.faint)
+                    Text("Reviewer: \(routing?.reviewerAlias ?? "anyone") · \(via)")
+                        .ltype(.meta)
+                        .foregroundStyle(p.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
             if let line = ManagerReviewUx.line(review) {
                 HStack(alignment: .firstTextBaseline, spacing: LSpace.s) {
                     Image(systemName: icon(line.tone))
@@ -35,7 +48,9 @@ struct ManagerReviewRow: View {
             }
         }
         .task(id: task.id + task.status) {
-            review = await model.fetchManagerReview(task)
+            let extras = await model.fetchReviewExtras(task)
+            review = extras?.managerReview
+            routing = extras?.reviewRouting
         }
     }
 

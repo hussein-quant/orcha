@@ -155,11 +155,19 @@ class MainActivity : ComponentActivity() {
                         onSetAutonomy = viewModel::setAutonomy,
                         onOpenTask = viewModel::openTask,
                         onRepoChanged = { viewModel.refreshSelected() },
+                        onIconChanged = { viewModel.refreshSelected(); viewModel.probeContainers() },
                     )
 
                     // Keep the workspace's saved UI state (tab filters, request lens, scroll) while a
                     // detail screen is open, so back returns to the same view — per project.
                     AppRoute.Workspace -> workspaceState.SaveableStateProvider("workspace-${state.selectedContainer?.id}") {
+                        // Synced prefs (iOS parity): pull the server's theme/skin when a workspace opens.
+                        LaunchedEffect(state.selectedContainer?.baseUrl) {
+                            val base = state.selectedContainer?.baseUrl ?: return@LaunchedEffect
+                            io.openorcha.mobile.ui.screens.InboxPrefsSync.pull(
+                                base, state.themeMode, state.skinMode, viewModel::setThemeMode, viewModel::setSkinMode,
+                            )
+                        }
                         WorkspaceScreen(
                             state = state,
                             onBack = viewModel::showContainers,

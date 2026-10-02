@@ -165,6 +165,10 @@ private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
         #expect(crumbs[2] == .parent(id: "p2", title: "Mid", status: nil))
         #expect(crumbs.last == .this)
         #expect(!GoalChainUx.isWorthShowing([.this]))
+        // Bare project, no objective, no parent: the page breadcrumb already covers it.
+        #expect(!GoalChainUx.isWorthShowing([.objective(text: nil, projectTitle: "p"), .this]))
+        #expect(GoalChainUx.isWorthShowing([.objective(text: "Ship v1", projectTitle: "p"), .this]))
+        #expect(ManagerReviewUx.via(ReviewRoutingDto(routedVia: "reports_to", managerDepth: 1, assigneeAlias: "Atlas")) == "via Atlas’s manager")
     }
 
     @Test func cronPresets() {

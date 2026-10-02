@@ -100,6 +100,7 @@ internal fun HomeTab(
                 onRepo = { if (repo == null && state.selectedContainer != null) connectRepo = true else onOpenGithubHub() },
             )
             if (connectRepo) InboxConnectRepoHost(state, onDismiss = { connectRepo = false })
+            HomeObjectiveEditor(state)
         }
 
         item(key = "home-needs") {

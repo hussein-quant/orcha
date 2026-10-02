@@ -2,7 +2,7 @@ package io.openorcha.mobile.ui.screens
 
 /* Routines (web pages/routines/RoutinesPage.tsx): recurring work with its schedule in
    words, next and last run; pause/resume, Run now, delete (with confirm) and the recent
-   runs of the one you open. Creating and editing routines stays on the portal. */
+   runs of the one you open. Create and edit open the routine editor (RoutineEditorScreen). */
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -98,7 +98,13 @@ private sealed class RoutineConfirm {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun InboxRoutinesScreen(container: StoredContainer, onBack: () -> Unit, onOpenTask: ((String) -> Unit)? = null) {
+fun InboxRoutinesScreen(
+    container: StoredContainer,
+    onBack: () -> Unit,
+    onOpenTask: ((String) -> Unit)? = null,
+    /** AI agents a routine can be assigned to (the editor's assignee chips). */
+    agents: List<RoutineAssignee> = emptyList(),
+) {
     val p = Orcha.palette
     val scope = rememberCoroutineScope()
     val base = container.baseUrl
@@ -113,7 +119,10 @@ fun InboxRoutinesScreen(container: StoredContainer, onBack: () -> Unit, onOpenTa
     var confirm by remember { mutableStateOf<RoutineConfirm?>(null) }
     var actBusy by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
-    BackHandler(onBack = onBack)
+    // Editor: null = closed, "" = new routine, else the routine id being edited.
+    var editor by remember { mutableStateOf<String?>(null) }
+    var savedNote by remember { mutableStateOf<String?>(null) }
+    BackHandler(enabled = editor == null, onBack = onBack)
 
     suspend fun reload() {
         runCatching { InboxApi.routines(base, container.id) }
@@ -126,6 +135,18 @@ fun InboxRoutinesScreen(container: StoredContainer, onBack: () -> Unit, onOpenTa
     }
 
     LaunchedEffect(container.id, reloadKey) { reload() }
+    LaunchedEffect(savedNote) { savedNote?.let { snackbar.showSnackbar(it); savedNote = null } }
+
+    editor?.let { target ->
+        RoutineEditorScreen(
+            container = container,
+            routineId = target.ifEmpty { null },
+            agents = agents,
+            onClose = { editor = null },
+            onSaved = { note -> editor = null; savedNote = note; reloadKey++ },
+        )
+        return
+    }
 
     fun toggle(r: InboxRoutineDto, on: Boolean) {
         toggling[r.id] = true
@@ -150,7 +171,15 @@ fun InboxRoutinesScreen(container: StoredContainer, onBack: () -> Unit, onOpenTa
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = p.bg, titleContentColor = p.text),
                     title = { Text("Routines", style = ltype(LType.Headline)) },
                     navigationIcon = { IconButton(onClick = onBack) { Icon(OrchaIcons.ArrowBack, "Back", tint = p.text2) } },
-                    actions = { IconButton(onClick = { reloadKey++ }) { Icon(OrchaIcons.Refresh, "Refresh", tint = p.text2) } },
+                    actions = {
+                        IconButton(onClick = { reloadKey++ }) { Icon(OrchaIcons.Refresh, "Refresh", tint = p.text2) }
+                        if (actor != null) {
+                            LButton(
+                                "New routine", { editor = "" }, icon = OrchaIcons.Add,
+                                kind = LButtonKind.Primary, size = LSize.Small, modifier = Modifier.padding(end = LSpace.s),
+                            )
+                        }
+                    },
                 )
                 LDivider()
             }
@@ -174,7 +203,9 @@ fun InboxRoutinesScreen(container: StoredContainer, onBack: () -> Unit, onOpenTa
                 list.isEmpty() -> item {
                     LEmptyState(
                         icon = OrchaIcons.Schedule, title = "No routines yet",
-                        message = "Routines create a task on a schedule. Set one up from the portal with “Make recurring…” on any task.",
+                        message = "Routines create a task on a schedule. Create one here, or use “Make recurring…” on any task.",
+                        actionTitle = if (actor != null) "New routine" else null,
+                        onAction = if (actor != null) ({ editor = "" }) else null,
                     )
                 }
                 else -> {
@@ -199,6 +230,7 @@ fun InboxRoutinesScreen(container: StoredContainer, onBack: () -> Unit, onOpenTa
                             onEnabled = { toggle(r, it) },
                             onRun = { confirm = RoutineConfirm.Run(r) },
                             onDelete = { confirm = RoutineConfirm.Delete(r) },
+                            onEdit = { editor = r.id },
                             onOpenTask = onOpenTask,
                         )
                     }
@@ -281,6 +313,7 @@ private fun RoutineCard(
     onEnabled: (Boolean) -> Unit,
     onRun: () -> Unit,
     onDelete: () -> Unit,
+    onEdit: () -> Unit,
     onOpenTask: ((String) -> Unit)?,
 ) {
     val p = Orcha.palette
@@ -320,6 +353,7 @@ private fun RoutineCard(
                 verticalArrangement = Arrangement.spacedBy(LSpace.s),
                 modifier = Modifier.padding(vertical = LSpace.s),
             ) {
+                LButton("Edit", onEdit, kind = LButtonKind.Secondary, size = LSize.Small, enabled = canAct)
                 LButton("Run now", onRun, icon = OrchaIcons.PlayArrow, kind = LButtonKind.Secondary, size = LSize.Small, enabled = canAct)
                 LButton("Delete routine", onDelete, kind = LButtonKind.Danger, size = LSize.Small, enabled = canAct)
             }

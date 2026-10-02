@@ -219,7 +219,7 @@ private fun ProjectRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(LSpace.m),
         ) {
-            ProjectGlyph(container.displayName)
+            io.openorcha.mobile.ui.components.ProjectIconTile(health?.icon)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(container.displayName, style = ltype(LType.BodyEmph), color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
@@ -277,22 +277,3 @@ private fun ProjectRow(
     }
 }
 
-/** Round project tile: the name's leading emoji if it has one, else its initial. */
-@Composable
-private fun ProjectGlyph(name: String) {
-    val p = Orcha.palette
-    val t = name.trim()
-    val glyph = if (t.isEmpty()) "•" else {
-        val cp = Character.codePointAt(t, 0)
-        if (Character.isLetterOrDigit(cp)) String(Character.toChars(cp)).uppercase() else String(Character.toChars(cp))
-    }
-    Box(
-        Modifier
-            .size(32.dp)
-            .background(p.surface2, CircleShape)
-            .border(1.dp, p.border, CircleShape),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(glyph, style = ltype(LType.BodyEmph), color = p.text2, maxLines = 1)
-    }
-}

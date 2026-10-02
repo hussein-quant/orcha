@@ -137,6 +137,8 @@ fun SettingsScreen(
     onOpenTask: ((String) -> Unit)? = null,
     // After Connect repo saves, so the caller can refresh the snapshot (optional).
     onRepoChanged: (String?) -> Unit = {},
+    // After the project icon saves, so the caller can refresh the snapshot (optional).
+    onIconChanged: () -> Unit = {},
 ) {
     val p = Orcha.palette
     val context = LocalContext.current
@@ -144,6 +146,9 @@ fun SettingsScreen(
     var tokenDialogFor by remember { mutableStateOf<ServerGroup?>(null) }
     var showExecution by remember { mutableStateOf(false) }
     var showConnectRepo by remember { mutableStateOf(false) }
+    var showIconSheet by remember { mutableStateOf(false) }
+    // Optimistic local copy so the row repaints before the snapshot refresh lands.
+    var savedIcon by remember(state.selectedContainer?.id) { mutableStateOf<Pair<Boolean, io.openorcha.mobile.domain.ProjectIconValue?>>(false to null) }
     var subPage by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -166,7 +171,14 @@ fun SettingsScreen(
         return
     }
     if (selected != null && subPage == "routines") {
-        InboxRoutinesScreen(selected, onBack = { subPage = null }, onOpenTask = onOpenTask)
+        InboxRoutinesScreen(
+            selected, onBack = { subPage = null }, onOpenTask = onOpenTask,
+            agents = snapshot?.agents.orEmpty().filter { it.kind == "ai" && it.terminatedAt == null }.map { RoutineAssignee(it.id, it.alias) },
+        )
+        return
+    }
+    if (selected != null && (subPage == "budgets" || subPage == "worktrees")) {
+        ProjectBudgetsScreen(selected, worktrees = subPage == "worktrees", onBack = { subPage = null })
         return
     }
 
@@ -205,10 +217,19 @@ fun SettingsScreen(
                                 leading = { LAvatar(alias, size = 28.dp) },
                             )
                             LDivider()
+                            val projectIcon = if (savedIcon.first) savedIcon.second else snapshot?.container?.projectIcon
                             LRow(
                                 title = "Project",
-                                leading = { RowIcon(OrchaIcons.Home) },
+                                leading = { io.openorcha.mobile.ui.components.ProjectIconTile(projectIcon, size = 28.dp) },
                                 trailing = { TrailingValue(snapshot?.container?.name ?: selected.displayName) },
+                            )
+                            LDivider()
+                            LRow(
+                                title = "Icon",
+                                subtitle = "An emoji or an icon for this project",
+                                onClick = { showIconSheet = true },
+                                leading = { RowIcon(io.openorcha.mobile.ui.icons.ProjectGlyphs.vector("palette")!!) },
+                                trailing = { TrailingValue(projectIconSummary(projectIcon), chevron = true) },
                             )
                         }
                     }
@@ -233,6 +254,22 @@ fun SettingsScreen(
                                     subtitle = "Recurring work on a schedule",
                                     onClick = { subPage = "routines" },
                                     leading = { RowIcon(OrchaIcons.Schedule) },
+                                    trailing = { TrailingValue("", chevron = true) },
+                                )
+                                LDivider()
+                                LRow(
+                                    title = "Budgets & limits",
+                                    subtitle = "Monthly spend limits and how many agents can run",
+                                    onClick = { subPage = "budgets" },
+                                    leading = { RowIcon(OrchaIcons.WarningAmber) },
+                                    trailing = { TrailingValue("", chevron = true) },
+                                )
+                                LDivider()
+                                LRow(
+                                    title = "Agent worktrees",
+                                    subtitle = "Clean up finished agent checkouts",
+                                    onClick = { subPage = "worktrees" },
+                                    leading = { RowIcon(OrchaIcons.Terminal) },
                                     trailing = { TrailingValue("", chevron = true) },
                                 )
                             }
@@ -389,6 +426,15 @@ fun SettingsScreen(
             onDismiss = { showExecution = false },
             onSetWakes = { onSetWakes?.invoke(it) },
             onSetAutonomy = { onSetAutonomy?.invoke(it) },
+        )
+    }
+    if (showIconSheet && selected != null) {
+        ProjectIconSheet(
+            container = selected,
+            projectName = snapshot?.container?.name ?: selected.displayName,
+            icon = if (savedIcon.first) savedIcon.second else snapshot?.container?.projectIcon,
+            onDismiss = { showIconSheet = false },
+            onSaved = { icon -> savedIcon = true to icon; onIconChanged() },
         )
     }
     if (showConnectRepo && selected != null) {
@@ -608,4 +654,13 @@ private fun AccessTokenDialog(
         textContentColor = p.text2,
         shape = RoundedCornerShape(12.dp),
     )
+}
+
+/** The Settings › Icon row's value: what the icon is, in words (never a raw shape). */
+internal fun projectIconSummary(icon: io.openorcha.mobile.domain.ProjectIconValue?): String = when (icon) {
+    null -> "Default"
+    is io.openorcha.mobile.domain.ProjectIconValue.Emoji -> icon.value
+    is io.openorcha.mobile.domain.ProjectIconValue.Glyph ->
+        icon.name.replaceFirstChar { it.uppercase() } +
+            (icon.color?.let { " · " + io.openorcha.mobile.domain.ProjectIcons.HUE_NAMES.getOrNull(it).orEmpty() } ?: "")
 }

@@ -104,10 +104,19 @@ internal fun WorkspaceTopBar(
     onCreateTask: () -> Unit,
     onSettings: () -> Unit,
     onDisconnect: () -> Unit,
+    /** D14 project icons by container id (null / absent = the default glyph). */
+    icons: Map<String, io.openorcha.mobile.domain.ProjectIconValue?> = emptyMap(),
 ) {
     val p = Orcha.palette
     var switcherOpen by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    var metricsOpen by remember { mutableStateOf(false) }
+    containers.firstOrNull { it.id == selectedId }?.takeIf { metricsOpen }?.let { sel ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { metricsOpen = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) { ProjectMetricsScreen(sel, onBack = { metricsOpen = false }) }
+    }
     Column(Modifier.fillMaxWidth().background(p.bg).statusBarsPadding()) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = LSpace.xs),
@@ -130,6 +139,7 @@ internal fun WorkspaceTopBar(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     StatusDot(dotColorFor(dotState))
+                    io.openorcha.mobile.ui.components.ProjectIconMark(selectedId?.let { icons[it] }, size = 18.dp)
                     Text(
                         projectName,
                         style = ltype(LType.Headline),
@@ -155,6 +165,7 @@ internal fun WorkspaceTopBar(
                         containers.forEach { c ->
                             DropdownMenuItem(
                                 text = { Text(c.displayName, style = ltype(LType.Body), color = p.text) },
+                                leadingIcon = { io.openorcha.mobile.ui.components.ProjectIconMark(icons[c.id], size = 18.dp) },
                                 trailingIcon = if (c.id == selectedId) {
                                     { Icon(OrchaIcons.Check, "Current", tint = p.accent, modifier = Modifier.size(16.dp)) }
                                 } else null,
@@ -188,6 +199,13 @@ internal fun WorkspaceTopBar(
                         leadingIcon = { Icon(OrchaIcons.Settings, null, tint = p.muted, modifier = Modifier.size(16.dp)) },
                         onClick = { menuOpen = false; onSettings() },
                     )
+                    if (selectedId != null) {
+                        DropdownMenuItem(
+                            text = { Text("Metrics & usage", style = ltype(LType.Body), color = p.text) },
+                            leadingIcon = { Icon(OrchaIcons.Verified, null, tint = p.muted, modifier = Modifier.size(16.dp)) },
+                            onClick = { menuOpen = false; metricsOpen = true },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("All projects", style = ltype(LType.Body), color = p.text) },
                         leadingIcon = { Icon(OrchaIcons.Home, null, tint = p.muted, modifier = Modifier.size(16.dp)) },

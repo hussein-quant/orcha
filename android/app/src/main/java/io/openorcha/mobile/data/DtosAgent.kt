@@ -158,3 +158,99 @@ data class ChatRunDto(
 
 @Serializable
 data class ChatRunsResponse(val runs: List<ChatRunDto> = emptyList())
+
+// ---------- config history: GET /api/agents/{aid}/config-revisions[/{rev}], POST …/restore ----------
+
+/** One field a revision touched. Values are string | number | null on the wire. */
+@Serializable
+data class ConfigFieldChangeDto(
+    val field: String,
+    val before: kotlinx.serialization.json.JsonElement? = null,
+    val after: kotlinx.serialization.json.JsonElement? = null,
+    val derived: Boolean = false,
+)
+
+@Serializable
+data class ConfigRevisionActorDto(
+    @SerialName("agent_id") val agentId: String? = null,
+    val alias: String? = null,
+    val kind: String? = null,
+)
+
+@Serializable
+data class ConfigRevisionDto(
+    @SerialName("revision_no") val revisionNo: Int,
+    /** initial | change | restore */
+    val kind: String = "change",
+    val changes: List<ConfigFieldChangeDto> = emptyList(),
+    val actor: ConfigRevisionActorDto? = null,
+    @SerialName("restored_from") val restoredFrom: Int? = null,
+    val reason: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+)
+
+@Serializable
+data class ConfigRevisionPageDto(
+    @SerialName("latest_revision_no") val latestRevisionNo: Int? = null,
+    val total: Int = 0,
+    val revisions: List<ConfigRevisionDto> = emptyList(),
+    @SerialName("next_before") val nextBefore: Int? = null,
+)
+
+@Serializable
+data class ConfigRestorePreviewDto(
+    val field: String,
+    val current: kotlinx.serialization.json.JsonElement? = null,
+    val target: kotlinx.serialization.json.JsonElement? = null,
+    val grant: String? = null,
+)
+
+@Serializable
+data class ConfigRestoreBlockedDto(val field: String, val reason: String = "")
+
+/** The revision plus what restoring it would change (or why it can't). */
+@Serializable
+data class ConfigRevisionDetailDto(
+    @SerialName("revision_no") val revisionNo: Int,
+    @SerialName("restore_preview") val restorePreview: List<ConfigRestorePreviewDto> = emptyList(),
+    @SerialName("restore_blocked") val restoreBlocked: List<ConfigRestoreBlockedDto> = emptyList(),
+)
+
+@Serializable
+data class ConfigRestoreResultDto(
+    @SerialName("restored_from") val restoredFrom: Int? = null,
+    val applied: List<String> = emptyList(),
+)
+
+@Serializable
+data class ConfigRestoreBody(
+    @SerialName("actor_agent_id") val actorAgentId: String,
+    val reason: String? = null,
+)
+
+// ---------- org lines: the snapshot's per-agent `reports_to` ----------
+
+@Serializable
+data class OrgRowDto(
+    val id: String,
+    @SerialName("reports_to") val reportsTo: String? = null,
+)
+
+@Serializable
+data class OrgSnapshotDto(val agents: List<OrgRowDto> = emptyList())
+
+// ---------- acting identity: GET /api/me?cid= (role + grants gate the controls) ----------
+
+@Serializable
+data class ActingIdentityDto(
+    @SerialName("agent_id") val agentId: String? = null,
+    val alias: String = "",
+    @SerialName("member_role") val memberRole: String = "member",
+    val grants: List<String> = emptyList(),
+)
+
+@Serializable
+data class MeDto(
+    val identity: ActingIdentityDto? = null,
+    val trusted: Boolean = false,
+)

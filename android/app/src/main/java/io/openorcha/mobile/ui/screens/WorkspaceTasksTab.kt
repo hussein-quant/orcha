@@ -42,6 +42,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.data.AgentDto
 import io.openorcha.mobile.data.TaskDto
+import io.openorcha.mobile.data.StoredContainer
+import io.openorcha.mobile.domain.TaskInsightsUx
+import io.openorcha.mobile.ui.components.Banner
+import io.openorcha.mobile.ui.components.BannerKind
+import io.openorcha.mobile.ui.rememberTaskInsights
+import androidx.compose.runtime.collectAsState
 import io.openorcha.mobile.domain.MobileUx
 import io.openorcha.mobile.ui.components.LAvatar
 import io.openorcha.mobile.ui.components.LButton
@@ -94,8 +100,24 @@ internal fun isAiAlias(alias: String, agents: List<AgentDto>): Boolean =
 internal fun String.capitalizedFirst(): String = replaceFirstChar { it.uppercase() }
 
 @Composable
-internal fun TasksTab(tasks: List<TaskDto>, agents: List<AgentDto>, onOpenTask: (String) -> Unit) {
+internal fun TasksTab(
+    tasks: List<TaskDto>,
+    agents: List<AgentDto>,
+    onOpenTask: (String) -> Unit,
+    /** Enables the leading-swipe "Reassign" (iOS parity) when the pairing has a human identity. */
+    container: StoredContainer? = null,
+    /** Reloads the snapshot after a reassign (wire `viewModel::refreshSelected`). */
+    onTaskChanged: () -> Unit = {},
+) {
     val p = Orcha.palette
+    val insights = rememberTaskInsights()
+    val ins by insights.state.collectAsState()
+    var reassigning by remember { mutableStateOf<TaskDto?>(null) }
+    val canWrite = container?.humanAgentId != null &&
+        agents.firstOrNull { it.id == container.humanAgentId }?.memberRole != "viewer"
+    LaunchedEffect(ins.notice) {
+        if (ins.notice != null) { kotlinx.coroutines.delay(4_000); insights.clearNotice() }
+    }
     var filter by rememberSaveable { mutableStateOf("All") }
     var scopeName by rememberSaveable { mutableStateOf(TaskScope.All.name) }
     val scope = TaskScope.valueOf(scopeName)
@@ -176,6 +198,11 @@ internal fun TasksTab(tasks: List<TaskDto>, agents: List<AgentDto>, onOpenTask: 
                 }
             }
         }
+        ins.notice?.let { n ->
+            item(key = "reassign-notice") {
+                Banner(BannerKind.Info, n, Modifier.padding(horizontal = LSpace.l, vertical = LSpace.xs))
+            }
+        }
         item(key = "pills") {
             LSegmented(
                 options = options,
@@ -208,7 +235,13 @@ internal fun TasksTab(tasks: List<TaskDto>, agents: List<AgentDto>, onOpenTask: 
             if (!isCollapsed) {
                 items(rows, key = { it.id }) { task ->
                     Column(Modifier.animateItem()) {
-                        TaskRow(task, onOpenTask, agents)
+                        if (canWrite && TaskInsightsUx.canReassign(task.isRoot, task.status)) {
+                            ReassignSwipeRow(onReassign = { insights.clearError(); reassigning = task }) {
+                                Box(Modifier.background(p.bg)) { TaskRow(task, onOpenTask, agents) }
+                            }
+                        } else {
+                            TaskRow(task, onOpenTask, agents)
+                        }
                         LDivider(Modifier.padding(start = 56.dp, end = LSpace.l))
                     }
                 }
@@ -241,6 +274,12 @@ internal fun TasksTab(tasks: List<TaskDto>, agents: List<AgentDto>, onOpenTask: 
             }
         }
         item { Spacer(Modifier.height(72.dp)) }
+    }
+    val target = reassigning
+    if (target != null && container != null) {
+        ReassignSheet(target, agents, ins.busy, ins.actionError, onDismiss = { reassigning = null }) { agent ->
+            insights.reassign(container, target.id, agent.id, agent.alias) { reassigning = null; onTaskChanged() }
+        }
     }
 }
 

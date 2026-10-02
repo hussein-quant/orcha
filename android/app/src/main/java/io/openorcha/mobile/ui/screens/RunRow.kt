@@ -20,7 +20,9 @@ import androidx.compose.ui.unit.dp
 import io.openorcha.mobile.data.RunDto
 import io.openorcha.mobile.domain.ActivityCopy
 import io.openorcha.mobile.domain.MobileUx
+import io.openorcha.mobile.domain.providerFor
 import io.openorcha.mobile.ui.components.LAvatar
+import io.openorcha.mobile.ui.components.ModelProviderMark
 import io.openorcha.mobile.ui.components.LStatusGlyph
 import io.openorcha.mobile.ui.components.LType
 import io.openorcha.mobile.ui.components.ltype
@@ -49,7 +51,7 @@ fun RunRow(run: RunDto, onOpenRun: (RunDto) -> Unit) {
             .padding(vertical = 10.dp)
             .semantics(mergeDescendants = true) {
                 contentDescription = listOfNotNull(
-                    "Run ${run.runId.take(6)}", MobileUx.statusCopy(run.status), subtitle, run.agentAlias, ago,
+                    "Run ${run.runId.take(6)}", providerFor(run.runtime)?.label, MobileUx.statusCopy(run.status), subtitle, run.agentAlias, ago,
                 ).joinToString(", ")
             },
         verticalAlignment = Alignment.CenterVertically,
@@ -59,6 +61,7 @@ fun RunRow(run: RunDto, onOpenRun: (RunDto) -> Unit) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(run.runId.take(6), style = ltype(LType.Mono), color = p.text)
+                ModelProviderMark(run.runtime, size = 12.dp)
                 Text(
                     MobileUx.statusCopy(run.status), style = ltype(LType.Meta),
                     color = if (run.status == "running") p.warn else p.text2, maxLines = 1,

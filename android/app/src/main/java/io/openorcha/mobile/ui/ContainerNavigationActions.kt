@@ -103,12 +103,16 @@ fun probeContainers() {
                         "polling", snap.agents.size, snap.taskOpenTotal,
                         needsYou = plans + verifs + reqs,
                         githubRepo = snap.container.githubRepo,
+                        icon = snap.container.projectIcon,
                     )
                 }
                 .getOrElse { err ->
                     // An auth bounce is not "unreachable" — the box answered; the phone's
                     // token is missing/stale. Rendered as its own chip + card copy.
-                    ContainerHealth(if (isAuthRequired(err)) "signin" else "unreachable")
+                    ContainerHealth(
+                        if (isAuthRequired(err)) "signin" else "unreachable",
+                        icon = _uiState.value.containerHealth[stored.id]?.icon, // keep the last known icon
+                    )
                 }
             _uiState.update { it.copy(containerHealth = it.containerHealth + (stored.id to health)) }
         }

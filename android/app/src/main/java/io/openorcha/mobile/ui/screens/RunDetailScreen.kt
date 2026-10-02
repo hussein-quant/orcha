@@ -101,6 +101,7 @@ fun RunDetailScreen(
                         maxLines = 1,
                     )
                     it.wakeKind?.let { wk -> LTag(wk) }
+                    io.openorcha.mobile.ui.components.ModelProviderMark(it.runtime)
                     Spacer(Modifier.weight(1f))
                     it.agentAlias?.let { a -> LAvatar(a, isAI = true, size = 20.dp) }
                     if (it.status == "running") {
