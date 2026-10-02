@@ -41,12 +41,13 @@ private struct DictationMicCore: View {
             ZStack {
                 if engine.state == .recording {
                     Circle()
-                        .fill(p.danger.opacity(0.18 + 0.5 * Double(engine.level)))
+                        .fill(p.danger.opacity(0.10 + 0.30 * Double(engine.level)))
+                        .overlay(Circle().strokeBorder(p.danger.opacity(0.35), lineWidth: 1))
                         .frame(width: 34, height: 34)
                         .animation(.linear(duration: 0.08), value: engine.level)
                 }
                 Image(systemName: micGlyph)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(micColor)
                     .frame(width: 34, height: 34)
                     .contentShape(Circle())
@@ -76,9 +77,9 @@ private struct DictationMicCore: View {
 
     private var micGlyph: String {
         switch engine.state {
-        case .recording: "stop.circle.fill"
+        case .recording: "stop.fill"
         case .preparing, .finishing: "ellipsis"
-        default: "mic.fill"
+        default: "mic"
         }
     }
 
@@ -86,7 +87,7 @@ private struct DictationMicCore: View {
         switch engine.state {
         case .recording: p.danger
         case .preparing, .finishing: p.muted
-        default: p.accent
+        default: p.text2
         }
     }
 

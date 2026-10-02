@@ -1,29 +1,44 @@
 import SwiftUI
 
-/// Flow 04 S1 — Settings: Appearance (instant three-way theme), containers, about.
-/// A 1:1 port of the Android `SettingsScreen`, presented as a sheet.
+/// Flow 04 S1 — Settings, grouped like the web portal's settings: Project
+/// (General, Execution), Access (Members, Devices and pairing) and Personal
+/// (Appearance, Notifications, Interface). Linear rows on panel cards, muted
+/// caption headers, Quorate branding in the footer. Presented as a sheet.
 struct SettingsScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
     @Environment(\.dismiss) private var dismiss
+    @State private var showExecution = false
 
     var body: some View {
         NavigationStack {
             OrchaThemed(mode: model.themeMode, skin: model.skinMode) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        identitySection
+                    VStack(alignment: .leading, spacing: LSpace.xl) {
+                        if model.selectedContainer != nil {
+                            groupHeader("Project")
+                            identitySection
+                            executionSection
+                            groupHeader("Access")
+                            membersSection
+                        } else {
+                            groupHeader("Access")
+                        }
+                        containersSection
+                        groupHeader("Personal")
                         appearanceSection
                         notificationsSection
-                        membersSection
-                        containersSection
+                        interfaceSection
                         aboutSection
                     }
-                    .padding(16)
+                    .padding(.horizontal, LSpace.l)
+                    .padding(.vertical, LSpace.l)
                 }
+                .background(p.bg)
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(p.bg, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { dismiss() }
@@ -32,162 +47,226 @@ struct SettingsScreen: View {
             .task {
                 if model.selectedContainer != nil { await model.loadMembers() }
             }
+            .sheet(isPresented: $showExecution) {
+                ContainerControlsSheet()
+            }
         }
     }
 
-    // MARK: acting identity (collab v1)
+    /// The web's group label (PROJECT / ACCESS / PERSONAL) above its sections.
+    private func groupHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .ltype(.micro)
+            .fontWeight(.semibold)
+            .tracking(0.6)
+            .foregroundStyle(p.faint)
+            .padding(.horizontal, 4)
+            .padding(.bottom, -LSpace.m)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// Hairline-separated rows on one panel card.
+    private func rowsCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        LCard(padding: 0) {
+            VStack(spacing: 0) { content() }
+        }
+    }
+
+    private func chevron() -> some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(p.faint)
+            .accessibilityHidden(true)
+    }
+
+    private func rowIcon(_ name: String, tint: Color? = nil) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(tint ?? p.text2)
+            .frame(width: 26, height: 26)
+            .background(p.surface2, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(p.border, lineWidth: 1))
+            .accessibilityHidden(true)
+    }
+
+    // MARK: Project → General (acting identity, collab v1)
 
     /// Who the deployment sees acting from this phone: the proxy-verified GitHub
     /// identity (avatar + login + role + grants), the honest "signed in but not a
     /// member" state, or — self-host, trust off — the paired human, unchanged.
     @ViewBuilder
     private var identitySection: some View {
-        if model.selectedContainer != nil {
-            VStack(alignment: .leading, spacing: 6) {
-                SectionH(title: "Acting as")
-                OrchaCard {
-                    if let identity = model.identity {
-                        HStack(spacing: 10) {
-                            AgentAvatar(alias: identity.alias, human: true, githubLogin: identity.githubLogin)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(identity.githubLogin.map { "@\($0)" } ?? identity.alias)
-                                    .font(p.uiFont(15, .semibold))
-                                    .foregroundStyle(p.text)
-                                Text("GitHub identity · verified by the deployment")
-                                    .font(p.uiFont(12))
-                                    .foregroundStyle(p.muted)
-                            }
-                            Spacer()
-                            MetaTag(text: identity.memberRole, tint: identity.memberRole == "owner" ? p.violet : nil)
-                        }
-                        if !model.access.isOwner, !identity.grants.isEmpty {
+        LSection("General") {
+            rowsCard {
+                if let identity = model.identity {
+                    LRow(
+                        title: identity.githubLogin.map { "@\($0)" } ?? identity.alias,
+                        subtitle: "GitHub identity · verified by the deployment"
+                    ) {
+                        LAvatar(name: identity.githubLogin ?? identity.alias, size: 28)
+                    } trailing: {
+                        LTag(identity.memberRole, tint: identity.memberRole == "owner" ? p.violet : nil)
+                    }
+                    .accessibilityElement(children: .combine)
+                    if !model.access.isOwner, !identity.grants.isEmpty {
+                        LDivider()
+                        ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 6) {
                                 ForEach(identity.grants, id: \.self) { grant in
-                                    MetaTag(text: grant.replacingOccurrences(of: "_", with: " "))
+                                    LTag(grant.replacingOccurrences(of: "_", with: " "))
                                 }
                             }
-                        }
-                    } else if model.identityTrusted {
-                        Text("Signed in via GitHub, but not a member of this project — ask an owner for an invite.")
-                            .font(p.uiFont(13))
-                            .foregroundStyle(p.muted)
-                    } else {
-                        HStack(spacing: 10) {
-                            AgentAvatar(alias: model.selectedContainer?.humanAlias ?? "H", human: true)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(model.selectedContainer?.humanAlias ?? "Paired human")
-                                    .font(p.uiFont(15, .semibold))
-                                    .foregroundStyle(p.text)
-                                Text("Self-hosted — acting as the paired human")
-                                    .font(p.uiFont(12))
-                                    .foregroundStyle(p.muted)
-                            }
+                            .padding(.horizontal, LSpace.m)
+                            .padding(.vertical, LSpace.s)
                         }
                     }
+                } else if model.identityTrusted {
+                    Text("Signed in via GitHub, but not a member of this project — ask an owner for an invite.")
+                        .ltype(.meta)
+                        .foregroundStyle(p.muted)
+                        .padding(LSpace.m)
+                } else {
+                    LRow(
+                        title: model.selectedContainer?.humanAlias ?? "Paired human",
+                        subtitle: "Self-hosted — acting as the paired human"
+                    ) {
+                        LAvatar(name: model.selectedContainer?.humanAlias ?? "H", size: 28)
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+                if let container = model.selectedContainer {
+                    LDivider()
+                    LRow(title: "Project") {
+                        rowIcon("square.stack.3d.up")
+                    } trailing: {
+                        Text(container.displayName).lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
     }
 
-    // MARK: appearance
+    // MARK: Project → Execution
+
+    private var executionSection: some View {
+        LSection("Execution") {
+            rowsCard {
+                Button { showExecution = true } label: {
+                    LRow(title: "Notifier & autonomy", subtitle: "Pause agent wakes, choose how far agents go") {
+                        rowIcon("bolt.horizontal", tint: executionTint)
+                    } trailing: {
+                        HStack(spacing: 6) {
+                            Text(executionValue)
+                            chevron()
+                        }
+                    }
+                }
+                .buttonStyle(.lRow)
+            }
+        }
+    }
+
+    private var executionValue: String {
+        guard let c = model.snapshot?.container else { return "" }
+        if (c.wakesEnabled ?? true) == false { return "Paused" }
+        return MobileUx.autonomyLabel(c.autonomyLevel ?? "plan")
+    }
+
+    private var executionTint: Color {
+        (model.snapshot?.container.wakesEnabled ?? true) ? p.ok : p.warn
+    }
+
+    // MARK: Personal → Appearance
 
     private var appearanceSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionH(title: "Appearance")
-            OrchaCard {
-                Picker("Appearance", selection: themeBinding) {
-                    ForEach(ThemeMode.allCases, id: \.self) { mode in
-                        Text(mode.label).tag(mode)
+        LSection("Appearance") {
+            LCard {
+                VStack(alignment: .leading, spacing: LSpace.m) {
+                    LSegmented(
+                        ThemeMode.allCases.map { ($0, $0 == .auto ? "System" : $0.label) },
+                        selection: themeBinding
+                    )
+                    .accessibilityLabel("Theme")
+                    Text("System follows your iPhone's setting. Changes apply instantly.")
+                        .ltype(.meta)
+                        .foregroundStyle(p.muted)
+                    if model.prefsActive {
+                        Text("Appearance follows your GitHub account — changes here sync to the portal and your other devices.")
+                            .ltype(.micro)
+                            .foregroundStyle(p.faint)
                     }
                 }
-                .pickerStyle(.segmented)
-                Text("Auto follows the system setting. Changes apply instantly.")
-                    .font(p.uiFont(13))
-                    .foregroundStyle(p.muted)
-            }
-            SectionH(title: "Design")
-            OrchaCard {
-                Picker("Design", selection: skinBinding) {
-                    ForEach(SkinMode.allCases, id: \.self) { skin in
-                        Text(skin.label).tag(skin)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Text(model.skinMode.blurb)
-                    .font(p.uiFont(13))
-                    .foregroundStyle(p.muted)
-                    .contentTransition(.opacity)
-            }
-            if model.prefsActive {
-                Text("Appearance follows your GitHub account — changes here sync to the portal and your other devices.")
-                    .font(p.uiFont(12))
-                    .foregroundStyle(p.faint)
-                    .padding(.horizontal, 2)
             }
         }
     }
 
-    // MARK: members (collab v1, read parity — no invite/role editing on iOS)
+    // MARK: Personal → Interface
+
+    private var interfaceSection: some View {
+        LSection("Interface") {
+            LCard {
+                VStack(alignment: .leading, spacing: LSpace.m) {
+                    LSegmented(SkinMode.allCases.map { ($0, $0.label) }, selection: skinBinding)
+                        .accessibilityLabel("Design")
+                    Text(model.skinMode.blurb)
+                        .ltype(.meta)
+                        .foregroundStyle(p.muted)
+                        .contentTransition(.opacity)
+                }
+            }
+        }
+    }
+
+    // MARK: Access → Members (collab v1, read parity — no invite/role editing on iOS)
 
     @ViewBuilder
     private var membersSection: some View {
-        if model.selectedContainer != nil {
-            VStack(alignment: .leading, spacing: 6) {
-                switch model.membersState {
-                case .idle:
-                    EmptyView()
-                case .loading:
-                    SectionH(title: "Members")
-                    SkeletonBlock(height: 64)
-                case let .failed(reason):
-                    SectionH(title: "Members")
-                    OrchaCard {
-                        Text(reason)
-                            .font(p.uiFont(13))
-                            .foregroundStyle(p.muted)
+        switch model.membersState {
+        case .idle:
+            EmptyView()
+        case .loading:
+            LSection("Members") {
+                SkeletonBlock(height: 104)
+            }
+        case let .failed(reason):
+            LSection("Members") {
+                LCard {
+                    Text(reason)
+                        .ltype(.meta)
+                        .foregroundStyle(p.muted)
+                }
+            }
+        case let .loaded(members, restricted):
+            LSection("Members", count: restricted ? nil : members.count) {
+                VStack(alignment: .leading, spacing: LSpace.s) {
+                    rowsCard {
+                        ForEach(Array(members.enumerated()), id: \.element.id) { index, member in
+                            if index > 0 { LDivider() }
+                            memberRow(member)
+                        }
                     }
-                case let .loaded(members, restricted):
-                    SectionH(title: "Members", count: restricted ? nil : "\(members.count)")
-                    ForEach(members) { member in
-                        memberCard(member)
-                    }
-                    if restricted {
-                        Text("The roster is private on this project — you can see your own membership; owners see everyone.")
-                            .font(p.uiFont(12))
-                            .foregroundStyle(p.faint)
-                            .padding(.horizontal, 2)
-                    } else {
-                        Text("Invites and role changes are managed from the portal.")
-                            .font(p.uiFont(12))
-                            .foregroundStyle(p.faint)
-                            .padding(.horizontal, 2)
-                    }
+                    Text(restricted
+                         ? "The roster is private on this project — you can see your own membership; owners see everyone."
+                         : "Invites and role changes are managed from the portal.")
+                        .ltype(.micro)
+                        .foregroundStyle(p.faint)
+                        .padding(.horizontal, 4)
                 }
             }
         }
     }
 
-    private func memberCard(_ member: MemberDto) -> some View {
-        OrchaCard {
-            HStack(spacing: 10) {
-                AgentAvatar(alias: member.alias, human: true, githubLogin: member.githubLogin)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(member.githubLogin.map { "@\($0)" } ?? member.alias)
-                        .font(p.uiFont(15, .semibold))
-                        .foregroundStyle(p.text)
-                        .lineLimit(1)
-                    if member.githubLogin != nil, member.alias != member.githubLogin {
-                        Text(member.alias)
-                            .font(p.uiFont(12))
-                            .foregroundStyle(p.muted)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                if member.pending {
-                    MetaTag(text: "pending", tint: p.warn)
-                }
-                MetaTag(text: member.memberRole, tint: member.memberRole == "owner" ? p.violet : nil)
+    private func memberRow(_ member: MemberDto) -> some View {
+        LRow(
+            title: member.githubLogin.map { "@\($0)" } ?? member.alias,
+            subtitle: (member.githubLogin != nil && member.alias != member.githubLogin) ? member.alias : nil
+        ) {
+            LAvatar(name: member.githubLogin ?? member.alias, size: 28)
+        } trailing: {
+            HStack(spacing: 6) {
+                if member.pending { LTag("pending", tint: p.warn) }
+                LTag(member.memberRole, tint: member.memberRole == "owner" ? p.violet : nil)
             }
         }
         .accessibilityElement(children: .combine)
@@ -207,34 +286,37 @@ struct SettingsScreen: View {
         )
     }
 
-    // MARK: notifications
+    // MARK: Personal → Notifications
 
     @State private var testStatus: String?
 
     private var notificationsSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionH(title: "Notifications")
-            OrchaCard {
+        LSection("Notifications") {
+            rowsCard {
                 Toggle(isOn: notificationsBinding) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Needs-you alerts")
-                            .font(p.uiFont(14, .semibold))
+                            .ltype(.bodyEmph)
                             .foregroundStyle(p.text)
                         Text("Background checks post an alert when a plan, verification, or request starts waiting on you — tapping opens that exact screen. iOS times the checks: expect minutes to an hour, not instant.")
-                            .font(p.uiFont(12))
+                            .ltype(.meta)
                             .foregroundStyle(p.muted)
                     }
                 }
                 .tint(p.accent)
+                .padding(LSpace.m)
                 if model.notificationsEnabled {
-                    KitButton(title: "Send test alert (arrives in 3s)", role: .neutral, small: true) {
-                        Task { testStatus = await NotificationCoordinator.shared.sendTest(model: model) }
-                    }
-                    if let testStatus {
-                        Text(testStatus)
-                            .font(p.uiFont(12))
+                    LDivider()
+                    HStack(spacing: LSpace.s) {
+                        LButton("Send test alert", icon: "bell.badge", kind: .secondary, size: .small) {
+                            Task { testStatus = await NotificationCoordinator.shared.sendTest(model: model) }
+                        }
+                        Text(testStatus ?? "Arrives in about 3 seconds")
+                            .ltype(.micro)
                             .foregroundStyle(p.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .padding(LSpace.m)
                 }
             }
         }
@@ -259,84 +341,75 @@ struct SettingsScreen: View {
         )
     }
 
-    // MARK: containers
+    // MARK: Access → Devices and pairing
 
     private var containersSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionH(title: "Containers", count: "\(model.containers.count)")
-            ForEach(model.containers) { container in
-                OrchaCard {
-                    HStack(spacing: 10) {
-                        AgentAvatar(alias: container.displayName)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(container.displayName)
-                                .font(p.uiFont(14, .semibold))
-                                .foregroundStyle(p.text)
-                            Text(container.baseUrl)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(p.muted)
-                                .lineLimit(1)
+        LSection("Devices and pairing", count: model.containers.count) {
+            VStack(alignment: .leading, spacing: LSpace.s) {
+                ForEach(model.containers) { container in
+                    rowsCard {
+                        LRow(title: container.displayName, subtitle: container.baseUrl) {
+                            LAvatar(name: container.displayName, size: 28)
+                        } trailing: {
+                            Button("Disconnect", role: .destructive) { model.forgetContainer(container.id) }
+                                .ltype(.meta)
+                                .fontWeight(.medium)
+                                .foregroundStyle(p.danger)
+                                .frame(minHeight: 44)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Disconnect") { model.forgetContainer(container.id) }
-                            .font(p.uiFont(13, .semibold))
-                            .foregroundStyle(p.danger)
-                    }
-                    HStack(spacing: 8) {
-                        Image(systemName: "key.horizontal")
-                            .font(.system(size: 12))
-                            .foregroundStyle(container.accessToken == nil ? p.faint : p.accent)
-                        Text(container.accessToken == nil ? "No access token" : "Access token set")
-                            .font(p.uiFont(12))
-                            .foregroundStyle(container.accessToken == nil ? p.faint : p.text2)
-                        Spacer()
-                        Button(container.accessToken == nil ? "Add token…" : "Update token…") {
+                        LDivider()
+                        Button {
                             tokenDraft = ""
                             tokenEditing = container
+                        } label: {
+                            LRow(title: "Access token") {
+                                rowIcon("key.horizontal", tint: container.accessToken == nil ? nil : p.accent)
+                            } trailing: {
+                                HStack(spacing: 6) {
+                                    Text(container.accessToken == nil ? "Not set" : "Set")
+                                    chevron()
+                                }
+                            }
                         }
-                        .font(p.uiFont(12, .semibold))
-                        .foregroundStyle(p.accent)
-                    }
-                    HStack(spacing: 8) {
-                        Image(systemName: "network")
-                            .font(.system(size: 12))
-                            .foregroundStyle(container.remoteBaseUrl == nil ? p.faint : p.accent)
-                        if let remote = container.remoteBaseUrl, !remote.isEmpty {
-                            Text(remote)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundStyle(p.text2)
-                                .lineLimit(1)
-                        } else {
-                            Text("No second address")
-                                .font(p.uiFont(12))
-                                .foregroundStyle(p.faint)
-                        }
-                        Spacer()
-                        Button(container.remoteBaseUrl == nil ? "Add remote…" : "Edit remote…") {
+                        .buttonStyle(.lRow)
+                        .accessibilityHint(container.accessToken == nil ? "Adds a token" : "Updates the token")
+                        LDivider()
+                        Button {
                             remoteDraft = container.remoteBaseUrl ?? ""
                             remoteError = nil
                             remoteEditing = container
+                        } label: {
+                            LRow(title: "Remote address") {
+                                rowIcon("network", tint: container.remoteBaseUrl == nil ? nil : p.accent)
+                            } trailing: {
+                                HStack(spacing: 6) {
+                                    Text(container.remoteBaseUrl.flatMap { $0.isEmpty ? nil : $0 } ?? "None")
+                                        .monospaced(container.remoteBaseUrl != nil)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                    chevron()
+                                }
+                            }
                         }
-                        .font(p.uiFont(12, .semibold))
-                        .foregroundStyle(p.accent)
+                        .buttonStyle(.lRow)
                     }
                 }
+                Text("Cloud deployments authenticate every request with the team access token — update it here when your admin rotates it; it applies to every project at that address. The remote address is for self-hosted boxes only: add the computer's Tailscale address and the app fails over to whichever answers.")
+                    .ltype(.micro)
+                    .foregroundStyle(p.faint)
+                    .padding(.horizontal, 4)
             }
-            Text("Cloud deployments authenticate every request with the team access token — update it here when your admin rotates it; it applies to every project at that address. The remote address is for self-hosted boxes only: add the computer's Tailscale address and the app fails over to whichever answers.")
-                .font(p.uiFont(12))
-                .foregroundStyle(p.faint)
-                .padding(.horizontal, 2)
-                .alert("Access token", isPresented: tokenAlertShown) {
-                    SecureField("Paste the team access token", text: $tokenDraft)
-                    Button("Save") { saveToken() }
-                    Button("Remove", role: .destructive) {
-                        if let c = tokenEditing { model.setAccessToken(c.id, to: nil) }
-                        tokenEditing = nil
-                    }
-                    Button("Cancel", role: .cancel) { tokenEditing = nil }
-                } message: {
-                    Text("Sent as the bearer credential on every request to this Orcha, and applied to all its projects. Needed for cloud deployments; leave unset for an unprotected local server.")
-                }
+        }
+        .alert("Access token", isPresented: tokenAlertShown) {
+            SecureField("Paste the team access token", text: $tokenDraft)
+            Button("Save") { saveToken() }
+            Button("Remove", role: .destructive) {
+                if let c = tokenEditing { model.setAccessToken(c.id, to: nil) }
+                tokenEditing = nil
+            }
+            Button("Cancel", role: .cancel) { tokenEditing = nil }
+        } message: {
+            Text("Sent as the bearer credential on every request to this Orcha, and applied to all its projects. Needed for cloud deployments; leave unset for an unprotected local server.")
         }
         .alert("Remote address (Tailscale)", isPresented: remoteAlertShown) {
             TextField("e.g. my-mac.tailnet.ts.net:8001", text: $remoteDraft)
@@ -398,16 +471,33 @@ struct SettingsScreen: View {
         }
     }
 
-    // MARK: about
+    // MARK: about — Quorate branding
+
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        let build = info?["CFBundleVersion"] as? String
+        return build.map { "\(short) (\($0))" } ?? short
+    }
 
     private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            SectionH(title: "About")
-            OrchaCard {
-                KVRow(key: "Version", value: "0.1.0")
-                KVRow(key: "Project", value: "github.com/open-orcha/orcha", mono: true)
-                MetaTag(text: "GH #30 · mobile companion")
-            }
+        VStack(spacing: LSpace.s) {
+            BrandMark(size: 36)
+                .accessibilityHidden(true)
+            Text("Quorate")
+                .ltype(.headline)
+                .foregroundStyle(p.text)
+            Text("Version \(appVersion)")
+                .ltype(.micro)
+                .monospacedDigit()
+                .foregroundStyle(p.faint)
+            Text("github.com/open-orcha/orcha")
+                .ltype(.micro)
+                .monospaced()
+                .foregroundStyle(p.faint)
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, LSpace.l)
+        .accessibilityElement(children: .combine)
     }
 }

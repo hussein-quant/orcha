@@ -84,8 +84,10 @@ private func pillPulses(_ status: String, _ domain: StatusDomain) -> Bool {
     }
 }
 
-/// `.pill` — word + dot, color text on Soft fill with Line border (11/700, radius 999).
-/// Status is never conveyed by color alone (foundations §2 accessibility).
+/// Status — Linear: a compact glyph + label, no loud tinted pill. Tasks use the
+/// Linear status glyphs (`LStatusGlyph`); other domains a small semantic dot
+/// (pulsing while live). Status is never conveyed by color alone — the word is
+/// always present (foundations §2 accessibility). Swiss keeps its mono caps.
 struct StatusPill: View {
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -95,17 +97,22 @@ struct StatusPill: View {
     var body: some View {
         let tint = palette.tint(statusColorName(status, domain))
         HStack(spacing: 6) {
-            PulseDot(color: tint.color, animated: pillPulses(status, domain) && !reduceMotion)
+            if domain == .task {
+                LStatusGlyph(status: status, size: 12)
+                    .accessibilityHidden(true)
+            } else {
+                PulseDot(color: tint.color, animated: pillPulses(status, domain) && !reduceMotion)
+            }
             Text(pillLabel(MobileUx.statusCopy(status.lowercased()), palette))
                 .font(pillFont(palette))
                 .tracking(pillTracking(palette))
-                .foregroundStyle(tint.color)
+                .foregroundStyle(palette.text2)
+                .lineLimit(1)
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 10)
+        .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(tint.soft, in: PillShape(mono: palette.pillMono))
-        .overlay(PillShape(mono: palette.pillMono).strokeBorder(tint.line, lineWidth: 1))
+        .background(palette.surface2, in: PillShape(mono: palette.pillMono, radius: palette.radiusTag))
+        .overlay(PillShape(mono: palette.pillMono, radius: palette.radiusTag).strokeBorder(palette.border, lineWidth: 1))
         .accessibilityElement(children: .combine)
     }
 }
@@ -114,13 +121,15 @@ struct StatusPill: View {
 /// `[data-skin="swiss"] .pill` rules); Classic keeps the capsule.
 struct PillShape: InsettableShape {
     let mono: Bool
+    /// Linear: tag radius (5) rather than a capsule; nil = capsule.
+    var radius: CGFloat? = nil
     var inset: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
         let base = rect.insetBy(dx: inset, dy: inset)
-        return mono
-            ? Path(base)
-            : Capsule().path(in: base)
+        if mono { return Path(base) }
+        if let radius { return RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: base) }
+        return Capsule().path(in: base)
     }
 
     func inset(by amount: CGFloat) -> PillShape {
@@ -135,11 +144,11 @@ func pillLabel(_ text: String, _ p: Palette) -> String {
 }
 
 func pillFont(_ p: Palette) -> Font {
-    p.pillMono ? .system(size: 10, weight: .bold, design: .monospaced) : .system(size: 11, weight: .bold)
+    p.pillMono ? .system(size: 10, weight: .bold, design: .monospaced) : p.uiFont(12, .medium)
 }
 
 func pillTracking(_ p: Palette) -> CGFloat {
-    p.pillMono ? 0.7 : 0.2
+    p.pillMono ? 0.7 : 0
 }
 
 /// Issue 1 — request status pill with a per-type GLYPH (mobile adaptation of the web's
@@ -161,13 +170,13 @@ struct RequestStatusPill: View {
             Text(pillLabel(label, palette))
                 .font(pillFont(palette))
                 .tracking(pillTracking(palette))
-                .foregroundStyle(tint.color)
+                .foregroundStyle(palette.text2)
+                .lineLimit(1)
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 10)
+        .padding(.horizontal, 7)
         .padding(.vertical, 3)
-        .background(tint.soft, in: PillShape(mono: palette.pillMono))
-        .overlay(PillShape(mono: palette.pillMono).strokeBorder(tint.line, lineWidth: 1))
+        .background(palette.surface2, in: PillShape(mono: palette.pillMono, radius: palette.radiusTag))
+        .overlay(PillShape(mono: palette.pillMono, radius: palette.radiusTag).strokeBorder(palette.border, lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(label)
     }
@@ -182,9 +191,10 @@ struct PulseDot: View {
     var body: some View {
         Circle()
             .fill(color)
-            .frame(width: 7, height: 7)
+            .frame(width: 6, height: 6)
             .opacity(animated && dim ? 0.35 : 1)
             .animation(animated ? .easeInOut(duration: 1).repeatForever(autoreverses: true) : nil, value: dim)
             .onAppear { if animated { dim = true } }
+            .accessibilityHidden(true)
     }
 }

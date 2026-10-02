@@ -13,7 +13,7 @@ struct ChatMarkdownView: View {
 
     var body: some View {
         let blocks = ChatMarkdown.blocks(text)
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: LSpace.s) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 blockView(block)
             }
@@ -34,52 +34,42 @@ struct ChatMarkdownView: View {
         switch block {
         case let .heading(level, text):
             Text(styledInline(text))
-                .font(p.uiFont(headingSize(level), level <= 2 ? .bold : .semibold))
+                .ltype(level <= 2 ? .headline : .bodyEmph)
                 .foregroundStyle(p.text)
-                .padding(.top, 2)
+                .padding(.top, level <= 2 ? 6 : 2)
                 .accessibilityAddTraits(.isHeader)
         case let .paragraph(text):
             Text(styledInline(text))
-                .font(p.uiFont(14.5))
+                .ltype(.body)
                 .foregroundStyle(p.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
         case let .code(code):
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
-                    .font(.system(size: 12, design: .monospaced))
+                    .ltype(.mono)
                     .foregroundStyle(p.text2)
                     .textSelection(.enabled)
-                    .padding(10)
+                    .padding(.horizontal, LSpace.m)
+                    .padding(.vertical, 10)
             }
-            .background(p.surface3, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(p.border, lineWidth: 1))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(p.surface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(p.border, lineWidth: 1).allowsHitTesting(false))
         case let .listItem(depth, marker, text):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(marker)
-                    .font(p.uiFont(14.5, .semibold))
+                    .ltype(.body)
                     .foregroundStyle(p.muted)
                 Text(styledInline(text))
-                    .font(p.uiFont(14.5))
+                    .ltype(.body)
                     .foregroundStyle(p.text)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.leading, CGFloat(min(depth, 4)) * 14)
         case .rule:
-            Rectangle()
-                .fill(p.border2)
-                .frame(height: 1)
-                .padding(.vertical, 2)
+            LDivider()
+                .padding(.vertical, 4)
                 .accessibilityHidden(true)
-        }
-    }
-
-    /// Chat-scale heading sizes over the 14.5 body (h5/h6 already clamp to 4).
-    private func headingSize(_ level: Int) -> CGFloat {
-        switch level {
-        case 1: 18
-        case 2: 16.5
-        case 3: 15.5
-        default: 14.5
         }
     }
 

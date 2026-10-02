@@ -7,6 +7,7 @@ import SwiftUI
 /// `orcha-task:` URL. Any other scheme (e.g. a real http(s) URL an author pasted) falls
 /// through to the system handler.
 struct LinkedMessageText: View {
+    @Environment(\.palette) private var p
     let text: String
     let tasks: [TaskDto]
     var onTapTask: (String) -> Void
@@ -17,6 +18,7 @@ struct LinkedMessageText: View {
         for range in linkRanges {
             attr[range].underlineStyle = .single
             attr[range].inlinePresentationIntent = .stronglyEmphasized
+            attr[range].foregroundColor = p.accent
         }
         return attr
     }

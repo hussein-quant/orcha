@@ -65,9 +65,11 @@ struct AgentDetailScreen: View {
                 header(agent)
                 if agent.kind == "ai" && !dead {
                     NavigationLink(value: WorkspaceRoute.converse(agent.id)) {
-                        KitButtonLabel(title: "Converse", role: .primary)
+                        Label("Converse", systemImage: "bubble.left.and.text.bubble.right")
+                            .ltype(.bodyEmph)
+                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(LButtonStyle(kind: .primary))
                 }
                 nowSection(agent)
                 if agent.kind == "ai" { controls(agent) }
@@ -139,26 +141,33 @@ struct AgentDetailScreen: View {
     // MARK: header
 
     private func header(_ agent: AgentDto) -> some View {
-        OrchaCard {
-            HStack(spacing: 12) {
-                AgentAvatar(alias: agent.alias, human: agent.kind == "human", githubLogin: agent.githubLogin, size: 56)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(agent.alias).font(p.uiFont(20, .heavy)).foregroundStyle(p.text)
-                    Text(humanSubtitle(agent))
-                        .font(p.uiFont(13)).foregroundStyle(p.muted).lineLimit(1)
+        let status = dead ? "retired" : (agent.status ?? agent.kind)
+        return LCard(padding: LSpace.l) {
+            HStack(spacing: LSpace.m) {
+                if agent.kind == "human" {
+                    AgentAvatar(alias: agent.alias, human: true, githubLogin: agent.githubLogin, size: 44)
+                } else {
+                    LAvatar(name: agent.alias, isAI: true, size: 44, status: status)
                 }
-                Spacer(minLength: 4)
-                StatusPill(status: agent.status ?? agent.kind, domain: .agent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(agent.alias).ltype(.title).foregroundStyle(p.text)
+                    Text(humanSubtitle(agent))
+                        .ltype(.meta).foregroundStyle(p.muted).lineLimit(1)
+                }
+                Spacer(minLength: LSpace.xs)
+                AgentStatusCapsule(status: status)
             }
-            HStack(spacing: 8) {
-                if let m = agent.model { MetaTag(text: m, mono: true) }
+            HStack(spacing: LSpace.s) {
+                if let m = agent.model { LTag(m) }
                 Spacer()
-                Text(MobileUx.agoLabel(agent.lastActive) ?? "")
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(p.faint)
+                if let ago = MobileUx.agoLabel(agent.lastActive) {
+                    Text("Active \(ago)").ltype(.micro).foregroundStyle(p.faint)
+                }
             }
+            .padding(.top, LSpace.s)
         }
         .opacity(dead ? 0.55 : 1)
+        .accessibilityElement(children: .combine)
     }
 
     /// Collab v1 — a human member reads as their GitHub identity + role.
@@ -194,13 +203,19 @@ struct AgentDetailScreen: View {
         if let tid {
             SectionH(title: "Now")
             NavigationLink(value: WorkspaceRoute.task(tid)) {
-                OrchaCard {
-                    HStack(spacing: 8) {
-                        Text("▸").font(p.uiFont(15, .heavy)).foregroundStyle(p.accent)
+                LCard {
+                    HStack(spacing: LSpace.s) {
+                        LStatusGlyph(status: "in_progress")
                         Text(title ?? tid)
-                            .font(p.uiFont(15, .semibold))
+                            .ltype(.bodyEmph)
                             .foregroundStyle(p.text)
                             .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(p.faint)
+                            .accessibilityHidden(true)
                     }
                 }
             }
@@ -216,15 +231,18 @@ struct AgentDetailScreen: View {
     private func liveRunRow(_ run: RunDto?) -> some View {
         if let run {
             NavigationLink(value: WorkspaceRoute.run(run)) {
-                OrchaCard(borderColor: p.accentLine) {
-                    HStack(spacing: 8) {
-                        Text(run.runId.prefix(6))
-                            .font(.system(size: 12, design: .monospaced))
+                LCard {
+                    HStack(spacing: LSpace.s) {
+                        Image(systemName: "terminal")
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(p.text2)
-                        StatusPill(status: "running", domain: .run)
-                        MetaTag(text: run.wakeKind ?? "headless")
+                            .accessibilityHidden(true)
+                        Text(run.runId.prefix(6))
+                            .ltype(.mono)
+                            .foregroundStyle(p.text2)
+                        LTag(run.wakeKind ?? "headless")
                         Spacer()
-                        Text("streaming").font(p.uiFont(11, .bold)).foregroundStyle(p.accent)
+                        Text("Live").ltype(.micro).foregroundStyle(p.accent)
                     }
                 }
             }
@@ -385,7 +403,8 @@ struct AgentDetailScreen: View {
                     Button("Rename") { newAlias = agent.alias; renaming = true }
                     Button("Retire agent…", role: .destructive) { confirmRetire = true }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    Label("Agent actions", systemImage: "ellipsis.circle")
+                        .labelStyle(.iconOnly)
                 }
             }
         }
@@ -402,24 +421,6 @@ struct AgentDetailScreen: View {
         r.agentId = r.agentId ?? agent.id
         r.agentAlias = r.agentAlias ?? agent.alias
         return r
-    }
-}
-
-/// A non-interactive KitButton-styled label — used inside a `NavigationLink` so the
-/// whole primary "Converse" affordance pushes the conversation route.
-private struct KitButtonLabel: View {
-    @Environment(\.palette) private var p
-    let title: String
-    let role: KitButtonRole
-
-    var body: some View {
-        Text(title)
-            .font(p.uiFont(15, .bold))
-            .foregroundStyle(role == .primary ? p.accentInk : p.accent)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .padding(.horizontal, 18)
-            .background(role == .primary ? p.accent : p.accentSoft, in: RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -527,9 +528,14 @@ struct AutoWakeSheet: View {
 
 // MARK: - Flow 10: Conversation
 
+/// Linear live chat (web parity): your messages right-aligned in a subtle surface
+/// bubble; agent turns full-width with rendered markdown, a "Worked for …" line and a
+/// compact work-log row; a shimmering live "Working…" row; a composer pinned to the
+/// bottom; auto-scroll with a "New messages" pill when you've scrolled up.
 struct ConversationScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let agentId: String
 
     @State private var draft = ""
@@ -540,53 +546,65 @@ struct ConversationScreen: View {
     private static let revealStep = 20
     /// GH #140 — a tapped task-id link pushes onto the tab's NavigationStack.
     @State private var linkedTaskId: String?
+    /// Whether the bottom sentinel is on screen — drives auto-scroll vs the "New messages" pill.
+    @State private var atBottom = true
+    @State private var hasUnseen = false
 
     private var agent: AgentDto? {
         model.snapshot?.agents.first { $0.id == agentId }
     }
+    private var alias: String { agent?.alias ?? "the agent" }
     private var working: Bool { agent?.status == "working" }
     private let hints = ["What are you working on?", "Any blockers?", "Status update, please"]
 
     var body: some View {
-        // Issue 2: composer pinned via `.safeAreaInset(edge: .bottom)` (like TaskThreadScreen)
-        // so SwiftUI lifts it directly above the keyboard and shrinks the scroll area — no gap,
-        // no obscured transcript. The "working" banner is a top inset so it never scrolls away.
+        // Issue 2: composer pinned via `.safeAreaInset(edge: .bottom)` so SwiftUI lifts it
+        // directly above the keyboard and shrinks the scroll area. The "working" strip is a
+        // top inset so it never scrolls away.
         transcript
-            .safeAreaInset(edge: .top, spacing: 0) { workingBanner }
-            .safeAreaInset(edge: .bottom) { composer }
+            .background(p.bg)
+            .safeAreaInset(edge: .top, spacing: 0) { workingStrip }
+            .safeAreaInset(edge: .bottom, spacing: 0) { composer }
             .navigationTitle(agent?.alias ?? "Conversation")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button("End conversation", role: .destructive) { confirmEnd = true }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("End conversation", role: .destructive) { confirmEnd = true }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                            .labelStyle(.iconOnly)
+                    }
                 }
             }
-        }
-        .confirmationDialog("End this conversation?", isPresented: $confirmEnd, titleVisibility: .visible) {
-            Button("End conversation", role: .destructive) { Task { await model.endConversation(agentId) } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("\(agent?.alias ?? "The agent") goes back to their own work. The transcript stays here.")
-        }
-        .navigationDestination(item: $linkedTaskId) { TaskDetailScreen(taskId: $0) }
-        .task { await model.loadConversation(agentId) }
+            .confirmationDialog("End this conversation?", isPresented: $confirmEnd, titleVisibility: .visible) {
+                Button("End conversation", role: .destructive) { Task { await model.endConversation(agentId) } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("\(agent?.alias ?? "The agent") goes back to their own work. The transcript stays here.")
+            }
+            .navigationDestination(item: $linkedTaskId) { TaskDetailScreen(taskId: $0) }
+            .task { await model.loadConversation(agentId) }
     }
 
-    // MARK: working banner (top inset)
+    // MARK: working strip (top inset)
 
     @ViewBuilder
-    private var workingBanner: some View {
+    private var workingStrip: some View {
         if working, agent?.currentTask != nil {
-            Banner(
-                kind: .info,
-                text: "\(agent?.alias ?? "The agent") is working on a task — your message queues."
-            )
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            HStack(spacing: LSpace.s) {
+                LStatusGlyph(status: "in_progress", size: 12)
+                Text("\(agent?.alias ?? "The agent") is on a task — your message queues.")
+                    .ltype(.meta)
+                    .foregroundStyle(p.text2)
+                    .lineLimit(2)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, LSpace.l)
+            .padding(.vertical, LSpace.s)
             .background(p.bg)
+            .overlay(alignment: .bottom) { LDivider() }
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -595,190 +613,202 @@ struct ConversationScreen: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
+                LazyVStack(alignment: .leading, spacing: 20) {
                     // Issue 4: "Load earlier" widens the reveal window over the already-fetched
                     // turns (no refetch); it changes only the TOP, so it must not scroll to bottom.
                     if model.turns.count > revealed {
-                        Button { revealed += Self.revealStep } label: {
-                            Text("Load earlier messages")
-                                .font(p.uiFont(12, .bold))
-                                .foregroundStyle(p.accent)
-                                .frame(maxWidth: .infinity)
+                        LButton("Load earlier messages", icon: "arrow.up", kind: .ghost, size: .small) {
+                            revealed += Self.revealStep
                         }
-                        .buttonStyle(.plain)
-                        .padding(.vertical, 4)
+                        .frame(maxWidth: .infinity)
                     }
                     if model.turns.isEmpty {
-                        OrchaCard {
-                            Text("No conversation yet. Send a message to wake \(agent?.alias ?? "the agent").")
-                                .foregroundStyle(p.muted)
-                        }
-                        // The hint chips feed the composer — hidden for read-only
-                        // roles right along with it (collab v1).
-                        if model.access.canWrite {
-                            HStack(spacing: 8) {
-                                ForEach(hints, id: \.self) { hint in
-                                    PillChip(label: hint, selected: false) { draft = hint }
-                                }
-                            }
-                        }
+                        emptyConversation
                     }
                     turnRows
                     if model.sendFlow.showsPendingBubble {
                         pendingBubble
+                            .transition(insertion)
                     }
                     // One status row at a time: awaiting-reply (just sent) is the most
                     // specific, then the overdue note, then the ambient "working" pulse.
                     if model.sendFlow.showsAwaitingReply {
-                        PulsingNoteRow(text: awaitingReplyCopy)
+                        LiveWorkingRow(alias: agent?.alias ?? "Agent", text: awaitingReplyCopy)
+                            .transition(insertion)
                     } else if model.sendFlow.showsOverdueNote {
-                        Text("No reply yet — \(agent?.alias ?? "the agent") may still be starting up. Pull down to refresh.")
-                            .font(p.uiFont(13))
+                        Text("No reply yet — \(alias) may still be starting up. Pull down to refresh.")
+                            .ltype(.meta)
                             .foregroundStyle(p.muted)
                     } else if working {
-                        PulsingNoteRow(text: "\(agent?.alias ?? "The agent") is working…")
+                        LiveWorkingRow(alias: agent?.alias ?? "Agent", text: "Working…")
+                            .transition(insertion)
                     }
                     if let error = model.error {
                         Banner(kind: .danger, text: error)
                     }
-                    Color.clear.frame(height: 1).id("bottom")
+                    Color.clear
+                        .frame(height: 1)
+                        .id("bottom")
+                        .onAppear { atBottom = true; hasUnseen = false }
+                        .onDisappear { atBottom = false }
                 }
-                .padding(16)
+                .padding(.horizontal, LSpace.l)
+                .padding(.vertical, LSpace.l)
+                .lAnimation(.lSpring, value: model.turns.last?.seq)
+                .lAnimation(.lSpring, value: model.sendFlow.phase)
             }
-            // Scroll to bottom on a NEW/sent turn (newest seq changes), on any send-flow
-            // step (pending bubble / indicator appearing), or when the keyboard opens —
-            // never on a "Load earlier" reveal (which only widens the top).
+            .scrollDismissesKeyboard(.interactively)
+            .overlay(alignment: .bottom) {
+                if hasUnseen {
+                    NewMessagesPill { scrollToBottom(proxy) }
+                        .padding(.bottom, LSpace.m)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                }
+            }
+            .lAnimation(.lQuick, value: hasUnseen)
+            // Scroll to bottom on a NEW/sent turn (newest seq changes) when already at the
+            // bottom or when it's yours; otherwise surface the "New messages" pill. Also on
+            // any send-flow step and when the keyboard opens — never on a "Load earlier" reveal.
             .onChange(of: model.turns.last?.seq) {
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                let mine = model.turns.last.map(isMine) ?? false
+                if atBottom || mine {
+                    scrollToBottom(proxy)
+                } else {
+                    hasUnseen = true
+                }
             }
-            .onChange(of: model.sendFlow.phase) {
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
-            }
+            .onChange(of: model.sendFlow.phase) { scrollToBottom(proxy) }
             .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
-                withAnimation { proxy.scrollTo("bottom", anchor: .bottom) }
+                scrollToBottom(proxy)
             }
             .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             .refreshable { await model.refreshConversationDelta(agentId) }
         }
     }
 
-    /// Turns as bubbles, with a `.system` day-divider bubble inserted at each new day.
-    @ViewBuilder
-    private var turnRows: some View {
-        let humanId = model.humanId
-        let alias = agent?.alias ?? "agent"
-        let rows = withDayDividers(Array(model.turns.suffix(revealed)))
-        ForEach(rows) { row in
-            switch row {
-            case let .day(label):
-                Bubble(.system, label)
-            case let .turn(turn):
-                turnBubble(turn, humanId: humanId, alias: alias)
-            }
+    private var insertion: AnyTransition {
+        reduceMotion ? .opacity : .asymmetric(
+            insertion: .move(edge: .bottom).combined(with: .opacity),
+            removal: .opacity
+        )
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        hasUnseen = false
+        if reduceMotion {
+            proxy.scrollTo("bottom", anchor: .bottom)
+        } else {
+            withAnimation(.lSpring) { proxy.scrollTo("bottom", anchor: .bottom) }
         }
     }
 
     @ViewBuilder
-    private func turnBubble(_ turn: TurnDto, humanId: String?, alias: String) -> some View {
+    private var emptyConversation: some View {
+        LEmptyState(
+            icon: "bubble.left.and.text.bubble.right",
+            title: "No conversation yet",
+            message: "Send a message to wake \(alias)."
+        )
+        // The hint chips feed the composer — hidden for read-only roles right along
+        // with it (collab v1).
+        if model.access.canWrite {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: LSpace.s) {
+                    ForEach(hints, id: \.self) { hint in
+                        LChip(hint, icon: "sparkles") { draft = hint }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Turns as messages, with a `.system` day divider inserted at each new day.
+    @ViewBuilder
+    private var turnRows: some View {
+        let humanId = model.humanId
+        let rows = withDayDividers(Array(model.turns.suffix(revealed)), all: model.turns)
+        ForEach(rows) { row in
+            switch row {
+            case let .day(label):
+                Bubble(.system, label)
+                    .accessibilityAddTraits(.isHeader)
+            case let .turn(turn, workedFor):
+                turnBubble(turn, humanId: humanId, workedFor: workedFor)
+                    .transition(insertion)
+            }
+        }
+    }
+
+    private func isMine(_ turn: TurnDto) -> Bool {
+        turn.authorAgentId == model.humanId || turn.role == "human"
+    }
+
+    @ViewBuilder
+    private func turnBubble(_ turn: TurnDto, humanId: String?, workedFor: String?) -> some View {
         let mine = turn.authorAgentId == humanId || turn.role == "human"
         let tasks = model.snapshot?.tasks ?? []
+        let author = agent?.alias ?? "agent"
         if turn.role == "system" {
             Bubble(.system, turn.content, tasks: tasks, onTapTask: { linkedTaskId = $0 })
         } else if mine {
             Bubble(.mine, turn.content, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 })
         } else if ChatSendFlow.isBlankReply(turn.content) {
             // A blank agent turn (the session restarted mid-reply and no output was
-            // captured) must never render as an empty bubble — show a muted notice.
-            emptyReplyNotice(turn, alias: alias)
+            // captured) must never render as an empty message — show a muted notice.
+            EmptyReplyNotice(
+                alias: author,
+                time: MobileUx.agoLabel(turn.createdAt),
+                runRoute: turn.runId.map(workLogRoute)
+            )
         } else {
             // Web parity: agent turn content renders as chat-scale markdown
             // (headings, bold/italic, code, lists, links, rules).
-            Bubble(.theirs, turn.content, author: alias, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 }, markdown: true) {
-                if let rid = turn.runId {
-                    workLogLink(rid, alias: alias)
-                }
+            Bubble(.theirs, turn.content, author: author, time: MobileUx.agoLabel(turn.createdAt), tasks: tasks, onTapTask: { linkedTaskId = $0 }, markdown: true) {
+                TurnFooter(workedFor: workedFor, runRoute: turn.runId.map(workLogRoute))
             }
         }
     }
 
-    /// The "theirs"-side muted notice replacing a blank agent bubble.
-    private func emptyReplyNotice(_ turn: TurnDto, alias: String) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("No reply captured — \(alias)'s session may have restarted.")
-                    .font(p.uiFont(12))
-                    .foregroundStyle(p.muted)
-                if let time = MobileUx.agoLabel(turn.createdAt) {
-                    Text(time)
-                        .font(.system(size: 10.5, design: .monospaced))
-                        .foregroundStyle(p.faint)
-                }
-                if let rid = turn.runId {
-                    workLogLink(rid, alias: alias)
-                }
-            }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 10)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(p.border2, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    .allowsHitTesting(false)
-            )
-            Spacer(minLength: 60)
-        }
-    }
-
-    /// The existing run-log link, shared by real replies and the blank-reply notice.
-    private func workLogLink(_ runId: String, alias: String) -> some View {
-        NavigationLink(value: WorkspaceRoute.run(RunDto(runId: runId, agentId: agentId, agentAlias: alias, status: "exited"))) {
-            Text("Open work log →")
-                .font(p.uiFont(11, .bold))
-                .foregroundStyle(p.accent)
-        }
-        .buttonStyle(.plain)
-        .padding(.top, 4)
+    private func workLogRoute(_ runId: String) -> WorkspaceRoute {
+        .run(RunDto(runId: runId, agentId: agentId, agentAlias: agent?.alias ?? "agent", status: "exited"))
     }
 
     // MARK: optimistic send (pending bubble + awaiting-reply copy)
 
     private var awaitingReplyCopy: String {
-        let alias = agent?.alias ?? "the agent"
-        return model.sendFlow.isFirstTurn
+        model.sendFlow.isFirstTurn
             ? "Starting \(alias)'s session — the first reply can take a minute."
-            : "\(alias) is waking…"
+            : "Waking…"
     }
 
-    /// The composed message, rendered the moment the send begins: "sending…" while the
+    /// The composed message, rendered the moment the send begins: "Sending…" while the
     /// POST is in flight (and until the poll echoes the real turn back — which then
-    /// replaces this bubble), or "tap to retry" when the POST failed. Never both this
-    /// and the echoed turn: `ChatSendFlow.observe` dedupes by content + seq recency.
+    /// replaces this bubble), or "Not sent — tap to retry" when the POST failed. Never both
+    /// this and the echoed turn: `ChatSendFlow.observe` dedupes by content + seq recency.
     private var pendingBubble: some View {
         let flow = model.sendFlow
-        return Bubble(.mine, flow.content) {
+        return Bubble(.mine, flow.content, trailing: {
             if flow.isFailed {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Not sent — tap to retry")
-                        .font(p.uiFont(11, .bold))
+                    Label("Not sent — tap to retry", systemImage: "exclamationmark.circle")
+                        .ltype(.micro)
+                        .foregroundStyle(p.danger)
                     if let reason = flow.failureReason {
                         Text(reason)
-                            .font(p.uiFont(10.5))
-                            .opacity(0.75)
+                            .ltype(.micro)
+                            .foregroundStyle(p.muted)
                     }
                 }
-                .foregroundStyle(p.accentInk)
                 .padding(.top, 2)
             } else {
-                Text("sending…")
-                    .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(p.accentInk.opacity(0.55))
+                Text("Sending…")
+                    .ltype(.micro)
+                    .foregroundStyle(p.faint)
             }
-        }
-        .opacity(flow.isFailed ? 1 : 0.75)
+        })
+        .opacity(flow.isFailed ? 1 : 0.7)
         .contentShape(Rectangle())
-        .onTapGesture {
-            guard model.sendFlow.isFailed, let restored = model.takeFailedSendContent() else { return }
-            draft = draft.isEmpty ? restored : restored + "\n\n" + draft
-        }
+        .onTapGesture(perform: restoreFailedSend)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             flow.isFailed
@@ -789,6 +819,11 @@ struct ConversationScreen: View {
         .accessibilityAddTraits(flow.isFailed ? .isButton : [])
     }
 
+    private func restoreFailedSend() {
+        guard model.sendFlow.isFailed, let restored = model.takeFailedSendContent() else { return }
+        draft = draft.isEmpty ? restored : restored + "\n\n" + draft
+    }
+
     // MARK: composer
 
     /// Collab v1: a read-only role (viewer / trusted non-member) gets the honest
@@ -796,50 +831,34 @@ struct ConversationScreen: View {
     @ViewBuilder
     private var composer: some View {
         if let reason = model.access.writeDenialReason {
-            Banner(kind: .info, text: reason)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(p.bg)
+            HStack(spacing: LSpace.s) {
+                Image(systemName: "lock")
+                    .foregroundStyle(p.muted)
+                    .accessibilityHidden(true)
+                Text(reason)
+                    .ltype(.meta)
+                    .foregroundStyle(p.muted)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, LSpace.l)
+            .padding(.vertical, LSpace.m)
+            .background(p.bg)
+            .overlay(alignment: .top) { LDivider() }
         } else {
-            composerField
+            ChatComposer(
+                draft: $draft,
+                placeholder: "Message \(alias)…",
+                canSend: canSend,
+                isSending: model.sendFlow.isSending,
+                onSend: send
+            )
         }
     }
 
-    private var composerField: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Chat with \(agent?.alias ?? "the agent")…", text: $draft, axis: .vertical)
-                .lineLimit(1...4)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(p.surface2, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(p.border2, lineWidth: 1))
-            DictationMicButton(text: $draft)
-            Button {
-                let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                draft = ""
-                Task { await model.sendTurn(agentId, content: text) }
-            } label: {
-                Group {
-                    if model.sendFlow.isSending {
-                        ProgressView()
-                            .tint(p.accentInk)
-                    } else {
-                        Image(systemName: "paperplane.fill")
-                            .font(p.uiFont(16, .semibold))
-                            .foregroundStyle(p.accentInk)
-                    }
-                }
-                .frame(width: 40, height: 40)
-                .background(p.accent, in: Circle())
-            }
-            .buttonStyle(.plain)
-            .opacity(canSend || model.sendFlow.isSending ? 1 : 0.45)
-            .disabled(!canSend)
-            .accessibilityLabel(model.sendFlow.isSending ? "Sending" : "Send")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(p.bg)
+    private func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = ""
+        Task { await model.sendTurn(agentId, content: text) }
     }
 
     /// Send gate: non-empty draft, no global action in flight, and the send machine
@@ -850,22 +869,30 @@ struct ConversationScreen: View {
             && model.sendFlow.canBegin
     }
 
-    // MARK: day dividers
+    // MARK: day dividers + "worked for"
 
     private enum ChatRow: Identifiable {
         case day(String)
-        case turn(TurnDto)
+        case turn(TurnDto, workedFor: String?)
 
         var id: String {
             switch self {
             case let .day(label): "day-\(label)"
-            case let .turn(t): t.id ?? "seq-\(t.seq)"
+            case let .turn(t, _): t.id ?? "seq-\(t.seq)"
             }
         }
     }
 
-    /// Insert a `.day` row (a `.system` divider bubble) whenever the calendar day changes.
-    private func withDayDividers(_ turns: [TurnDto]) -> [ChatRow] {
+    /// Insert a `.day` row whenever the calendar day changes, and attach a "Worked for …"
+    /// label to each agent reply (time since the human turn it answers, from `all`).
+    private func withDayDividers(_ turns: [TurnDto], all: [TurnDto]) -> [ChatRow] {
+        var lastHumanAt: [Int: Date] = [:]
+        var latestHuman: Date?
+        for turn in all {
+            if isMine(turn) { latestHuman = MobileUx.parseInstant(turn.createdAt) }
+            else if let latestHuman { lastHumanAt[turn.seq] = latestHuman }
+            if !isMine(turn), turn.role != "system" { latestHuman = nil }
+        }
         var rows: [ChatRow] = []
         var lastDay: String?
         for turn in turns {
@@ -873,27 +900,251 @@ struct ConversationScreen: View {
                 lastDay = day
                 rows.append(.day(MobileUx.dayLabel(turn.createdAt) ?? day))
             }
-            rows.append(.turn(turn))
+            var worked: String?
+            if let start = lastHumanAt[turn.seq], let end = MobileUx.parseInstant(turn.createdAt) {
+                worked = Self.workedForLabel(end.timeIntervalSince(start))
+            }
+            rows.append(.turn(turn, workedFor: worked))
         }
         return rows
     }
+
+    /// "Worked for 47 sec" / "Worked for 3 min" — nil for non-positive or > 2h gaps
+    /// (a reply that late isn't an honest "work" span).
+    private static func workedForLabel(_ secs: TimeInterval) -> String? {
+        guard secs >= 1, secs < 7200 else { return nil }
+        let s = Int(secs.rounded())
+        if s < 60 { return "Worked for \(s) sec" }
+        let m = s / 60
+        return m < 60 ? "Worked for \(m) min" : "Worked for \(m / 60) h \(m % 60) min"
+    }
 }
 
-/// A muted, gently pulsing status line under the transcript (awaiting-reply /
-/// agent-working). Owns its pulse state so each appearance animates afresh;
-/// Reduce Motion renders it static. VoiceOver reads the text as-is.
-private struct PulsingNoteRow: View {
+// MARK: - Conversation pieces
+
+/// Compact footer under an agent turn: "Worked for …" + a work-log row.
+private struct TurnFooter: View {
+    @Environment(\.palette) private var p
+    let workedFor: String?
+    let runRoute: WorkspaceRoute?
+
+    var body: some View {
+        if workedFor != nil || runRoute != nil {
+            HStack(spacing: LSpace.s) {
+                if let workedFor {
+                    Label(workedFor, systemImage: "clock")
+                        .labelStyle(CompactLabelStyle())
+                        .ltype(.micro)
+                        .foregroundStyle(p.faint)
+                }
+                if let runRoute {
+                    WorkLogRow(route: runRoute)
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+}
+
+/// The run-log link as a compact tool-summary row ("Work log ›").
+private struct WorkLogRow: View {
+    @Environment(\.palette) private var p
+    let route: WorkspaceRoute
+
+    var body: some View {
+        NavigationLink(value: route) {
+            HStack(spacing: 5) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 10, weight: .semibold))
+                    .accessibilityHidden(true)
+                Text("Work log")
+                    .ltype(.micro)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(p.text2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(p.surface, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(p.border, lineWidth: 1))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open work log")
+    }
+}
+
+private struct CompactLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) {
+            configuration.icon.imageScale(.small).accessibilityHidden(true)
+            configuration.title
+        }
+    }
+}
+
+/// The agent-side muted notice replacing a blank agent reply.
+private struct EmptyReplyNotice: View {
+    @Environment(\.palette) private var p
+    let alias: String
+    let time: String?
+    let runRoute: WorkspaceRoute?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                LAvatar(name: alias, isAI: true, size: 20)
+                    .accessibilityHidden(true)
+                Text(alias).ltype(.bodyEmph).foregroundStyle(p.text)
+                if let time { Text(time).ltype(.micro).foregroundStyle(p.faint) }
+            }
+            Text("No reply captured — \(alias)'s session may have restarted.")
+                .ltype(.meta)
+                .foregroundStyle(p.muted)
+            if let runRoute { WorkLogRow(route: runRoute) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// The live agent row: avatar, name and a shimmering "Working…" line with a gently
+/// pulsing dot. Reduce Motion renders it static; VoiceOver reads the text as-is.
+private struct LiveWorkingRow: View {
     @Environment(\.palette) private var p
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let alias: String
     let text: String
+    @State private var phase: CGFloat = -1
     @State private var pulse = false
 
     var body: some View {
-        Text(text)
-            .font(p.uiFont(13))
-            .foregroundStyle(p.muted)
-            .opacity(!reduceMotion && pulse ? 0.4 : 1)
-            .animation(.easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
-            .onAppear { if !reduceMotion { pulse = true } }
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                LAvatar(name: alias, isAI: true, size: 20, status: "working")
+                    .accessibilityHidden(true)
+                Text(alias).ltype(.bodyEmph).foregroundStyle(p.text)
+            }
+            HStack(spacing: LSpace.s) {
+                Circle()
+                    .fill(p.accent)
+                    .frame(width: 7, height: 7)
+                    .scaleEffect(!reduceMotion && pulse ? 1.35 : 1)
+                    .opacity(!reduceMotion && pulse ? 0.45 : 1)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .ltype(.body)
+                    .foregroundStyle(p.muted)
+                    .overlay { shimmer.mask(Text(text).ltype(.body)) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .onAppear(perform: start)
+    }
+
+    /// A soft highlight band sweeping across the text (the "streaming" feel).
+    @ViewBuilder
+    private var shimmer: some View {
+        if !reduceMotion {
+            GeometryReader { geo in
+                LinearGradient(
+                    colors: [.clear, p.text.opacity(0.9), .clear],
+                    startPoint: .leading, endPoint: .trailing
+                )
+                .frame(width: geo.size.width * 0.5)
+                .offset(x: phase * geo.size.width)
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func start() {
+        guard !reduceMotion else { return }
+        withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
+        withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { phase = 1.5 }
+    }
+}
+
+/// Floating "New messages ↓" pill shown when a reply lands while you're scrolled up.
+private struct NewMessagesPill: View {
+    @Environment(\.palette) private var p
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 11, weight: .bold))
+                    .accessibilityHidden(true)
+                Text("New messages").ltype(.meta).fontWeight(.medium)
+            }
+            .foregroundStyle(p.lPrimaryText)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(p.lPrimaryFill, in: Capsule())
+            .shadow(color: .black.opacity(0.18), radius: 8, y: 2)
+            .frame(minHeight: 44)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Scrolls to the newest message")
+    }
+}
+
+/// Composer pinned to the bottom: a rounded surface holding the growing field,
+/// dictation mic and the send button.
+private struct ChatComposer: View {
+    @Environment(\.palette) private var p
+    @Binding var draft: String
+    let placeholder: String
+    let canSend: Bool
+    let isSending: Bool
+    let onSend: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: LSpace.xs) {
+            TextField(placeholder, text: $draft, axis: .vertical)
+                .ltype(.body)
+                .foregroundStyle(p.text)
+                .lineLimit(1...6)
+                .focused($focused)
+                .padding(.leading, LSpace.m)
+                .padding(.vertical, 10)
+            DictationMicButton(text: $draft)
+            Button(action: onSend) {
+                Group {
+                    if isSending {
+                        ProgressView().tint(p.lPrimaryText).controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(canSend ? p.lPrimaryText : p.faint)
+                    }
+                }
+                .frame(width: 30, height: 30)
+                .background(canSend || isSending ? p.lPrimaryFill : p.surface3, in: Circle())
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSend)
+            .accessibilityLabel(isSending ? "Sending" : "Send")
+            .lAnimation(.lQuick, value: canSend)
+        }
+        .padding(.trailing, 2)
+        .background(p.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(focused ? p.border2 : p.border, lineWidth: 1)
+                .allowsHitTesting(false)
+        )
+        .padding(.horizontal, LSpace.m)
+        .padding(.top, LSpace.s)
+        .padding(.bottom, LSpace.s)
+        .background(p.bg)
+        .overlay(alignment: .top) { LDivider() }
     }
 }
