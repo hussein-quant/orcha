@@ -8,6 +8,22 @@ import UIKit
 /// correctly without re-applying; a skin change re-applies (new bars pick it up).
 @MainActor
 enum ChromeAppearance {
+    /// Applies Auto/Light/Dark to every window of the app. `.unspecified` hands
+    /// control back to the system, and presented sheets follow immediately.
+    static func applyInterfaceStyle(_ mode: ThemeMode) {
+        let style: UIUserInterfaceStyle = switch mode {
+        case .auto: .unspecified
+        case .light: .light
+        case .dark: .dark
+        }
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows {
+                window.overrideUserInterfaceStyle = style
+            }
+        }
+    }
+
     static func apply(skin: SkinMode) {
         let dark = Palette.current(.dark, skin: skin)
         let light = Palette.current(.light, skin: skin)

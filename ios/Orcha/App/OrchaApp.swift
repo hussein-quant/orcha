@@ -18,7 +18,12 @@ struct OrchaApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
-                .preferredColorScheme(model.themeMode.colorScheme)
+                // Window-level override, not `.preferredColorScheme`: switching back to
+                // System (nil) leaves already-presented sheets stuck on the old scheme,
+                // so a sheet rendered light tokens on dark chrome. UIKit propagates a
+                // window's style to every presented controller.
+                .onAppear { ChromeAppearance.applyInterfaceStyle(model.themeMode) }
+                .onChange(of: model.themeMode) { _, mode in ChromeAppearance.applyInterfaceStyle(mode) }
                 .tint(ChromeAppearance.accent(skin: model.skinMode))
                 .onChange(of: model.skinMode) { _, skin in ChromeAppearance.apply(skin: skin) }
                 .task { NotificationCoordinator.shared.model = model }
