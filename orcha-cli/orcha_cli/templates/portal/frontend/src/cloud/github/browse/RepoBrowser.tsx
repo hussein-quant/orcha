@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Button, Popover, Segmented } from "../../../components/primitives";
 import { Icon } from "../../../components/ui";
+import { browseRawUrl } from "../../../components/filePreview/sources";
 import {
   BrowseErrorBody,
   BrowseSkeletonPane,
@@ -191,6 +192,7 @@ export function RepoBrowser({ cid, gitRef, path, htmlUrlBase, onNavigate, leadin
           />
         ) : (
           <ContentPane
+            cid={cid}
             gitRef={gitRef}
             path={path}
             loading={fileLoading}
@@ -373,6 +375,7 @@ function SearchResults({
 
 /* ---- content pane: sticky header + line-numbered, tokenized content ------- */
 function ContentPane({
+  cid,
   gitRef,
   path,
   loading,
@@ -380,6 +383,7 @@ function ContentPane({
   payload,
   htmlUrl,
 }: {
+  cid: string;
   gitRef: string;
   path: string;
   loading: boolean;
@@ -395,7 +399,7 @@ function ContentPane({
   if (!payload) return <BrowseSkeletonPane />;
 
   return (
-    <ContentPaneChrome gitRef={gitRef} payload={payload} htmlUrl={htmlUrl} extIcon={<Icon name="ext" cls="gl" />} hidePath>
+    <ContentPaneChrome gitRef={gitRef} payload={payload} htmlUrl={htmlUrl} extIcon={<Icon name="ext" cls="gl" />} hidePath rawUrl={browseRawUrl(cid, payload.ref || gitRef, payload.path)}>
       <CodeLines content={payload.content ?? ""} path={payload.path} />
     </ContentPaneChrome>
   );

@@ -64,6 +64,7 @@ import { usePaneWidths } from "./usePaneWidths";
 import { useCodeLayout } from "./useCodeLayout";
 import { fetchWorktreeBranch, fetchWorktreeFile, type WorktreeFilePayload, fetchWorktreeAvailable } from "./worktreeApi";
 import { WorktreeDiffPane } from "./WorktreeDiffPane";
+import { browseRawUrl } from "../../components/filePreview/sources";
 import "./codespace.css";
 import { RepoNotConnected } from "../github/RepoNotConnected";
 // Registers the Cmd/Ctrl+K "Files" provider (C-03). extensions.ts imports this
@@ -1303,6 +1304,7 @@ export function CodeSpacePage() {
                   gitRef={cachedPreview!.ref}
                   payload={{ ref: cachedPreview!.ref, path: cachedPreview!.path, content: cachedPreview!.content, size: (cachedPreview!.content ?? "").length, truncated: cachedPreview!.truncated, binary: cachedPreview!.binary }}
                   htmlUrl={htmlUrl}
+                  rawUrl={browseRawUrl(cid, cachedPreview!.ref, cachedPreview!.path)}
                 >
                   <div className="rb-code mono">
                     {(cachedPreview!.content ?? "").split("\n").map((line, i) => (
@@ -1334,6 +1336,8 @@ export function CodeSpacePage() {
                   gitRef={gitRef}
                   payload={filePayload}
                   htmlUrl={htmlUrl}
+                  // images / PDF / media / fonts preview natively (never while editing)
+                  rawUrl={editMode ? null : browseRawUrl(cid, filePayload.ref || gitRef, filePayload.path)}
                 >
                   {editMode && draftMode ? (
                     draftContent == null ? (

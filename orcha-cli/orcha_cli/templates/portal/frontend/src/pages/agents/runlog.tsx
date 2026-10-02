@@ -26,6 +26,7 @@ import type { Agent, Run } from "../../types";
 import { classifyLine, selfAction, type LogEvent } from "../../lib/classify";
 import { nearBottom, pinToBottom } from "../../lib/logScroll";
 import { FilesChanged, parseDiffFiles } from "../../components/FilesChanged";
+import { runBlobSource } from "../../components/filePreview/sources";
 
 // LogEvent comes from lib/classify; `sec` (section collapse) is a legacy
 // vanilla affordance the shared classifier never emits.
@@ -493,7 +494,7 @@ function RunCard({ run, agentAlias }: { run: Run; agentAlias?: string }) {
                 <Icon name="chev" cls="v2-ico run-chev" />
                 Code diff
               </summary>
-              <div className="run-diff-b"><FilesChanged diff={run.diff} /></div>
+              <div className="run-diff-b"><FilesChanged diff={run.diff} blobSource={runBlobSource(run)} /></div>
             </details>
           )}
           {/* wave-4 (D12): ONE run-log renderer app-wide — the Activity inspector's RunLogView
@@ -1141,7 +1142,7 @@ export function RunChanges({ run }: { run: Run | null | undefined }) {
         // the card above already says "Changed N files +a −d": the embedded viewer's own
         // count line is dropped (hideSummary) so the fact is stated once (D12)
         <div className="run-changes-diff" ref={diffRef}>
-          <FilesChanged preparsed={shown} hideSummary />
+          <FilesChanged preparsed={shown} hideSummary blobSource={runBlobSource(run)} />
         </div>
       ) : null}
     </div>

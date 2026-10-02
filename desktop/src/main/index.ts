@@ -836,6 +836,9 @@ function getOrCreatePortalView(stack: Stack): WebContentsView {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Chromium's built-in PDF viewer, so PDFs preview inline in code views, diffs and
+      // deliverables (the portal's file previews) instead of falling back to a download card.
+      plugins: true,
       // Dedicated minimal preload (NOT the manager's): exposes window.orchaHost only when
       // the page origin equals this stack's origin (arch §7.2).
       preload: path.join(__dirname, '../preload/portal.js'),

@@ -17,6 +17,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, EmptyState, Inspector } from "../../components/primitives";
 import { FilesChanged } from "../../components/FilesChanged";
+import { BinaryDiffView, type BlobSource } from "../../components/filePreview/BinaryDiff";
+import { runRawUrl } from "../../components/filePreview/sources";
 import { statusLetter } from "../../cloud/codespace/ChangesTab";
 import { extractLiveEdits, groupLiveEditsByFile } from "../../cloud/codespace/liveEdits";
 import { useRunStream } from "../../hooks/useRunStream";
@@ -158,6 +160,8 @@ export function LiveChangesPanel({ agentAlias, agentId, run, live, state, onClos
     </>
   );
 
+  const version = payload?.version || "";
+  const rawSource: BlobSource = (f, side) => runRawUrl(agentId, rid, f.path, side) + (version ? "&v=" + encodeURIComponent(version) : "");
   const selDiff = diff && selected && diff.key.startsWith(rid + "|" + selected.path + "|") ? diff.data : null;
   // a deleted file has nothing to open; an untracked one was never committed, so the
   // branch view Code opens would not have it — no link rather than a dead one
@@ -245,11 +249,17 @@ export function LiveChangesPanel({ agentAlias, agentId, run, live, state, onClos
             ) : !selDiff.available ? (
               <div className="lc-note">{selDiff.detail || "This diff is unavailable."}</div>
             ) : selDiff.binary ? (
-              <div className="lc-note">Binary file — not shown.</div>
+              // images compare before/after; other binaries get a sized card —
+              // the version pins each fetch to this poll's state of the file
+              <BinaryDiffView
+                key={selected.path + "|" + (payload?.version || "")}
+                file={{ path: selected.path, old: selected.orig_path || undefined, status: selected.status }}
+                source={rawSource}
+              />
             ) : (
               <>
                 {selDiff.truncated ? <div className="lc-note">Diff truncated — showing a partial view.</div> : null}
-                <FilesChanged diff={selDiff.diff} hideSummary />
+                <FilesChanged diff={selDiff.diff} hideSummary blobSource={rawSource} />
               </>
             )}
           </section>

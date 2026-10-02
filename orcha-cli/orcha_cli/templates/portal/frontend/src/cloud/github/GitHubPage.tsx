@@ -32,7 +32,8 @@ import {
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
 import { getJSON } from "../../api/client";
-import { DiffFile, FilesChanged } from "../../components/FilesChanged";
+import { DiffFile, FilesChanged, type BlobSource } from "../../components/FilesChanged";
+import { refBlobSource } from "../../components/filePreview/sources";
 import { Icon, useToast } from "../../components/ui";
 import {
   Avatar,
@@ -591,7 +592,7 @@ const GH_STATUS: Record<string, "M" | "A" | "D" | "R"> = {
   modified: "M", changed: "M", added: "A", copied: "A", removed: "D", renamed: "R",
 };
 
-function FilesSection({ files, htmlUrl }: { files: GhFiles | undefined; htmlUrl: string | null | undefined }) {
+function FilesSection({ files, htmlUrl, blobSource }: { files: GhFiles | undefined; htmlUrl: string | null | undefined; blobSource?: BlobSource | null }) {
   const f = files || {};
   const items = f.items || [];
   if (!items.length) return <div className="gh-quiet-empty">No files changed.</div>;
@@ -608,10 +609,12 @@ function FilesSection({ files, htmlUrl }: { files: GhFiles | undefined; htmlUrl:
       lines: it.patch_omitted
         ? ["(diff too large to show here — view it on GitHub)"]
         : (it.patch || "(no textual diff)").split("\n"),
+      // GitHub sends no patch for a binary file (and no line counts) — preview it instead
+      binary: !it.patch && !it.patch_omitted && !it.additions && !it.deletions && it.status !== "renamed",
     }));
   return (
     <div className="gh-files">
-      <FilesChanged preparsed={preparsed} />
+      <FilesChanged preparsed={preparsed} blobSource={blobSource} />
       {f.truncated ? <div className="gh-files-more muted">Showing the first {items.length} of {f.count} files.</div> : null}
       {f.patches_truncated ? (
         <div className="gh-files-more muted">
@@ -1851,7 +1854,12 @@ export function GitHubPage() {
               {activeSub === "checks" ? (
                 <ChecksSection checks={pull.checks} htmlUrl={pull.html_url} />
               ) : activeSub === "files" ? (
-                <FilesSection files={pull.files} htmlUrl={pull.html_url} />
+                <FilesSection
+                  files={pull.files}
+                  htmlUrl={pull.html_url}
+                  // before = the base branch, after = the PR head (browse/raw ref=pr/<n>)
+                  blobSource={cid && pull.number ? refBlobSource(cid, pull.base, "pr/" + pull.number) : null}
+                />
               ) : (
                 activity("pull", pull, pull.comments, pull.comments_count, pull.review_comments_count)
               )}

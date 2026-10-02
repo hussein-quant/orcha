@@ -140,8 +140,11 @@ describe("Code Space states", () => {
 
   it("a binary file offers no Edit toggle", async () => {
     stub();
-    mountPage("/code?path=logo.png");
-    await screen.findByText("Binary file not shown.", { exact: false });
+    const view = mountPage("/code?path=logo.png");
+    // an image is previewed from its raw bytes (never shown as text) …
+    await waitFor(() => expect(view.container.querySelector('.fp[data-kind="image"]')).not.toBeNull());
+    expect(vi.mocked(global.fetch).mock.calls.some(([u]) => String(u).includes("/github/browse/raw?") && String(u).includes("path=logo.png"))).toBe(true);
+    // … and still offers no Edit toggle
     expect(screen.queryByRole("button", { name: /^Edit/ })).toBeNull();
   });
 

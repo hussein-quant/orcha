@@ -13,6 +13,10 @@
  * by run_id and selection/filter/collapse survive the 3s poll re-renders.
  */
 import { useEffect, useMemo, useState } from "react";
+import { binaryPatchNewSize, isBinaryDiff, isRichKind, kindFromExt, stripBinaryPayload } from "../lib/filePreview";
+import { BinaryDiffView, type BlobSource } from "./filePreview/BinaryDiff";
+
+export type { BlobSource } from "./filePreview/BinaryDiff";
 
 export interface DiffFile {
   path: string;
@@ -21,6 +25,11 @@ export interface DiffFile {
   add: number;
   del: number;
   lines: string[];
+  /** A binary section ("GIT binary patch" / "Binary files … differ") — its
+   *  payload is never rendered as text; the preview layer shows it instead. */
+  binary?: boolean;
+  /** The new side's size when a binary patch states it (`literal N`). */
+  size?: number | null;
 }
 
 // V2 a11y: tree rows are keyboard-reachable (Enter/Space activate) and the
@@ -43,7 +52,8 @@ export function diffLineClass(l: string): string {
     l.startsWith("new mode") ||
     l.startsWith("similarity ") ||
     l.startsWith("rename ") ||
-    l.startsWith("Binary files")
+    l.startsWith("Binary files") ||
+    l.startsWith("GIT binary patch")
   )
     return "meta";
   if (l.startsWith("@@")) return "hunk";
@@ -66,13 +76,27 @@ export function parseDiffFiles(diff: string): DiffFile[] {
     cur.lines.push(l);
     if (l.startsWith("new file")) cur.status = "A";
     else if (l.startsWith("deleted file")) cur.status = "D";
-    else if (l.startsWith("rename to ")) {
+    else if (l === "GIT binary patch" || /^Binary files .* differ$/.test(l)) {
+      cur.binary = true;
+      // `--no-index` diffs say "Binary files /dev/null and b/x differ" with no mode line
+      if (/^Binary files \/dev\/null and /.test(l) && cur.status === "M") cur.status = "A";
+      else if (/ and \/dev\/null differ$/.test(l) && cur.status === "M") cur.status = "D";
+    } else if (cur.binary) {
+      /* base85 payload / literal|delta headers — counted as neither add nor del */
+    } else if (l.startsWith("rename to ")) {
       cur.status = "R";
       cur.path = l.slice(10);
     } else if (l.startsWith("+++ b/")) cur.path = l.slice(6);
     else if (diffLineClass(l) === "add") cur.add++;
     else if (diffLineClass(l) === "del") cur.del++;
   });
+  for (const f of files) {
+    if (f.binary) {
+      f.size = binaryPatchNewSize(f.lines);
+      f.add = 0;
+      f.del = 0;
+    }
+  }
   return files;
 }
 
@@ -80,7 +104,7 @@ export function parseDiffFiles(diff: string): DiffFile[] {
 function FlatDiff({ diff }: { diff: string }) {
   let add = 0;
   let del = 0;
-  const rows = diff.split("\n").map((l, i) => {
+  const rows = stripBinaryPayload(diff.split("\n")).map((l, i) => {
     const cls = diffLineClass(l);
     if (cls === "add") add++;
     else if (cls === "del") del++;
@@ -187,8 +211,30 @@ function buildTreeRows(files: DiffFile[], q: string, closed: Set<string>, selPat
 }
 
 /* ---- the selected file's pane (dfvPaneHtml parity) ------------------------ */
-function FilePane({ file }: { file: DiffFile | undefined }) {
+/** A file whose change the preview layer shows (binary, or a rich media kind
+ *  — e.g. an image the host can serve both sides of). */
+function previewable(file: DiffFile, blobSource?: BlobSource | null): boolean {
+  if (file.binary || isBinaryDiff(file.lines)) return true;
+  const k = kindFromExt(file.path);
+  // an SVG text diff stays a text diff; other rich kinds never carry useful text
+  return !!blobSource && !!k && isRichKind(k) && k !== "svg";
+}
+
+function FilePane({ file, blobSource }: { file: DiffFile | undefined; blobSource?: BlobSource | null }) {
   if (!file) return null;
+  if (previewable(file, blobSource)) {
+    return (
+      <>
+        <div className="dfv-ph">
+          <span className="dfv-path mono">{file.path}</span>
+          <span className="muted dfv-bin">binary</span>
+        </div>
+        <div className="dfv-preview">
+          <BinaryDiffView key={file.path} file={file} source={blobSource} />
+        </div>
+      </>
+    );
+  }
   return (
     <>
       <div className="dfv-ph">
@@ -214,7 +260,10 @@ function FilePane({ file }: { file: DiffFile | undefined }) {
 /** `hideSummary`: the host already states "N files changed +a −d" (e.g. the
  *  agent conversation's "Changed N files" card) — drop the viewer's own count
  *  line so the fact is shown once (D12); the maximize control stays. */
-export function FilesChanged({ diff, preparsed, hideSummary }: { diff?: string | null | undefined; preparsed?: DiffFile[]; hideSummary?: boolean }) {
+/** `blobSource`: where each side's bytes live (a run / working-tree / ref raw
+ *  route) — binary and media files then preview (images compare before/after);
+ *  without it they show a compact "binary file" card, never their payload. */
+export function FilesChanged({ diff, preparsed, hideSummary, blobSource }: { diff?: string | null | undefined; preparsed?: DiffFile[]; hideSummary?: boolean; blobSource?: BlobSource | null }) {
   const files = useMemo(
     () => (preparsed && preparsed.length ? preparsed : diff && diff.trim() ? parseDiffFiles(diff) : []),
     [diff, preparsed],
@@ -362,7 +411,7 @@ export function FilesChanged({ diff, preparsed, hideSummary }: { diff?: string |
       <div className="dfv-body">
         {side}
         <div className="dfv-main">
-          <FilePane file={sel} />
+          <FilePane file={sel} blobSource={blobSource} />
         </div>
       </div>
     </div>

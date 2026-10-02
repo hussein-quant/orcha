@@ -205,13 +205,26 @@ describe("RepoBrowser content pane", () => {
     expect(link).toHaveAttribute("href", "https://github.com/acme/app/blob/main/big.txt");
   });
 
-  it("shows a binary placeholder instead of content", async () => {
-    stubFetch({
+  it("previews a binary image from its raw bytes instead of showing content", async () => {
+    const calls = stubFetch({
       "/browse/tree": { ref: "HEAD", path: "", entries: [] },
       "/browse/file": { ref: "HEAD", path: "logo.png", content: "", size: 5000, binary: true },
     });
-    mount({ path: "logo.png" });
-    expect(await screen.findByText(/binary file not shown/i)).toBeInTheDocument();
+    const view = mount({ path: "logo.png" });
+    await waitFor(() => expect(view.container.querySelector('.fp[data-kind="image"]')).not.toBeNull());
+    expect(calls.some((c) => c.url.includes("/github/browse/raw?ref=HEAD&path=logo.png"))).toBe(true);
+    expect(screen.queryByText(/binary file not shown/i)).toBeNull();
+  });
+
+  it("a binary with no preview gets the unsupported card (size + Download), never its bytes", async () => {
+    stubFetch({
+      "/browse/tree": { ref: "HEAD", path: "", entries: [] },
+      "/browse/file": { ref: "HEAD", path: "dist/app.zip", size: 2048, binary: true },
+    });
+    mount({ path: "dist/app.zip" });
+    expect(await screen.findByText("Preview not supported for .zip files")).toBeInTheDocument();
+    expect(screen.getByText("· 2.0 KB")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute("href", expect.stringContaining("download=1"));
   });
 
   it("shows the empty-pane hint when no file is selected", () => {

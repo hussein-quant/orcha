@@ -41,6 +41,7 @@ from portal_backend import (
     device_token_routes,
     embodiment_token_routes,
     evidence_routes,  # proof-of-work evidence packs (mig 058)
+    file_raw_routes,  # raw bytes for file previews (images, PDF, media)
     github_hub_routes,
     github_pat_routes,
     github_repo_browse_routes,
@@ -137,6 +138,7 @@ ROUTE_MODULES = (
     device_token_routes,
     embodiment_token_routes,
     evidence_routes,  # proof-of-work evidence packs (mig 058)
+    file_raw_routes,  # raw bytes for file previews (images, PDF, media)
     github_hub_routes,
     github_pat_routes,
     github_repo_browse_routes,

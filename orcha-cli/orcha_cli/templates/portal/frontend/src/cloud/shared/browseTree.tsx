@@ -17,6 +17,8 @@ import type { GhError } from "../github/ghlib";
 import type { BrowseEntry, BrowseFilePayload } from "../github/browse/browseTypes";
 import { highlightLine, type Token } from "../github/browse/highlight";
 import { Button, ButtonLink } from "../../components/primitives/Button";
+import { FilePreview } from "../../components/filePreview/FilePreview";
+import { isRichKind, kindFromExt, looksBinaryText } from "../../lib/filePreview";
 
 /* ---- error degrade (same class names GitHubPage/RepoBrowser already use) -
    V2 (G-08): every state names what happened AND offers the recovery that
@@ -378,8 +380,16 @@ export interface ContentPaneChromeProps {
   // breadcrumb) — a fact is never shown twice (D12)
   hidePath?: boolean;
   children?: React.ReactNode; // the actual code body (CodeLines or a custom gutter render)
+  /** The file's raw-bytes URL (browse/raw at this ref). With it, images, SVG,
+   *  PDF, media and fonts render natively and other binaries get a sized
+   *  Download card; without it a binary keeps the one-line notice. */
+  rawUrl?: string | null;
 }
-export function ContentPaneChrome({ gitRef, payload, htmlUrl, extIcon, headerExtra, hidePath, children }: ContentPaneChromeProps) {
+export function ContentPaneChrome({ gitRef, payload, htmlUrl, extIcon, headerExtra, hidePath, children, rawUrl }: ContentPaneChromeProps) {
+  const kind = kindFromExt(payload.path);
+  // a payload the server didn't flag but whose text is really binary is never dumped
+  const binary = !!payload.binary || looksBinaryText(payload.content);
+  const preview = !!rawUrl && (binary || kind === "binary" || (!!kind && isRichKind(kind)));
   return (
     <>
       <div className="rb-file-head">
@@ -388,7 +398,16 @@ export function ContentPaneChrome({ gitRef, payload, htmlUrl, extIcon, headerExt
         <span className="rb-file-size muted">{formatSize(payload.size)}</span>
         {headerExtra}
       </div>
-      {payload.binary ? (
+      {preview ? (
+        <FilePreview
+          url={rawUrl!}
+          path={payload.path}
+          // an unknown extension (null): the response's MIME + a byte sniff decide
+          kind={kind}
+          sizeHint={payload.size}
+          sourceView={kind === "svg" && !binary ? <div className="fp-svg-code">{children}</div> : undefined}
+        />
+      ) : binary ? (
         <div className="rb-binary muted">
           Binary file not shown.
           {htmlUrl ? <> <a href={htmlUrl} target="_blank" rel="noopener noreferrer">View on GitHub {extIcon}</a></> : null}

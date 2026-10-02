@@ -67,6 +67,7 @@ import {
   useSnapshot,
 } from "../../state/SnapshotProvider";
 import { FilesChanged } from "../../components/FilesChanged";
+import { runBlobSource } from "../../components/filePreview/sources";
 import { modeWords, useProjectMode } from "../../lib/projectMode";
 import { AutofixSection, EvidencePack } from "./evidence";
 import { DeliverablesEvidence, DeliverablesSection } from "./deliverables";
@@ -712,7 +713,7 @@ function VerifyEvidence({ t, runs, onOpenRuns, noDiff }: { t: Task; runs: RunsSt
               {withDiff === latest ? words.runChanges : words.runChanges + " (earlier run)"}
             </summary>
             <div style={{ marginTop: 8 }}>
-              <FilesChanged diff={withDiff.diff} />
+              <FilesChanged diff={withDiff.diff} blobSource={runBlobSource(withDiff)} />
             </div>
           </details>
         ) : null}
@@ -2933,7 +2934,7 @@ function RunCard({ run, diffOpen = false }: { run: Run; diffOpen?: boolean }) {
             {words.runChanges}
           </summary>
           <div className="wk-run-sec-b">
-            <FilesChanged diff={run.diff} />
+            <FilesChanged diff={run.diff} blobSource={runBlobSource(run)} />
           </div>
         </details>
       ) : null}

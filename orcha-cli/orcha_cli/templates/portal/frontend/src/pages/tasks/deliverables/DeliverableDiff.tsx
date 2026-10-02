@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { FilesChanged, parseDiffFiles, type DiffFile } from "../../../components/FilesChanged";
 import { fetchDeliverableDiff, formatBytes, type DeliverableDiffResult } from "./api";
+import { ImageCompare } from "../../../components/filePreview/BinaryDiff";
 
 type DiffState = { status: "loading" } | { status: "error"; message: string } | { status: "ok"; data: DeliverableDiffResult };
 
@@ -27,6 +28,14 @@ export function DeliverableDiff({ tid, did, from, to }: { tid: string; did: stri
   if (st.status === "error") return <p className="dlv-err" role="alert">Diff unavailable — {st.message}.</p>;
   const d = st.data;
   const label = "v" + d.from.version + " → v" + d.to.version;
+  if (d.binary && d.kind === "image" && d.bytes_changed) {
+    // two image versions compare GitHub-style (2-up / swipe / onion skin)
+    return (
+      <div className="dlv-diff" data-testid="dlv-image-diff" aria-label={"Changes " + label}>
+        <ImageCompare path={d.path} oldUrl={d.from.raw_url} newUrl={d.to.raw_url} />
+      </div>
+    );
+  }
   if (d.binary) {
     return (
       <p className="dlv-note" data-testid="dlv-binary-diff">

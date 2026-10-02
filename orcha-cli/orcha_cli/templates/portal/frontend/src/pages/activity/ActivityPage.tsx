@@ -28,6 +28,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { getJSON } from "../../api/client";
 import { Icon } from "../../components/ui";
 import { FilesChanged } from "../../components/FilesChanged";
+import { runBlobSource } from "../../components/filePreview/sources";
 import {
   Avatar, Button, Chip, EmptyState, IconButton, Inspector, List, Row, Skeleton, SplitPane, StatusIcon, Tooltip,
 } from "../../components/primitives";
@@ -747,7 +748,7 @@ function RunInspector({ run, agent, taskTitle, now, onClose }: { run: WorkerRun;
               Code diff
               <Icon name="chev-right" cls="v2-ico act-diff-chev" />
             </summary>
-            <FilesChanged diff={run.diff} />
+            <FilesChanged diff={run.diff} blobSource={runBlobSource(run)} />
           </details>
         ) : null}
         <RunLogView key={id} run={run} outcome={{ bucket: o.bucket, stoppedByHuman: killCause(run.kill_reason) === "human_stop" }} />

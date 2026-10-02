@@ -329,12 +329,17 @@ describe("DeliverablesEvidence (verification gate)", () => {
     await waitFor(() => expect(calls.some((c) => c.url === base + "/d-md/diff?from=2&to=3")).toBe(true));
     await waitFor(() => expect(within(ev).getByTestId("dlv-diff")).toBeTruthy());
   });
-  it("binary updates say 'file changed' instead of a fake text diff; nothing when empty", async () => {
+  it("an updated image compares before/after (never a fake text diff); nothing when empty", async () => {
     LIST = [dlv("d-png", "chart.png", "image", 2)];
     const r = wrap(<DeliverablesEvidence tid={TID} />);
     const ev = await screen.findByTestId("deliverables-evidence");
     fireEvent.click(within(ev).getByText(/Changes in 1 deliverable/));
-    expect((await screen.findByTestId("dlv-binary-diff")).textContent).toContain("file changed");
+    const cmp = await screen.findByTestId("dlv-image-diff");
+    expect(cmp.querySelector('[data-testid="fp-compare"]')).not.toBeNull();
+    // both versions' bytes come from their own /raw URLs
+    await waitFor(() => expect(calls.some((c) => c.url === base + "/d-png/versions/1/raw")).toBe(true));
+    expect(calls.some((c) => c.url === base + "/d-png/versions/2/raw")).toBe(true);
+    expect(screen.queryByTestId("dlv-binary-diff")).toBeNull();
     r.unmount();
     LIST = [];
     const r2 = wrap(<DeliverablesEvidence tid={TID} />);

@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from "react";
 import { Md } from "../../../components/ui";
+import { ImageView } from "../../../components/filePreview/FilePreview";
 import type { Task } from "../../../types";
 import { fetchDeliverableText, formatBytes, TEXT_KINDS, type Deliverable, type DeliverableText, type DeliverableVersion } from "./api";
 import { delimiterFor, parseCsv } from "./csv";
@@ -84,8 +85,9 @@ export function DeliverablePreview({ d, v, tasks }: { d: Deliverable; v: Deliver
 
   if (d.kind === "image") {
     return (
+      // the shared preview: checkerboard transparency, Fit / Actual size, dimensions
       <div className="dlv-preview" data-kind="image">
-        <img className="dlv-img" src={v.raw_url} alt={d.name + " (version " + v.version + ")"} loading="lazy" />
+        <ImageView src={v.raw_url} path={d.path} size={v.size_bytes} url={v.raw_url} alt={d.name + " (version " + v.version + ")"} />
       </div>
     );
   }

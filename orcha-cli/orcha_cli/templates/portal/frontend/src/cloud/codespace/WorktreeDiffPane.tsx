@@ -10,7 +10,9 @@
  */
 import { Button } from "../../components/primitives";
 import { useEffect, useRef, useState } from "react";
-import { FilesChanged } from "../../components/FilesChanged";
+import { FilesChanged, parseDiffFiles } from "../../components/FilesChanged";
+import { BinaryDiffView } from "../../components/filePreview/BinaryDiff";
+import { worktreeBlobSource } from "../../components/filePreview/sources";
 import { fetchWorktreeDiff, type WorktreeDiffPayload } from "./worktreeApi";
 
 export interface WorktreeDiffPaneProps {
@@ -47,13 +49,17 @@ export function WorktreeDiffPane({ cid, path, onViewAtHead }: WorktreeDiffPanePr
       ) : !payload.available ? (
         <div className="cs-empty-line">{payload.detail || "This diff is unavailable."}</div>
       ) : payload.binary ? (
-        <div className="cs-empty-line">Binary file not shown.</div>
+        // HEAD vs the working tree, previewed (images compare before/after)
+        <BinaryDiffView
+          file={{ path, status: parseDiffFiles(payload.diff || "")[0]?.status || "M" }}
+          source={worktreeBlobSource(cid)}
+        />
       ) : (
         <>
           {payload.truncated ? (
             <div className="rb-truncated-note muted">Diff truncated — showing a partial view.</div>
           ) : null}
-          <FilesChanged diff={payload.diff} />
+          <FilesChanged diff={payload.diff} blobSource={worktreeBlobSource(cid)} />
         </>
       )}
     </div>
