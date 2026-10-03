@@ -35,7 +35,7 @@ struct ContainerControlsSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: LSpace.xl) {
                         if laptopPaused {
-                            Banner(kind: .info, text: "This Quorate is paused or stopped on the laptop — controls are disabled until it resumes.")
+                            Banner(kind: .info, text: "This Embodent is paused or stopped on the laptop — controls are disabled until it resumes.")
                         }
                         if lacksGrant {
                             Banner(kind: .info, text: model.access.manageDenialReason(Grant.manageAutonomy, action: "Changing the notifier or autonomy")

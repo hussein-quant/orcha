@@ -118,7 +118,7 @@ enum ProjectLimitsUx {
         case "has-output": "Has output"
         case "unmerged": "Unmerged commits"
         case "in-use": "In use"
-        case "not-quorate": "Not Quorate"
+        case "not-quorate": "Not an agent worktree"
         default: s.replacingOccurrences(of: "-", with: " ").capitalized
         }
     }
@@ -131,9 +131,9 @@ enum ProjectLimitsUx {
     static func objectiveSaveError(_ error: Error) -> String {
         if let api = error as? OrchaApiError {
             if api.status == 404 || api.status == 405 {
-                return "This Quorate can't edit objectives yet — update it, or set one by applying a template."
+                return "This Embodent can't edit objectives yet — update it, or set one by applying a template."
             }
-            if api.status >= 500 { return "Couldn't save the objective — Quorate hit an error. Try again." }
+            if api.status >= 500 { return "Couldn't save the objective — Embodent hit an error. Try again." }
             if api.status == 413 { return "That objective is too long — keep it under 4,000 characters." }
         }
         let why = InboxErrorText.describe(error)

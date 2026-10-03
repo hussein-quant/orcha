@@ -2,7 +2,7 @@
 --
 -- The notifier creates a git worktree per wake (`orcha/wk-*`), per agent+task (`orcha/task-*`),
 -- per resident conversation and per live terminal under <project>/.orcha-worktrees. They were
--- almost never removed: Quorate's own scaffolding copied into each one (runtime overlay, skills,
+-- almost never removed: Embodent's own scaffolding copied into each one (runtime overlay, skills,
 -- wake logs, the .orcha stack folder) made every worktree look "dirty". Worktrees live on the
 -- HOST, so — like the Verdikt previews (064) — the portal records settings and requests, and
 -- the host notifier (orcha_cli/notifier_worktree_gc.py + worktree_gc.py) does the git work and

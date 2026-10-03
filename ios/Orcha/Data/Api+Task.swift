@@ -1,6 +1,6 @@
 import Foundation
 
-/// Task-detail parity surface (web portal → Quorate iOS): proof-of-work evidence,
+/// Task-detail parity surface (web portal → Embodent iOS): proof-of-work evidence,
 /// Verdikt runs, goal ancestry, the AI manager pre-review, "Make recurring…"
 /// routines and reassign. Reads + the human writes the web shows to a person.
 extension OrchaApiClient {

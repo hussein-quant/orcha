@@ -78,7 +78,7 @@ describe("GitHub polish r2", () => {
     expect(within(rowOf(8)).getByText("+1")).toBeInTheDocument();
   });
 
-  it("the Tracked in Quorate band uses a neutral glyph (not accent)", () => {
+  it("the Tracked in Embodent band uses a neutral glyph (not accent)", () => {
     const g = groupIssues([{ n: 1 }, { n: 2 }], (r) => r.n === 1);
     expect(g[0]).toMatchObject({ id: "tracked", tone: "neutral", glyph: "tracked" });
     expect(g[1]).toMatchObject({ id: "untracked", tone: "ok" });

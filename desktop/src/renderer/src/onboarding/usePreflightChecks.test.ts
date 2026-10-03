@@ -63,7 +63,7 @@ describe('setupIssues', () => {
     )
     expect(issues.map((i) => i.key)).toEqual(['docker', 'homebrew', 'ai', 'helper'])
     expect(issues[0].title).toMatch(/isn.t running/)
-    expect(issues[3].title).toMatch(/quorate command-line helper/i)
+    expect(issues[3].title).toMatch(/embodent command-line helper/i)
   })
 
   it('distinguishes not installed, not responding and a stuck check', () => {

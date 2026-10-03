@@ -2,7 +2,7 @@ package io.openorcha.mobile.ui.screens
 
 /* Settings, grouped like the web portal and the iOS redesign: PROJECT (General,
    Execution), ACCESS (Members, Devices and pairing) and PERSONAL (Appearance,
-   Notifications, Interface), with a Quorate footer. Linear rows on panel cards. */
+   Notifications, Interface), with a Embodent footer. Linear rows on panel cards. */
 
 import android.content.Intent
 import android.provider.Settings
@@ -367,7 +367,7 @@ fun SettingsScreen(
                     RowsCard {
                         LRow(
                             title = "Plan usage",
-                            subtitle = "Claude and Codex limits from the Quorate desktop app",
+                            subtitle = "Claude and Codex limits from the Embodent desktop app",
                             onClick = { showPlanUsage = true },
                             leading = { RowIcon(OrchaIcons.Schedule) },
                             trailing = { TrailingValue("", chevron = true) },
@@ -402,7 +402,7 @@ fun SettingsScreen(
                         }
                         LRow(
                             title = "System notification settings",
-                            subtitle = "Sounds and banners for Quorate on this phone",
+                            subtitle = "Sounds and banners for Embodent on this phone",
                             onClick = {
                                 runCatching {
                                     context.startActivity(
@@ -588,7 +588,7 @@ private fun AboutFooter() {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         BrandMark(size = 36.dp)
-        Text("Quorate", style = ltype(LType.BodyEmph), color = p.text)
+        Text("Embodent", style = ltype(LType.BodyEmph), color = p.text)
         Text("Version ${BuildConfig.VERSION_NAME}", style = ltype(LType.Meta), color = p.muted)
     }
 }

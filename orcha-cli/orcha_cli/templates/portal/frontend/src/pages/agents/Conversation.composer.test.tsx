@@ -135,7 +135,7 @@ describe("composer send sequencing (vanilla conversation-composer.js parity)", (
     expect(JSON.parse(String(turnPosts()[0].body)).attachments).toEqual([{ id: "abc_shot.png", name: "shot.png" }]);
     // … the pending bubble flips to failed with an explicit Retry
     await waitFor(() => expect(container.querySelector(".turn.pending.failed")).toBeTruthy());
-    expect(container.querySelector(".conv-sendfail")!.textContent).toContain("Quorate couldn't save this message (error 500)");
+    expect(container.querySelector(".conv-sendfail")!.textContent).toContain("Embodent couldn't save this message (error 500)");
     // nothing lost, and held in exactly ONE place: the failed bubble keeps the text +
     // refs; the composer and tray stay clear so a follow-up Enter can't double-send
     expect(container.querySelector(".turn.pending.failed .tx")!.textContent).toBe("look at this");

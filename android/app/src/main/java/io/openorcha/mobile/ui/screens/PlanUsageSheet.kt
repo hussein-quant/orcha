@@ -86,7 +86,7 @@ fun PlanUsageSheet(usage: PlanUsageState, onDismiss: () -> Unit) {
                 }
                 view.isEmpty -> item(key = "empty") {
                     if (usage.unreachable) {
-                        LEmptyState(OrchaIcons.WarningAmber, "Plan usage is unavailable", "Couldn't reach your Quorate. Check your connection and try again.",
+                        LEmptyState(OrchaIcons.WarningAmber, "Plan usage is unavailable", "Couldn't reach your Embodent. Check your connection and try again.",
                             actionTitle = "Retry", onAction = usage::refresh)
                     } else {
                         LEmptyState(OrchaIcons.Schedule, "No plan usage yet", PlanUsageUx.EMPTY_MESSAGE)

@@ -66,7 +66,7 @@ export const STATE_META: Record<WorktreeState, { label: string; tone: ChipTone; 
   "has-output": { label: "Has output", tone: "info", order: 1 },
   "unmerged": { label: "Unmerged commits", tone: "warn", order: 2 },
   "in-use": { label: "In use", tone: "accent", order: 3 },
-  "not-quorate": { label: "Not Quorate", tone: "neutral", order: 4 },
+  "not-quorate": { label: "Not an agent worktree", tone: "neutral", order: 4 },
 };
 
 const POLL_MS = 2000;
@@ -348,7 +348,7 @@ function RemoveDialog({ item, onClose, onConfirm }: {
         ? `Its branch ${item.branch} has ${item.unmerged_commits ?? "some"} commit${item.unmerged_commits === 1 ? " that isn't" : "s that aren't"} on the base branch.`
         : item.state === "has-output"
           ? `Its output is saved first — attached to ${item.task_title ? "the task" : "nothing (no task), so copied to .orcha/saved-output"} — then the worktree is removed.`
-          : "Only Quorate scaffolding is in it. The worktree and its branch are removed."}
+          : "Only Embodent scaffolding is in it. The worktree and its branch are removed."}
       onClose={onClose}
       onConfirm={() => { if (ok) onConfirm(keepBranch, unmerged ? typed.trim() : undefined); }}
     >
@@ -384,7 +384,7 @@ function CleanupPreview({ items, scope, onClose, onConfirm }: {
     { key: "clean", title: "Clean", verb: "remove", rows: plan.remove },
     { key: "has-output", title: "Has output", verb: "save output to the task, then remove", rows: plan.save },
     { key: "unmerged", title: "Unmerged commits", verb: "keep (tick to remove the worktree, keep the branch)", rows: plan.unmerged },
-    { key: "in-use", title: "In use / not Quorate", verb: "skipped", rows: plan.skipped },
+    { key: "in-use", title: "In use / not Embodent", verb: "skipped", rows: plan.skipped },
   ].filter((g) => g.rows.length);
   const count = plan.remove.length + plan.save.length + plan.optIn.length;
   return (

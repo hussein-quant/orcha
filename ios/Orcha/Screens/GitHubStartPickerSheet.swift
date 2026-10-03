@@ -35,7 +35,7 @@ struct GitHubStartPickerSheet: View {
                                 .ltype(.headline)
                                 .foregroundStyle(p.text)
                                 .lineLimit(2)
-                            Text("Turn it into a Quorate task. Assign an agent to wake it now, or leave it unassigned for the backlog.")
+                            Text("Turn it into a Embodent task. Assign an agent to wake it now, or leave it unassigned for the backlog.")
                                 .ltype(.meta)
                                 .foregroundStyle(p.muted)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -56,7 +56,7 @@ struct GitHubStartPickerSheet: View {
                         LSection("Agents", count: agents.count) {
                             if agents.isEmpty {
                                 LCard {
-                                    Text("No AI agents are active in this Quorate yet.")
+                                    Text("No AI agents are active in this Embodent yet.")
                                         .ltype(.meta)
                                         .foregroundStyle(p.faint)
                                 }

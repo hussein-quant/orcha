@@ -157,8 +157,8 @@ describe("copy helpers (D4)", () => {
   });
 
   it("offline copy never includes URLs or status codes", () => {
-    expect(staleMessage(true, "10:13")).toBe("Can't reach Quorate · showing data from 10:13");
-    expect(staleMessage(false, null)).toBe("Can't reach Quorate · no project data loaded");
+    expect(staleMessage(true, "10:13")).toBe("Can't reach Embodent · showing data from 10:13");
+    expect(staleMessage(false, null)).toBe("Can't reach Embodent · no project data loaded");
   });
 
   it("payloadSummary picks a human field and never returns JSON", () => {

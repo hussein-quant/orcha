@@ -339,7 +339,7 @@ export function GitHubAccessSection() {
     <div className="card set-card">
       <GroupHead
         title="GitHub access"
-        lead="How Quorate signs in to GitHub for issues, pull requests and checks."
+        lead="How Embodent signs in to GitHub for issues, pull requests and checks."
         help="A GitHub App installation always takes precedence when present; a personal access token is used only when no App token is present."
       />
       <div className="card-b">

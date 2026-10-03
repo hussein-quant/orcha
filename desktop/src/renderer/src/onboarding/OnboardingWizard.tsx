@@ -21,7 +21,7 @@ import FleetStep from './steps/FleetStep'
 import FinishStep from './steps/FinishStep'
 
 const TITLES: Record<WizardVariant, string> = {
-  'first-run': 'Set up Quorate',
+  'first-run': 'Set up Embodent',
   'add-project': 'Add a project'
 }
 

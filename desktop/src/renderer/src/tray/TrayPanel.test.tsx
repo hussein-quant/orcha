@@ -85,7 +85,7 @@ describe('TrayPanel', () => {
 
   it('the gear opens the manager window', async () => {
     render(<TrayPanel />)
-    await userEvent.click(await screen.findByRole('button', { name: 'Open Quorate' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Open Embodent' }))
     expect(window.orchaDesktop.openManager).toHaveBeenCalled()
   })
 

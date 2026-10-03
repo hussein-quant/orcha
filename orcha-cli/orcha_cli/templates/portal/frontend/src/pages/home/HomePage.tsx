@@ -697,7 +697,7 @@ export function HomePage() {
                       <div className="ov-step-d">
                         {keyCheck.state === "loading" ? "Checking the provider key…"
                           : keyCheck.state === "ok" ? `Anthropic API key configured (${keyCheck.source === "env" ? "from the environment" : "stored here"}).`
-                          : keyCheck.state === "missing" ? <>No Anthropic API key yet. <Help text="AI-assisted setup and Quorate's model-powered helpers need one." /></>
+                          : keyCheck.state === "missing" ? <>No Anthropic API key yet. <Help text="AI-assisted setup and Embodent's model-powered helpers need one." /></>
                           : `Couldn't check the provider key (${keyCheck.why}).`}
                       </div>
                     </div>

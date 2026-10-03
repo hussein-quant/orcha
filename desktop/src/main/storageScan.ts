@@ -1,8 +1,8 @@
-/** Settings › Storage — "Clean up unused Quorate data".
+/** Settings › Storage — "Clean up unused Embodent data".
  *
- *  Lists Quorate leftovers whose compose project no longer has ANY container (running or
+ *  Lists Embodent leftovers whose compose project no longer has ANY container (running or
  *  stopped): project portal images, data volumes, default networks, and stopped `orcha-run-*`
- *  sandbox containers. A resource is only a candidate when its name has Quorate's exact shape
+ *  sandbox containers. A resource is only a candidate when its name has Embodent's exact shape
  *  AND (for volumes/networks) its compose label names that same project — shared images
  *  (`postgres:16`, `orcha-test/stub-runner`), dangling `<none>` layers and other tools'
  *  resources are never listed. Removal re-validates against a fresh scan, so the renderer can
@@ -59,7 +59,7 @@ export function findLeftovers(inp: StorageInputs): StorageReport {
       name,
       project: m[1],
       size: inp.sizes.images.get(name) ?? null,
-      note: 'Portal image of a project that is no longer in Quorate. It is rebuilt if you add the project again.'
+      note: 'Portal image of a project that is no longer in Embodent. It is rebuilt if you add the project again.'
     })
   }
   for (const v of inp.volumes) {
@@ -79,7 +79,7 @@ export function findLeftovers(inp: StorageInputs): StorageReport {
   for (const n of inp.networks) {
     const m = DEFAULT_NET.exec(n.name)
     if (!m || n.project !== m[1] || inUse.has(m[1])) continue
-    items.push({ kind: 'network', name: n.name, project: m[1], size: null, note: 'Network of a project that is no longer in Quorate.' })
+    items.push({ kind: 'network', name: n.name, project: m[1], size: null, note: 'Network of a project that is no longer in Embodent.' })
   }
   for (const c of inp.containers) {
     if (!SANDBOX_NAME.test(c.name) || c.managed !== '1' || !STOPPED.has(c.state)) continue
@@ -90,7 +90,7 @@ export function findLeftovers(inp: StorageInputs): StorageReport {
       name: c.name,
       project: owner,
       size: null,
-      note: owner ? 'Finished agent sandbox of a project that is no longer in Quorate.' : 'Finished agent sandbox whose project is gone.'
+      note: owner ? 'Finished agent sandbox of a project that is no longer in Embodent.' : 'Finished agent sandbox whose project is gone.'
     })
   }
   return { items, inUse: [...inUse].filter((p) => p.startsWith('orcha-')).sort() }

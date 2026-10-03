@@ -80,7 +80,7 @@ function captureProgress(): { cb: ProgressCb | null } {
 }
 
 async function skipWelcomeIfPresent(user: ReturnType<typeof userEvent.setup>) {
-  if (!screen.queryByRole('heading', { name: /welcome to quorate/i })) return
+  if (!screen.queryByRole('heading', { name: /welcome to embodent/i })) return
   await user.click(screen.getByRole('button', { name: /get started/i }))
 }
 
@@ -211,7 +211,7 @@ describe('OnboardingWizard — local folder source', () => {
     await waitFor(() => expect(onDone).toHaveBeenCalled())
   })
 
-  it('blocks a folder Quorate cannot write to', async () => {
+  it('blocks a folder Embodent cannot write to', async () => {
     mock(window.orchaDesktop.inspectFolder).mockResolvedValue({
       initialized: false,
       writable: false,
@@ -441,7 +441,7 @@ describe('OnboardingWizard — From GitHub source', () => {
 describe('OnboardingWizard — walker: welcome / agents / finish / cancel', () => {
   it('first-run shows the Welcome screen first', () => {
     render(<OnboardingWizard onDone={vi.fn()} variant="first-run" />)
-    expect(screen.getByRole('heading', { name: /welcome to quorate/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /welcome to embodent/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /get started/i })).toBeInTheDocument()
   })
 
@@ -604,7 +604,7 @@ describe('OnboardingWizard — add-project background setup check', () => {
     expect(window.orchaDesktop.preflight).toHaveBeenCalledTimes(2)
   })
 
-  it('names the missing helper as the "Quorate command-line helper", never "Orcha helper"', async () => {
+  it('names the missing helper as the "Embodent command-line helper", never "Orcha helper"', async () => {
     mock(window.orchaDesktop.probePrereqs).mockResolvedValue({
       homebrew: true,
       dockerEngine: true,
@@ -615,7 +615,7 @@ describe('OnboardingWizard — add-project background setup check', () => {
     })
     render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
     const notice = await screen.findByTestId('setup-notice')
-    expect(notice).toHaveTextContent(/quorate command-line helper/i)
+    expect(notice).toHaveTextContent(/embodent command-line helper/i)
     expect(document.body.textContent).not.toMatch(/orcha helper/i)
   })
 
@@ -626,7 +626,7 @@ describe('OnboardingWizard — add-project background setup check', () => {
     const notice = await screen.findByTestId('setup-notice')
     await user.click(within(notice).getByRole('button', { name: /open setup/i }))
     expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
-    expect(screen.getByText(/quorate needs something on this mac first/i)).toBeInTheDocument()
+    expect(screen.getByText(/embodent needs something on this mac first/i)).toBeInTheDocument()
     expect(screen.getByText(/docker isn.t installed\./i)).toBeInTheDocument()
     // The detour is not one of Add a project's steps — no indicator there.
     expect(screen.queryByRole('list', { name: /step \d of/i })).not.toBeInTheDocument()

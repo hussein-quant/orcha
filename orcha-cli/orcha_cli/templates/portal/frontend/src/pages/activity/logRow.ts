@@ -40,7 +40,7 @@ const KIND: Record<string, { kind: string; tone: LogTone }> = {
   tool: { kind: "Tool", tone: "muted" },
   result: { kind: "Result", tone: "muted" },
   subagent: { kind: "Subagent", tone: "muted" },
-  decision: { kind: "Quorate", tone: "muted" },
+  decision: { kind: "Embodent", tone: "muted" },
   error: { kind: "Error", tone: "danger" },
   done: { kind: "Done", tone: "muted" },
 };
@@ -50,7 +50,7 @@ const EXIT_LINE = /^[a-z_]+( · exit -?\d+)?$/;
 
 const LABEL_KIND: Record<string, string> = {
   "injected prompt": "Prompt",
-  "orcha-action": "Quorate",
+  "orcha-action": "Embodent",
   decision: "Decision",
   hook: "Hook",
   reasoning: "Reasoning",

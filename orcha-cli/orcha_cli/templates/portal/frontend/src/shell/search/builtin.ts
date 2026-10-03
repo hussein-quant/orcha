@@ -18,8 +18,8 @@ import { currentTheme, effectivePref, hostThemeMode, setThemePref } from "../the
 export function themeActions(): SearchResult[] {
   const managed = hostThemeMode();
   const reason = managed === "managed"
-    ? "The Quorate app sets the theme — change it in the app's Settings › Appearance"
-    : managed === "dark" ? "This version of the Quorate app is dark only" : undefined;
+    ? "The Embodent app sets the theme — change it in the app's Settings › Appearance"
+    : managed === "dark" ? "This version of the Embodent app is dark only" : undefined;
   const next = currentTheme() === "dark" ? "light" : "dark";
   const rows: SearchResult[] = [{
     id: "theme-toggle", group: "Actions", label: `Switch to ${next} theme`,

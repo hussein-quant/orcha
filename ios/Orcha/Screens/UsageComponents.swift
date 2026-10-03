@@ -173,7 +173,7 @@ extension UsageUx {
     /// Human error copy for the usage screens.
     static func describe(_ error: Error) -> String {
         error is DecodingError
-            ? "Unexpected response from the server. Check that Quorate is reachable and up to date."
+            ? "Unexpected response from the server. Check that Embodent is reachable and up to date."
             : InboxErrorText.describe(error)
     }
 }

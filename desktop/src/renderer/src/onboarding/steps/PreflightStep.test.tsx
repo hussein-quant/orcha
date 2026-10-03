@@ -29,11 +29,11 @@ const row = (key: string) => document.querySelector(`[data-row="${key}"]`) as HT
 beforeEach(() => stub())
 
 describe('PreflightStep (Setup)', () => {
-  it('lists Docker, Homebrew, the AI agent and the Quorate command-line helper with their real state', async () => {
+  it('lists Docker, Homebrew, the AI agent and the Embodent command-line helper with their real state', async () => {
     render(<PreflightStep onContinue={vi.fn()} />)
     await waitFor(() => expect(within(row('docker')).getByText('Running')).toBeInTheDocument())
     // User-facing name for the orcha CLI — never "Orcha helper".
-    expect(within(row('orcha')).getByText('Quorate command-line helper')).toBeInTheDocument()
+    expect(within(row('orcha')).getByText('Embodent command-line helper')).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/orcha helper/i)
     // Readiness meter counts what resolved.
     expect(screen.getByText('4 of 4 ready')).toBeInTheDocument()
@@ -152,7 +152,7 @@ describe('PreflightStep — detour from Add a project', () => {
     const onBack = vi.fn()
     const user = userEvent.setup()
     render(<PreflightStep onContinue={vi.fn()} onBack={onBack} reason="Docker isn’t running." />)
-    expect(screen.getByText(/quorate needs something on this mac first/i)).toBeInTheDocument()
+    expect(screen.getByText(/embodent needs something on this mac first/i)).toBeInTheDocument()
     expect(screen.getByText('Docker isn’t running.')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /^back$/i }))
     expect(onBack).toHaveBeenCalled()
@@ -167,6 +167,6 @@ describe('PreflightStep — detour from Add a project', () => {
     render(<PreflightStep onContinue={vi.fn()} />)
     await waitFor(() => expect(screen.getByRole('button', { name: /^continue$/i })).toBeEnabled())
     await user.click(screen.getByRole('button', { name: /^continue$/i }))
-    expect(await screen.findByText(/the quorate command-line helper didn.t install: network down/i)).toBeInTheDocument()
+    expect(await screen.findByText(/the embodent command-line helper didn.t install: network down/i)).toBeInTheDocument()
   })
 })

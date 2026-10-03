@@ -47,7 +47,7 @@ struct ScannerScreen: View {
                 // I2 — camera unavailable / permission denied
                 StateLayout(
                     title: "Camera access needed",
-                    sub: "Quorate uses the camera only to read the pairing QR from your portal. Grant access in Settings, or type the address instead.",
+                    sub: "Embodent uses the camera only to read the pairing QR from your portal. Grant access in Settings, or type the address instead.",
                     danger: true
                 ) {
                     Image(systemName: "camera.slash")
@@ -136,8 +136,8 @@ struct AuthOptionsSheet: View {
     private var host: String {
         guard let draft = model.connectDraft,
               let base = try? OrchaServerAddress.parse(draft).baseUrl,
-              let url = URL(string: base) else { return "This Quorate" }
-        return url.host ?? "This Quorate"
+              let url = URL(string: base) else { return "This Embodent" }
+        return url.host ?? "This Embodent"
     }
 
     private var phase: DeviceAuthFlow.Phase { model.deviceAuth.phase }
@@ -315,9 +315,9 @@ struct ManualConnectSheet: View {
                 PairingStepper(current: model.connectNeedsToken ? .signIn : .address)
                 VStack(alignment: .leading, spacing: LSpace.m) {
                     PairingStepCard(number: 1, title: "Scan the QR", detail: "Open your portal → Settings → Devices and pairing → Pair phone. Scanning fills this in for you.")
-                    PairingStepCard(number: 2, title: "Or enter the address", detail: "For a cloud deployment that's the portal domain, like quorate.yourteam.com.")
+                    PairingStepCard(number: 2, title: "Or enter the address", detail: "For a cloud deployment that's the portal domain, like embodent.yourteam.com.")
                     VStack(spacing: LSpace.s) {
-                        TextField("Address or QR payload", text: $address, prompt: Text("quorate.yourteam.com"), axis: .vertical)
+                        TextField("Address or QR payload", text: $address, prompt: Text("embodent.yourteam.com"), axis: .vertical)
                             .lineLimit(1...5)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
@@ -373,7 +373,7 @@ struct ManualConnectSheet: View {
     private var selfHostHelp: some View {
         LCard {
           VStack(alignment: .leading, spacing: LSpace.m) {
-            PairingDisclosure(title: "Running Quorate on your own computer?", icon: "desktopcomputer", expanded: $showSelfHostHelp)
+            PairingDisclosure(title: "Running Embodent on your own computer?", icon: "desktopcomputer", expanded: $showSelfHostHelp)
             if showSelfHostHelp {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("A cloud portal works from anywhere and none of this applies. Self-hosting on your own machine instead? Then the phone talks straight to that computer:")
@@ -404,7 +404,7 @@ struct ManualConnectSheet: View {
 
     private var unreachable: some View {
         StateLayout(
-            title: "Can't reach this Quorate",
+            title: "Can't reach this Embodent",
             sub: "\(address.isEmpty ? "That address" : address) didn't answer. Your work is safe — the phone just can't see it right now.",
             danger: true
         ) {
@@ -416,7 +416,7 @@ struct ManualConnectSheet: View {
                 LCard {
                     VStack(alignment: .leading, spacing: LSpace.s) {
                         step(1, "Is the address right? A cloud portal needs no port.")
-                        step(2, "Is the deployment up — or, self-hosting, is the computer awake with Quorate running?")
+                        step(2, "Is the deployment up — or, self-hosting, is the computer awake with Embodent running?")
                         step(3, "On a local address: same Wi-Fi, and no firewall or VPN in the way?")
                     }
                     .ltype(.meta)
@@ -496,7 +496,7 @@ private struct PairingBackdrop: View {
     }
 }
 
-/// Orca mark + "Quorate" + a one-line value proposition.
+/// Embodent mark + "Embodent" + a one-line value proposition.
 private struct PairingHero: View {
     @Environment(\.palette) private var p
     let subtitle: String
@@ -506,7 +506,7 @@ private struct PairingHero: View {
             BrandMark(size: 60)
                 .shadow(color: p.accent.opacity(0.25), radius: 18, y: 6)
                 .accessibilityHidden(true)
-            Text("Quorate")
+            Text("Embodent")
                 .ltype(.display)
                 .foregroundStyle(p.text)
                 .accessibilityAddTraits(.isHeader)

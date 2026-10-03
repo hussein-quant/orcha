@@ -79,7 +79,7 @@ import kotlinx.serialization.json.contentOrNull
 
 /** The server's own `detail` sentence when it sent one, else a plain fallback (never a status code). */
 internal suspend fun routineErrorText(err: Throwable): String {
-    val resp = (err as? ResponseException)?.response ?: return "Quorate couldn't be reached"
+    val resp = (err as? ResponseException)?.response ?: return "Embodent couldn't be reached"
     val detail = runCatching {
         ((Json.parseToJsonElement(resp.bodyAsText()) as? JsonObject)?.get("detail") as? JsonPrimitive)?.contentOrNull
     }.getOrNull()
@@ -87,7 +87,7 @@ internal suspend fun routineErrorText(err: Throwable): String {
         ?: when (resp.status.value) {
             401, 403 -> "you don't have permission to manage routines"
             404 -> "it no longer exists"
-            else -> "Quorate hit an error — try again"
+            else -> "Embodent hit an error — try again"
         }
 }
 
@@ -212,7 +212,7 @@ fun InboxRoutinesScreen(
                     item(key = "scheduler") {
                         Text(
                             lastTick?.let { "Scheduler checked ${MobileUx.agoLabel(it) ?: "recently"}." }
-                                ?: "The scheduler hasn't checked in yet — routines fire while the Quorate notifier is running (orcha up starts it).",
+                                ?: "The scheduler hasn't checked in yet — routines fire while the Embodent notifier is running (orcha up starts it).",
                             style = ltype(LType.Meta), color = p.muted, modifier = Modifier.padding(horizontal = 4.dp),
                         )
                     }

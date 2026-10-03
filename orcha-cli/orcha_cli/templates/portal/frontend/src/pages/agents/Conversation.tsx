@@ -840,8 +840,8 @@ const ConvComposer = memo(forwardRef<ComposerApi, ConvComposerProps>(function Co
           <button
             type="button"
             className="conv-skills"
-            title={draft.trim() && !draft.startsWith("/") ? "Skills start a message — clear the draft or type / at the start" : "Quorate skills — or type / at the start of a message"}
-            aria-label="Insert a Quorate skill"
+            title={draft.trim() && !draft.startsWith("/") ? "Skills start a message — clear the draft or type / at the start" : "Embodent skills — or type / at the start of a message"}
+            aria-label="Insert a Embodent skill"
             disabled={skillsDisabled || (!!draft.trim() && !draft.startsWith("/"))}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
@@ -1327,13 +1327,13 @@ export function Conversation({
         body: JSON.stringify({ role: "human", author_agent_id: h.id, content: v, attachments: atts.length ? atts : undefined }),
       });
       if (!r.ok) {
-        failSend(r.status >= 500 ? "Quorate couldn't save this message (error " + r.status + ")." : "The message was rejected (error " + r.status + ").");
+        failSend(r.status >= 500 ? "Embodent couldn't save this message (error " + r.status + ")." : "The message was rejected (error " + r.status + ").");
         return;
       }
       const d: any = await r.json().catch(() => ({}));
       settleSend(d && d.turn);
     } catch {
-      failSend("Couldn't reach Quorate — it may be restarting.");
+      failSend("Couldn't reach Embodent — it may be restarting.");
     }
   };
   // success: the server owns the turn. Reconcile the optimistic bubble with the

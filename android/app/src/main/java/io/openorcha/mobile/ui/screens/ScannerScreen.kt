@@ -152,7 +152,7 @@ fun ScannerScreen(
             }
             denied -> StateLayout(
                 title = "Camera access needed",
-                sub = "Quorate uses the camera only to read the pairing QR from your portal. Grant access in Settings, or type the address instead.",
+                sub = "Embodent uses the camera only to read the pairing QR from your portal. Grant access in Settings, or type the address instead.",
                 danger = true,
                 glyph = { Icon(OrchaIcons.NoPhotography, null, tint = p.danger, modifier = Modifier.size(34.dp)) },
             ) {

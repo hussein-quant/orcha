@@ -110,7 +110,7 @@ describe('stripManagedHooks (surgical .claude/settings.json edit)', () => {
     expect(stripManagedHooks(JSON.stringify(mine))).toEqual({ kind: 'unchanged' })
   })
 
-  it('a file holding only Quorate hooks can be deleted', () => {
+  it('a file holding only Embodent hooks can be deleted', () => {
     const only = { hooks: { SessionEnd: [{ hooks: [{ type: 'command', command: 'orcha snapshot', timeout: 30 }] }] } }
     expect(stripManagedHooks(JSON.stringify(only))).toEqual({ kind: 'delete', removed: 1 })
   })
@@ -180,7 +180,7 @@ describe('worktrees', () => {
     expect(quorateWorktrees(all, '/Users/me/acme')).toEqual([{ path: '/Users/me/acme/.orcha-worktrees/task-login', branch: 'orcha/task-login' }])
   })
 
-  it('Quorate branches are orcha/<slug> only', () => {
+  it('Embodent branches are orcha/<slug> only', () => {
     expect(isQuorateBranch('orcha/task-login')).toBe(true)
     expect(isQuorateBranch('main')).toBe(false)
     expect(isQuorateBranch('orcha/../main')).toBe(false)

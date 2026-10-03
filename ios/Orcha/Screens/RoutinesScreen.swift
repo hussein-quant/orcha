@@ -76,7 +76,7 @@ struct RoutinesScreen: View {
             )
         } else {
             if lastTickAt == nil {
-                Banner(kind: .warn, text: "The scheduler hasn't checked in yet — routines fire while the Quorate notifier is running (orcha up starts it).")
+                Banner(kind: .warn, text: "The scheduler hasn't checked in yet — routines fire while the Embodent notifier is running (orcha up starts it).")
             }
             section("Active", routines.filter(\.enabled))
             section("Paused", routines.filter { !$0.enabled })

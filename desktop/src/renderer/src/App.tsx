@@ -625,7 +625,7 @@ function AppShell() {
         <div style={{ width: effectiveWidth }} className="flex shrink-0 flex-col gap-2 px-4 pt-4">
           <span className="flex items-center gap-2">
             <OrchaMark size={18} className="shrink-0" />
-            <span className="text-[14px] font-semibold tracking-tight text-text">Quorate</span>
+            <span className="text-[14px] font-semibold tracking-tight text-text">Embodent</span>
           </span>
           <span className="mt-3 h-3 w-24 animate-pulse rounded bg-hover" />
           <span className="h-3 w-32 animate-pulse rounded bg-hover" />

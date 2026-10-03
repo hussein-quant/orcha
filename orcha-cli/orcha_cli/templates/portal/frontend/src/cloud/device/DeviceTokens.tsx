@@ -31,12 +31,12 @@ export function deviceKind(label: string | null | undefined): { icon: string; na
  *  device_token_routes 403s "device tokens require a verified GitHub
  *  identity" on a self-hosted (trust-off) portal. */
 export const DEVICE_SIGNIN_UNAVAILABLE =
-  "Device sign-in needs GitHub sign-in (Quorate Cloud). It isn't available on this self-hosted portal.";
+  "Device sign-in needs GitHub sign-in (Embodent Cloud). It isn't available on this self-hosted portal.";
 
 /** Signed in with GitHub, but not a member of any project: the device-token
  *  routes 403 "GitHub user 'x' is not a member of any project" (D9). */
 export const DEVICE_NOT_A_MEMBER =
-  "You're not a member of any Quorate project yet — ask an owner to invite you.";
+  "You're not a member of any Embodent project yet — ask an owner to invite you.";
 
 /** Which 403 this is (pure, tested): the self-host "no verified GitHub
  *  identity" state, or a signed-in GitHub user who belongs to no project. */

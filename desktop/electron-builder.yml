@@ -1,8 +1,8 @@
-# Branding: the user-facing name is Quorate; appId, the orcha:// scheme and the userData
+# Branding: the user-facing name is Embodent; appId, the orcha:// scheme and the userData
 # folder (<appData>/Orcha, pinned in src/main/userDataPath.ts) keep their orcha names.
 appId: io.openorcha.desktop
-productName: Quorate
-copyright: Copyright © 2026 Quorate
+productName: Embodent
+copyright: Copyright © 2026 Embodent
 
 # What goes inside the .app bundle. electron-vite emits everything to out/;
 # the renderer bundles its own deps. Main has ONE external runtime dep, node-pty
@@ -55,7 +55,7 @@ mac:
   # Dictation (portal Settings › Voice): macOS shows this when the app first asks for the
   # microphone, and kills an app that touches the mic without it.
   extendInfo:
-    NSMicrophoneUsageDescription: Quorate uses your microphone only while you dictate into a text field. Audio is never stored.
+    NSMicrophoneUsageDescription: Embodent uses your microphone only while you dictate into a text field. Audio is never stored.
   # Signed with a Developer ID Application certificate and notarized by Apple,
   # so Gatekeeper opens the app on a normal double-click — no right-click→Open
   # or xattr/quarantine workaround needed. Credentials are supplied via
@@ -75,7 +75,7 @@ mac:
 # Preserve the orcha:// deep-link protocol the widget uses to open the app (the scheme
 # stays `orcha` for compatibility; only its display name follows the product).
 protocols:
-  - name: Quorate
+  - name: Embodent
     schemes:
       - orcha
 

@@ -1,7 +1,7 @@
 /**
  * Shared UI primitives — React ports of the app.js helpers, emitting the SAME
  * markup/class names so the untouched styles.css styles them identically:
- * Icon (the I path map), Pill/glyph, Avatar, KindBadge, OrcaMark, Md/Linkified
+ * Icon (the I path map), Pill/glyph, Avatar, KindBadge, OrcaMark (the Embodent mark), Md/Linkified
  * (trusted-HTML renderers over lib/format), Modal, and the toast system.
  */
 import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
@@ -162,15 +162,21 @@ export function KindBadge({ kind }: { kind: string | null | undefined }) {
   );
 }
 
-/* ---- the Orcha mark ------------------------------------------------------ */
+/* ---- the Embodent mark --------------------------------------------------- */
+// A figure (head over an arch), split down the middle: light | grey on dark,
+// near-black | grey on light (--v2-logo-ink / --v2-logo-accent, v2-tokens.css).
+// Each half is its own filled outline (no clipPath), so many marks on one page
+// never collide on SVG ids. Same geometry as static/logo-mark.svg.
+export const EMBODENT_MARK_LEFT =
+  "M627 153A146 146 0 0 0 627 445ZM255 838L255 940A111 111 0 0 0 477 940L477 838A150 150 0 0 1 627 688L627 466A372 372 0 0 0 255 838Z";
+export const EMBODENT_MARK_RIGHT =
+  "M627 153A146 146 0 0 1 627 445ZM999 838L999 940A111 111 0 0 1 777 940L777 838A150 150 0 0 0 627 688L627 466A372 372 0 0 1 999 838Z";
 export function OrcaMark() {
   // intrinsic size: downstream stylesheets may not carry .brand .mark rules
   return (
-    <svg viewBox="0 0 100 100" width={34} height={34} style={{ maxWidth: "100%", maxHeight: "100%" }} aria-label="Quorate">
-      {/* ink = the cream arcs on dark, near-black on light (--v2-logo-*, v2-tokens.css) */}
-      <path fill="#9695F2" style={{ fill: "var(--v2-logo-accent, #9695F2)" }} d="M72.39 5.29A50 50 0 0 1 99.02 40.13L82.72 50.98A32.74 32.74 0 0 0 60.07 18.85Z" />
-      <path fill="#F9F4EB" style={{ fill: "var(--v2-logo-ink, #F9F4EB)" }} d="M99.84 46.01A50 50 0 0 1 14.4 85.11L26.92 73.22A32.74 32.74 0 0 0 81.73 58.06Z" />
-      <path fill="#F9F4EB" style={{ fill: "var(--v2-logo-ink, #F9F4EB)" }} d="M10.86 81.11A50 50 0 0 1 67.2 3.05L54.06 17.51A32.74 32.74 0 0 0 23.45 69.15Z" />
+    <svg viewBox="102 77 1050 1050" width={34} height={34} style={{ maxWidth: "100%", maxHeight: "100%" }} role="img" aria-label="Embodent">
+      <path fill="#ECEDF1" style={{ fill: "var(--v2-logo-ink, #ECEDF1)" }} d={EMBODENT_MARK_LEFT} />
+      <path fill="#7C808A" style={{ fill: "var(--v2-logo-accent, #7C808A)" }} d={EMBODENT_MARK_RIGHT} />
     </svg>
   );
 }

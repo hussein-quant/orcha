@@ -37,7 +37,7 @@ data class PlanUsageView(
 }
 
 object PlanUsageUx {
-    const val EMPTY_MESSAGE = "Plan usage appears when the Quorate desktop app is running on your computer."
+    const val EMPTY_MESSAGE = "Plan usage appears when the Embodent desktop app is running on your computer."
     const val STALE_NOTE = "may be out of date"
     val STALE_AFTER: Duration = Duration.ofMinutes(30)
     const val POLL_MS = 120_000L

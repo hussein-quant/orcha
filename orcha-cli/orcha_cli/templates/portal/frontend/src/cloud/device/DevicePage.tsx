@@ -51,13 +51,13 @@ export function mintError(status: number, detail: unknown): MintError {
   if (status === 403 && /verified github identity|trusted proxy/i.test(raw)) {
     return {
       headline: "Sign in with GitHub first",
-      guidance: "Device sign-in needs GitHub sign-in (Quorate Cloud). Open Quorate through its GitHub sign-in, then try again.",
+      guidance: "Device sign-in needs GitHub sign-in (Embodent Cloud). Open Embodent through its GitHub sign-in, then try again.",
       detail: details,
     };
   }
   if (status === 403) {
     return {
-      headline: "Your GitHub account isn't a member of this Quorate yet",
+      headline: "Your GitHub account isn't a member of this Embodent yet",
       guidance: "Ask an owner to invite you (Settings → Members & access), then try again.",
       detail: details,
     };
@@ -65,7 +65,7 @@ export function mintError(status: number, detail: unknown): MintError {
   return {
     headline: "Couldn't create a sign-in token",
     guidance: "Something went wrong on the server. Try again.",
-    detail: status ? details : raw || "No answer from Quorate",
+    detail: status ? details : raw || "No answer from Embodent",
   };
 }
 
@@ -136,13 +136,13 @@ export function DevicePage() {
     : token != null
       ? appSlow
         ? "If the app didn’t open, copy the token below."
-        : client === "desktop" ? "Device token minted — opening the Quorate desktop app…" : "Device token minted — opening the Orcha mobile app…"
+        : client === "desktop" ? "Device token minted — opening the Embodent desktop app…" : "Device token minted — opening the Orcha mobile app…"
       : "Minting a device token…";
 
   return (
     <div className="device-page">
       <main className="device-card" aria-labelledby="deviceTitle">
-        <div className="device-brand"><OrcaMark /><span>Quorate</span></div>
+        <div className="device-brand"><OrcaMark /><span>Embodent</span></div>
         <h1 id="deviceTitle">{client === "desktop" ? "Sign in the desktop app" : "Connect your device"}</h1>
         {status != null && (
           <p id="status" role="status" aria-live="polite" className="device-status">
@@ -160,13 +160,13 @@ export function DevicePage() {
             </details>
             <div className="device-acts">
               <Button size="sm" variant="primary" icon="refresh" onClick={retry}>Try again</Button>
-              <ButtonLink size="sm" variant="ghost" href="/">Back to Quorate</ButtonLink>
+              <ButtonLink size="sm" variant="ghost" href="/">Back to Embodent</ButtonLink>
             </div>
           </div>
         )}
         {token != null && (
           <div id="tokenbox">
-            <p>{client === "desktop" ? "The Quorate desktop app" : "The Orcha mobile app"} should have opened automatically. If it
+            <p>{client === "desktop" ? "The Embodent desktop app" : "The Orcha mobile app"} should have opened automatically. If it
               didn&rsquo;t, copy the token below and paste it into the app.</p>
             <div className="device-token-row">
               <code id="token" title="Device token (copy copies the full value)">{token}</code>
@@ -187,7 +187,7 @@ export function DevicePage() {
             </div>
           </div>
         )}
-        {error == null && <p className="device-foot">This token identifies you (via your GitHub account) to this Quorate
+        {error == null && <p className="device-foot">This token identifies you (via your GitHub account) to this Embodent
           box. You can revoke it any time from{" "}
           <a href="/settings#tab=pairing">Settings &rarr; Devices &amp; pairing</a>.</p>}
       </main>

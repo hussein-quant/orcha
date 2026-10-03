@@ -118,7 +118,7 @@ describe("GitHubPage Linear list + detail", () => {
     expect(groups).toEqual(["pull-conflicts", "pull-mergeable", "pull-draft"]);
   });
 
-  it("detail from the list: header h1 + pager in list order, Quorate card, timeline, rail empties", async () => {
+  it("detail from the list: header h1 + pager in list order, Embodent card, timeline, rail empties", async () => {
     stub();
     mount();
     await screen.findByText("Remove hash routing");
@@ -130,7 +130,7 @@ describe("GitHubPage Linear list + detail", () => {
     await waitFor(() => expect(lastSearch).toContain("pr=12"));
     expect(await screen.findByRole("heading", { level: 1, name: "Add OAuth flow" })).toBeInTheDocument();
     // tracked → the Orcha card shows the task chip instead of the Fix action
-    const card = screen.getByRole("region", { name: "Quorate" });
+    const card = screen.getByRole("region", { name: "Embodent" });
     expect(within(card).getByText("Tracked as a task")).toBeInTheDocument();
     expect(within(card).queryByRole("button", { name: /Dispatch an agent/ })).toBeNull();
     // activity: opened event + the comment card

@@ -4,7 +4,7 @@
  *
  * Appearance: System / Light / Dark (shell/theme.ts). The choice is stored in
  * localStorage `orcha:theme` ("auto" | "light" | "dark") and, when signed in,
- * the per-user `/api/prefs` bag (server wins on load). Inside the Quorate
+ * the per-user `/api/prefs` bag (server wins on load). Inside the Embodent
  * desktop app the host owns the theme, so the control is read-only there.
  * The decorative skins (classic/swiss/minimal/gold) stay retired: a stored
  * skin is disclosed, never applied, rewritten or deleted.
@@ -45,8 +45,8 @@ const THEME_OPTIONS: ThemePref[] = ["auto", "light", "dark"];
 
 /** Where the theme choice is kept (pure, tested). */
 export function themeStorageNote(accountPrefs: boolean, managed: "managed" | "dark" | null): string {
-  if (managed === "managed") return "Set by the Quorate app — change it in the app's Settings › Appearance.";
-  if (managed === "dark") return "This version of the Quorate app is dark only — update it to choose a theme.";
+  if (managed === "managed") return "Set by the Embodent app — change it in the app's Settings › Appearance.";
+  if (managed === "dark") return "This version of the Embodent app is dark only — update it to choose a theme.";
   return accountPrefs ? "Saved to your account" : "Saved in this browser";
 }
 

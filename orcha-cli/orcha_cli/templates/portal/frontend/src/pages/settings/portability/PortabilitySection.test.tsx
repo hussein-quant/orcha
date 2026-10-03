@@ -219,7 +219,7 @@ describe("Settings → General › Template", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Import…" }));
     const dialog = await screen.findByRole("dialog", { name: "Import template" });
     await pickFile(dialog, { hello: "world" });
-    expect(await within(dialog).findByText("This file isn't a Quorate project template.")).toBeTruthy();
+    expect(await within(dialog).findByText("This file isn't a Embodent project template.")).toBeTruthy();
     expect(calls.filter((c) => c.url.includes("template/preview"))).toHaveLength(0);
   });
 

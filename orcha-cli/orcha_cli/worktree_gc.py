@@ -6,7 +6,7 @@ desktop app calls ``orcha worktrees … --json`` instead of re-implementing it.
 
 States (``classify``):
 
-* ``clean``        no commits beyond the base branch and no real changes — only Quorate's own
+* ``clean``        no commits beyond the base branch and no real changes — only Embodent's own
                    scaffolding (the runtime overlay, copied skills/commands, wake logs, the
                    ``.orcha`` stack folder a handoff carried in) or untracked files that are
                    byte-identical copies of the same file in the main checkout.
@@ -55,7 +55,7 @@ STATE_IN_USE = "in-use"
 STATE_NOT_QUORATE = "not-quorate"
 STATES = (STATE_CLEAN, STATE_HAS_OUTPUT, STATE_UNMERGED, STATE_IN_USE, STATE_NOT_QUORATE)
 
-# Files Quorate itself writes or copies into a worktree. Kept in step with
+# Files Embodent itself writes or copies into a worktree. Kept in step with
 # notifier_worktree_base.overlay_runtime_config (orcha.json, settings.json, orcha-tabs,
 # commands/orcha-*.md, .agents/skills/orcha-*) and with what `orcha init` places in a project
 # (.orcha/ stack folder, .codex/hooks.json, docs/orcha-project-preferences.md, the
@@ -229,7 +229,7 @@ def describe_branch(branch: Optional[str]) -> dict:
 # ------------------------------------------------------------------ file classification
 
 def is_scaffolding(relpath: str) -> bool:
-    """Whether a worktree-relative POSIX path is Quorate's own scaffolding."""
+    """Whether a worktree-relative POSIX path is Embodent's own scaffolding."""
     p = relpath[2:] if relpath.startswith("./") else relpath
     for pattern in OUTPUT_UNDER_SCAFFOLDING:
         if fnmatch.fnmatchcase(p, pattern):
@@ -554,7 +554,7 @@ def classify(base_cwd, wt: dict, *, busy: Iterable[str] = (), refs: Optional[lis
             n = len(changes["modified"])
             parts.append(f"{n} changed file{'s' if n != 1 else ''}")
         return dict(row, state=STATE_HAS_OUTPUT, reason=" and ".join(parts))
-    return dict(row, state=STATE_CLEAN, reason="only Quorate scaffolding — safe to remove")
+    return dict(row, state=STATE_CLEAN, reason="only Embodent scaffolding — safe to remove")
 
 
 def inventory(base_cwd, *, busy: Iterable[str] = (), measure: bool = True, run=git,

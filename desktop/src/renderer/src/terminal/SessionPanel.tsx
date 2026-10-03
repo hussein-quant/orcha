@@ -408,6 +408,7 @@ function Tab({
     if (renaming) done.current = false
   }, [renaming])
   // Pinned: compact (kind icon + colour dot), the title lives in the tooltip / accessible name.
+  // A set colour is always a small dot before the title; only the active tab gets an underline.
   const compact = tab.pinned && !renaming
   const colorName = tab.color ? tabColorName(tab.color) : null
   return (
@@ -443,16 +444,13 @@ function Tab({
       )}
     >
       <KindIcon kind={tab.kind} className="h-3.5 w-3.5 shrink-0" />
-      {compact && tab.color && (
+      {tab.color && (
         <span aria-hidden="true" data-testid="tab-color-dot" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: tabColorCss(tab.color) }} />
       )}
-      {!compact && tab.color && (
-        <span
-          aria-hidden="true"
-          data-testid="tab-color-marker"
-          className="pointer-events-none absolute inset-x-2 bottom-0 h-[2px] rounded-full"
-          style={{ background: tabColorCss(tab.color) }}
-        />
+      {active && (
+        // The one underline in the strip: a neutral grey bar that means "current tab" (the
+        // tab's own colour is the dot above, never a line).
+        <span aria-hidden="true" data-testid="tab-active-underline" className="pointer-events-none absolute inset-x-2 bottom-0 h-[2px] rounded-full bg-text-3" />
       )}
       {renaming ? (
         <input

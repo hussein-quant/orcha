@@ -104,7 +104,7 @@ describe('App single-window host', () => {
   it('starts in onboarding mode when there are no stacks', async () => {
     stub([])
     render(<App />)
-    await waitFor(() => expect(screen.getByText(/set up quorate/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/set up embodent/i)).toBeInTheDocument())
   })
 
   it('starts on the Projects home screen when stacks exist', async () => {
@@ -671,7 +671,7 @@ describe('App — V2 host sidebar (arch §7)', () => {
   it('first-run onboarding hides the host sidebar', async () => {
     stub([])
     render(<App />)
-    await waitFor(() => expect(screen.getByText(/set up quorate/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/set up embodent/i)).toBeInTheDocument())
     expect(screen.queryByTestId('host-sidebar')).not.toBeInTheDocument()
   })
 })

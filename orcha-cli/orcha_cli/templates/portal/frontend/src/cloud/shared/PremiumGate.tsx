@@ -29,7 +29,7 @@ export function PremiumGate({ feature, title, pitch, upgradeUrl, hideTitle }: Pr
         {/* flat status line (V2): only the icon carries colour — no tinted warn slab */}
         <div className="pg-status">
           <Icon name="shield" cls="" />
-          <span><b>{title} is a Quorate Cloud Team feature.</b> Local run is the free solo tier.</span>
+          <span><b>{title} is a Embodent Cloud Team feature.</b> Local run is the free solo tier.</span>
         </div>
         {pitch.length > 0 && (
           <ul className="pg-pitch">
@@ -47,7 +47,7 @@ export function PremiumGate({ feature, title, pitch, upgradeUrl, hideTitle }: Pr
             type="button"
             onClick={() => window.open(upgradeUrl, "_blank", "noopener")}
           >
-            <Icon name="spark" cls="" />Upgrade to Quorate Cloud Team
+            <Icon name="spark" cls="" />Upgrade to Embodent Cloud Team
           </button>
         </div>
       </div>

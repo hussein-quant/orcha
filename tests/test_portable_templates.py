@@ -366,7 +366,7 @@ async def test_bundle_validation(client, seeded):
     assert (await status(bad))[0] == 422
     newer = copy.deepcopy(base); newer["version"] = 2
     code, text = await status(newer)
-    assert code == 422 and "newer Quorate" in text
+    assert code == 422 and "newer Embodent" in text
     dup = copy.deepcopy(base); dup["roster"].append(dict(dup["roster"][0], alias="atlas"))
     code, text = await status(dup)
     assert code == 422 and "same agent twice" in text

@@ -32,7 +32,7 @@ export interface TermTab {
   /** Pinned tabs sit at the front of the strip (in pin order), render compact and are
    *  skipped by Close Others / To The Right / To The Left. */
   pinned: boolean
-  /** Tab colour (a 2px underline in the strip, a dot on the sidebar row); null = none. */
+  /** Tab colour (a dot in the strip and on the sidebar row); null = none. */
   color: TabColor | null
   /** Shell basename reported by main ("zsh"). */
   shell: string | null

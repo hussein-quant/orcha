@@ -1,6 +1,6 @@
 // Verdikt hand-off links in the embedded portal. They are SAME-ORIGIN portal routes that
 // 302 to Verdikt's own site (or to a task's running preview), so the generic "same origin
-// stays in the view" rule used to follow the redirect and load Verdikt INSIDE Quorate.
+// stays in the view" rule used to follow the redirect and load Verdikt INSIDE Embodent.
 // Route them out instead:
 //   - "Open in Verdikt" / "Open Verdikt" → launch the installed Verdikt app (it has no URL
 //     scheme, so it can't deep-link; launching brings its window forward), else the default

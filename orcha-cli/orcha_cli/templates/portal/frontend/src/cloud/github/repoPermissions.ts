@@ -29,7 +29,7 @@ export function repoConnectBlockedReason(
  *  status code (D4). A string detail is the server's own honest sentence. */
 export function bindErrorText(status: number, detail: unknown): string {
   if (typeof detail === "string" && detail.trim()) return detail;
-  if (status === 0) return "Couldn't reach Quorate. Check your connection and try again.";
+  if (status === 0) return "Couldn't reach Embodent. Check your connection and try again.";
   if (status === 403) return "You don't have permission to change this project's repository.";
   if (status === 422) return "That repository name isn't valid.";
   return "Something went wrong. Try again.";

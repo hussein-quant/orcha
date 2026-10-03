@@ -42,7 +42,7 @@ import io.openorcha.mobile.ui.theme.Orcha
 
 /* =============================================================================
    Flow 03 — manual entry + the unreachable checklist state. Linear onboarding
-   like iOS `ManualConnectSheet`: Quorate hero, Address · Sign in · Connected
+   like iOS `ManualConnectSheet`: Embodent hero, Address · Sign in · Connected
    tracker, numbered steps, Linear fields and ONE primary Connect. Address-neutral
    wording: both a local self-host address and a cloud portal domain work.
    ============================================================================= */
@@ -106,7 +106,7 @@ fun ManualConnectScreen(
         }
         if (failed) {
             StateLayout(
-                title = "Can't reach this Quorate",
+                title = "Can't reach this Embodent",
                 sub = "${address.ifBlank { "That address" }} didn't answer. Your work is safe — the phone just can't see it right now.",
                 modifier = Modifier.padding(padding),
                 danger = true,
@@ -114,7 +114,7 @@ fun ManualConnectScreen(
             ) {
                 LCard {
                     NumberedLine(1, "Is the address right? A cloud portal needs no port.")
-                    NumberedLine(2, "Is the deployment up — or, self-hosting, is the computer awake with Quorate running?")
+                    NumberedLine(2, "Is the deployment up — or, self-hosting, is the computer awake with Embodent running?")
                     NumberedLine(3, "On a local address: same Wi-Fi, and no firewall or VPN in the way?")
                 }
                 LButton(
@@ -142,11 +142,11 @@ fun ManualConnectScreen(
                 LCard(padding = LSpace.l) {
                     Column(verticalArrangement = Arrangement.spacedBy(LSpace.l)) {
                         PairingStepCard(1, "Scan the QR", "Open your portal → Settings → Devices and pairing → Pair phone. Scanning fills this in for you.")
-                        PairingStepCard(2, "Or enter the address", "For a cloud deployment that's the portal domain, like quorate.yourteam.com.")
+                        PairingStepCard(2, "Or enter the address", "For a cloud deployment that's the portal domain, like embodent.yourteam.com.")
                         OrchaField(
                             address, { address = it },
                             label = "Address or QR payload",
-                            placeholder = "quorate.yourteam.com",
+                            placeholder = "embodent.yourteam.com",
                             minLines = 1, maxLines = 5,
                         )
                         OrchaField(

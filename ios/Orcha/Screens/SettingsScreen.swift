@@ -3,7 +3,7 @@ import SwiftUI
 /// Flow 04 S1 — Settings, grouped like the web portal's settings: Project
 /// (General, Execution), Access (Members, Devices and pairing) and Personal
 /// (Appearance, Notifications, Interface). Linear rows on panel cards, muted
-/// caption headers, Quorate branding in the footer. Presented as a sheet.
+/// caption headers, Embodent branding in the footer. Presented as a sheet.
 struct SettingsScreen: View {
     @Environment(AppModel.self) private var model
     @Environment(\.palette) private var p
@@ -413,7 +413,7 @@ struct SettingsScreen: View {
                         let granted = await NotificationCoordinator.shared.requestPermission()
                         model.setNotificationsEnabled(granted)
                         if !granted {
-                            model.error = "Notifications are blocked for Quorate — enable them in iOS Settings, then flip this back on."
+                            model.error = "Notifications are blocked for Embodent — enable them in iOS Settings, then flip this back on."
                         }
                     }
                 } else {
@@ -461,7 +461,7 @@ struct SettingsScreen: View {
             }
             Button("Cancel", role: .cancel) { tokenEditing = nil }
         } message: {
-            Text("Sent as the bearer credential on every request to this Quorate, and applied to all its projects. Needed for cloud deployments; leave unset for an unprotected local server.")
+            Text("Sent as the bearer credential on every request to this Embodent, and applied to all its projects. Needed for cloud deployments; leave unset for an unprotected local server.")
         }
         .alert("Remote address (Tailscale)", isPresented: remoteAlertShown) {
             TextField("e.g. my-mac.tailnet.ts.net:8001", text: $remoteDraft)
@@ -581,7 +581,7 @@ struct SettingsScreen: View {
         }
     }
 
-    // MARK: about — Quorate branding
+    // MARK: about — Embodent branding
 
     private var appVersion: String {
         let info = Bundle.main.infoDictionary
@@ -594,7 +594,7 @@ struct SettingsScreen: View {
         VStack(spacing: LSpace.s) {
             BrandMark(size: 36)
                 .accessibilityHidden(true)
-            Text("Quorate")
+            Text("Embodent")
                 .ltype(.headline)
                 .foregroundStyle(p.text)
             Text("Version \(appVersion)")

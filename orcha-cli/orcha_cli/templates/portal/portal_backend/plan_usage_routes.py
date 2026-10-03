@@ -1,6 +1,6 @@
 """Plan usage snapshots (mig 069) — PUT/GET /api/plan-usage, GET /api/plan-usage/summary.
 
-The Quorate desktop app computes Claude (Max) / Codex (Plus) plan limits locally — the
+The Embodent desktop app computes Claude (Max) / Codex (Plus) plan limits locally — the
 Claude numbers come from the Keychain OAuth token + Anthropic usage API, the Codex ones from
 local logs. A phone can do neither, so the desktop PUBLISHES a snapshot here after each limits
 refresh and the mobile apps READ it.
@@ -98,7 +98,7 @@ def _gate(cur, request: Request, write: bool) -> None:
     member = _mapped_member_anywhere(cur, login)
     if member is None:
         raise HTTPException(
-            403, f"your GitHub account ('{login}') is not a member of any project on this Quorate"
+            403, f"your GitHub account ('{login}') is not a member of any project on this Embodent"
         )
     if write and member["member_role"] == "viewer":
         raise HTTPException(403, "your role is viewer — it is read-only")

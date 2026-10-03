@@ -436,7 +436,7 @@ export function KeyCard({ cid, asRow = false, isDefault = false, reload = 0, onS
       name="Anthropic"
       detail={<KeyDetail mode={vm.mode} masked={vm.masked} />}
       detailTone={vm.mode === "none" ? "warn" : undefined}
-      badge={isDefault ? <DefaultBadge tip="The shipped default provider for Quorate's helpers" /> : null}
+      badge={isDefault ? <DefaultBadge tip="The shipped default provider for Embodent's helpers" /> : null}
       docsHref={PROVIDER_DOCS.anthropic}
     >
       {body}
@@ -735,7 +735,7 @@ function PkCard({
         name={k.name}
         detail={<KeyDetail mode={k.mode} masked={k.masked} />}
         detailTone={k.mode === "none" ? "warn" : undefined}
-        badge={isDefault ? <DefaultBadge tip="The shipped default provider for Quorate's helpers" /> : null}
+        badge={isDefault ? <DefaultBadge tip="The shipped default provider for Embodent's helpers" /> : null}
         docsHref={PROVIDER_DOCS[k.provider] || null}
       >
         <div className="pk-card" data-provider={k.provider}>
@@ -1367,7 +1367,7 @@ export function projectLoadState(error: string | null | undefined): { text: stri
     case "forbidden": return { text: "You're not a member of this project.", tone: "warn", retry: false };
     case "not_found": return { text: "This project couldn't be found.", tone: "warn", retry: false };
     case "server": return { text: "Couldn't load this project.", tone: "err", retry: true };
-    case "network": return { text: "Can't reach Quorate.", tone: "err", retry: true };
+    case "network": return { text: "Can't reach Embodent.", tone: "err", retry: true };
     default: return { text: "Loading project…", tone: "muted", retry: false };
   }
 }
@@ -1618,7 +1618,7 @@ export function ProvidersGroup({
   return (
     <SettingsGroup
       settab="provider-keys" title="Providers" flush className="mp-group"
-      lead="API keys for Quorate's own helpers."
+      lead="API keys for Embodent's own helpers."
       help="Keys are stored encrypted on this project. ORCHA_LLM_API_KEY in the environment takes precedence over any stored key."
       action={
         <>
@@ -1666,8 +1666,8 @@ function ModelsGroup({ cid }: { cid: string | null }) {
   return (
     <SettingsGroup
       settab="provider-keys" title="Universal model selection" flush
-      lead="The model behind each of Quorate's own helpers."
-      help="Quorate's direct-API helpers (the universal client) — separate from each agent's own model, which is set per agent."
+      lead="The model behind each of Embodent's own helpers."
+      help="Embodent's direct-API helpers (the universal client) — separate from each agent's own model, which is set per agent."
     >
       <div id="modelRows"><ModelsCard cid={cid} /></div>
     </SettingsGroup>
@@ -1818,7 +1818,7 @@ export function buildSettingsGroups(cid: string | null, ext = extensions): Setti
   const pk = byKey("provider-keys");
   groups.push({
     key: "provider-keys", title: "Models & providers",
-    sub: "Agent runtimes, provider API keys and the models behind Quorate's own helpers.",
+    sub: "Agent runtimes, provider API keys and the models behind Embodent's own helpers.",
     render: () => (
       <>
         {(keyOn || modelsOn) && <KeysLockNote />}

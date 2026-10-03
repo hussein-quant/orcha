@@ -101,7 +101,7 @@ describe('labels', () => {
       'Removed acme. Its data is kept — add the folder again to bring it back.'
     )
     expect(removedToast('acme', { dataDeleted: true, filesRemoved: true })).toBe(
-      'Removed acme and deleted its data. Quorate’s files were removed from the folder.'
+      'Removed acme and deleted its data. Embodent’s files were removed from the folder.'
     )
   })
 })

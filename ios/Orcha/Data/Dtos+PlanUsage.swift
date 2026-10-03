@@ -1,6 +1,6 @@
 import Foundation
 
-/// `GET /api/plan-usage` — plan-limit snapshots the Quorate desktop app publishes to
+/// `GET /api/plan-usage` — plan-limit snapshots the Embodent desktop app publishes to
 /// each portal it is connected to (one per desktop host), newest first. Carries only
 /// plan names, window labels / used % / reset times and today's tokens + est. cost.
 struct PlanUsageListDto: Decodable, Equatable, Sendable {

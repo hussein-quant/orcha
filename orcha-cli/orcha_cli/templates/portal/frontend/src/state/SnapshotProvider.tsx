@@ -722,7 +722,7 @@ export interface ActingAuthority {
   unverified?: boolean;
 }
 
-export const UNVERIFIED_REASON = "Couldn't confirm who you are — view-only until Quorate responds (retrying)";
+export const UNVERIFIED_REASON = "Couldn't confirm who you are — view-only until Embodent responds (retrying)";
 export const OFFLINE_REASON = "Offline — reconnect to make changes";
 export const NOT_MEMBER_REASON = "You are not a member of this project (view-only)";
 export const NOT_FOUND_REASON = "Project not found";

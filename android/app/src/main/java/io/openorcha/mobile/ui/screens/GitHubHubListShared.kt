@@ -105,7 +105,7 @@ internal fun GitHubUnavailableState(reason: String?, detail: String?) {
 }
 
 internal const val GITHUB_APP_MISSING_TITLE = "GitHub isn't connected on this server"
-internal const val GITHUB_APP_MISSING_MESSAGE = "An admin can install the Quorate GitHub App from the portal under Settings › GitHub."
+internal const val GITHUB_APP_MISSING_MESSAGE = "An admin can install the Embodent GitHub App from the portal under Settings › GitHub."
 
 /** True when the server can't talk to GitHub at all (no GitHub App installed / no
  *  credential) — as opposed to a repo not being bound, rate limits, etc. */
@@ -122,7 +122,7 @@ internal fun githubUnavailableCopy(reason: String?, detail: String?): Pair<Strin
     reason == "not_found" -> "Not on GitHub" to GitHubHubUx.unavailableCopy(reason, detail)
     reason == "repo_not_connected" -> "No repository connected" to
         "No GitHub repository is connected to this project yet. Connect one from the Home tab to see its issues and pull requests here."
-    else -> "GitHub isn't available" to GitHubHubUx.unavailableCopy(reason, detail).replace("this Quorate", "this server")
+    else -> "GitHub isn't available" to GitHubHubUx.unavailableCopy(reason, detail).replace("this Embodent", "this server")
 }
 
 @Composable

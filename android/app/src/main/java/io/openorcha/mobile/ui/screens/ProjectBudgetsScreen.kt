@@ -131,7 +131,7 @@ fun ProjectBudgetsScreen(container: StoredContainer, worktrees: Boolean, onBack:
             title = { Text("Clean up clean worktrees?", style = ltype(LType.Headline), color = p.text) },
             text = {
                 Text(
-                    "Only Quorate scaffolding is in them. The worktrees and their branches are removed. Worktrees with output or unmerged commits are left alone.",
+                    "Only Embodent scaffolding is in them. The worktrees and their branches are removed. Worktrees with output or unmerged commits are left alone.",
                     style = ltype(LType.Body), color = p.text2,
                 )
             },

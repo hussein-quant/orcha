@@ -158,7 +158,7 @@ export function VerdiktSettingsGroup({ cid, actorId, reason }: VerdiktSettingsGr
       settab="github-access"
       title="Verdikt"
       lead={lead}
-      help="Quorate creates one Verdikt scenario per task (its UI-checkable definition-of-done lines become the acceptance criteria; the task, changed files, branch and PR go in its description) and queues a run. Results are polled back. A Verdikt verdict is evidence — the human still accepts or rejects the task."
+      help="Embodent creates one Verdikt scenario per task (its UI-checkable definition-of-done lines become the acceptance criteria; the task, changed files, branch and PR go in its description) and queues a run. Results are polled back. A Verdikt verdict is evidence — the human still accepts or rejects the task."
       flush
       id="verdiktSettings"
     >
@@ -205,7 +205,7 @@ export function VerdiktSettingsGroup({ cid, actorId, reason }: VerdiktSettingsGr
           <div className="vk-sub" id="verdiktAutofix">
             <div className="vk-sub-h">Auto-fix</div>
             <div className="set-rowi-d">
-              When an automatic Verdikt run fails, Quorate sends the task back to its agent with the failed criteria, the
+              When an automatic Verdikt run fails, Embodent sends the task back to its agent with the failed criteria, the
               screenshots and the report, then checks the rework again — until it passes or a limit is hit. A pass never
               completes the task: a person still verifies it.
             </div>

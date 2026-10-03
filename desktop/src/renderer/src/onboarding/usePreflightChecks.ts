@@ -36,8 +36,8 @@ export interface PreflightChecks {
   pending: boolean
 }
 
-/** What Quorate needs on this Mac: Docker running, Homebrew, an AI coding CLI and the
- *  Quorate command-line helper (the `orcha` CLI). Two independent probes: the tool probe is
+/** What Embodent needs on this Mac: Docker running, Homebrew, an AI coding CLI and the
+ *  Embodent command-line helper (the `orcha` CLI). Two independent probes: the tool probe is
  *  instant, while preflight may spend up to a minute starting Docker — each answer lands as
  *  soon as it arrives.
  *
@@ -145,7 +145,7 @@ export function setupIssues(c: PreflightChecks): SetupIssue[] {
     return [
       {
         key: 'check',
-        title: 'Quorate couldn’t check this Mac',
+        title: 'Embodent couldn’t check this Mac',
         fix: 'If Docker is starting or busy, wait a moment and check again.'
       }
     ]
@@ -190,7 +190,7 @@ export function setupIssues(c: PreflightChecks): SetupIssue[] {
     if (!p.orcha)
       out.push({
         key: 'helper',
-        title: 'The Quorate command-line helper isn’t installed',
+        title: 'The Embodent command-line helper isn’t installed',
         fix: 'Open setup to install it — it takes a few seconds.'
       })
   }

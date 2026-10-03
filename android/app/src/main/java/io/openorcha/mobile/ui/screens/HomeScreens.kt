@@ -132,7 +132,7 @@ fun ContainersHomeScreen(
                 }
                 item(key = "hint") {
                     Text(
-                        "Every project on a paired Quorate appears here automatically. Long-press a project to rename or disconnect it.",
+                        "Every project on a paired Embodent appears here automatically. Long-press a project to rename or disconnect it.",
                         style = ltype(LType.Meta),
                         color = p.muted,
                         modifier = Modifier.padding(horizontal = LSpace.xs),
@@ -156,20 +156,20 @@ private fun PairingEmptyState(onScan: () -> Unit, onAdd: () -> Unit, modifier: M
         ) {
             BrandMark(44.dp)
             Text(
-                "Add your Quorate",
+                "Add your Embodent",
                 style = ltype(LType.Title),
                 color = p.text,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.semantics { heading() },
             )
             Text(
-                "Open your Quorate portal and choose Pair phone, then scan the QR here — or type the portal address, like quorate.yourteam.com. One pairing brings in every project on it.",
+                "Open your Embodent portal and choose Pair phone, then scan the QR here — or type the portal address, like embodent.yourteam.com. One pairing brings in every project on it.",
                 style = ltype(LType.Body),
                 color = p.text2,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.heightIn(min = LSpace.xs))
-            LButton("Add your Quorate", onScan, Modifier.fillMaxWidth(), icon = OrchaIcons.QrCodeScanner, kind = LButtonKind.Primary)
+            LButton("Add your Embodent", onScan, Modifier.fillMaxWidth(), icon = OrchaIcons.QrCodeScanner, kind = LButtonKind.Primary)
             LButton("Enter address manually", onAdd, Modifier.fillMaxWidth(), kind = LButtonKind.Ghost)
         }
     }

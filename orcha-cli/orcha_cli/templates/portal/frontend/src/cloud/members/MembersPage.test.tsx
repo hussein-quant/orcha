@@ -273,7 +273,7 @@ describe("MembersPage plan gating (docs/orcha-cloud-local-run.md addendum)", () 
   it("solo plan renders PremiumGate instead of the roster+invite UI", async () => {
     stubFetch({ plan: SOLO_PLAN });
     mount();
-    expect(await screen.findByText("Members is a Quorate Cloud Team feature.", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("Members is a Embodent Cloud Team feature.", { exact: false })).toBeInTheDocument();
     // the pitch (contract item 7: invite, roles, grants, GitHub-verified identity)
     expect(screen.getByText(/Invite teammates/)).toBeInTheDocument();
     expect(screen.getByText(/owner, member, viewer/)).toBeInTheDocument();
@@ -288,7 +288,7 @@ describe("MembersPage plan gating (docs/orcha-cloud-local-run.md addendum)", () 
     stubFetch({ plan: { ...SOLO_PLAN, upgrade_url: "https://example.com/team" } });
     mount();
     const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
-    fireEvent.click(await screen.findByRole("button", { name: /Upgrade to Quorate Cloud Team/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Upgrade to Embodent Cloud Team/ }));
     expect(openSpy).toHaveBeenCalledWith("https://example.com/team", "_blank", "noopener");
   });
 
@@ -308,7 +308,7 @@ describe("MembersPage plan gating (docs/orcha-cloud-local-run.md addendum)", () 
       target: { value: "hubot" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Invite/ }));
-    expect(await screen.findByText("Members is a Quorate Cloud Team feature.", { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText("Members is a Embodent Cloud Team feature.", { exact: false })).toBeInTheDocument();
   });
 });
 

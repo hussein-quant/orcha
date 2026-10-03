@@ -90,7 +90,7 @@ fun InboxConnectRepoSheet(
         phase = runCatching { InboxApi.githubRepos(container.baseUrl, container.id) }
             .fold(
                 onSuccess = { if (it.available) RepoPhase.Ready(it.repos) else RepoPhase.Unavailable },
-                onFailure = { RepoPhase.Failed("Quorate couldn't be reached. Check the connection and try again.") },
+                onFailure = { RepoPhase.Failed("Embodent couldn't be reached. Check the connection and try again.") },
             )
     }
 
@@ -117,7 +117,7 @@ fun InboxConnectRepoSheet(
                 RepoPhase.Unavailable -> LEmptyState(
                     icon = OrchaIcons.GitHub,
                     title = "GitHub isn't connected on this server",
-                    message = "An admin can install the Quorate GitHub App from the portal under Settings › GitHub.",
+                    message = "An admin can install the Embodent GitHub App from the portal under Settings › GitHub.",
                 )
                 is RepoPhase.Failed -> LEmptyState(
                     icon = OrchaIcons.GitHub,
@@ -128,7 +128,7 @@ fun InboxConnectRepoSheet(
                 )
                 is RepoPhase.Ready -> {
                     Text(
-                        "Bind this workspace to a repository the Quorate GitHub App is installed on.",
+                        "Bind this workspace to a repository the Embodent GitHub App is installed on.",
                         style = ltype(LType.Meta), color = p.muted,
                     )
                     if (ph.repos.isEmpty()) {

@@ -852,7 +852,7 @@ function ExecutionControls() {
           <span className="v2-exec-info" aria-hidden="true" title={note}><Icon name="info" cls="v2-ico" /></span>
           <span className="v2-sr">{note}</span>
         </div>
-        {offline ? <p className="v2-exec-offline" role="note">Offline — changes are disabled until Quorate reconnects.</p> : null}
+        {offline ? <p className="v2-exec-offline" role="note">Offline — changes are disabled until Embodent reconnects.</p> : null}
         <AutonomyControls />
       </Popover>
     </>
@@ -922,8 +922,8 @@ function ConnectionIndicator() {
   const last = lastOkAt ? relTime(new Date(lastOkAt).toISOString()) : null;
   const title =
     connection === "live" ? "Live updates connected" + (last ? " · last update " + last : "")
-    : connection === "polling" ? (snap ? "Live stream unavailable — refreshing every 3 s" : "Connecting to Quorate…") + (last ? " · last update " + last : "")
-    : connection === "reconnecting" ? "Reconnecting… lost contact with the Quorate backend" + (last ? " · showing data from " + last : "")
+    : connection === "polling" ? (snap ? "Live stream unavailable — refreshing every 3 s" : "Connecting to Embodent…") + (last ? " · last update " + last : "")
+    : connection === "reconnecting" ? "Reconnecting… lost contact with the Embodent backend" + (last ? " · showing data from " + last : "")
     : last ? "Offline — showing data from " + last + " (not live)" : "Offline — no data loaded";
   if (connection === "live") return <span className="v2-sr" role="status">{title}</span>;
   return (
@@ -938,7 +938,7 @@ function ConnectionIndicator() {
 
 /** The user-facing offline sentence (pure, tested): no URLs / status codes. */
 export function staleMessage(hasData: boolean, when: string | null): string {
-  return hasData && when ? `Can't reach Quorate · showing data from ${when}` : "Can't reach Quorate · no project data loaded";
+  return hasData && when ? `Can't reach Embodent · showing data from ${when}` : "Can't reach Embodent · no project data loaded";
 }
 
 // One classifier for the whole app: the provider records the failure kind
@@ -1252,7 +1252,7 @@ function ShellBody({ page, title, ctx, crumbs, primaryAction, secondaryActions, 
   useEffect(() => () => document.documentElement.removeAttribute("data-conn"), []);
 
   useEffect(() => {
-    const parts = [sectionTitle, projectName, "Quorate"].filter(Boolean);
+    const parts = [sectionTitle, projectName, "Embodent"].filter(Boolean);
     document.title = parts.join(" · ");
   }, [sectionTitle, projectName]);
 

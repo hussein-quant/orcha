@@ -282,7 +282,7 @@ struct NeedsYouView: View {
         case .accessoryRectangular:
             rectangularView
         case .accessoryInline:
-            Label(count == 0 ? "Quorate · all clear" : "Quorate · \(count) need you",
+            Label(count == 0 ? "Embodent · all clear" : "Embodent · \(count) need you",
                   systemImage: count == 0 ? "checkmark.circle" : "circle.lefthalf.filled")
         default:
             smallView
@@ -299,7 +299,7 @@ struct NeedsYouView: View {
                 Text(count == 0 ? "all clear" : "need you")
                     .font(.system(size: 13, weight: .medium))
             }
-            Text(entry.workspace?.name ?? "Quorate")
+            Text(entry.workspace?.name ?? "Embodent")
                 .font(.system(size: 12, weight: .medium))
                 .lineLimit(1)
                 .opacity(0.8)
@@ -320,7 +320,7 @@ struct NeedsYouView: View {
                 Circle()
                     .fill(statusDotColor(t, entry.workspace))
                     .frame(width: 7, height: 7)
-                Text(entry.workspace?.name ?? "Quorate")
+                Text(entry.workspace?.name ?? "Embodent")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(t.text2)
                     .lineLimit(1)
@@ -367,7 +367,7 @@ struct NeedsYouView: View {
     }
 
     private var accessibilitySummary: String {
-        guard let w = entry.workspace else { return "Quorate. Open the app to pair a workspace." }
+        guard let w = entry.workspace else { return "Embodent. Open the app to pair a workspace." }
         let head = w.needsYou == 0 ? "all clear" : "\(w.needsYou) need you"
         var s = "\(w.name), \(head)"
         if w.needsYou > 0 { s += ": \(breakdown)" }
@@ -572,7 +572,7 @@ struct GlanceView: View {
             Text("No workspace yet")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(t.text)
-            Text("Open Quorate and pair a workspace")
+            Text("Open Embodent and pair a workspace")
                 .font(.system(size: 11))
                 .foregroundStyle(t.text3)
         }

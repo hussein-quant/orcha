@@ -44,12 +44,12 @@ export interface Stack {
 
 // ---- Remove project / Storage -------------------------------------------------------------
 
-/** "Remove project…" levels. Default (both false) = Remove from Quorate: containers, sandboxes,
+/** "Remove project…" levels. Default (both false) = Remove from Embodent: containers, sandboxes,
  *  network, portal image and host daemons go; the data volume and every file stay. */
 export interface RemoveOptions {
   /** Also delete the stack's volumes (tasks, agents, history) — irreversible, typed confirm. */
   deleteData: boolean
-  /** Also remove Quorate's own files from the project folder (never the user's code). */
+  /** Also remove Embodent's own files from the project folder (never the user's code). */
   removeFiles: boolean
   /** With removeFiles: first save agent worktrees' output (attached to its task while the
    *  portal still runs, else copied to .orcha/saved-output/<branch>/, which is kept). Default
@@ -78,12 +78,12 @@ export interface RemovePlan {
   images: SizedName[]
   volumes: SizedName[]
   daemonPidFiles: string[]
-  /** Quorate's files present in the folder (relative), removed only with removeFiles. */
+  /** Embodent's files present in the folder (relative), removed only with removeFiles. */
   folderFiles: string[]
   worktrees: Array<{
     path: string
     branch: string | null
-    /** The CLI's classification (absent when the CLI is too old to say). Quorate's own
+    /** The CLI's classification (absent when the CLI is too old to say). Embodent's own
      *  scaffolding never counts as a change. */
     state?: AgentWorktreeState
     /** has-output: the files that would be saved first. */
@@ -434,10 +434,10 @@ export interface OrchaDesktopApi {
   resetStack(project: string): Promise<void>
   /** What "Remove project…" would remove / keep (with sizes) — the dialog's summary. */
   removePlan?(project: string): Promise<RemovePlan>
-  /** Remove a project from Quorate (see RemoveOptions). Progress arrives on onRemoveProgress. */
+  /** Remove a project from Embodent (see RemoveOptions). Progress arrives on onRemoveProgress. */
   removeProject?(project: string, opts: RemoveOptions): Promise<RemoveResult>
   onRemoveProgress?(cb: (e: { project: string; phase: RemovePhase }) => void): () => void
-  /** Settings › Storage: Quorate leftovers whose project no longer has a stack. */
+  /** Settings › Storage: Embodent leftovers whose project no longer has a stack. */
   storageScan?(): Promise<StorageReport>
   /** Remove one leftover (re-validated against a fresh scan; a volume needs `confirm` = its name). */
   storageRemove?(item: { kind: StorageItemKind; name: string; confirm?: string }): Promise<void>

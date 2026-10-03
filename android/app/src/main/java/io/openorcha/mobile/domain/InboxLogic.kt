@@ -294,10 +294,10 @@ object NotifPrefsLogic {
 
     /** A failed save, in plain words (web `prefsErrText`). */
     fun errorText(status: Int?): String = when {
-        status == null || status == 0 -> "Quorate couldn't be reached"
+        status == null || status == 0 -> "Embodent couldn't be reached"
         status == 401 || status == 403 -> "you can only change your own notification settings"
         status == 422 -> "that setting isn't valid"
-        status >= 500 -> "Quorate hit an error — try again"
+        status >= 500 -> "Embodent hit an error — try again"
         else -> "the server refused the change"
     }
 

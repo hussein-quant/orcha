@@ -10,7 +10,7 @@ describe('WelcomeStep', () => {
     const user = userEvent.setup()
     render(<WelcomeStep onContinue={onContinue} />)
 
-    expect(screen.getByRole('heading', { name: 'Welcome to Quorate' })).toHaveClass('ob-display')
+    expect(screen.getByRole('heading', { name: 'Welcome to Embodent' })).toHaveClass('ob-display')
     expect(screen.getByText('A team of agents')).toBeInTheDocument()
     expect(screen.getAllByRole('button')).toHaveLength(1)
     expect(document.body.textContent).not.toMatch(/\p{Extended_Pictographic}/u)

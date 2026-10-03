@@ -1,7 +1,7 @@
 {
   "name": "orcha-desktop",
   "version": "1.1.2",
-  "description": "Quorate — desktop stack manager for orcha-* Docker stacks (Orcha#237)",
+  "description": "Embodent — desktop stack manager for orcha-* Docker stacks (Orcha#237)",
   "main": "./out/main/index.js",
   "author": "Orcha",
   "private": true,

@@ -345,4 +345,4 @@ async def test_device_page_serves_redirect_js_and_fallback(client):
     assert "Copy token" in src
     # mint failure (non-member) renders an actionable message (parity DEV-004:
     # a fixed headline per case, raw server text only under Details)
-    assert "isn't a member of this Quorate yet" in src
+    assert "isn't a member of this Embodent yet" in src

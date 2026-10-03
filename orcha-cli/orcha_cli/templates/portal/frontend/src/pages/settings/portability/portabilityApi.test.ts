@@ -28,8 +28,8 @@ describe("portability helpers", () => {
     expect(ok.error).toBeNull();
     expect(ok.bundle?.version).toBe(1);
     expect(parseBundleText("{nope").error).toBe("This file isn't valid JSON.");
-    expect(parseBundleText("[1,2]").error).toBe("This file isn't a Quorate project template.");
-    expect(parseBundleText(JSON.stringify({ format: "x", version: 1 })).error).toBe("This file isn't a Quorate project template.");
+    expect(parseBundleText("[1,2]").error).toBe("This file isn't a Embodent project template.");
+    expect(parseBundleText(JSON.stringify({ format: "x", version: 1 })).error).toBe("This file isn't a Embodent project template.");
     expect(parseBundleText(JSON.stringify({ format: "orcha.project-template" })).error).toBe("This template has no version.");
   });
 

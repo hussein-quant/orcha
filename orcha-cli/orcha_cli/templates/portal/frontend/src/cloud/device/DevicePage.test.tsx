@@ -57,7 +57,7 @@ describe("DevicePage (device-token mint)", () => {
     stubFetch({ status: 403, data: { detail: "GitHub user 'x' is not a member of any project" } });
     render(<DevicePage />);
     // DEV-004: a fixed headline + guidance; the raw server text only inside Details
-    expect(await screen.findByText("Your GitHub account isn't a member of this Quorate yet")).toBeInTheDocument();
+    expect(await screen.findByText("Your GitHub account isn't a member of this Embodent yet")).toBeInTheDocument();
     expect(screen.getByText("Ask an owner to invite you (Settings → Members & access), then try again.")).toBeInTheDocument();
     expect(document.querySelector(".device-err-more code")).toHaveTextContent("HTTP 403 · GitHub user 'x' is not a member of any project");
     expect(document.querySelector(".device-err-d")).not.toHaveTextContent(/GitHub user 'x'/);
@@ -89,11 +89,11 @@ describe("DevicePage (V2: client, retry, fallback copy)", () => {
   it("an error leads with a human sentence and offers Try again (which mints again)", async () => {
     const calls = stubFetch({ status: 403, data: { detail: "not a member of any project" } });
     render(<DevicePage />);
-    expect(await screen.findByText("Your GitHub account isn't a member of this Quorate yet")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Back to Quorate" })).toHaveAttribute("href", "/");
+    expect(await screen.findByText("Your GitHub account isn't a member of this Embodent yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to Embodent" })).toHaveAttribute("href", "/");
     fireEvent.click(screen.getByRole("button", { name: /Try again/ }));
     await waitFor(() => expect(calls.filter((c) => c.url === "/api/device-tokens").length).toBe(2));
-    await screen.findByText("Your GitHub account isn't a member of this Quorate yet");
+    await screen.findByText("Your GitHub account isn't a member of this Embodent yet");
     expect(calls.filter((c) => c.url === "/api/device-tokens").length).toBe(2);
   });
 });

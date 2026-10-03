@@ -441,7 +441,7 @@ class ProjectTemplateBundle(_M):
             raise ValueError("version must be >= 1")
         if v > VERSION:
             raise ValueError(
-                f"this template is format v{v}, made by a newer Quorate; this Quorate reads v{VERSION}"
+                f"this template is format v{v}, made by a newer Embodent; this Embodent reads v{VERSION}"
             )
         return v
 

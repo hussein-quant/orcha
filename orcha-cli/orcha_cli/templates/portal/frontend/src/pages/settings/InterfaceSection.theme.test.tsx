@@ -77,7 +77,7 @@ describe("ThemePicker", () => {
     render(<InterfaceSection />);
     expect(screen.getByRole("radio", { name: "System" })).toHaveAttribute("aria-checked", "true");
     for (const r of screen.getAllByRole("radio")) expect(r).toBeDisabled();
-    expect(screen.getByText(/Set by the Quorate app/)).toBeInTheDocument();
+    expect(screen.getByText(/Set by the Embodent app/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "Light" }));
     expect(localStorage.getItem("orcha:theme")).toBeNull();
   });

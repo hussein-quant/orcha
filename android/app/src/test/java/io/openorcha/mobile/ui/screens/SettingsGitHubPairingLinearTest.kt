@@ -51,7 +51,7 @@ class SettingsGitHubPairingLinearTest {
     fun missingGitHubAppGetsFriendlyCopyWithoutJargon() {
         val (title, message) = githubUnavailableCopy("no_token", "No GitHub installation token is wired")
         assertEquals("GitHub isn't connected on this server", title)
-        assertEquals("An admin can install the Quorate GitHub App from the portal under Settings › GitHub.", message)
+        assertEquals("An admin can install the Embodent GitHub App from the portal under Settings › GitHub.", message)
         assertFalse(message.contains("token", ignoreCase = true))
         assertFalse(message.contains("wired", ignoreCase = true))
         // Unknown reason but a jargon detail is still the missing-app case.

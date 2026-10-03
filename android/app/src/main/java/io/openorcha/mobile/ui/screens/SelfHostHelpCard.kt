@@ -1,7 +1,7 @@
 package io.openorcha.mobile.ui.screens
 
 /* Linear onboarding pieces shared by the pairing screens (ManualConnectScreen,
-   DeviceSignInPanel): the Quorate hero, the 3-step tracker, numbered step cards,
+   DeviceSignInPanel): the Embodent hero, the 3-step tracker, numbered step cards,
    a disclosure header and the collapsed self-host explainer. iOS
    PairingScreens.swift parity. */
 
@@ -54,7 +54,7 @@ internal const val PAIRING_TAGLINE = "Your agents, approvals and reviews — in 
 /** The three pairing steps (Address → Sign in → Connected). */
 internal enum class PairingStep(val title: String) { Address("Address"), SignIn("Sign in"), Connected("Connected") }
 
-/** App mark, "Quorate", tagline. */
+/** App mark, "Embodent", tagline. */
 @Composable
 internal fun PairingHero(subtitle: String = PAIRING_TAGLINE) {
     val p = Orcha.palette
@@ -64,7 +64,7 @@ internal fun PairingHero(subtitle: String = PAIRING_TAGLINE) {
         verticalArrangement = Arrangement.spacedBy(LSpace.m),
     ) {
         BrandMark(size = 60.dp)
-        Text("Quorate", style = ltype(LType.Display), color = p.text, modifier = Modifier.semantics { heading() })
+        Text("Embodent", style = ltype(LType.Display), color = p.text, modifier = Modifier.semantics { heading() })
         Text(subtitle, style = ltype(LType.Body), color = p.text2, textAlign = TextAlign.Center)
     }
 }
@@ -184,7 +184,7 @@ fun SelfHostHelpCard() {
     val p = Orcha.palette
     var expanded by remember { mutableStateOf(false) }
     LCard(padding = LSpace.m) {
-        PairingDisclosure("Running Quorate on your own computer?", OrchaIcons.DesktopWindows, expanded) { expanded = !expanded }
+        PairingDisclosure("Running Embodent on your own computer?", OrchaIcons.DesktopWindows, expanded) { expanded = !expanded }
         AnimatedVisibility(expanded) {
             Column(Modifier.padding(top = LSpace.s), verticalArrangement = Arrangement.spacedBy(LSpace.xs)) {
                 Text(

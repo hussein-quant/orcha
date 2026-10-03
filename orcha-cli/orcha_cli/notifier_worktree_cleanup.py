@@ -13,7 +13,7 @@ from typing import Any
 
 NESTED_WORKTREES_PREFIX = ".orcha-worktrees/"
 
-# Quorate's own scaffolding, kept out of checkpoint commits and captured diffs. Must cover
+# Embodent's own scaffolding, kept out of checkpoint commits and captured diffs. Must cover
 # every worktree_gc.SCAFFOLDING_PATTERNS entry (a test enforces it): a checkpoint that swept
 # in a wake log or the .orcha overlay made the branch look "unmerged", so cleanup kept it
 # forever. Agent output under .orcha/outputs is collected separately (it is self-ignoring).

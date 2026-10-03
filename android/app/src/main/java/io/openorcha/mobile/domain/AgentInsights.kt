@@ -207,7 +207,7 @@ object AgentConfigHistoryUx {
         r.changes.filterNot { it.derived }.joinToString(", ") { fieldLabel(it.field).lowercase() }
 
     fun actorName(r: io.openorcha.mobile.data.ConfigRevisionDto): String =
-        if (r.kind == "initial") "Quorate" else r.actor?.alias ?: "Unattributed"
+        if (r.kind == "initial") "Embodent" else r.actor?.alias ?: "Unattributed"
 
     /** One sentence per revision, as the web history list reads. */
     fun sentence(r: io.openorcha.mobile.data.ConfigRevisionDto): String = when (r.kind) {

@@ -16,7 +16,7 @@ const CODE_TEXT: Record<string, string> = {
   INVALID_STORAGE_ITEM: 'That item changed since the list was made — refresh and try again.',
   PORT_UNAVAILABLE: 'The port is already in use.',
   PORTAL_TIMEOUT: 'The portal didn’t come up in time.',
-  INTERNAL: 'Something went wrong inside Quorate.'
+  INTERNAL: 'Something went wrong inside Embodent.'
 }
 
 const ANSI = /\u001b\[[0-9;]*[A-Za-z]/g

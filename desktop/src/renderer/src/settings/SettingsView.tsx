@@ -123,7 +123,7 @@ export default function SettingsView({
               <>
                 <h2 className="text-[24px] font-semibold tracking-[-0.01em] text-text">Agents</h2>
                 <p className="mb-8 mt-1 text-[13px] text-text-3">
-                  Coding-agent CLIs you launch in terminals from Quorate — ⌘K, a project’s ⋯ menu, New tab, and ⌥⌘T for the Default.
+                  Coding-agent CLIs you launch in terminals from Embodent — ⌘K, a project’s ⋯ menu, New tab, and ⌥⌘T for the Default.
                 </p>
                 <AgentsSettings onTestLaunch={onTestLaunch} />
               </>
@@ -143,7 +143,7 @@ export default function SettingsView({
                   <div className="flex min-h-[52px] items-center justify-between gap-6 px-4 py-3">
                     <div className="min-w-0">
                       <div className="text-[13px] font-medium text-text">Show usage in the menu bar</div>
-                      <div className="text-[12px] text-text-3">The busiest plan window next to the Quorate icon, e.g. “C 77%”.</div>
+                      <div className="text-[12px] text-text-3">The busiest plan window next to the Embodent icon, e.g. “C 77%”.</div>
                     </div>
                     <div
                       role="radiogroup"
@@ -192,7 +192,7 @@ export default function SettingsView({
               <section data-testid="settings-notifications">
                 <h2 className="text-[24px] font-semibold tracking-[-0.01em] text-text">Notifications</h2>
                 <p className="mb-6 mt-1 text-[13px] text-text-3">
-                  Desktop alerts follow your Quorate notification settings — categories, “only mine”, pause, quiet hours and
+                  Desktop alerts follow your Embodent notification settings — categories, “only mine”, pause, quiet hours and
                   per-project mute. Muting only silences alerts: anything that needs you still shows in Needs you and the tray.
                 </p>
                 <div className="flex min-h-[52px] items-center justify-between gap-6 rounded-[10px] border border-border px-4 py-3">

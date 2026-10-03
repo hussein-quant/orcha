@@ -1,6 +1,6 @@
-/** Stats & Usage (Orca-style): Quorate's own agent stats, then Usage Analytics over the
+/** Stats & Usage (Orca-style): Embodent's own agent stats, then Usage Analytics over the
  *  agents' local logs — overview cards, a daily-intensity heatmap, the token mix, models and
- *  providers (Enable / Off, persisted by main) — and the connected Quorate projects' own
+ *  providers (Enable / Off, persisted by main) — and the connected Embodent projects' own
  *  spend. Fills the inset content panel like Settings (main hides the portal view under it).
  *  Every cost is an estimate at API list price, and says so. */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -268,7 +268,7 @@ function ProviderCard({
               ? `No local usage yet${p.logPath ? ` in ${p.logPath}` : ''}.`
               : p.state === 'not-installed'
                 ? 'Not installed on this Mac — install it from Settings › Agents.'
-                : 'Quorate can’t read this CLI’s usage yet.'}
+                : 'Embodent can’t read this CLI’s usage yet.'}
         </div>
       )}
       {on && p.hasLimits && (
@@ -437,13 +437,13 @@ export default function StatsView({
               testId="stat-spawned"
               label="Agents spawned"
               value={(app?.agentsSpawned ?? 0).toLocaleString('en-US')}
-              sub={`from Quorate · ${logSessions.toLocaleString('en-US')} sessions in logs`}
+              sub={`from Embodent · ${logSessions.toLocaleString('en-US')} sessions in logs`}
             />
             <StatCard
               testId="stat-time"
               label="Time agents worked"
               value={formatDuration(overview.activeSeconds)}
-              sub={`from logs · ${formatDuration(app?.agentSeconds ?? 0)} in Quorate`}
+              sub={`from logs · ${formatDuration(app?.agentSeconds ?? 0)} in Embodent`}
             />
             <StatCard testId="stat-prs" label="PRs created" value={overview.prsCreated.toLocaleString('en-US')} sub="gh pr create by agents" />
             <StatCard
@@ -537,11 +537,11 @@ export default function StatsView({
             </div>
           </Section>
 
-          <Section title="Quorate projects">
+          <Section title="Embodent projects">
             {spend === null ? (
               <p className="text-[12px] text-text-3">Loading…</p>
             ) : spend.length === 0 ? (
-              <p className="text-[12px] text-text-3">No running Quorate project — start one to see its agents’ spend here.</p>
+              <p className="text-[12px] text-text-3">No running Embodent project — start one to see its agents’ spend here.</p>
             ) : (
               <div className="overflow-hidden rounded-[10px] border border-border" data-testid="usage-projects">
                 <div className="grid grid-cols-[minmax(0,1fr)_72px_96px_96px] gap-3 border-b border-border px-4 py-2 text-[11.5px] text-text-3">

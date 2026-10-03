@@ -130,9 +130,9 @@ enum InboxErrorText {
                !detail.hasPrefix("{"), !detail.hasPrefix("[") {
                 return detail.prefix(1).uppercased() + detail.dropFirst()
             }
-            return api.errorDescription ?? "Quorate refused the change."
+            return api.errorDescription ?? "Embodent refused the change."
         }
         if error is OrchaAuthRequiredError { return error.localizedDescription }
-        return "Quorate couldn't be reached."
+        return "Embodent couldn't be reached."
     }
 }

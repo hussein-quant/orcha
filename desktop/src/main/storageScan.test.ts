@@ -86,7 +86,7 @@ describe('findLeftovers', () => {
     expect(r.inUse).toEqual(['orcha-acme-web', 'orcha-helpdesk'])
   })
 
-  it('a volume kept by "Remove from Quorate" says how to bring it back', () => {
+  it('a volume kept by "Remove from Embodent" says how to bring it back', () => {
     const k = findLeftovers(inputs({ 'orcha-acme': { folder: '/Users/me/acme', present: true } }))
     expect(k.items.find((i) => i.name === 'orcha-acme_pgdata')?.note).toMatch(/Adding \/Users\/me\/acme again brings it back/)
   })

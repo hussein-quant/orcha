@@ -24,7 +24,7 @@ const FEATURES = [
   }
 ]
 
-/** First-run welcome: a hero with the Quorate orca gliding over a slow, soft light field,
+/** First-run welcome: a hero with the Embodent mark gliding over a slow, soft light field,
  *  a Display title, four one-line capabilities (revealed in sequence) and one primary.
  *  No typewriter, no emoji; everything holds still under reduced motion. */
 export default function WelcomeStep({ onContinue }: { onContinue: () => void }) {
@@ -42,7 +42,7 @@ export default function WelcomeStep({ onContinue }: { onContinue: () => void }) 
       </div>
       <StepHeader
         size="xl"
-        title="Welcome to Quorate"
+        title="Welcome to Embodent"
         subtitle="Your agent fleet, on your machine. Setting up your first project takes a couple of minutes."
       />
       <ul className="ob-features">

@@ -73,7 +73,10 @@ fun Avatar(alias: String, human: Boolean, size: AvatarSize = AvatarSize.Md, modi
     LAvatar(name = alias, modifier = modifier, isAI = !human, size = size.dp)
 }
 
-/** Brand tile — the orca glyph on a flat hairline tile (no radial glow; Linear chrome). */
+/**
+ * Brand tile — the Embodent mark (light | grey halves) on its near-black #121314 rounded
+ * tile in both themes, so the light half never disappears on a light background.
+ */
 @Composable
 fun BrandMark(size: Dp = 34.dp, modifier: Modifier = Modifier) {
     val p = Orcha.palette
@@ -81,14 +84,14 @@ fun BrandMark(size: Dp = 34.dp, modifier: Modifier = Modifier) {
     Box(
         modifier
             .size(size)
-            .background(if (p.isDark) Color(0xFF0B1F24) else Color(0xFF0E2D33), shape)
+            .background(Color(0xFF121314), shape)
             .border(BorderStroke(1.dp, p.border), shape),
         contentAlignment = Alignment.Center,
     ) {
         androidx.compose.foundation.Image(
-            painter = androidx.compose.ui.res.painterResource(io.openorcha.mobile.R.drawable.orca_glyph),
-            contentDescription = "Quorate",
-            modifier = Modifier.size(size * 24f / 34f),
+            painter = androidx.compose.ui.res.painterResource(io.openorcha.mobile.R.drawable.embodent_mark),
+            contentDescription = "Embodent",
+            modifier = Modifier.size(size * 0.9f),
         )
     }
 }

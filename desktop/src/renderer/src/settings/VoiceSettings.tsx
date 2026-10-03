@@ -72,7 +72,7 @@ export default function VoiceSettings({
             <div className="text-[13px] font-medium text-text">Microphone access</div>
             <div className="text-[12px] text-text-3" data-testid="voice-mic-status">
               {access ? ACCESS_TEXT[access] : 'Checking…'}
-              {blocked ? ' — turn on Quorate in Privacy & Security › Microphone, then come back.' : ''}
+              {blocked ? ' — turn on Embodent in Privacy & Security › Microphone, then come back.' : ''}
             </div>
           </div>
           {blocked ? (

@@ -19,7 +19,7 @@ import kotlinx.serialization.json.buildJsonObject
 
 /*
  * Agent slice endpoints, as extensions on the shared client (same auth seam, base-URL
- * normalisation and tolerant JSON reader as every other Quorate call).
+ * normalisation and tolerant JSON reader as every other Embodent call).
  */
 
 suspend fun OrchaApiClient.getAgentBudget(baseUrl: String, agentId: String): AgentBudgetDto = withTimeout(8_000) {

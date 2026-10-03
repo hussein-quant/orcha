@@ -62,7 +62,7 @@ extension AppModel {
     ) async -> T? {
         guard let sel = selectedContainer else { return nil }
         guard let actor = sel.humanAgentId else {
-            error = "Pairing is missing the human identity. Reconnect this Quorate first."
+            error = "Pairing is missing the human identity. Reconnect this Embodent first."
             return nil
         }
         actionInFlight = true
@@ -154,7 +154,7 @@ extension AppModel {
     func uploadDeliverables(_ taskId: String, _ files: [DeliverableUpload]) async -> Bool {
         guard let sel = selectedContainer, !files.isEmpty else { return false }
         guard let actor = sel.humanAgentId else {
-            error = "Pairing is missing the human identity. Reconnect this Quorate first."
+            error = "Pairing is missing the human identity. Reconnect this Embodent first."
             return false
         }
         actionInFlight = true

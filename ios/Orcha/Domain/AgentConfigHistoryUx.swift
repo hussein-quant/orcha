@@ -57,7 +57,7 @@ enum AgentConfigHistoryUx {
     }
 
     static func actorName(_ r: ConfigRevisionDto) -> String {
-        if r.kind == "initial" { return "Quorate" }
+        if r.kind == "initial" { return "Embodent" }
         return r.actor?.alias ?? "Unattributed"
     }
 

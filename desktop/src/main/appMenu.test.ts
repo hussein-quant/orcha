@@ -71,14 +71,14 @@ describe('app menu', () => {
     })
   })
 
-  it('macOS app menu is branded Quorate (About / Hide / Quit Quorate)', () => {
+  it('macOS app menu is branded Embodent (About / Hide / Quit Embodent)', () => {
     const orig = Object.getOwnPropertyDescriptor(process, 'platform')!
     Object.defineProperty(process, 'platform', { value: 'darwin' })
     try {
       const tmpl = buildAppMenuTemplate({ onAddProject: vi.fn(), onSettings: vi.fn() })
-      expect(tmpl[0].label).toBe('Quorate')
+      expect(tmpl[0].label).toBe('Embodent')
       const labels = (tmpl[0].submenu as Array<{ label?: string; role?: string }>).map((i) => i.label).filter(Boolean)
-      expect(labels).toEqual(expect.arrayContaining(['About Quorate', 'Hide Quorate', 'Quit Quorate']))
+      expect(labels).toEqual(expect.arrayContaining(['About Embodent', 'Hide Embodent', 'Quit Embodent']))
       expect(JSON.stringify(labels)).not.toMatch(/Orcha/)
     } finally {
       Object.defineProperty(process, 'platform', orig)

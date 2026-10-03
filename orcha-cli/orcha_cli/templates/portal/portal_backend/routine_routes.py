@@ -645,7 +645,7 @@ def _claim_next_due(cid: str, now: datetime) -> Optional[dict]:
                           if prev["outcome"] == "pending" else
                           f"Skipped: the previous task “{prev['title']}” is still {prev['status'].replace('_', ' ')}.")
                 if trigger == "catch_up":
-                    detail += f" ({missed} scheduled run{'s' if missed != 1 else ''} came due while Quorate was down.)"
+                    detail += f" ({missed} scheduled run{'s' if missed != 1 else ''} came due while Embodent was down.)"
 
         cur.execute(
             """INSERT INTO routine_runs (routine_id, container_id, trigger, scheduled_for, missed_count,
@@ -733,8 +733,8 @@ def _task_texts(r, *, trigger, slots, now, actor_alias=None):
                 f"first due {_fmt_local(slots[0], tz_name)}, last due {_fmt_local(slots[-1], tz_name)}")
         trailer = (
             f"Created by routine “{title}” ({schedule_text}). Catch-up run: "
-            f"{n} scheduled run{'s were' if n != 1 else ' was'} missed while Quorate's scheduler "
-            f"wasn't running ({span}). Quorate creates at most one catch-up task, so this one "
+            f"{n} scheduled run{'s were' if n != 1 else ' was'} missed while Embodent's scheduler "
+            f"wasn't running ({span}). Embodent creates at most one catch-up task, so this one "
             "task covers them."
         )
     else:

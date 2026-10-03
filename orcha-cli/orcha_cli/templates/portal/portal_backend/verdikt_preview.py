@@ -55,7 +55,7 @@ def validate_command(cmd: str | None) -> str | None:
     if any(ch in c for ch in ("\x00", "\n", "\r")):
         raise ValueError("the preview command must be one line (chain steps with &&)")
     if "{port}" not in c and not re.search(r"\$\{?PORT\b", c):
-        raise ValueError("the preview command must serve on {port} (or read $PORT) so Quorate knows where it is")
+        raise ValueError("the preview command must serve on {port} (or read $PORT) so Embodent knows where it is")
     return c
 
 
@@ -278,7 +278,7 @@ def reconcile(cur, run: dict, p: dict, *, timeout_minutes: int) -> dict:
 def retarget_handoff(handoff: dict, url: str, branch: str | None) -> dict:
     """Point the scenario description's `Target:` line at the preview."""
     h = dict(handoff or {})
-    label = f"Target: web:{url} (a preview of {'branch ' + branch if branch else 'the task'}, served by Quorate)"
+    label = f"Target: web:{url} (a preview of {'branch ' + branch if branch else 'the task'}, served by Embodent)"
     desc = h.get("description") or ""
     h["description"] = re.sub(r"(?m)^Target: .*$", label, desc) if re.search(r"(?m)^Target: ", desc) else \
         (desc + "\n" + label).strip()

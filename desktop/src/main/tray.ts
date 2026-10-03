@@ -19,7 +19,7 @@ export function trayTitle(hasFace: boolean, count: number, usage: string): strin
   return base.trim() ? `${base} · ${usage}` : ` ${usage}`
 }
 
-/** Menu-bar presence. The face is the Quorate orca silhouette as a macOS template image
+/** Menu-bar presence. The face is the Embodent mark silhouette as a macOS template image
  *  (resources/trayTemplate.png + @2x, black-on-transparent so the menu bar tints it);
  *  the decision count rides alongside as the title. If the image is missing (odd dev
  *  setups) it falls back to the old text glyph. Left-click toggles the popover;

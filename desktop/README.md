@@ -16,7 +16,7 @@ npm install
 # If Electron fails to start with "Electron uninstall", the binary download
 # was skipped during install:
 node node_modules/electron/install.js
-# Re-signs the dev Electron binary and brands it with the Orcha icon — needed
+# Re-signs the dev Electron binary and brands it with the Embodent icon — needed
 # for notifications and the dock/banner icon in dev (re-run after any npm
 # install that touches electron):
 ./scripts/sign-dev-electron.sh

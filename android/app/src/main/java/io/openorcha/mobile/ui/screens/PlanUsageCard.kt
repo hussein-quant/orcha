@@ -146,7 +146,7 @@ fun PlanUsageCard(usage: PlanUsageState, onOpen: () -> Unit, modifier: Modifier 
             }
             if (view.isEmpty) {
                 Text(
-                    if (usage.unreachable) "Couldn't reach your Quorate. Pull to refresh." else PlanUsageUx.EMPTY_MESSAGE,
+                    if (usage.unreachable) "Couldn't reach your Embodent. Pull to refresh." else PlanUsageUx.EMPTY_MESSAGE,
                     style = ltype(LType.Meta), color = p.muted,
                 )
             } else {

@@ -84,19 +84,19 @@ struct ContainersHomeScreen: View {
             }
             Button("Cancel", role: .cancel) { disconnecting = nil }
         } message: {
-            Text("This removes the pairing — and every project sharing its address — from this phone only. The Quorate keeps running, and you can pair again anytime from the portal.")
+            Text("This removes the pairing — and every project sharing its address — from this phone only. The Embodent keeps running, and you can pair again anytime from the portal.")
         }
     }
 
     private var emptyState: some View {
         StateLayout(
-            title: "Add your Quorate",
-            sub: "Open your Quorate portal and choose Pair phone, then scan the QR here — or type the portal address, like quorate.yourteam.com. One pairing brings in every project on that Quorate."
+            title: "Add your Embodent",
+            sub: "Open your Embodent portal and choose Pair phone, then scan the QR here — or type the portal address, like embodent.yourteam.com. One pairing brings in every project on that Embodent."
         ) {
             BrandMark(size: 44)
         } actions: {
             VStack(spacing: LSpace.s) {
-                LButton("Add your Quorate", icon: "qrcode.viewfinder", kind: .primary) { showScanner = true }
+                LButton("Add your Embodent", icon: "qrcode.viewfinder", kind: .primary) { showScanner = true }
                 LButton("Enter address manually", kind: .ghost) { showManualEntry = true }
             }
         }
@@ -130,7 +130,7 @@ struct ContainersHomeScreen: View {
                         }
                     }
                 }
-                Text("Every project on a paired Quorate appears here automatically. Long-press a project to rename or disconnect it.")
+                Text("Every project on a paired Embodent appears here automatically. Long-press a project to rename or disconnect it.")
                     .ltype(.meta)
                     .foregroundStyle(p.muted)
                     .padding(.horizontal, LSpace.xs)

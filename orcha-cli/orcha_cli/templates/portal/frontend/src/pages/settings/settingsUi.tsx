@@ -234,9 +234,9 @@ export function settingsErrText(e: unknown): string {
     } catch { detail = ""; }
   }
   if (detail) return detail;
-  if (!status) return "couldn't reach Quorate";
+  if (!status) return "couldn't reach Embodent";
   if (status === 401 || status === 403) return "you don't have permission to change this";
   if (status === 404) return "this project couldn't be found";
-  if (status >= 500) return "Quorate hit an error — try again";
+  if (status >= 500) return "Embodent hit an error — try again";
   return "the server refused the change";
 }

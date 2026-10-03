@@ -91,7 +91,7 @@ fun WorkspaceScreen(
         containerColor = Orcha.palette.bg,
         topBar = {
             WorkspaceTopBar(
-                projectName = selected?.displayName ?: "Quorate",
+                projectName = selected?.displayName ?: "Embodent",
                 containers = state.containers,
                 selectedId = selected?.id,
                 icons = state.containerHealth.mapValues { it.value.icon } +
@@ -136,7 +136,7 @@ fun WorkspaceScreen(
             ) {
                 io.openorcha.mobile.ui.components.LCard {
                     Text("1  Are you online? The portal needs an internet connection.", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
-                    Text("2  Is the deployment up — or, self-hosting, is the computer awake with Quorate running?", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
+                    Text("2  Is the deployment up — or, self-hosting, is the computer awake with Embodent running?", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
                     Text("3  Access token rotated? Update it in Settings → Containers.", style = MaterialTheme.typography.bodyMedium, color = Orcha.palette.text2)
                 }
                 io.openorcha.mobile.ui.components.LButton("Try again", onRefresh)

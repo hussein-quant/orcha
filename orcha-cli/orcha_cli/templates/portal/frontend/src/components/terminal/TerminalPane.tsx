@@ -520,7 +520,7 @@ export function usePairing(agent: Agent): Pairing {
         title={product + " isn't installed"}
         desc={
           "Pairing as " + nm + " runs " + product +
-          " on this host, but it isn't on the PATH. Install it (or point Quorate at it with the override env), then pair again."
+          " on this host, but it isn't on the PATH. Install it (or point Embodent at it with the override env), then pair again."
         }
         primary="Copy install hint"
         cancel="Dismiss"

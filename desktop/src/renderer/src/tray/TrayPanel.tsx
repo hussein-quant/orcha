@@ -99,7 +99,7 @@ export default function TrayPanel() {
     <div className="flex h-full flex-col bg-bg text-text animate-fade-in">
       <header className="flex h-10 shrink-0 items-center gap-2 px-3">
         <OrchaMark size={16} className="shrink-0" />
-        <span className="text-[13px] font-semibold">Quorate</span>
+        <span className="text-[13px] font-semibold">Embodent</span>
         <span className="whitespace-nowrap text-xs tabular-nums text-text-3">
           {runningCount}/{stacks.length} running
         </span>
@@ -227,9 +227,9 @@ export default function TrayPanel() {
       )}
 
       <footer className="flex h-11 shrink-0 items-center gap-1 border-t border-border px-2">
-        <Button variant="ghost" aria-label="Open Quorate" onClick={() => void window.orchaDesktop.openManager()}>
+        <Button variant="ghost" aria-label="Open Embodent" onClick={() => void window.orchaDesktop.openManager()}>
           <AppWindow />
-          Open Quorate
+          Open Embodent
         </Button>
         {mostUrgent && decisions(byProject.get(mostUrgent.project)) > 0 && (
           <Button

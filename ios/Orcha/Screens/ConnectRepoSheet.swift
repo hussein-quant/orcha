@@ -66,7 +66,7 @@ struct ConnectRepoSheet: View {
     private var offState: some View {
         StateLayout(
             title: "GitHub isn't connected on this server",
-            sub: "An admin can install the Quorate GitHub App from the portal under Settings › GitHub."
+            sub: "An admin can install the Embodent GitHub App from the portal under Settings › GitHub."
         ) {
             GitHubMark()
                 .frame(width: 34, height: 34)
@@ -104,7 +104,7 @@ struct ConnectRepoSheet: View {
         let visible = RepoConnect.filter(repos, query: query)
         return ScrollView {
             VStack(alignment: .leading, spacing: LSpace.l) {
-                Text("Bind this workspace to a repository the Quorate GitHub App is installed on.")
+                Text("Bind this workspace to a repository the Embodent GitHub App is installed on.")
                     .ltype(.meta)
                     .foregroundStyle(p.muted)
                 if repos.isEmpty {

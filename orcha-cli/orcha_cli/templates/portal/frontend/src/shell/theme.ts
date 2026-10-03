@@ -12,7 +12,7 @@
  * never "auto" — so every CSS rule keys off one attribute and the legacy
  * [data-theme="auto"] blocks in open-base/tokens.css never match.
  *
- * Desktop: when a v1 orchaHost declares the "theme" capability, the Quorate
+ * Desktop: when a v1 orchaHost declares the "theme" capability, the Embodent
  * desktop app owns the theme. It drives Electron's nativeTheme.themeSource,
  * which is what `prefers-color-scheme` reports inside the embedded view, so
  * the portal simply follows System there (live) and ignores its own stored

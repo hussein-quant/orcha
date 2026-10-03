@@ -94,7 +94,7 @@ describe("repoConnectBlockedReason / bindErrorText (pure)", () => {
     expect(bindErrorText(400, "local repository source is not available here")).toBe("local repository source is not available here");
     expect(bindErrorText(422, null)).toBe("That repository name isn't valid.");
     expect(bindErrorText(403, null)).toMatch(/permission/);
-    expect(bindErrorText(0, null)).toMatch(/Couldn't reach Quorate/);
+    expect(bindErrorText(0, null)).toMatch(/Couldn't reach Embodent/);
     expect(bindErrorText(500, null)).not.toMatch(/500/);
   });
 });

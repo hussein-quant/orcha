@@ -92,8 +92,8 @@ describe("objectiveSaveError", () => {
     expect(objectiveSaveError(Object.assign(new Error("/x → 403"), { status: 403 }))).toBe("Couldn't save the objective — you don't have permission to change this.");
     expect(objectiveSaveError(Object.assign(new Error("/x → 405"), { status: 405 }))).toMatch(/can't edit objectives yet/);
     expect(objectiveSaveError(Object.assign(new Error("/x → 413"), { status: 413 }))).toMatch(/too long/);
-    expect(objectiveSaveError(Object.assign(new Error("/x → 500: Internal Server Error"), { status: 500 }))).toBe("Couldn't save the objective — Quorate hit an error. Try again.");
-    expect(objectiveSaveError(new TypeError("Failed to fetch"))).toBe("Couldn't save the objective — couldn't reach Quorate.");
+    expect(objectiveSaveError(Object.assign(new Error("/x → 500: Internal Server Error"), { status: 500 }))).toBe("Couldn't save the objective — Embodent hit an error. Try again.");
+    expect(objectiveSaveError(new TypeError("Failed to fetch"))).toBe("Couldn't save the objective — couldn't reach Embodent.");
   });
 });
 

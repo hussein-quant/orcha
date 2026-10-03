@@ -25,7 +25,7 @@ describe("palette theme actions", () => {
   });
   it("inside the desktop app the rows explain instead of acting", () => {
     (window as unknown as { orchaHost: unknown }).orchaHost = { version: 1, capabilities: ["sidebar", "theme"] };
-    for (const r of themeActions()) expect(r.disabledReason).toMatch(/Quorate app/);
+    for (const r of themeActions()) expect(r.disabledReason).toMatch(/Embodent app/);
   });
   it("is matched by the Actions provider for 'theme'", async () => {
     const { searchProviders } = await import("./providers");

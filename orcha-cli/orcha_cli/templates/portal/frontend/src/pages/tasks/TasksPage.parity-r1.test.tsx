@@ -357,7 +357,7 @@ describe("activity markers and a rejected attempt", () => {
     expect(parseThreadMarker("[verification rejected] Tests fail")).toEqual({ kind: "verify_rejected", feedback: "Tests fail" });
     expect(parseThreadMarker("hello")).toBeNull();
     // mig 068: the Verdikt auto-fix loop's system lines
-    expect(parseThreadMarker("[Verdikt auto-fix] Verdikt failed this task on attempt 2 of 3. Quorate sent it back…\n\nFailed criteria:\n1. The error text is red\n   Actual: black\n   Screenshot: /api/x.png\n\nReport: /x"))
+    expect(parseThreadMarker("[Verdikt auto-fix] Verdikt failed this task on attempt 2 of 3. Embodent sent it back…\n\nFailed criteria:\n1. The error text is red\n   Actual: black\n   Screenshot: /api/x.png\n\nReport: /x"))
       .toEqual({ kind: "autofix_rework", attempt: 2, max: 3, detail: "1. The error text is red\n   Actual: black" });
     expect(parseThreadMarker("[Verdikt auto-fix] Stopped: Verdikt passed on attempt 3 of 3 — ready for your review"))
       .toEqual({ kind: "autofix_stopped", reason: "Verdikt passed on attempt 3 of 3 — ready for your review" });

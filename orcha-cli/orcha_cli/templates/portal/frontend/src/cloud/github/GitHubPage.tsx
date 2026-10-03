@@ -478,7 +478,7 @@ export function groupIssues<T>(rows: T[], isTracked: (r: T) => boolean): GhGroup
   const tracked = rows.filter(isTracked);
   const open = rows.filter((r) => !isTracked(r));
   const out: GhGroup<T>[] = [];
-  if (tracked.length) out.push({ id: "tracked", title: "Tracked in Quorate", glyph: "tracked", tone: "neutral", items: tracked });
+  if (tracked.length) out.push({ id: "tracked", title: "Tracked in Embodent", glyph: "tracked", tone: "neutral", items: tracked });
   if (open.length) out.push({ id: "untracked", title: "Not tracked", glyph: "issueDot", tone: "ok", items: open });
   return out;
 }
@@ -1717,9 +1717,9 @@ export function GitHubPage() {
     const tracked = !!(ts && ts.task_id);
     const showFixInfo = kind === "pull" && !tracked;
     return (
-      <section className="gh-orcha-card" aria-label="Quorate">
+      <section className="gh-orcha-card" aria-label="Embodent">
         <span className="gh-orcha-ico" aria-hidden="true"><Icon name="spark" cls="gl" /></span>
-        <span className="gh-orcha-h">Quorate</span>
+        <span className="gh-orcha-h">Embodent</span>
         <span className="gh-orcha-t">
           {tracked
             ? "Tracked as a task"

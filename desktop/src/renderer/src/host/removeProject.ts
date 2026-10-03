@@ -103,6 +103,6 @@ export function removedToast(name: string, r: Pick<RemoveResult, 'dataDeleted' |
   const what = r.dataDeleted
     ? `Removed ${name} and deleted its data.`
     : `Removed ${name}. Its data is kept — add the folder again to bring it back.`
-  const files = r.filesRemoved ? ' Quorate’s files were removed from the folder.' : ''
+  const files = r.filesRemoved ? ' Embodent’s files were removed from the folder.' : ''
   return `${what}${files}`
 }

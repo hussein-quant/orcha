@@ -20,7 +20,7 @@ export function totalSize(items: readonly StorageItem[]): number | null {
   return items.reduce<number | null>((t, i) => (i.size === null ? t : (t ?? 0) + i.size), null)
 }
 
-/** Settings › Storage — "Clean up unused Quorate data": leftovers of projects that no longer
+/** Settings › Storage — "Clean up unused Embodent data": leftovers of projects that no longer
  *  have a stack (portal images, finished sandboxes, networks, data volumes) with sizes, a
  *  Remove per item and "Remove all". Project data is never part of "Remove all": each volume
  *  needs its own explicit confirmation. */
@@ -78,7 +78,7 @@ export default function StorageSettings() {
     <section data-testid="settings-storage">
       <h2 className="text-[24px] font-semibold tracking-[-0.01em] text-text">Storage</h2>
       <p className="mb-6 mt-1 text-[13px] text-text-3">
-        Clean up unused Quorate data: what projects that are no longer in Quorate left behind in Docker. Projects you
+        Clean up unused Embodent data: what projects that are no longer in Embodent left behind in Docker. Projects you
         still have are never listed.
       </p>
 

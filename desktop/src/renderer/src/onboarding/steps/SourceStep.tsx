@@ -98,7 +98,7 @@ export default function SourceStep({
       <StepHeader
         icon={<Compass className="h-4 w-4" aria-hidden="true" />}
         title="Where’s your code?"
-        subtitle="Quorate sets the project up in a folder on this Mac."
+        subtitle="Embodent sets the project up in a folder on this Mac."
       />
       {notice}
       <div className="ob-source-grid" role="group" aria-label="Project source">

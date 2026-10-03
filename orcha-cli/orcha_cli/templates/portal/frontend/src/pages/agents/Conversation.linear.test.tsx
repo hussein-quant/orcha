@@ -139,7 +139,7 @@ describe("Linear agent-panel thread", () => {
     const send = container.querySelector("#convSend") as HTMLButtonElement;
     expect(send.getAttribute("aria-label")).toBe("Send message");
     expect(send.classList.contains("is-idle")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Insert a Quorate skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "Insert a Embodent skill" }));
     expect((container.querySelector("#convInput") as HTMLTextAreaElement).value).toBe("/");
     expect(container.querySelector("#convSlash")).toBeTruthy();
   });

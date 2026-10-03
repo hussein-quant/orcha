@@ -182,7 +182,7 @@ def _parse_bundle(raw: dict) -> pb.ProjectTemplateBundle:
     if len(pb.canonical(raw)) > MAX_BUNDLE_CHARS:
         raise HTTPException(413, "this template is too large to import")
     if raw.get("format") != pb.FORMAT:
-        raise HTTPException(422, "this file isn't a Quorate project template")
+        raise HTTPException(422, "this file isn't a Embodent project template")
     try:
         bundle = pb.ProjectTemplateBundle.model_validate(raw)
         pb.check_bundle(bundle)

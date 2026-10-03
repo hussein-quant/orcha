@@ -5,7 +5,7 @@ import { InlineText, Notice, ObButton, StatusGlyph, StepFooter, StepHeader, type
 import { usePreflightChecks } from '../usePreflightChecks'
 
 /** User-facing name for the `orcha` CLI the desktop installs (internally still `orcha`). */
-export const HELPER_LABEL = 'Quorate command-line helper'
+export const HELPER_LABEL = 'Embodent command-line helper'
 
 const LINKS = {
   homebrew: 'https://brew.sh',
@@ -74,8 +74,8 @@ interface Row {
   extra?: React.ReactNode
 }
 
-/** Setup: checks what Quorate needs on this Mac (Docker running, Homebrew, an AI coding CLI,
- *  and the Quorate command-line helper — the `orcha` CLI, the one thing Quorate installs
+/** Setup: checks what Embodent needs on this Mac (Docker running, Homebrew, an AI coding CLI,
+ *  and the Embodent command-line helper — the `orcha` CLI, the one thing Embodent installs
  *  itself, on Continue). Every row says its real state and offers the action that fits THAT
  *  state. The check logic lives in usePreflightChecks (shared with Add a project's silent
  *  background check).
@@ -145,7 +145,7 @@ export default function PreflightStep({
           extra: (
             <span className="ob-row-sub" data-testid="docker-stuck">
               Docker hasn’t answered yet. If Docker Desktop looks frozen, quit it from the menu bar and open it
-              again, or Re-check. Quorate keeps waiting and updates this row by itself once Docker answers.
+              again, or Re-check. Embodent keeps waiting and updates this row by itself once Docker answers.
             </span>
           )
         }
@@ -278,11 +278,11 @@ export default function PreflightStep({
       <StepHeader
         icon={<Laptop className="h-4 w-4" aria-hidden="true" />}
         title="Check your Mac"
-        subtitle="Quorate runs your agents with a few free tools. Anything missing is listed with how to get it."
+        subtitle="Embodent runs your agents with a few free tools. Anything missing is listed with how to get it."
       />
 
       {reason && (
-        <Notice tone="warning" title="Quorate needs something on this Mac first">
+        <Notice tone="warning" title="Embodent needs something on this Mac first">
           {reason}
         </Notice>
       )}

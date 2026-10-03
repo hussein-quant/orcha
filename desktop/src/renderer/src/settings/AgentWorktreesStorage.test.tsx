@@ -71,7 +71,7 @@ describe('Settings › Storage › Agent worktrees', () => {
     expect(out).toHaveTextContent('save output to the task, then remove')
     expect(out).toHaveTextContent('qa-runs/report.md')
     expect(within(preview).getByRole('region', { name: 'Unmerged commits' })).toHaveTextContent('kept unless ticked')
-    expect(within(preview).getByRole('region', { name: 'In use / not Quorate' })).toHaveTextContent('skipped')
+    expect(within(preview).getByRole('region', { name: 'In use / not Embodent' })).toHaveTextContent('skipped')
     expect(api.storageCleanWorktrees).toHaveBeenCalledTimes(1) // nothing ran yet
     await userEvent.click(within(preview).getByRole('checkbox', { name: 'Remove wk-Ferry-9, keep branch' }))
     await userEvent.click(within(preview).getByRole('button', { name: /^Clean up 4 · free 2\.3 GB$/ }))

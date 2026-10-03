@@ -1,6 +1,6 @@
 -- PLAN USAGE SNAPSHOTS (migration 069).
 --
--- The Quorate desktop app computes Claude / Codex plan limits locally (Keychain OAuth +
+-- The Embodent desktop app computes Claude / Codex plan limits locally (Keychain OAuth +
 -- Anthropic usage API; Codex logs). A phone can do neither, so the desktop PUBLISHES a
 -- privacy-safe snapshot to each portal it is connected to, and the mobile apps READ it.
 -- portal_backend/plan_usage_routes.py is the source of truth (PUT/GET /api/plan-usage).

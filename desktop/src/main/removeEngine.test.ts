@@ -226,7 +226,7 @@ describe('removeProject — command construction', () => {
   })
 })
 
-describe('removeProject — Remove Quorate’s files', () => {
+describe('removeProject — Remove Embodent’s files', () => {
   const WT = `${FOLDER}/.orcha-worktrees`
   const gitRun = (opts: { dirty?: string[]; unmerged?: string[] } = {}) =>
     vi.fn(async (cmd: string, args: string[]) => {
@@ -253,7 +253,7 @@ describe('removeProject — Remove Quorate’s files', () => {
       return { stdout: '' }
     })
 
-  it('removes Quorate files only; keeps the user’s code, own commands/skills, CLAUDE.md and hooks', async () => {
+  it('removes Embodent files only; keeps the user’s code, own commands/skills, CLAUDE.md and hooks', async () => {
     const run = gitRun({ dirty: ['task-dirty'], unmerged: ['orcha/task-wip'] })
     const { d, mem } = deps({ run })
     const res = await removeProject('orcha-acme', 'acme', FOLDER, { deleteData: false, removeFiles: true }, d)
@@ -282,7 +282,7 @@ describe('removeProject — Remove Quorate’s files', () => {
     )
   })
 
-  it('deletes settings.json only when it held nothing but Quorate hooks', async () => {
+  it('deletes settings.json only when it held nothing but Embodent hooks', async () => {
     const files = {
       ...projectFiles(),
       [`${FOLDER}/.claude/settings.json`]: JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: 'command', command: 'orcha snapshot' }] }] } })
@@ -304,7 +304,7 @@ describe('planRemoval', () => {
     expect(plan.images).toEqual([{ name: 'orcha-acme-portal:latest', size: 24_900_000 }])
     expect(plan.volumes).toEqual([{ name: 'orcha-acme_pgdata', size: 66_800_000 }])
     expect(plan.folderMatches).toBe(true)
-    expect(plan.folderFiles).toEqual(expect.arrayContaining(['.orcha', '.claude/orcha.json', '.claude/settings.json (Quorate hooks only)']))
+    expect(plan.folderFiles).toEqual(expect.arrayContaining(['.orcha', '.claude/orcha.json', '.claude/settings.json (Embodent hooks only)']))
     expect(plan.daemonPidFiles).toContain(`${HOME}/.orcha/notifier-cid-acme.pid`)
   })
 
@@ -331,7 +331,7 @@ describe('removeProject — agent worktrees through the CLI classification', () 
     path: `${WT}/${name}`, name, branch: `orcha/${name}`, kind: 'wake', agent: 'Atlas', state, size_bytes: 1000, ...extra
   })
   const ROWS = [
-    row('wk-scaffold', 'clean', { reason: 'only Quorate scaffolding — safe to remove' }),
+    row('wk-scaffold', 'clean', { reason: 'only Embodent scaffolding — safe to remove' }),
     row('task-qa', 'has-output', { output: ['qa-runs/report.md'] }),
     row('wk-ahead', 'unmerged', { unmerged_commits: 2 }),
     row('live-Atlas', 'in-use'),
@@ -370,7 +370,7 @@ describe('removeProject — agent worktrees through the CLI classification', () 
     expect(res.warnings).toEqual(expect.arrayContaining([
       expect.stringMatching(/wk-ahead.*orcha\/wk-ahead has commits that aren't merged/),
       expect.stringMatching(/live-Atlas.*still running/),
-      expect.stringMatching(/truck.*isn't a Quorate worktree/)
+      expect.stringMatching(/truck.*isn't a Embodent worktree/)
     ]))
     expect(res.warnings.some((w) => /uncommitted/.test(w))).toBe(false)
     // saved agent output survives the .orcha removal

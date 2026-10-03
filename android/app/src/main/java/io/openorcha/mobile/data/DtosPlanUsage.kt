@@ -1,6 +1,6 @@
 package io.openorcha.mobile.data
 
-/* Plan usage slice DTOs: the snapshot the Quorate desktop app publishes to each portal
+/* Plan usage slice DTOs: the snapshot the Embodent desktop app publishes to each portal
    (GET /api/plan-usage). Plan names, window labels, used %, reset times and today's
    tokens/cost only: no credentials ever travel in it. Every field is tolerant. */
 

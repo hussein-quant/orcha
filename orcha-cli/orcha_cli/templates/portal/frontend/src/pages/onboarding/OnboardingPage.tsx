@@ -454,7 +454,7 @@ function StepWelcome({ f }: { f: Flow }) {
   const projectName = f.snap?.container?.name || null;
   return (
     <div className="ob welcome">
-      <StepHead title={known && projectName ? <>Join {projectName}</> : "Welcome to Quorate"}>
+      <StepHead title={known && projectName ? <>Join {projectName}</> : "Welcome to Embodent"}>
         {known
           ? <>Signed in as <b>{f.accountName}</b>. Confirm the name you'll act under here.</>
           : "Agents do the work; nothing ships on their say-so."}

@@ -1174,7 +1174,7 @@ export function CodeSpacePage() {
               title={"Can't reach " + cantReachRepo}
               body={cantReachDetail
                 ? <>{cantReachDetail.charAt(0).toUpperCase() + cantReachDetail.slice(1)}.</>
-                : <>Quorate has no GitHub token that can read this repository. Add or check one in Settings › Integrations.</>}
+                : <>Embodent has no GitHub token that can read this repository. Add or check one in Settings › Integrations.</>}
               action={<ButtonLink variant="secondary" size="sm" href={withCid("/settings", cid) + "#tab=github-access"}>Check GitHub access</ButtonLink>}
             />
           </div>
@@ -1185,7 +1185,7 @@ export function CodeSpacePage() {
               title={"Can't reach " + (unreachableName || "this project")}
               body={
                 <>
-                  Quorate couldn&#39;t load this project&#39;s code. It may still be starting, or its database may be down.
+                  Embodent couldn&#39;t load this project&#39;s code. It may still be starting, or its database may be down.
                   {/* the Shell's stale bar already carries Details + Retry for a
                       failed snapshot — never the same fact twice (D12) */}
                   {unreachableDetail && !snapError ? (

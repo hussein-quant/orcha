@@ -222,7 +222,7 @@ override suspend fun connectWithToken(rawBaseUrl: String, accessToken: String?):
         } else {
             api.listContainers(baseUrl).containers
         }
-        if (listed.isEmpty()) error("No Quorate container was found at this address.")
+        if (listed.isEmpty()) error("No Embodent container was found at this address.")
         // The QR is a capability for ONE project (iOS `payload.containerId` parity):
         // select it as primary; manual entry has no id and takes the first. Taking
         // `first()` unconditionally made scanning a second project on the same box
@@ -251,7 +251,7 @@ override suspend fun connectWithToken(rawBaseUrl: String, accessToken: String?):
             val humans = snapshot.agents.filter { it.kind == "human" }
             val human = humans.firstOrNull { it.id == pairedHumanId } ?: humans.singleOrNull()
             // One pairing stores EVERY project the portal lists (iOS `for dto in listed`
-            // parity — "Every project on a paired Quorate appears here automatically"),
+            // parity — "Every project on a paired Embodent appears here automatically"),
             // preserving local edits (rename, remote, resolved human) on re-pair.
             // Primary upserts last so it sorts to the top of the containers list.
             val existingById = _uiState.value.containers.associateBy { it.id }
@@ -298,7 +298,7 @@ override suspend fun connectWithToken(rawBaseUrl: String, accessToken: String?):
                         connectNeedsToken = true,
                         connectDraft = rawBaseUrl,
                         error = if (trimmedToken == null) {
-                            "This Quorate is protected — sign in with GitHub or enter its access token to connect."
+                            "This Embodent is protected — sign in with GitHub or enter its access token to connect."
                         } else {
                             "That access token wasn't accepted. Check it and try again."
                         },

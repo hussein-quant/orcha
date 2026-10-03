@@ -218,11 +218,33 @@ describe('strip tab menu (SessionPanel)', () => {
     expect(pinned.title).toMatch(/^tab 3 \(pinned\)/)
     expect(pinned.querySelector('[data-testid="tab-color-dot"]')).not.toBeNull()
     expect(within(pinned).queryByRole('button')).toBeNull()
-    // an unpinned coloured tab gets the 2px underline, not a fill
+    // an unpinned coloured tab gets the same dot before its title, never a coloured line
     const coloured = stripTab('t2')
-    const marker = coloured.querySelector<HTMLElement>('[data-testid="tab-color-marker"]')!
-    expect(marker.className).toMatch(/h-\[2px\]/)
+    expect(coloured.querySelector('[data-testid="tab-color-dot"]')).not.toBeNull()
+    expect(coloured.querySelector('[data-testid="tab-color-marker"]')).toBeNull()
     expect(coloured.textContent).toBe('tab 2')
+  })
+
+  it('tab colour is a dot (none when unset); the only underline is the neutral one on the active tab', async () => {
+    const user = userEvent.setup()
+    let s = tabs(3)
+    s = tabsReducer(s, { type: 'color', key: 't1', color: 'blue' })
+    render(<Harness initial={s} />)
+    const dot = stripTab('t1').querySelector<HTMLElement>('[data-testid="tab-color-dot"]')!
+    expect(dot).not.toBeNull()
+    expect(dot.className).toMatch(/h-1\.5 w-1\.5/)
+    expect(dot.style.background).not.toBe('')
+    expect(stripTab('t2').querySelector('[data-testid="tab-color-dot"]')).toBeNull()
+    const underlines = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>('[data-testid="tab-active-underline"]')]
+    const selected = (): HTMLElement => screen.getAllByRole('tab').find((t) => t.getAttribute('aria-selected') === 'true')!
+    expect(underlines()).toHaveLength(1)
+    expect(selected().contains(underlines()[0])).toBe(true)
+    expect(underlines()[0].className).toMatch(/bg-text-3/)
+    expect(underlines()[0].style.background).toBe('')
+    await user.click(stripTab('t1'))
+    expect(stripTab('t1')).toHaveAttribute('aria-selected', 'true')
+    expect(underlines()).toHaveLength(1)
+    expect(stripTab('t1').contains(underlines()[0])).toBe(true)
   })
 
   it('Close Others keeps pinned tabs and asks once when processes are running', async () => {

@@ -40,7 +40,7 @@ describe("UpdateNotice", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
-    expect(screen.getByTestId("update-notice")).toHaveTextContent("Quorate was updated");
+    expect(screen.getByTestId("update-notice")).toHaveTextContent("Embodent was updated");
   });
 
   it("stays hidden when the bundle is unchanged, on a dev server, or when offline", async () => {

@@ -443,7 +443,7 @@ struct GitHubPersonMeta: View {
     }
 }
 
-/// "Tracked in Quorate" — links the started task when there is one; otherwise
+/// "Tracked in Embodent" — links the started task when there is one; otherwise
 /// offers Start (the same agent picker as the toolbar).
 struct GitHubTrackedCard: View {
     @Environment(\.palette) private var p
@@ -456,7 +456,7 @@ struct GitHubTrackedCard: View {
             BrandMark(size: 28)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(startedTaskId == nil ? "Not tracked in Quorate" : "Tracked in Quorate")
+                Text(startedTaskId == nil ? "Not tracked in Embodent" : "Tracked in Embodent")
                     .ltype(.bodyEmph)
                     .foregroundStyle(p.text)
                 Text(startedTaskId == nil ? "Start a task to hand this to an agent." : "A task is following this item.")

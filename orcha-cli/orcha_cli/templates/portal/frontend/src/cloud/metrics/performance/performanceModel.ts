@@ -75,7 +75,7 @@ async function readJSON<T>(r: Response): Promise<T> {
   }
 }
 
-export const UNEXPECTED_RESPONSE = "Unexpected response from the server. Reload the page, or check that Quorate is reachable.";
+export const UNEXPECTED_RESPONSE = "Unexpected response from the server. Reload the page, or check that Embodent is reachable.";
 
 /** 401/403: the page itself already explains access (e.g. "not a member") — a performance
  * surface hides rather than repeat that with a Retry that cannot help (AP-30). */

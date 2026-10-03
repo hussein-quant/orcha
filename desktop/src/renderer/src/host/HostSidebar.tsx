@@ -718,7 +718,7 @@ export default function HostSidebar(props: HostSidebarProps) {
     >
       <div className="flex h-12 shrink-0 items-center gap-2 pl-4 pr-2">
         <OrchaMark size={18} className="shrink-0" />
-        <span className="text-[14px] font-semibold tracking-tight">Quorate</span>
+        <span className="text-[14px] font-semibold tracking-tight">Embodent</span>
         <button
           type="button"
           data-nav-item

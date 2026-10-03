@@ -42,7 +42,7 @@ export default function FolderStep({
     try {
       onPicked(c, await window.orchaDesktop.inspectFolder(c.folder))
     } catch {
-      setError('Quorate couldn’t read that folder. Check its permissions, or choose another one.')
+      setError('Embodent couldn’t read that folder. Check its permissions, or choose another one.')
     } finally {
       setInspecting(false)
     }
@@ -65,7 +65,7 @@ export default function FolderStep({
             <Folder className="h-5 w-5" />
           </span>
         )}
-        {!choice && <span className="ob-meta">Your code stays where it is — Quorate adds a small config next to it.</span>}
+        {!choice && <span className="ob-meta">Your code stays where it is — Embodent adds a small config next to it.</span>}
         <div className="flex flex-wrap justify-center gap-2">
         <ObButton onClick={() => void choose('existing')} disabled={inspecting}>
           <Folder className="h-3.5 w-3.5" aria-hidden="true" />
@@ -123,7 +123,7 @@ export default function FolderStep({
         </Notice>
       )}
       {state && choice && !inspecting && !state.writable && (
-        <Notice tone="danger" title="Quorate can’t write to this folder">
+        <Notice tone="danger" title="Embodent can’t write to this folder">
           Choose a folder you own, or change this folder’s permissions and choose it again.
         </Notice>
       )}

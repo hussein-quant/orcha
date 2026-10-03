@@ -137,7 +137,7 @@ export interface IconSaveResult { ok: boolean; message?: string }
 
 function iconSaveMessage(status: number): string {
   if (status === 401 || status === 403) return "You don't have permission to change this project's icon.";
-  if (status === 404 || status === 405) return "This project's Quorate doesn't support shared icons yet. Update it to change icons.";
+  if (status === 404 || status === 405) return "This project's Embodent doesn't support shared icons yet. Update it to change icons.";
   if (status === 422) return "That icon can't be used. Pick another one.";
   return "Couldn't save the icon. Try again.";
 }
@@ -169,7 +169,7 @@ export function saveProjectIconResult(cid: string, icon: ProjectIconValue | null
     return { ok: true };
   }).catch((): IconSaveResult => {
     rollback();
-    return { ok: false, message: "Couldn't reach Quorate. Check your connection and try again." };
+    return { ok: false, message: "Couldn't reach Embodent. Check your connection and try again." };
   }).finally(() => {
     const n = (_pending.get(cid) || 1) - 1;
     if (n > 0) _pending.set(cid, n); else _pending.delete(cid);

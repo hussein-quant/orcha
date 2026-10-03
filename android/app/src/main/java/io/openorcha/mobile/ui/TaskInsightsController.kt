@@ -127,7 +127,7 @@ class TaskInsightsController(private val scope: CoroutineScope, private val api:
 
     private fun act(container: StoredContainer, success: String?, onDone: () -> Unit, block: suspend (String) -> Unit) {
         val actor = container.humanAgentId ?: run {
-            _state.update { it.copy(actionError = "Pairing is missing the human identity. Reconnect this Quorate first.") }
+            _state.update { it.copy(actionError = "Pairing is missing the human identity. Reconnect this Embodent first.") }
             return
         }
         scope.launch {
@@ -151,7 +151,7 @@ class TaskInsightsController(private val scope: CoroutineScope, private val api:
 
         /** The server's own `detail` (FastAPI) when it sent one, else a plain fallback. */
         internal suspend fun errorText(e: Throwable): String {
-            val resp = (e as? ResponseException)?.response ?: return "Couldn't reach Quorate. Check the connection and try again."
+            val resp = (e as? ResponseException)?.response ?: return "Couldn't reach Embodent. Check the connection and try again."
             val detail = runCatching {
                 json.parseToJsonElement(resp.bodyAsText()).jsonObject["detail"]?.jsonPrimitive?.content
             }.getOrNull()
@@ -161,7 +161,7 @@ class TaskInsightsController(private val scope: CoroutineScope, private val api:
         internal fun detailText(status: Int, detail: String?): String = when {
             !detail.isNullOrBlank() -> detail.replaceFirstChar { it.uppercase() }
             status == 403 -> "You don't have permission to do that on this project."
-            status == 404 -> "This Quorate server doesn't support that yet."
+            status == 404 -> "This Embodent server doesn't support that yet."
             else -> "Something went wrong (HTTP $status)."
         }
     }

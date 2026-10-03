@@ -170,7 +170,7 @@ export function changedSummary(r: ConfigRevision): string {
 
 /** Who did it, truthfully: an alias, or "Unattributed" (no identity was recorded). */
 export function actorName(r: ConfigRevision): string {
-  if (r.kind === "initial") return "Quorate";
+  if (r.kind === "initial") return "Embodent";
   return r.actor?.alias || "Unattributed";
 }
 

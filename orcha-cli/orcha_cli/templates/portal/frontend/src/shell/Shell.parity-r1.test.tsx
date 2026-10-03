@@ -155,8 +155,8 @@ describe("a 403 / 404 snapshot is not an outage (SH-123 / SH-077 / e2e-scope-liv
     expect(staleBanner("forbidden", false, null, null)).toMatchObject({ msg: expect.stringMatching(/not a member/), retry: false, toProjects: true });
     expect(staleBanner("not_found", false, null, null)).toMatchObject({ msg: expect.stringMatching(/^Project not found/), retry: false, toProjects: true });
     expect(staleBanner("server", false, null, "billing")).toMatchObject({ msg: "billing is unreachable · no project data loaded", retry: true });
-    expect(staleBanner("server", false, null, null).msg).toBe("Can't reach Quorate · no project data loaded");
-    expect(staleBanner("network", true, "10:13", "billing").msg).toBe("Can't reach Quorate · showing data from 10:13");
+    expect(staleBanner("server", false, null, null).msg).toBe("Can't reach Embodent · no project data loaded");
+    expect(staleBanner("network", true, "10:13", "billing").msg).toBe("Can't reach Embodent · showing data from 10:13");
   });
 
   it("details never show the raw endpoint or container id", () => {
@@ -178,7 +178,7 @@ describe("a 403 / 404 snapshot is not an outage (SH-123 / SH-077 / e2e-scope-liv
     mount();
     const bar = await screen.findByText(/You're not a member of this project/, {}, { timeout: 5000 });
     const alert = bar.closest(".v2-stalebar")!;
-    expect(alert.textContent).not.toMatch(/Can't reach Quorate/);
+    expect(alert.textContent).not.toMatch(/Can't reach Embodent/);
     expect(alert.querySelector('a[href$="/projects"]')?.textContent).toBe("All projects");
     expect(alert.textContent).not.toMatch(/Retry/);
     expect(document.querySelector(".v2-conn.is-offline")).toBeNull();

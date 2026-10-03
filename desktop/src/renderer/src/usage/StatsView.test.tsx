@@ -52,7 +52,7 @@ describe('StatsView', () => {
     expect(within(screen.getByTestId('usage-limits-claude')).getByText(/Keychain/)).toBeTruthy()
   })
 
-  it('Quorate projects list each stack’s est. spend from its metrics API', async () => {
+  it('Embodent projects list each stack’s est. spend from its metrics API', async () => {
     const portalGet = vi.fn().mockResolvedValue({ totals: { runs: 12, est_cost_usd: 4.2, tokens_in: 1000, tokens_out: 500, runs_with_cost: 10 } })
     render(
       <StatsView

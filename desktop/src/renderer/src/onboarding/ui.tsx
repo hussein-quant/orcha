@@ -197,7 +197,7 @@ export function Avatar({ name, size = 24, badge }: { name: string; size?: 16 | 2
   )
 }
 
-/** The Quorate orca mark — shared with the sidebar / tray headers (components/BrandMark; OrchaMark is its compat alias). */
+/** The Embodent mark — shared with the sidebar / tray headers (components/BrandMark; OrchaMark is its compat alias). */
 export { OrchaMark } from '../components/OrchaMark'
 
 /** Render `backtick` spans as inline code — CLI warnings arrive as plain strings that use

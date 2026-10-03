@@ -478,7 +478,7 @@ function ProjectsHeader({ onNew, onRefresh, loading, fetchedAt }: {
   onNew: () => void; onRefresh: () => void; loading: boolean; fetchedAt: number | null;
 }) {
   const chrome = useChrome();
-  useEffect(() => { document.title = "All projects · Quorate"; }, []);
+  useEffect(() => { document.title = "All projects · Embodent"; }, []);
   const updated = fetchedAt ? new Date(fetchedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
   return (
     <header className="v2-header topbar proj-head" id="projTop">
@@ -621,7 +621,7 @@ export function ProjectsPage() {
         ) : !list.length ? (
           <EmptyState
             title="No projects yet"
-            body="You're not a member of any project on this Quorate — create one, or ask an owner for an invite."
+            body="You're not a member of any project on this Embodent — create one, or ask an owner for an invite."
             action={<>
               <Button variant="secondary" onClick={() => setCreating(true)}>New project</Button>
               {signedIn ? <ButtonLink variant="ghost" href={SIGN_OUT_HREF} className="proj-signout">Sign out</ButtonLink> : null}

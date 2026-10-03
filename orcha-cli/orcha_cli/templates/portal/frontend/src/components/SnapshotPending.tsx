@@ -37,7 +37,7 @@ export function SnapshotPending({ lines = 6, label, what = "project data" }: { l
       <EmptyState
         icon="alert"
         title={`Couldn't load ${what}`}
-        body="The Quorate backend did not answer. Nothing is shown rather than guesses."
+        body="The Embodent backend did not answer. Nothing is shown rather than guesses."
         action={<Button variant="secondary" onClick={() => void refresh()}>Retry</Button>}
       />
     );

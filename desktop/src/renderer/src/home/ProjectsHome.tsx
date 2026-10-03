@@ -342,7 +342,7 @@ export default function ProjectsHome(props: ProjectsHomeProps) {
             <LayoutGrid className="h-6 w-6 text-text-3" aria-hidden="true" />
             <div className="text-[15px] font-semibold text-text">No projects yet</div>
             <p className="max-w-sm text-[13px] text-text-3">
-              Point Quorate at a folder or a GitHub repo and it sets up a local stack for your agents.
+              Point Embodent at a folder or a GitHub repo and it sets up a local stack for your agents.
             </p>
           </div>
         )}

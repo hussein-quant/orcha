@@ -6,7 +6,7 @@ import Foundation
 /// `desktop/src/shared/usage.ts` and `renderer/src/usage/parts.tsx`.
 enum PlanUsageUx {
 
-    static let emptyText = "Plan usage appears when the Quorate desktop app is running on your computer."
+    static let emptyText = "Plan usage appears when the Embodent desktop app is running on your computer."
     /// A snapshot older than this shows a muted "may be out of date".
     static let staleAfter: TimeInterval = 30 * 60
     static let pollInterval: Duration = .seconds(120)

@@ -7,7 +7,7 @@ task's definition of done and reports a verdict for each line, with screenshots 
 
 Neither one completes a task. A human still accepts the work at the verification gate. The one
 exception to "evidence only" is the opt-in **auto-fix loop** (section 9): when an automatic Verdikt
-run fails, Quorate can send the task back to its agent (as the system identity `system:verdikt`)
+run fails, Embodent can send the task back to its agent (as the system identity `system:verdikt`)
 until Verdikt passes or a stop condition fires. Even then a pass only hands the task to a person.
 
 ## 1. The evidence pack
@@ -390,7 +390,7 @@ run.
 These targets match Verdikt's web routes (`web/src/app/(app)/runs/[id]`, which reads
 `?scenario=`, and `projects/[slug]`). Verdikt's `/scenarios` page shows the scenarios of the
 project selected in its `qa_app` cookie and doesn't read `?scenario=`. That means a scenario link
-can't be made reliable from outside, so before a run Quorate opens the project instead.
+can't be made reliable from outside, so before a run Embodent opens the project instead.
 
 In the UI:
 - The evidence pack's Verdikt section has **Open in Verdikt**.
@@ -443,7 +443,7 @@ task), or switching Verdikt to `manual`, ends any running loop as "turned off".
      `max_attempts`). That is the normal rework directive. It always wakes the agent through the
      event bus. The message, failures first:
      ```
-     Verdikt failed this task on attempt 1 of 3. Quorate sent it back to you automatically … mark the
+     Verdikt failed this task on attempt 1 of 3. Embodent sent it back to you automatically … mark the
      task done again. Verdikt will check it again (2 more checks before a person takes over).
 
      Failed criteria:

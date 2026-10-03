@@ -14,7 +14,7 @@ def _checkpoint_task_worktree(
     compat = sys.modules["orcha_cli.notifier"]
     from orcha_cli.notifier_worktree_cleanup import SCAFFOLD_UNSTAGE
 
-    # stage real work, then drop Quorate's scaffolding (see SCAFFOLD_UNSTAGE for why this is
+    # stage real work, then drop Embodent's scaffolding (see SCAFFOLD_UNSTAGE for why this is
     # not done with :(exclude) pathspecs on `git add`)
     return_code, _ = compat._run_git(["add", "-A", "--", "."], cwd=worktree)
     if return_code != 0:

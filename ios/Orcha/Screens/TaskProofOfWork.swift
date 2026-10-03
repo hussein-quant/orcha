@@ -102,7 +102,7 @@ struct TaskProofOfWork: View {
 
     private static func unavailableText(_ error: Error) -> String {
         if let api = error as? OrchaApiError, api.status == 404 {
-            return "Proof of work isn't available on this Quorate yet."
+            return "Proof of work isn't available on this Embodent yet."
         }
         return "Couldn't gather the evidence."
     }

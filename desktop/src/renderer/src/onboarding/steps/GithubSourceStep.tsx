@@ -139,7 +139,7 @@ export default function GithubSourceStep({
       <StepHeader
         icon={<GitBranch className="h-4 w-4" aria-hidden="true" />}
         title="Clone from GitHub"
-        subtitle="Quorate clones the repository to this Mac and sets it up there." />
+        subtitle="Embodent clones the repository to this Mac and sets it up there." />
 
       {checkingAuth ? (
         <div className="flex items-center gap-2 text-[13px] text-text-2">

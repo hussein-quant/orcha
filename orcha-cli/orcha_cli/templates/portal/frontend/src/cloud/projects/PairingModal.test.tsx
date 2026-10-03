@@ -23,7 +23,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe("PairingPanel", () => {
   it("a warning has a Check again button that re-requests pairing", async () => {
     const calls = stub([
-      { status: 409, body: { detail: { reachable: false, reason: "no_lan_address", title: "Phones can't reach this Quorate yet", message: "No LAN address" } } },
+      { status: 409, body: { detail: { reachable: false, reason: "no_lan_address", title: "Phones can't reach this Embodent yet", message: "No LAN address" } } },
       { status: 200, body: { baseUrl: "http://10.0.0.2:8765", shortCode: "ABC-123", expiresAt: new Date(Date.now() + 5 * 60e3).toISOString(), humanAgentAlias: "kedar" } },
     ]);
     render(<PairingPanel cid="c1" identity={null} />);

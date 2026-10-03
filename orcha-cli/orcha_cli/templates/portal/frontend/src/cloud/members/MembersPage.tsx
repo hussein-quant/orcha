@@ -127,7 +127,7 @@ export function memErrText(res: { status: number; body: { detail?: unknown } | n
     return (d as { message: string }).message;
   }
   if (!res.status) return "Couldn't reach the server.";
-  if (res.status >= 500) return "Quorate hit an error — try again.";
+  if (res.status >= 500) return "Embodent hit an error — try again.";
   return "The server refused the change.";
 }
 

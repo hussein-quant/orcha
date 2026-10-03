@@ -114,7 +114,7 @@ describe("Codex exec --json (newer item.* shape)", () => {
     expect(logRowView(ws).text).toBe("WebSearch · vitest fake timers");
   });
 
-  it("a command that calls the Quorate API is a self-action, as for Claude", () => {
+  it("a command that calls the Embodent API is a self-action, as for Claude", () => {
     const [r] = rows({ type: "item.started", item: { id: "c", type: "command_execution", command: "bash -lc 'curl -X POST http://x:8000/api/tasks/t1/done'", status: "in_progress" } });
     expect(r.type).toBe("decision");
     expect(r.label).toBe("orcha-action");

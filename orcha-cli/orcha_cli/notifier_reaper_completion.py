@@ -112,7 +112,7 @@ def handle_exited(
         )
         _release_worker(api_base, aid, worker, lane, "released", services)
     # Agent-worktree housekeeping (mig 067): a clean wake worktree the legacy teardown kept only
-    # because of Quorate's own scaffolding goes now; a has-output one gets its files attached
+    # because of Embodent's own scaffolding goes now; a has-output one gets its files attached
     # to the task. Never raises; a no-op when auto clean-up is off.
     notifier_worktree_gc.after_run(api_base, worker, live_workers, quiet=quiet)
     if proc.returncode == 0:

@@ -50,7 +50,7 @@ object ResolveUndoStore {
                 .onSuccess { onDone() }
                 .onFailure {
                     resolved.remove(requestId)
-                    failure = requestId to "Couldn't resolve this request — Quorate couldn't be reached. It's still open."
+                    failure = requestId to "Couldn't resolve this request — Embodent couldn't be reached. It's still open."
                 }
         }
     }

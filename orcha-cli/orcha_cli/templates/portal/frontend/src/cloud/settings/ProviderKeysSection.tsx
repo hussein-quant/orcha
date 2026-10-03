@@ -239,7 +239,7 @@ function CloudProviderKeyRows({ reload, onKeys, defaults }: ProviderRowsSlot) {
         name={k.name}
         detail={<KeyDetail mode={k.mode} masked={k.masked} />}
         detailTone={k.mode === "none" ? "warn" : undefined}
-        badge={defaults.has(p) ? <DefaultBadge tip="The shipped default provider for Quorate's helpers" /> : null}
+        badge={defaults.has(p) ? <DefaultBadge tip="The shipped default provider for Embodent's helpers" /> : null}
         docsHref={PROVIDER_DOCS[p] || null}
       >
         <div className="pk-card" data-provider={p}>

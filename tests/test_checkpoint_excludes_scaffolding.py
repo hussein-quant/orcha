@@ -1,4 +1,4 @@
-"""Checkpoint commits must never sweep in Quorate scaffolding (a committed wake log or .orcha
+"""Checkpoint commits must never sweep in Embodent scaffolding (a committed wake log or .orcha
 overlay makes the task branch look unmerged, so cleanup keeps it forever) — and must still
 checkpoint real work when some scaffolding is gitignored (`:(exclude)` pathspecs on
 `git add` made it refuse and stage nothing)."""

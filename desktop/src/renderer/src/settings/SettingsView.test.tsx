@@ -10,7 +10,7 @@ describe('SettingsView › Notifications', () => {
     expect(screen.getByTestId('settings-nav-agents')).toHaveTextContent('Agents')
     expect(screen.getByTestId('settings-nav-notifications')).toHaveAttribute('aria-current', 'page')
     const section = screen.getByTestId('settings-notifications')
-    expect(section).toHaveTextContent('Desktop alerts follow your Quorate notification settings')
+    expect(section).toHaveTextContent('Desktop alerts follow your Embodent notification settings')
     expect(section).toHaveTextContent('anything that needs you still shows in Needs you')
     expect(section).toHaveTextContent('Opens Settings › Notifications in todo-app.')
     expect(NOTIFICATION_SETTINGS_PATH).toBe('/settings#tab=notifications')

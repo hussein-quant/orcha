@@ -210,7 +210,7 @@ export function isSafeFolder(folder: string | null): folder is string {
   )
 }
 
-/** The `orcha …` hook commands Quorate/the CLI registers (orcha_cli/cli_hooks.py HOOKS and
+/** The `orcha …` hook commands Embodent/the CLI registers (orcha_cli/cli_hooks.py HOOKS and
  *  CODEX_HOOKS). Exact strings — a user's own hook is never matched, even one that calls
  *  `orcha` with other arguments. */
 export const MANAGED_HOOK_COMMANDS: ReadonlySet<string> = new Set([
@@ -235,7 +235,7 @@ export type HookEditResult =
   /** Not JSON / not an object: leave the file exactly as it is. */
   | { kind: 'unparseable' }
 
-/** Remove ONLY Quorate-managed hook entries from a Claude `settings.json` / Codex
+/** Remove ONLY Embodent-managed hook entries from a Claude `settings.json` / Codex
  *  `hooks.json` (parsed JSON, never regex). User hooks, matchers, other keys and ordering are
  *  kept; an entry whose every hook was managed is dropped, then an emptied event, then an
  *  emptied `hooks` object. */
@@ -285,7 +285,7 @@ export function stripManagedHooks(text: string): HookEditResult {
   return { kind: 'write', text: `${JSON.stringify(next, null, 2)}\n`, removed }
 }
 
-/** Quorate's own files inside a project folder (relative paths). Directories are removed
+/** Embodent's own files inside a project folder (relative paths). Directories are removed
  *  recursively, files singly. The user's code, their own `.claude` content and `.git` are
  *  never listed. `.orcha-worktrees/` is handled separately (git worktree remove). */
 export const ORCHA_DIRS = ['.orcha', '.claude/orcha-tabs', '.claude/.orcha-wakes', '.claude/.orcha-attachments', '.claude/.orcha-file-locks']
@@ -335,13 +335,13 @@ export function parseWorktrees(stdout: string): WorktreeEntry[] {
   return out
 }
 
-/** Quorate's agent worktrees: those living directly under `<folder>/.orcha-worktrees/`. */
+/** Embodent's agent worktrees: those living directly under `<folder>/.orcha-worktrees/`. */
 export function quorateWorktrees(entries: WorktreeEntry[], folder: string): WorktreeEntry[] {
   const root = `${folder.replace(/\/+$/, '')}/.orcha-worktrees/`
   return entries.filter((e) => e.path.startsWith(root) && !e.path.slice(root.length).includes('/'))
 }
 
-/** A branch Quorate created for agent work (`orcha/<kind>-<slug>`). */
+/** A branch Embodent created for agent work (`orcha/<kind>-<slug>`). */
 export function isQuorateBranch(branch: string | null): branch is string {
   return typeof branch === 'string' && /^orcha\/[A-Za-z0-9._-]+$/.test(branch)
 }

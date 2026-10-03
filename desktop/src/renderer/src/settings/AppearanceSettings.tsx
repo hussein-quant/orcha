@@ -89,7 +89,7 @@ export default function AppearanceSettings({ api = window.orchaDesktop?.theme }:
     <section data-testid="settings-appearance">
       <h2 className="text-[24px] font-semibold tracking-[-0.01em] text-text">Appearance</h2>
       <p className="mb-6 mt-1 text-[13px] text-text-3">
-        How Quorate looks on this Mac — the app, the menu-bar popover and every project’s portal inside it.
+        How Embodent looks on this Mac — the app, the menu-bar popover and every project’s portal inside it.
       </p>
       <div className="flex flex-col gap-4 rounded-[10px] border border-border px-4 py-4">
         <div className="min-w-0">

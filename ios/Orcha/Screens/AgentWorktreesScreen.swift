@@ -59,7 +59,7 @@ struct AgentWorktreesScreen: View {
             Button("Clean up \(cleanCount)") { Task { await cleanup() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Only Quorate scaffolding is in them. The worktrees and their branches are removed. Worktrees with output or unmerged commits are left alone.")
+            Text("Only Embodent scaffolding is in them. The worktrees and their branches are removed. Worktrees with output or unmerged commits are left alone.")
         }
     }
 

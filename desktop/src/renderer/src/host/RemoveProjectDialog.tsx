@@ -46,10 +46,10 @@ const sized = (label: string, size: number | null | undefined): string => {
   return s ? `${label} · ${s}` : label
 }
 
-/** "Remove project…" confirmation (Linear-style, danger tone). Default = Remove from Quorate:
+/** "Remove project…" confirmation (Linear-style, danger tone). Default = Remove from Embodent:
  *  containers, agent sandboxes, network, portal image and background helpers go; the data and
  *  every file stay. "Also delete all project data" needs the exact project name typed;
- *  "Remove Quorate's files from the folder" is a separate opt-in. Shows progress while it
+ *  "Remove Embodent's files from the folder" is a separate opt-in. Shows progress while it
  *  runs and a plain-words error with Try again. Host dialog → the native portal view is hidden
  *  while it is open; Escape cancels (not while running); focus starts on Cancel. */
 export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
@@ -93,7 +93,7 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
   const folder = plan?.folder ?? null
   const filesAllowed = !!plan && !!folder && plan.folderMatches
   const containerCount = (plan?.containers.length ?? 0) + (plan?.sandboxes.length ?? 0)
-  // Agent worktrees, as the CLI classified them (Quorate's scaffolding never counts as a change).
+  // Agent worktrees, as the CLI classified them (Embodent's scaffolding never counts as a change).
   const wts = plan?.worktrees ?? []
   const outputWts = wts.filter((w) => w.state === 'has-output')
   const keptWts = wts.filter((w) => w.state === 'unmerged' || w.state === 'in-use' || w.state === 'not-quorate')
@@ -120,7 +120,7 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
           </h2>
           <div id={`${ids}-body`} className="mt-2 flex flex-col gap-3 text-[13px] leading-relaxed text-text-2">
             <p>
-              Quorate stops this project and takes it out of the sidebar.{' '}
+              Embodent stops this project and takes it out of the sidebar.{' '}
               {deleteData ? (
                 <span className="text-text">Your code is kept; the project’s data is deleted.</span>
               ) : (
@@ -161,7 +161,7 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
                   )}
                   {removeFiles && filesAllowed && (
                     <Row icon="remove" testId="remove-files-row">
-                      Quorate’s files in the folder{goingWts > 0 ? ` and ${goingWts} agent worktree${goingWts === 1 ? '' : 's'}` : ''}
+                      Embodent’s files in the folder{goingWts > 0 ? ` and ${goingWts} agent worktree${goingWts === 1 ? '' : 's'}` : ''}
                     </Row>
                   )}
                   {removeFiles && filesAllowed && saveOutput && outputWts.length > 0 && (
@@ -183,7 +183,7 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
                     )}
                   </Row>
                   {!deleteData && <Row icon="keep" testId="keep-data-row">{sized('Project data: tasks, agents, history', dataSize)}</Row>}
-                  {!removeFiles && <Row icon="keep">Quorate’s files in the folder</Row>}
+                  {!removeFiles && <Row icon="keep">Embodent’s files in the folder</Row>}
                   {removeFiles && filesAllowed && keptWts.length > 0 && (
                     <Row icon="keep" testId="keep-worktrees-row">
                       {keptWts.length} agent worktree{keptWts.length === 1 ? '' : 's'} with unmerged commits or in use
@@ -256,13 +256,13 @@ export default function RemoveProjectDialog(props: RemoveProjectDialogProps) {
                   aria-describedby={`${ids}-files-hint`}
                 />
                 <span>
-                  <span className="font-medium text-text">Remove Quorate’s files from the folder</span>
+                  <span className="font-medium text-text">Remove Embodent’s files from the folder</span>
                   <span id={`${ids}-files-hint`} className="block text-[12px] text-text-3">
                     {!plan
                       ? 'Available once the folder has been checked.'
                       : !filesAllowed
                       ? 'Not available: the folder isn’t known or no longer belongs to this project.'
-                      : '.orcha/, agent worktrees, Quorate’s hooks, /orcha-* commands and skills. Your code, your own .claude settings and the git repo stay.'}
+                      : '.orcha/, agent worktrees, Embodent’s hooks, /orcha-* commands and skills. Your code, your own .claude settings and the git repo stay.'}
                   </span>
                 </span>
               </label>

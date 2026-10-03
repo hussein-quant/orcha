@@ -59,9 +59,9 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); document.documentElement.remo
 describe("Linear sidebar — top row", () => {
   it("workspace switcher menu carries the acting identity, All projects, New project, Settings, Help and the rail toggle", async () => {
     mount();
-    const sw = await within(sidebar()).findByRole("button", { name: "Quorate workspace menu" });
+    const sw = await within(sidebar()).findByRole("button", { name: "Embodent workspace menu" });
     fireEvent.click(sw);
-    const menu = await screen.findByRole("menu", { name: "Quorate workspace" });
+    const menu = await screen.findByRole("menu", { name: "Embodent workspace" });
     const labels = within(menu).getAllByRole("menuitem").map((m) => m.textContent);
     for (const l of ["All projects", "New project…", "Settings", "Help & docs", "Collapse sidebar"]) {
       expect(labels.some((t) => t?.includes(l)), l).toBe(true);

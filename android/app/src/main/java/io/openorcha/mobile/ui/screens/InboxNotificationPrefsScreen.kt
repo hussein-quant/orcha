@@ -286,7 +286,7 @@ fun InboxNotificationPrefsScreen(container: StoredContainer, onBack: () -> Unit)
                     LCard(padding = 0.dp) {
                         LRow(
                             title = "System notification settings",
-                            subtitle = "Sounds, banners and lock-screen alerts for Quorate on this phone",
+                            subtitle = "Sounds, banners and lock-screen alerts for Embodent on this phone",
                             onClick = {
                                 runCatching {
                                     context.startActivity(

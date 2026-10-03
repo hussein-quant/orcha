@@ -72,13 +72,13 @@ class TaskDeliverablesController(
 
     fun upload(container: StoredContainer, taskId: String, fileName: String, mimeType: String, read: () -> ByteArray?) {
         val actor = container.humanAgentId ?: run {
-            _state.update { it.copy(uploadError = "Pairing is missing the human identity. Reconnect this Quorate first.") }
+            _state.update { it.copy(uploadError = "Pairing is missing the human identity. Reconnect this Embodent first.") }
             return
         }
         val limits = _state.value.limits
         if (!DeliverablesUx.extensionAllowed(fileName, limits.allowedExtensions)) {
             _state.update {
-                it.copy(uploadError = "Quorate can't attach “$fileName”. Allowed: " + limits.allowedExtensions.joinToString(", ") { e -> ".$e" } + ".")
+                it.copy(uploadError = "Embodent can't attach “$fileName”. Allowed: " + limits.allowedExtensions.joinToString(", ") { e -> ".$e" } + ".")
             }
             return
         }

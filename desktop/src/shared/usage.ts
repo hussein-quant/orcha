@@ -170,7 +170,7 @@ export interface ProviderUsage {
 }
 
 export interface AppStats {
-  /** Agent terminals launched from Quorate. */
+  /** Agent terminals launched from Embodent. */
   agentsSpawned: number
   /** Wall-clock seconds those agent terminals were open. */
   agentSeconds: number

@@ -97,8 +97,8 @@ describe("pure helpers", () => {
     expect(settingsErrText(new Error("/api/containers/c1/settings/llm-key → 403: this action requires the owner role or the 'manage_keys' permission")))
       .toBe("this action requires the owner role or the 'manage_keys' permission");
     expect(settingsErrText(new Error("/api/containers/c1/settings/models → 422: [{\"type\":\"x\",\"msg\":\"model is retired\"}]"))).toBe("model is retired");
-    expect(settingsErrText(new Error("/api/containers/c1/worktrees → 500"))).toBe("Quorate hit an error — try again");
-    expect(settingsErrText(new Error("Failed to fetch"))).toBe("couldn't reach Quorate");
+    expect(settingsErrText(new Error("/api/containers/c1/worktrees → 500"))).toBe("Embodent hit an error — try again");
+    expect(settingsErrText(new Error("Failed to fetch"))).toBe("couldn't reach Embodent");
     expect(settingsErrText(new Error("/api/x → 403"))).not.toMatch(/\/api|403/);
   });
 
@@ -131,7 +131,7 @@ describe("pure helpers", () => {
     expect(projectLoadState("/api/containers/c1 → 403")).toMatchObject({ text: "You're not a member of this project.", retry: false });
     expect(projectLoadState("/api/containers/c1 → 404").text).toBe("This project couldn't be found.");
     expect(projectLoadState("/api/containers/c1 → 503")).toMatchObject({ text: "Couldn't load this project.", retry: true });
-    expect(projectLoadState("Failed to fetch")).toMatchObject({ text: "Can't reach Quorate.", retry: true });
+    expect(projectLoadState("Failed to fetch")).toMatchObject({ text: "Can't reach Embodent.", retry: true });
     expect(projectLoadState(null).text).toBe("Loading project…");
   });
 
@@ -263,9 +263,9 @@ describe("Devices & pairing (open build PairingCard) — DP-ERR-1", () => {
 
   it("the structured 409 reachability warning keeps its title, the Wi-Fi hint (LAN reason) and Check again", async () => {
     install({ route: (url) => (url.startsWith("/api/containers/c1/pairing")
-      ? { status: 409, data: { detail: { reachable: false, reason: "no_lan_address", title: "Phones can't reach this Quorate yet", message: "No LAN address." } } } : null) });
+      ? { status: 409, data: { detail: { reachable: false, reason: "no_lan_address", title: "Phones can't reach this Embodent yet", message: "No LAN address." } } } : null) });
     renderAt("pairing");
-    expect(await screen.findByText("Phones can't reach this Quorate yet")).toBeInTheDocument();
+    expect(await screen.findByText("Phones can't reach this Embodent yet")).toBeInTheDocument();
     expect(screen.getByText(/Both devices must be on the same Wi-Fi/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Check again/ })).toBeInTheDocument();
   });
@@ -274,7 +274,7 @@ describe("Devices & pairing (open build PairingCard) — DP-ERR-1", () => {
     install({ route: (url) => (url.startsWith("/api/containers/c1/pairing") ? { status: 500, data: { detail: "Not implemented in mock" } } : null) });
     renderAt("pairing");
     expect(await screen.findByText("Couldn't load the pairing code")).toBeInTheDocument();
-    expect(screen.queryByText("Phones can't reach this Quorate yet")).toBeNull();
+    expect(screen.queryByText("Phones can't reach this Embodent yet")).toBeNull();
     expect(screen.getByRole("button", { name: /Try again/ })).toBeInTheDocument();
   });
 });

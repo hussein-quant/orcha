@@ -19,7 +19,7 @@ const MESSAGES: Record<string, string> = {
   DOCKER_UNAVAILABLE: 'Docker stopped responding. Make sure Docker is running, then try again.',
   DOCKER_NOT_INSTALLED: 'Docker isn’t installed on this Mac.',
   DOCKER_START_TIMEOUT: 'Docker didn’t finish starting in time. Open Docker, wait until it’s running, then try again.',
-  PORT_UNAVAILABLE: 'Quorate couldn’t find a free port for this project. Stop another project or app, then try again.',
+  PORT_UNAVAILABLE: 'Embodent couldn’t find a free port for this project. Stop another project or app, then try again.',
   TEMPLATES_MISSING: 'The Orcha helper is missing its project templates. Reinstall the helper, then try again.',
   ALREADY_INITIALIZED: 'This folder already has an Orcha project. Go back and choose it again to reconnect.',
   PORTAL_TIMEOUT: 'The project started, but its portal didn’t answer in time. Trying again usually fixes this.',
@@ -31,7 +31,7 @@ const MESSAGES: Record<string, string> = {
   DEST_NOT_EMPTY: 'The destination folder isn’t empty. Go back and choose a different folder.',
   CLONE_FAILED: 'The repository couldn’t be cloned. Check the URL and your access to it.',
   UNKNOWN_STACK: 'The new project couldn’t be found after it was created.',
-  INTERNAL: 'Something went wrong inside Quorate.'
+  INTERNAL: 'Something went wrong inside Embodent.'
 }
 
 const STEP_NAMES: Partial<Record<ProvisionStep, string>> = {

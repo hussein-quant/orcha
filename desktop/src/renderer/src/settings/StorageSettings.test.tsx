@@ -8,9 +8,9 @@ import type { StorageReport } from '../../../shared/types'
 const REPORT: StorageReport = {
   inUse: ['orcha-acme-web'],
   items: [
-    { kind: 'image', name: 'orcha-ehr-portal:latest', project: 'orcha-ehr', size: 14_600_000, note: 'Portal image of a project that is no longer in Quorate.' },
-    { kind: 'image', name: 'orcha-demo-portal:latest', project: 'orcha-demo', size: 11_300_000, note: 'Portal image of a project that is no longer in Quorate.' },
-    { kind: 'network', name: 'orcha-ehr_default', project: 'orcha-ehr', size: null, note: 'Network of a project that is no longer in Quorate.' },
+    { kind: 'image', name: 'orcha-ehr-portal:latest', project: 'orcha-ehr', size: 14_600_000, note: 'Portal image of a project that is no longer in Embodent.' },
+    { kind: 'image', name: 'orcha-demo-portal:latest', project: 'orcha-demo', size: 11_300_000, note: 'Portal image of a project that is no longer in Embodent.' },
+    { kind: 'network', name: 'orcha-ehr_default', project: 'orcha-ehr', size: null, note: 'Network of a project that is no longer in Embodent.' },
     { kind: 'volume', name: 'orcha-ehr_pgdata', project: 'orcha-ehr', size: 67_590_000, note: 'Project data with no project left. Deleting it is permanent.' }
   ]
 }

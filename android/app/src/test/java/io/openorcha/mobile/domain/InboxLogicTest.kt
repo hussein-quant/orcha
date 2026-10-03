@@ -150,9 +150,9 @@ class InboxLogicTest {
     @Test
     fun `hidden channels and error copy`() {
         assertEquals("Mobile push and Slack aren't set up here.", NotifPrefsLogic.hiddenChannelsNote(payload()))
-        assertEquals("Quorate couldn't be reached", NotifPrefsLogic.errorText(null))
+        assertEquals("Embodent couldn't be reached", NotifPrefsLogic.errorText(null))
         assertEquals("that setting isn't valid", NotifPrefsLogic.errorText(422))
-        assertEquals("Quorate hit an error — try again", NotifPrefsLogic.errorText(503))
+        assertEquals("Embodent hit an error — try again", NotifPrefsLogic.errorText(503))
     }
 
     // ── routines ──

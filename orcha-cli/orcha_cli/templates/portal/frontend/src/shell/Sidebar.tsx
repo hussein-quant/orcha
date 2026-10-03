@@ -528,17 +528,17 @@ function WorkspaceSwitcher({ collapsed, onToggleRail, onNewProject }: { collapse
   ];
   return (
     <>
-      <Tooltip label="Quorate workspace" placement={collapsed ? "right" : "bottom"} disabled={!collapsed}>
+      <Tooltip label="Embodent workspace" placement={collapsed ? "right" : "bottom"} disabled={!collapsed}>
         <button
           ref={ref} type="button" className="v2-sb-switch" aria-haspopup="menu" aria-expanded={open}
-          aria-label="Quorate workspace menu" onClick={() => setOpen((v) => !v)}
+          aria-label="Embodent workspace menu" onClick={() => setOpen((v) => !v)}
         >
           <span className="v2-sb-mark"><OrcaMark /></span>
-          {!collapsed && <span className="v2-sb-word">Quorate</span>}
+          {!collapsed && <span className="v2-sb-word">Embodent</span>}
           {!collapsed && <Icon name="chev" cls="v2-ico v2-chev" />}
         </button>
       </Tooltip>
-      <Menu anchor={ref} open={open} onClose={() => setOpen(false)} items={items} label="Quorate workspace" placement={collapsed ? "right-start" : "bottom-start"} />
+      <Menu anchor={ref} open={open} onClose={() => setOpen(false)} items={items} label="Embodent workspace" placement={collapsed ? "right-start" : "bottom-start"} />
     </>
   );
 }
@@ -1083,7 +1083,7 @@ export function Sidebar() {
   return (
     <aside
       ref={asideRef}
-      className={"v2-sidebar sidebar" + (dragging ? " is-resizing" : "")} id="sidebar" aria-label="Quorate navigation"
+      className={"v2-sidebar sidebar" + (dragging ? " is-resizing" : "")} id="sidebar" aria-label="Embodent navigation"
       onKeyDown={(e) => { onDrawerKey(e); onNavKey(e); }}
       {...(drawerMode && drawerOpen ? { role: "dialog", "aria-modal": true } : {})}
     >

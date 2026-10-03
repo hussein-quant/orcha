@@ -63,7 +63,7 @@ export function pairingErrorView(status: number | null, detail: unknown, network
   if (detail && typeof detail === "object" && (detail as PairingWarningInfo).reachable === false) {
     const d = detail as PairingWarningInfo;
     return {
-      title: d.title || "Phones can't reach this Quorate yet",
+      title: d.title || "Phones can't reach this Embodent yet",
       message: d.message || "The server could not produce a phone-reachable network address.",
       remedy: d.remedy,
       wifiHint: WIFI_REASONS.has(d.reason || ""),
@@ -94,7 +94,7 @@ function scanCopy(cloud: boolean): string {
 }
 function footCopy(cloud: boolean): string {
   return cloud
-    ? "Your phone connects securely over HTTPS through this Quorate's sign-in perimeter."
+    ? "Your phone connects securely over HTTPS through this Embodent's sign-in perimeter."
     : "Your phone talks directly to this computer on your network. Nothing goes through the cloud.";
 }
 
@@ -247,7 +247,7 @@ export function PairingPanel({ cid, identity }: {
         return (
           <div className="pair-grid">
             <div className="pair-card">
-              <div className="pair-brand"><OrcaMark /><span className="pair-wordmark">Quorate</span></div>
+              <div className="pair-brand"><OrcaMark /><span className="pair-wordmark">Embodent</span></div>
               <div className="pair-qr" role="img" aria-label="Orcha phone pairing QR code" dangerouslySetInnerHTML={{ __html: data.qrSvg || "" }} />
               <div className="pair-scanline">Scan with the Orcha mobile app</div>
               <div className="pair-url mono">{data.baseUrl || ""}</div>

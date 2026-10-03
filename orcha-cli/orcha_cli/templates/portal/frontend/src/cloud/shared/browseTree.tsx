@@ -61,7 +61,7 @@ export function BrowseNoAccess({ detail }: { detail?: string | null }) {
     <div className="gh-empty card-empty" role="alert">
       <div className="t1">GitHub token can&#39;t access this repository</div>
       <p>
-        The token Quorate uses is missing, expired, or lacks access to this repo.
+        The token Embodent uses is missing, expired, or lacks access to this repo.
         {detail ? " (" + detail + ")" : ""}
       </p>
       <ButtonLink variant="primary" size="sm" href="/settings#tab=github-access">Check GitHub access</ButtonLink>

@@ -47,7 +47,7 @@ export function PairingButton() {
   const identity = useMeIdentity(cid);
 
   const launch = () => {
-    if (!cid) { toast("No Quorate container is loaded.", "danger"); return; }
+    if (!cid) { toast("No Embodent container is loaded.", "danger"); return; }
     setOpen(true);
   };
 
@@ -55,7 +55,7 @@ export function PairingButton() {
     <>
       <Button
         size="sm" variant="ghost" icon="phone" className="pair-top" id="pairPhoneBtn"
-        title="Pair a phone with this Quorate" onClick={launch}
+        title="Pair a phone with this Embodent" onClick={launch}
       >
         Pair phone
       </Button>
@@ -79,7 +79,7 @@ export function PairingSection() {
           {cid ? (
             <PairingPanel cid={cid} identity={identity} />
           ) : (
-            <StatusLine tone="muted" icon="phone">Waiting for a loaded Quorate project…</StatusLine>
+            <StatusLine tone="muted" icon="phone">Waiting for a loaded Embodent project…</StatusLine>
           )}
         </div>
       </div>

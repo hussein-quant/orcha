@@ -35,13 +35,14 @@ const pageRoutesPlugin = () => ({
 export const FONT_PRELOAD =
   '<link rel="preload" href="/assets/fonts/inter-var-opsz-latin.woff2" as="font" type="font/woff2" crossorigin />';
 
-// Favicons live in static/ (served at /assets/*). Injected post-transform for
+// Favicons + the PWA manifest (Embodent icons) live in static/ (served at /assets/*). Injected post-transform for
 // the same reason: a <link href="/assets/..."> in index.html is rebased under
 // /assets/dist/ by Vite dev, where it 404s to the SPA shell.
 export const FAVICON_LINKS = [
   '<link rel="icon" href="/assets/favicon.ico" sizes="48x48" />',
   '<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg" />',
   '<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />',
+  '<link rel="manifest" href="/assets/manifest.json" />',
 ];
 
 const sharedCssPlugin = () => ({

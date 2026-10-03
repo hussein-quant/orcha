@@ -166,9 +166,9 @@ export function bundleSummary(b: Pick<Bundle, "roster" | "routines" | "dod_prese
 export function parseBundleText(text: string): { bundle: Bundle | null; error: string | null } {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { return { bundle: null, error: "This file isn't valid JSON." }; }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { bundle: null, error: "This file isn't a Quorate project template." };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { bundle: null, error: "This file isn't a Embodent project template." };
   const b = raw as Bundle;
-  if (b.format !== "orcha.project-template") return { bundle: null, error: "This file isn't a Quorate project template." };
+  if (b.format !== "orcha.project-template") return { bundle: null, error: "This file isn't a Embodent project template." };
   if (typeof b.version !== "number") return { bundle: null, error: "This template has no version." };
   return { bundle: b, error: null };
 }

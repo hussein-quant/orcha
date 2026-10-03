@@ -27,7 +27,7 @@ const recent = new Date(Date.now() - 3 * 3600 * 1000).toISOString();
 
 const ITEMS: WorktreeItem[] = [
   { path: `${WT}/Atlas-1`, name: "Atlas-1", branch: "orcha/wk-Atlas-1", kind: "wake", agent: "Atlas", state: "clean",
-    size_bytes: 21_000_000, last_activity_at: recent, reason: "only Quorate scaffolding — safe to remove" },
+    size_bytes: 21_000_000, last_activity_at: recent, reason: "only Embodent scaffolding — safe to remove" },
   { path: `${WT}/Probe-1`, name: "Probe-1", branch: "orcha/wk-Probe-1", kind: "wake", agent: "Probe", state: "clean",
     size_bytes: 2_400_000_000, last_activity_at: recent },
   { path: `${WT}/task-Atlas-eecc`, name: "task-Atlas-eecc", branch: "orcha/task-Atlas-eecc3b74-ed6", kind: "task", agent: "Atlas",
@@ -178,7 +178,7 @@ describe("Settings → Execution › Agent worktrees", () => {
     expect(out).toHaveTextContent("save output to the task, then remove");
     expect(within(out).getByText("qa-runs/report.md")).toBeInTheDocument();
     expect(within(preview).getByRole("region", { name: "Unmerged commits" })).toHaveTextContent("keep");
-    expect(within(preview).getByRole("region", { name: "In use / not Quorate" })).toHaveTextContent("skipped");
+    expect(within(preview).getByRole("region", { name: "In use / not Embodent" })).toHaveTextContent("skipped");
     expect(posts()).toEqual([]); // the preview sends nothing
     fireEvent.click(within(preview).getByRole("checkbox", { name: "Remove Ferry-1, keep branch" }));
     const go = screen.getByRole("button", { name: /^Clean up 4 · free / });

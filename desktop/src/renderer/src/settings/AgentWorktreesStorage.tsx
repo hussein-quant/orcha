@@ -16,7 +16,7 @@ export const STATE_LABEL: Record<AgentWorktreeState, string> = {
   'has-output': 'Has output',
   unmerged: 'Unmerged commits',
   'in-use': 'In use',
-  'not-quorate': 'Not Quorate'
+  'not-quorate': 'Not Embodent'
 }
 const STATE_CLASS: Record<AgentWorktreeState, string> = {
   clean: 'text-ok',
@@ -122,7 +122,7 @@ export default function AgentWorktreesStorage() {
         </Button>
       </div>
       <p className="mb-2 text-[12px] text-text-3">
-        Agents work in git worktrees inside each project’s .orcha-worktrees folder. Clean ones hold only Quorate’s own files; output is saved to its task before a worktree with output goes; unmerged commits are kept.
+        Agents work in git worktrees inside each project’s .orcha-worktrees folder. Clean ones hold only Embodent’s own files; output is saved to its task before a worktree with output goes; unmerged commits are kept.
       </p>
       {error != null && (
         <div className="mb-2 rounded-md border border-border px-3 py-2">
@@ -259,7 +259,7 @@ function PreviewPanel({ preview, busy, onToggle, onCancel, onRun }: {
         )}
       </Group>
       <Group title="Kept" verb="has output (only clean ones are being cleaned)" rows={otherKept} />
-      <Group title="In use / not Quorate" verb="skipped" rows={result.skipped} />
+      <Group title="In use / not Embodent" verb="skipped" rows={result.skipped} />
       <div className="mt-3 flex justify-end gap-2">
         <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>
         <Button variant="destructive" size="sm" onClick={onRun} disabled={busy || count === 0}>

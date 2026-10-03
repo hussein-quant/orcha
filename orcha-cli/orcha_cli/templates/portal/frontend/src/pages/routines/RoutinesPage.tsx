@@ -94,8 +94,8 @@ function SchedulerNotice({ lastTick, hasEnabled }: { lastTick: string | null; ha
       <Icon name="alert" cls="v2-ico" />
       <span>
         {lastTick
-          ? `The scheduler last checked ${relTime(lastTick)} — routines only fire while the Quorate notifier is running. Runs missed meanwhile become one catch-up task when it's back.`
-          : "The scheduler hasn't checked in yet — routines fire while the Quorate notifier is running (orcha up starts it)."}
+          ? `The scheduler last checked ${relTime(lastTick)} — routines only fire while the Embodent notifier is running. Runs missed meanwhile become one catch-up task when it's back.`
+          : "The scheduler hasn't checked in yet — routines fire while the Embodent notifier is running (orcha up starts it)."}
       </span>
     </div>
   );

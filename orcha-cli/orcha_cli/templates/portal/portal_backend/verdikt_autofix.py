@@ -254,7 +254,7 @@ def build_message(task: dict, run: dict, *, attempt: int, max_attempts: int, cha
     passed = sum(1 for c in crit if isinstance(c, dict) and c.get("outcome") == "pass")
     left = max_attempts - attempt
     lines = [
-        f"Verdikt failed this task on attempt {attempt} of {max_attempts}. Quorate sent it back to you "
+        f"Verdikt failed this task on attempt {attempt} of {max_attempts}. Embodent sent it back to you "
         f"automatically (auto-fix, {ACTOR}) — fix what failed below, then mark the task done again. "
         + (f"Verdikt will check it again ({left} more check{'s' if left != 1 else ''} before a person takes over)."
            if left > 0 else "This is the last automatic check."),

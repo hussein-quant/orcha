@@ -264,13 +264,13 @@ describe("pairing card", () => {
         detail: {
           reachable: false,
           reason: "no_lan_address",
-          title: "Phones can't reach this Quorate yet",
+          title: "Phones can't reach this Embodent yet",
           message: "The portal only has a localhost address right now.",
         },
       },
     };
     renderPage("pairing");
-    await waitFor(() => expect(screen.getByText("Phones can't reach this Quorate yet")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("Phones can't reach this Embodent yet")).toBeInTheDocument());
     expect(screen.getByText("The portal only has a localhost address right now.")).toBeInTheDocument();
     expect(screen.queryByText("ABCD-1234")).not.toBeInTheDocument();
     // a real way forward: "Check again" re-requests the pairing payload
@@ -289,13 +289,13 @@ describe("pairing card", () => {
           reachable: false,
           reason: "no_human",
           title: "No human can pair this phone",
-          message: "Add a human operator to this Quorate before pairing a phone.",
+          message: "Add a human operator to this Embodent before pairing a phone.",
         },
       },
     };
     renderPage("pairing");
     await waitFor(() => expect(screen.getByText("No human can pair this phone")).toBeInTheDocument());
-    expect(screen.getByText("Add a human operator to this Quorate before pairing a phone.")).toBeInTheDocument();
+    expect(screen.getByText("Add a human operator to this Embodent before pairing a phone.")).toBeInTheDocument();
   });
 });
 

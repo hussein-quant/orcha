@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254">
+  <!-- Embodent mark (flattened from embodent-mark.svg for CoreSVG: no use/clipPath). -->
+  <path fill="#ECEDF1" d="M627 153 A146 146 0 0 0 627 445 Z"/>
+  <path fill="#ECEDF1" d="M255 940 L255 838 A372 372 0 0 1 627 466 L627 688 A150 150 0 0 0 477 838 L477 940 A111 111 0 0 1 255 940 Z"/>
+  <path fill="#7C808A" d="M627 153 A146 146 0 0 1 627 445 Z"/>
+  <path fill="#7C808A" d="M999 940 L999 838 A372 372 0 0 0 627 466 L627 688 A150 150 0 0 1 777 838 L777 940 A111 111 0 0 0 999 940 Z"/>
+</svg>

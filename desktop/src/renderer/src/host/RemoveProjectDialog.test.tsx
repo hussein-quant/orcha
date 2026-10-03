@@ -106,9 +106,9 @@ describe('RemoveProjectDialog', () => {
     expect(screen.getByRole('button', { name: 'Remove and delete data' })).toBeDisabled()
   })
 
-  it('"Remove Quorate’s files" is opt-in and only once the folder is known to belong to the project', async () => {
+  it('"Remove Embodent’s files" is opt-in and only once the folder is known to belong to the project', async () => {
     const p = setup()
-    const box = screen.getByRole('checkbox', { name: /Remove Quorate’s files from the folder/ })
+    const box = screen.getByRole('checkbox', { name: /Remove Embodent’s files from the folder/ })
     expect(box).toBeDisabled() // plan not loaded yet
     await screen.findByText('Portal image · 347 MB')
     expect(box).toBeEnabled()
@@ -121,7 +121,7 @@ describe('RemoveProjectDialog', () => {
   it('files option stays off when the folder belongs to another stack', async () => {
     setup({ loadPlan: vi.fn().mockResolvedValue({ ...PLAN, folderMatches: false }) })
     await screen.findByText('Portal image · 347 MB')
-    expect(screen.getByRole('checkbox', { name: /Remove Quorate’s files/ })).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: /Remove Embodent’s files/ })).toBeDisabled()
     expect(screen.getByText(/no longer belongs to this project/)).toBeInTheDocument()
   })
 
@@ -181,7 +181,7 @@ describe('RemoveProjectDialog', () => {
     }
     const p = setup({ loadPlan: vi.fn().mockResolvedValue(plan) })
     await screen.findByText('Portal image · 347 MB')
-    await userEvent.click(screen.getByRole('checkbox', { name: /Remove Quorate’s files from the folder/ }))
+    await userEvent.click(screen.getByRole('checkbox', { name: /Remove Embodent’s files from the folder/ }))
     expect(screen.getByTestId('remove-files-row')).toHaveTextContent('and 2 agent worktrees')
     expect(screen.getByTestId('remove-save-output-row')).toHaveTextContent('Output of 1 worktree saved first (4 files)')
     expect(screen.getByTestId('keep-worktrees-row')).toHaveTextContent('1 agent worktree with unmerged commits or in use')

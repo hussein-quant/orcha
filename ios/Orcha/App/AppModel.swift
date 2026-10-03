@@ -317,7 +317,7 @@ final class AppModel {
             let probeApi = token == nil ? api : OrchaApiClient(bearerToken: token)
             let listed = try await probeApi.listContainers(base).containers
             guard !listed.isEmpty else {
-                error = "No Quorate project was found at this address."
+                error = "No Embodent project was found at this address."
                 return false
             }
             let primary = listed.first { $0.id == payload.containerId } ?? listed[0]
@@ -350,7 +350,7 @@ final class AppModel {
                 connectNeedsToken = true
                 connectDraft = raw
                 self.error = token == nil
-                    ? "This Quorate is protected — enter its team access token to connect."
+                    ? "This Embodent is protected — enter its team access token to connect."
                     : "That access token wasn't accepted. Check it and try again."
             } else {
                 self.error = friendly(error)
@@ -914,7 +914,7 @@ final class AppModel {
     private func humanAction(_ success: String, _ block: (String, String) async throws -> Void) async -> Bool {
         guard let sel = selectedContainer else { return false }
         guard let actor = sel.humanAgentId else {
-            error = "Pairing is missing the human identity. Reconnect this Quorate first."
+            error = "Pairing is missing the human identity. Reconnect this Embodent first."
             return false
         }
         actionInFlight = true
@@ -1052,7 +1052,7 @@ final class AppModel {
     func nudgeRequest(_ rid: String, note: String?) async -> Bool {
         guard let sel = selectedContainer else { return false }
         guard let actor = sel.humanAgentId else {
-            error = "Pairing is missing the human identity. Reconnect this Quorate first."
+            error = "Pairing is missing the human identity. Reconnect this Embodent first."
             return false
         }
         actionInFlight = true
@@ -1145,7 +1145,7 @@ final class AppModel {
     func sendTurn(_ agentId: String, content: String) async -> Bool {
         guard let sel = selectedContainer else { return false }
         guard let actor = sel.humanAgentId else {
-            error = "Pairing is missing the human identity. Reconnect this Quorate first."
+            error = "Pairing is missing the human identity. Reconnect this Embodent first."
             return false
         }
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1278,6 +1278,6 @@ final class AppModel {
         if let e = error as? OrchaApiError {
             return e.localizedDescription
         }
-        return "Could not reach Quorate at this address. Check the address and that your Quorate is up."
+        return "Could not reach Embodent at this address. Check the address and that your Embodent is up."
     }
 }

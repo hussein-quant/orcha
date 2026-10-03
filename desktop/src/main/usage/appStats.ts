@@ -1,4 +1,4 @@
-/** Quorate's own agent stats — agents spawned from its terminals and the time they spent
+/** Embodent's own agent stats — agents spawned from its terminals and the time they spent
  *  working — persisted in <userData>/usage-stats.json. Follows Orca's stats tracker
  *  (github.com/stablyai/orca, MIT © Lovecast Inc.): a session entering `working` opens a timer,
  *  leaving it (done / attention / error / idle / exit) closes it and adds the duration.

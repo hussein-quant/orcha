@@ -197,7 +197,7 @@ export function ImportTemplateDialog({ cid, projectName, actor, hereReason, onCl
             <Button size="sm" variant="secondary" icon="folder" onClick={() => fileRef.current?.click()} disabled={phase === "busy"}>
               {fileName ? "Choose another file…" : "Choose file…"}
             </Button>
-            <span className="pt-meta pt-filename" title={fileName || undefined}>{fileName || "An .json file exported from Quorate"}</span>
+            <span className="pt-meta pt-filename" title={fileName || undefined}>{fileName || "An .json file exported from Embodent"}</span>
           </div>
           {fileError ? <ErrLine>{fileError}</ErrLine> : null}
 

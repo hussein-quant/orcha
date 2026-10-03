@@ -192,8 +192,8 @@
   --v2-shadow-lightbox: 0 20px 60px rgba(0, 0, 0, 0.5);
   --v2-live-pulse: rgba(76, 183, 130, 0.5);
   --v2-live-pulse-0: rgba(76, 183, 130, 0);
-  --v2-logo-ink: #F9F4EB;                   /* Quorate mark: cream arcs */
-  --v2-logo-accent: #9695F2;                /* Quorate mark: indigo arc */
+  --v2-logo-ink: #ECEDF1;                   /* Embodent mark: left (light) half */
+  --v2-logo-accent: #7C808A;                /* Embodent mark: right (grey) half */
 
   /* ---- 1.4 typography (D6) ---- */
   --v2-font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -458,8 +458,8 @@
   --v2-shadow-lightbox: 0 20px 60px rgba(0, 0, 0, 0.35);
   --v2-live-pulse: rgba(24, 122, 76, 0.40);
   --v2-live-pulse-0: rgba(24, 122, 76, 0);
-  --v2-logo-ink: #1C1D1F;
-  --v2-logo-accent: #6E6CE6;
+  --v2-logo-ink: #1C1D1F;                   /* light mode: near-black left half stays readable */
+  --v2-logo-accent: #7C808A;
 
   --v2-chip-border: #E1E1E5;
   --v2-pill-bg-selected: #EDEDEF;

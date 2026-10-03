@@ -90,7 +90,7 @@ describe("SH-130 pure helpers", () => {
 });
 
 describe("SH-130 whole-backend outage + recovery", () => {
-  it("with a cached list, an outage reads Can't reach Quorate — never '<project> is unreachable'", async () => {
+  it("with a cached list, an outage reads Can't reach Embodent — never '<project> is unreachable'", async () => {
     mountShell();
     await waitFor(() => expect(count(isList)).toBeGreaterThan(0));
     await waitFor(() => expect(document.querySelector(".v2-sb-note.is-error")).toBeNull());
@@ -102,7 +102,7 @@ describe("SH-130 whole-backend outage + recovery", () => {
     vi.spyOn(Date, "now").mockImplementation(() => real() + 11_000);
     // the first failure re-asks the project list at once (not on the 60 s tick)
     await waitFor(() => expect(count(isList)).toBeGreaterThan(listBefore), { timeout: 2000 });
-    await screen.findByText(/Can't reach Quorate/, { selector: ".v2-stalebar-msg" }, { timeout: 6000 });
+    await screen.findByText(/Can't reach Embodent/, { selector: ".v2-stalebar-msg" }, { timeout: 6000 });
     expect(document.querySelector(".v2-stalebar-msg")!.textContent).not.toMatch(/Orcha is unreachable/);
     expect(screen.queryByText(/^Connected — /)).toBeNull();
   }, 12_000);

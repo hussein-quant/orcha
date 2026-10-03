@@ -1014,7 +1014,7 @@ function AgentSpendDrilldown({ cid, agentId, onBack, shell, window: window_, onW
             <EmptyState
               icon="clock"
               title="30-day spend detail isn’t available on this server yet"
-              body="Update Quorate to break an agent’s spend down by 30 days, or pick another window."
+              body="Update Embodent to break an agent’s spend down by 30 days, or pick another window."
               action={<Button onClick={() => onWindow("7d")}>Show 7 days</Button>}
             />
           </div>

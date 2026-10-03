@@ -290,7 +290,7 @@ function promptApiKey(): Promise<string | null> {
       '-e',
       'try',
       '-e',
-      'set k to text returned of (display dialog "Paste your Anthropic API key (starts with sk-ant-). It is stored only on this Mac." default answer "" with hidden answer with title "Quorate" buttons {"Cancel", "Save"} default button "Save")',
+      'set k to text returned of (display dialog "Paste your Anthropic API key (starts with sk-ant-). It is stored only on this Mac." default answer "" with hidden answer with title "Embodent" buttons {"Cancel", "Save"} default button "Save")',
       '-e',
       'return k',
       '-e',
@@ -408,7 +408,7 @@ async function cloneAndProvision(
 }
 
 // Runtime name for everything Electron derives it from (dialogs, role menu labels —
-// "About/Hide/Quit Quorate"). The macOS app-menu TITLE still reads the bundle's Info.plist
+// "About/Hide/Quit Embodent"). The macOS app-menu TITLE still reads the bundle's Info.plist
 // ("Electron" in dev unless scripts/sign-dev-electron.sh patched it); packaged builds get
 // it from electron-builder productName.
 app.setName(PRODUCT_NAME)
@@ -494,7 +494,7 @@ function loadNodePty(): NodePty {
 const ptyHost = new PtyHost({
   spawn: (file, args, opts) => loadNodePty().spawn(file, args, { ...opts }),
   emit: (event: TermEvent) => {
-    // Quorate's own agent stats: working stretches + exits of agent terminals.
+    // Embodent's own agent stats: working stretches + exits of agent terminals.
     if (event.type === 'meta') appStats?.status(event.id, event.status)
     else if (event.type === 'exit') appStats?.exited(event.id)
     sendToManager(event.type === 'data' ? TERM_CHANNELS.data : event.type === 'meta' ? TERM_CHANNELS.meta : TERM_CHANNELS.exit, event)
@@ -1961,7 +1961,7 @@ app.whenReady().then(() => {
     listStacks,
     fetchStackAttention,
     notify: showAttentionNotification,
-    // Honour the person's Quorate notification settings (portal mig 063): the stack
+    // Honour the person's Embodent notification settings (portal mig 063): the stack
     // itself decides (should_notify on the desktop channel); fails open.
     gate: async (item) => shouldShowAttention(item, await listStacks()),
     onUpdate: (items, stacks, details) => {

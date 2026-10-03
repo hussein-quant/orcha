@@ -207,8 +207,8 @@ describe("notification prefs — pure helpers", () => {
     const e = (status: number, detail?: string) => Object.assign(new Error("/x → " + status + (detail ? ": " + detail : "")), { status, detail });
     expect(prefsErrText(e(422, "quiet hours need a start and an end that differ"))).toBe("quiet hours need a start and an end that differ");
     expect(prefsErrText(e(403))).toBe("you can only change your own notification settings");
-    expect(prefsErrText(e(500))).toBe("Quorate hit an error — try again");
-    expect(prefsErrText(new TypeError("Failed to fetch"))).toBe("Quorate couldn't be reached");
+    expect(prefsErrText(e(500))).toBe("Embodent hit an error — try again");
+    expect(prefsErrText(new TypeError("Failed to fetch"))).toBe("Embodent couldn't be reached");
   });
 
   it("ncMenuItems: settings link, pause or resume, mute (checked), disabled for non-members", () => {
@@ -356,7 +356,7 @@ describe("Settings › Notifications", () => {
     failNext = { status: 500 };
     fireEvent.click(sw("Routine runs — Desktop"));
     expect(sw("Routine runs — Desktop")).toHaveAttribute("aria-checked", "true");
-    const alert = await screen.findByText("Couldn't save — Quorate hit an error — try again. Your change was undone.", { selector: "#nfSaveErr" });
+    const alert = await screen.findByText("Couldn't save — Embodent hit an error — try again. Your change was undone.", { selector: "#nfSaveErr" });
     expect(alert).toBeInTheDocument();
     expect(sw("Routine runs — Desktop")).toHaveAttribute("aria-checked", "false"); // reverted
 

@@ -51,7 +51,7 @@ describe("ProjectIconPicker — a pick that isn't saved is never a silent revert
     stubPut("offline");
     render(<Harness onClose={vi.fn()} />);
     pickFirstEmoji();
-    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach Quorate");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't reach Embodent");
     expect(icons.projectIcons().c1).toBeUndefined();
   });
 

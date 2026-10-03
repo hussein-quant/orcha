@@ -1,5 +1,5 @@
 /**
- * Desktop OS notifications honour the person's Quorate notification settings (portal mig 063).
+ * Desktop OS notifications honour the person's Embodent notification settings (portal mig 063).
  *
  * The decision is NOT re-implemented here: before showing an OS notification for a new
  * attention item, the host asks the item's own local stack —

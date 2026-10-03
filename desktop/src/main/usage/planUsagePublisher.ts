@@ -1,5 +1,5 @@
 /** Plan-usage publisher (main process): after a limits refresh, PUT a privacy-safe snapshot of
- *  the Usage panel's plan limits to every running Quorate portal on this Mac, so the iOS /
+ *  the Usage panel's plan limits to every running Embodent portal on this Mac, so the iOS /
  *  Android apps can show it (portal mig 069, `PUT /api/plan-usage`).
  *
  *  PRIVACY (hard rule): the payload is built field-by-field from an allow-list — plan names,

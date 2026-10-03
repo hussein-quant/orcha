@@ -767,7 +767,7 @@ export function NeedsPage() {
           {i.agentAlias ? (
             <Avatar alias={i.agentAlias} kind={who?.kind || "ai"} status={who?.status} size={24} palette={slotOf(snap, i.agentAlias)} />
           ) : (
-            <Avatar alias="Quorate" kind="system" size={24} label="Quorate" />
+            <Avatar alias="Embodent" kind="system" size={24} label="Embodent" />
           )}
         </span>
         <span className="nd-main">

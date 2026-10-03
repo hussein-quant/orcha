@@ -34,14 +34,14 @@ def pairing_warning(reason: str) -> dict:
     return {
         "reachable": False,
         "reason": reason,
-        "title": "Phones can't reach this Quorate yet",
+        "title": "Phones can't reach this Embodent yet",
         "message": (
             "The portal only has a localhost address right now, so a phone on Wi-Fi would not "
             "know how to reach this computer."
         ),
         "remedy": (
             "Connect this Mac to the same Wi-Fi as the phone, run `orcha up` from this workspace, "
-            "and allow the Quorate portal port through macOS Firewall or Local Network prompts."
+            "and allow the Embodent portal port through macOS Firewall or Local Network prompts."
         ),
     }
 
@@ -105,14 +105,14 @@ def short_pairing_code() -> str:
 #   - dot-style data modules + rounded finder frames (the modern, branded look);
 #   - a 4-module quiet zone baked into the viewBox over an always-LIGHT tile —
 #     dark modules on light stay fixed in every theme, scanners need the contrast;
-#   - the Orcha ring mark (same artwork as static/logo-mark.svg) embedded on a
+#   - the Embodent mark (same artwork as static/logo-mark.svg) embedded on a
 #     rounded dark tile in the centre. EC=H recovers up to 30% damage; the knockout is
 #     capped well below that (~8% of the module area, see QR_EMBED_FRACTION).
 # Pure string assembly on qrcode's matrix — no Pillow/StyledPilImage dependency,
 # and SVG stays crisp at any rendered size.
 QR_DARK = "#0b1216"    # module ink — matches the favicon's tile
 QR_LIGHT = "#ffffff"   # the light tile behind the code (never theme-inverted)
-QR_TILE = "#141516"    # the centre logo tile (brand tile colour)
+QR_TILE = "#121314"    # the centre logo tile (Embodent brand tile colour)
 QR_QUIET_MODULES = 4   # quiet zone, in modules, on every side
 QR_EMBED_FRACTION = 0.28  # centre knockout side as a fraction of the module count
 
@@ -127,18 +127,19 @@ def _qr_finder_frame(x: float, y: float) -> str:
 
 
 def _qr_orca_tile(x: float, y: float, size: float) -> str:
-    """The Orcha ring mark on its rounded dark tile, scaled into the centre knockout."""
+    """The Embodent mark on its rounded dark tile, scaled into the centre knockout."""
     s = size / 100.0
+    # the mark's 1254-unit artwork, fitted into the inner ~80% of the 100-unit tile
+    m = 80.0 / 1050.0
     return (
         f'<g transform="translate({x:.2f},{y:.2f}) scale({s:.4f})" aria-hidden="true">'
         f'<rect width="100" height="100" rx="22" fill="{QR_TILE}"/>'
-        '<path fill="#9695F2" d="M66.12 17.81A36 36 0 0 1 85.29 42.9L73.56 50.7'
-        'A23.57 23.57 0 0 0 57.25 27.57Z"/>'
-        '<path fill="#F9F4EB" d="M85.88 47.12A36 36 0 0 1 24.37 75.28L33.38 66.72'
-        'A23.57 23.57 0 0 0 72.85 55.8Z"/>'
-        '<path fill="#F9F4EB" d="M21.82 72.4A36 36 0 0 1 62.38 16.2L52.92 26.61'
-        'A23.57 23.57 0 0 0 30.88 63.79Z"/>'
-        "</g>"
+        f'<g transform="translate(10,10) scale({m:.5f}) translate(-102,-77)">'
+        '<path fill="#ECEDF1" d="M627 153A146 146 0 0 0 627 445ZM255 838L255 940'
+        'A111 111 0 0 0 477 940L477 838A150 150 0 0 1 627 688L627 466A372 372 0 0 0 255 838Z"/>'
+        '<path fill="#7C808A" d="M627 153A146 146 0 0 1 627 445ZM999 838L999 940'
+        'A111 111 0 0 1 777 940L777 838A150 150 0 0 0 627 688L627 466A372 372 0 0 1 999 838Z"/>'
+        "</g></g>"
     )
 
 
@@ -256,7 +257,7 @@ def get_container_pairing(
                 "reachable": False,
                 "reason": "no_human",
                 "title": "No human can pair this phone",
-                "message": "Add a human operator to this Quorate before pairing a phone.",
+                "message": "Add a human operator to this Embodent before pairing a phone.",
             },
         )
     if human_agent_id:

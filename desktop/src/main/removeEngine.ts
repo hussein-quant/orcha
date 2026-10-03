@@ -1,12 +1,12 @@
-/** "Remove project…" — take one project out of Quorate, cleaning up everything it owns.
+/** "Remove project…" — take one project out of Embodent, cleaning up everything it owns.
  *
  *  Levels (shared/types RemoveOptions):
- *  - default ("Remove from Quorate"): stop the host daemons (notifier + terminal bridge, and
+ *  - default ("Remove from Embodent"): stop the host daemons (notifier + terminal bridge, and
  *    their pid files), remove the stack's containers including its `orcha-run-*` sandboxes,
  *    its network and its project-specific portal image. KEEPS the data volume and every file,
  *    so adding the folder again (same compose name → same `<project>_pgdata`) brings it back.
  *  - `deleteData`: additionally removes the stack's volumes (`down -v`) — irreversible.
- *  - `removeFiles`: additionally removes Quorate's own files from the folder (never the
+ *  - `removeFiles`: additionally removes Embodent's own files from the folder (never the
  *    user's code, their own .claude content or the git repo; worktrees with uncommitted
  *    changes and branches with unmerged work are kept, with a warning).
  *
@@ -133,7 +133,7 @@ function folderFacts(project: string, folder: string | null, fs: RemoveFs): Fold
   return { folder, matches, cid: matches ? cid : null }
 }
 
-/** Quorate's files that exist in the folder (relative paths, for the dialog's summary). */
+/** Embodent's files that exist in the folder (relative paths, for the dialog's summary). */
 function existingFolderFiles(folder: string, fs: RemoveFs): string[] {
   const out: string[] = []
   for (const rel of [...ORCHA_DIRS, ...ORCHA_FILES]) if (fs.exists(path.join(folder, rel))) out.push(rel)
@@ -144,7 +144,7 @@ function existingFolderFiles(folder: string, fs: RemoveFs): string[] {
   for (const rel of ['.claude/settings.json', '.codex/hooks.json']) {
     const text = fs.readText(path.join(folder, rel))
     if (text !== null && stripManagedHooks(text).kind !== 'unchanged' && stripManagedHooks(text).kind !== 'unparseable') {
-      out.push(`${rel} (Quorate hooks only)`)
+      out.push(`${rel} (Embodent hooks only)`)
     }
   }
   return out
@@ -171,7 +171,7 @@ export async function planRemoval(project: string, projectShort: string, folder:
     // sizes are a nicety — the plan stands without them
   }
   const worktrees = facts.folder && facts.matches ? ((await listWorktrees(facts.folder, deps)) ?? []) : []
-  // The CLI's classification (Quorate scaffolding is never a "change"); absent on an old CLI.
+  // The CLI's classification (Embodent scaffolding is never a "change"); absent on an old CLI.
   const classified = facts.folder && facts.matches && worktrees.length ? await classifyFolder(facts.folder, deps.run) : null
   const byPath = new Map((classified ?? []).map((c) => [c.path, c]))
   const pidFiles = daemonPidFiles(facts.matches ? facts.folder : null, facts.cid, deps.home).filter((p) => deps.fs.exists(p))
@@ -197,12 +197,12 @@ export async function planRemoval(project: string, projectShort: string, folder:
   }
 }
 
-/** Remove Quorate's own files from `folder` (only called when it belongs to the project). */
+/** Remove Embodent's own files from `folder` (only called when it belongs to the project). */
 async function removeFolderFiles(folder: string, deps: RemoveDeps, result: RemoveResult, saveOutputFirst = true): Promise<void> {
   const { fs } = deps
-  // 1. agent worktrees — through the CLI's classification when it can give one (Quorate's own
+  // 1. agent worktrees — through the CLI's classification when it can give one (Embodent's own
   //    scaffolding is not "uncommitted work"; output is saved before a worktree goes; unmerged
-  //    commits, in-use and non-Quorate worktrees are always kept). An old CLI falls back to
+  //    commits, in-use and non-Embodent worktrees are always kept). An old CLI falls back to
   //    plain `git worktree remove` (never --force).
   const classified = await classifyFolder(folder, deps.run, true)
   const trees = classified === null ? await listWorktrees(folder, deps) : []
@@ -210,7 +210,7 @@ async function removeFolderFiles(folder: string, deps: RemoveDeps, result: Remov
     for (const wt of classified) {
       const name = path.basename(wt.path)
       if (wt.state === 'not-quorate') {
-        result.warnings.push(`Kept ${name} in .orcha-worktrees — it isn't a Quorate worktree.`)
+        result.warnings.push(`Kept ${name} in .orcha-worktrees — it isn't a Embodent worktree.`)
         continue
       }
       if (wt.state === 'in-use') {
@@ -272,7 +272,7 @@ async function removeFolderFiles(folder: string, deps: RemoveDeps, result: Remov
       // best effort
     }
   }
-  // 2. Quorate's directories and files (fixed relative paths only). Saved agent output
+  // 2. Embodent's directories and files (fixed relative paths only). Saved agent output
   //    (.orcha/saved-output) is the one thing inside .orcha that is the user's — it stays.
   for (const rel of ORCHA_DIRS) {
     const p = path.join(folder, rel)
@@ -305,7 +305,7 @@ async function removeFolderFiles(folder: string, deps: RemoveDeps, result: Remov
     const edit = stripManagedHooks(text)
     if (edit.kind === 'write') {
       fs.writeText(p, edit.text)
-      result.removed.push(`${edit.removed} Quorate hook${edit.removed === 1 ? '' : 's'} from ${rel}`)
+      result.removed.push(`${edit.removed} Embodent hook${edit.removed === 1 ? '' : 's'} from ${rel}`)
     } else if (edit.kind === 'delete') {
       fs.rmFile(p)
       result.removed.push(rel)
@@ -442,7 +442,7 @@ export async function removeProject(
     for (const v of inv.volumes) result.kept.push(`Data ${v}`)
   }
 
-  // 4. Quorate's files in the folder (opt-in).
+  // 4. Embodent's files in the folder (opt-in).
   if (opts.removeFiles && facts.folder) {
     onPhase('removing-files')
     if (facts.matches) {

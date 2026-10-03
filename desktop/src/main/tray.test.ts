@@ -44,13 +44,13 @@ vi.mock('electron', () => {
 
 import { createTray, TRAY_IMAGE } from './tray'
 
-describe('tray (Quorate orca template image)', () => {
+describe('tray (Embodent mark template image)', () => {
   beforeEach(() => {
     h.menuTemplates.length = 0
     h.createFromPath.mockClear()
   })
 
-  it('loads the orca template image from resources and marks it as a template', () => {
+  it('loads the mark template image from resources and marks it as a template', () => {
     createTray({ onOpenManager: vi.fn(), createPopover: vi.fn(), onTestNotification: vi.fn() })
     const p = h.createFromPath.mock.calls[0][0] as string
     expect(path.basename(p)).toBe(TRAY_IMAGE)
@@ -62,13 +62,13 @@ describe('tray (Quorate orca template image)', () => {
     expect(existsSync(path.join(res, 'trayTemplate@2x.png'))).toBe(true)
   })
 
-  it('is branded Quorate: tooltip and right-click menu', () => {
+  it('is branded Embodent: tooltip and right-click menu', () => {
     createTray({ onOpenManager: vi.fn(), createPopover: vi.fn(), onTestNotification: vi.fn() })
-    expect(h.trayOpts.toolTip).toBe('Quorate')
+    expect(h.trayOpts.toolTip).toBe('Embodent')
     h.trayOpts.handlers['right-click']()
     const labels = h.menuTemplates.at(-1)!.map((i) => i.label)
-    expect(labels).toContain('Open Quorate')
-    expect(labels).toContain('Quit Quorate')
+    expect(labels).toContain('Open Embodent')
+    expect(labels).toContain('Quit Embodent')
     expect(labels.join(' ')).not.toMatch(/Orcha/)
   })
 })

@@ -1,5 +1,5 @@
 /**
- * "Quorate was updated · Reload" — the portal noticing it was upgraded underneath it.
+ * "Embodent was updated · Reload" — the portal noticing it was upgraded underneath it.
  *
  * A long-lived tab (and every desktop-embedded portal view) keeps running the bundle it
  * loaded, so after `orcha upgrade` people kept seeing the old UI and new features looked
@@ -64,7 +64,7 @@ export function UpdateNotice() {
   return (
     <div className="v2-update-notice" role="status" data-testid="update-notice">
       <span className="v2-update-dot" aria-hidden="true" />
-      <span>Quorate was updated. Reload to get the latest version.</span>
+      <span>Embodent was updated. Reload to get the latest version.</span>
       <button type="button" className="v2-update-btn" onClick={() => window.location.reload()}>Reload</button>
     </div>
   );

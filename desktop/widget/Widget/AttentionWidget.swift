@@ -70,7 +70,7 @@ struct OrchaAttentionWidget: Widget {
       AttentionView(entry: entry)
         .widgetURL(deepLink(status: entry.status, path: "/requests"))
     }
-    .configurationDisplayName("Quorate Attention")
+    .configurationDisplayName("Embodent Attention")
     .description("What's waiting on you.")
     .supportedFamilies([.systemLarge])
   }

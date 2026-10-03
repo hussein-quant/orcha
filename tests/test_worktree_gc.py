@@ -1,7 +1,7 @@
 """Agent-worktree housekeeping on the host (orcha_cli/worktree_gc.py + notifier_worktree_gc.py,
 cli_worktrees.py) — every test runs against REAL temporary git repositories.
 
-Covered: classification (Quorate scaffolding and byte-identical copies of the main checkout
+Covered: classification (Embodent scaffolding and byte-identical copies of the main checkout
 never count as changes; every state), safe removal (clean, has-output preserved to the task or
 .orcha/saved-output first, unmerged never automatic, in-use / not-quorate / unregistered
 refused, branches only deleted when merged), the automatic after-run clean-up and the setting
@@ -67,7 +67,7 @@ def project(tmp_path):
 
 
 def _scaffold(base: pathlib.Path, wt: pathlib.Path) -> None:
-    """Everything Quorate puts into a worktree: the runtime overlay plus what a handoff out of
+    """Everything Embodent puts into a worktree: the runtime overlay plus what a handoff out of
     the main checkout carries in (.orcha stack folder, wake logs, codex hooks, preferences)."""
     wbase.overlay_runtime_config(base, wt)
     (wt / ".claude" / ".orcha-wakes").mkdir(parents=True, exist_ok=True)

@@ -174,9 +174,9 @@ export function prefsErrText(e: unknown): string {
   const own = (e as { detail?: unknown } | null)?.detail;
   const detail = typeof own === "string" && own ? own : m && m[2] ? m[2].trim() : "";
   if (detail && detail[0] !== "{" && detail[0] !== "[") return detail;
-  if (!status) return "Quorate couldn't be reached";
+  if (!status) return "Embodent couldn't be reached";
   if (status === 401 || status === 403) return "you can only change your own notification settings";
   if (status === 422) return "that setting isn't valid";
-  if (status >= 500) return "Quorate hit an error — try again";
+  if (status >= 500) return "Embodent hit an error — try again";
   return "the server refused the change";
 }

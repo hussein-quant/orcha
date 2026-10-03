@@ -59,7 +59,7 @@ describe("settings key failures read as words", () => {
       .toBe("this action requires the owner role or the manage_keys permission");
     expect(pkErrText({ ok: false, status: 403, body: null })).toBe("you don't have permission to change this");
     expect(gaErrText({ status: 422, body: { detail: [{ loc: ["body", "token"], msg: "too short" }] } })).toBe("token: too short");
-    expect(gaErrText({ status: 0, body: null })).toBe("couldn't reach Quorate");
+    expect(gaErrText({ status: 0, body: null })).toBe("couldn't reach Embodent");
     expect(gaErrText({ status: 403, body: null })).not.toMatch(/\(403\)/);
   });
 });

@@ -25,9 +25,9 @@ export function objectiveSaveError(e: unknown): string {
   const status = (e as { status?: unknown } | null)?.status;
   if (status === 404 || status === 405) {
     // 404 on an existing project = an older backend without the route
-    return "This Quorate can't edit objectives yet — update it, or set one by applying a template.";
+    return "This Embodent can't edit objectives yet — update it, or set one by applying a template.";
   }
-  if (typeof status === "number" && status >= 500) return "Couldn't save the objective — Quorate hit an error. Try again.";
+  if (typeof status === "number" && status >= 500) return "Couldn't save the objective — Embodent hit an error. Try again.";
   if (status === 413) return `That objective is too long — keep it under ${OBJECTIVE_MAX.toLocaleString()} characters.`;
   const why = settingsErrText(e);
   return "Couldn't save the objective — " + why + (/[.!?]$/.test(why) ? "" : ".");

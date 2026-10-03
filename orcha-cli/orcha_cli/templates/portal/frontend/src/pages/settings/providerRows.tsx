@@ -233,7 +233,7 @@ export function RuntimesGroup() {
     <SettingsGroup
       settab="provider-keys"
       title="Agent runtimes"
-      lead="The coding-agent CLIs Quorate launches for your agents."
+      lead="The coding-agent CLIs Embodent launches for your agents."
       help="Each agent's model and effort are chosen on the agent's Configuration tab; this list is what the worker supports."
       action={models ? <Chip size="sm">{groups.length + (groups.length === 1 ? " runtime" : " runtimes")}</Chip> : undefined}
       flush

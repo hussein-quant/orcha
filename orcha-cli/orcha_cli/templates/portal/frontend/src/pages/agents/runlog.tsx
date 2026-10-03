@@ -702,7 +702,7 @@ export function activityText(e: Pick<LogEvent, "type" | "label" | "text" | "deta
       case "WebFetch": case "WebSearch": return "Searching the web";
       case "Task": case "Agent": return "Delegating to a subagent";
       case "TodoWrite": return "Updating its plan";
-      default: return e.type === "decision" ? "Updating Quorate" : "Using " + name;
+      default: return e.type === "decision" ? "Updating Embodent" : "Using " + name;
     }
   }
   if (e.type === "narrate" && (e.label === "narration" || e.label === "progress")) {

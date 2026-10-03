@@ -26,7 +26,7 @@ import { cn } from '../ui/cn'
 import { useAgents } from '../agents/AgentsContext'
 
 export const YOLO_HELP =
-  'Yolo launches each agent with its documented skip-permission flag (e.g. Claude Code’s --dangerously-skip-permissions), so it edits files and runs commands without asking first. Manual launches without those flags (and passes Cline’s --auto-approve false, since Cline auto-approves by default), so the agent asks before acting. Only affects terminals you open from Quorate — never Quorate’s managed agents.'
+  'Yolo launches each agent with its documented skip-permission flag (e.g. Claude Code’s --dangerously-skip-permissions), so it edits files and runs commands without asking first. Manual launches without those flags (and passes Cline’s --auto-approve false, since Cline auto-approves by default), so the agent asks before acting. Only affects terminals you open from Embodent — never Embodent’s managed agents.'
 
 export const RESTORE_HELP =
   'Shells reopen as a new shell in the folder they were last in (running processes can’t survive a quit). Claude Code tabs resume their exact conversation (claude --resume), Codex tabs likewise (codex resume); other agents start a new conversation. Up to 20 tabs are reopened. When this is off, ⌘K › Restore last session brings them back.'
@@ -327,7 +327,7 @@ export default function AgentsSettings({ onTestLaunch }: { onTestLaunch?: (id: A
   const [expanded, setExpanded] = useState<AgentId | null>(null)
 
   if (!bridge) {
-    return <p className="text-[13px] text-text-3">Agent settings need a newer Quorate build.</p>
+    return <p className="text-[13px] text-text-3">Agent settings need a newer Embodent build.</p>
   }
 
   const detecting = !snapshot || snapshot.detection === 'pending' || (refreshing && snapshot.detection !== 'ready')
@@ -345,7 +345,7 @@ export default function AgentsSettings({ onTestLaunch }: { onTestLaunch?: (id: A
             <InfoTip label="About agent permissions" text={YOLO_HELP} />
           </div>
           <p className="mt-1 text-[13px] leading-5 text-text-3">
-            Launch agents with fewer permission prompts (Yolo) or with manual checks. Applies to terminals you open from Quorate.
+            Launch agents with fewer permission prompts (Yolo) or with manual checks. Applies to terminals you open from Embodent.
           </p>
         </div>
         <Segmented
@@ -369,7 +369,7 @@ export default function AgentsSettings({ onTestLaunch }: { onTestLaunch?: (id: A
               <InfoTip label="About session restore" text={RESTORE_HELP} />
             </div>
             <p className="mt-1 text-[13px] leading-5 text-text-3">
-              Reopen the tabs you had open when Quorate quit — same folders, titles, pins and colours.
+              Reopen the tabs you had open when Embodent quit — same folders, titles, pins and colours.
             </p>
           </div>
           <Segmented
