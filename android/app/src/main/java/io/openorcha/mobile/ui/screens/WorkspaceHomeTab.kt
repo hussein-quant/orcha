@@ -102,10 +102,12 @@ internal fun HomeTab(
                 onRepo = { if (repo == null && state.selectedContainer != null) connectRepo = true else onOpenGithubHub() },
             )
             if (connectRepo) InboxConnectRepoHost(state, onDismiss = { connectRepo = false })
-            state.selectedContainer?.let { c ->
-                Spacer(Modifier.height(LSpace.m))
-                HomeUsageCard(c, refreshing = state.loading, onOpen = onOpenMetrics)
-            }
+            // Plan usage (Claude / Codex limits from the desktop) in place of "This week".
+            val planUsage = rememberPlanUsage(state.containers.map { it.baseUrl })
+            var showPlanUsage by remember { mutableStateOf(false) }
+            if (showPlanUsage) PlanUsageSheet(planUsage, onDismiss = { showPlanUsage = false })
+            Spacer(Modifier.height(LSpace.m))
+            PlanUsageCard(planUsage, onOpen = { showPlanUsage = true })
             HomeObjectiveEditor(state)
         }
 

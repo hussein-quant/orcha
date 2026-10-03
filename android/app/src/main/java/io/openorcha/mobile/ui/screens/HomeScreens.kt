@@ -78,11 +78,7 @@ fun ContainersHomeScreen(
     onSettings: () -> Unit,
 ) {
     val p = Orcha.palette
-    // Plan usage (desktop Usage panel parity): read from every paired portal, polled while visible.
-    val planUsage = rememberPlanUsage(state.containers.map { it.baseUrl })
-    var showPlanUsage by remember { mutableStateOf(false) }
-    val refreshAll = { onRefresh(); planUsage.refresh() }
-    if (showPlanUsage) PlanUsageSheet(planUsage, onDismiss = { showPlanUsage = false })
+    val refreshAll = { onRefresh() }
     Scaffold(
         containerColor = p.bg,
         topBar = {
@@ -109,7 +105,7 @@ fun ContainersHomeScreen(
             PairingEmptyState(onScan = onScan, onAdd = onAdd, modifier = Modifier.padding(padding))
         } else {
             PullToRefreshBox(
-                isRefreshing = planUsage.refreshing,
+                isRefreshing = false,
                 onRefresh = refreshAll,
                 modifier = Modifier.fillMaxSize().padding(padding),
             ) {
@@ -118,7 +114,6 @@ fun ContainersHomeScreen(
                 contentPadding = PaddingValues(horizontal = LSpace.l, vertical = LSpace.m),
                 verticalArrangement = Arrangement.spacedBy(LSpace.m),
             ) {
-                item(key = "plan-usage") { PlanUsageCard(planUsage, onOpen = { showPlanUsage = true }) }
                 item(key = "projects") {
                     LSection("All projects", count = state.containers.size) {
                         LCard(padding = 0.dp) {

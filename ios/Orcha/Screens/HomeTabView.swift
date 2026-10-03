@@ -12,8 +12,7 @@ struct HomeTabView: View {
     @State private var verifySheetTask: TaskDto?
     @State private var showRepoConnect = false
     @State private var showObjectiveEditor = false
-    @State private var usage: MetricsSummaryDto?
-    @State private var usageLoaded = false
+    @State private var showPlanUsage = false
 
     var body: some View {
         Group {
@@ -43,25 +42,20 @@ struct HomeTabView: View {
         .sheet(isPresented: $showObjectiveEditor) {
             ObjectiveEditorSheet(current: model.snapshot?.container.description ?? "")
         }
-        .task(id: model.selectedContainer?.id) {
-            usage = nil
-            usageLoaded = false
-            await loadUsage()
+        .sheet(isPresented: $showPlanUsage) {
+            PlanUsageSheet()
+        }
+        // Plan usage: read now, then every 2 minutes while Home is visible.
+        .task(id: pairedBases) {
+            while !Task.isCancelled {
+                await model.planUsage.refresh(bases: pairedBases)
+                try? await Task.sleep(for: PlanUsageUx.pollInterval)
+            }
         }
     }
 
-    /// `GET …/metrics?days=7` for the "This week" card; any failure reads as no runs.
-    private func loadUsage() async {
-        guard let sel = model.selectedContainer else { usageLoaded = true; return }
-        do {
-            usage = try await model.api.metricsSummary(sel.baseUrl, sel.id, days: 7)
-        } catch is CancellationError {
-            return
-        } catch {
-            usage = nil
-        }
-        usageLoaded = true
-    }
+    /// Every paired server, once each — plan usage merges the newest snapshot per provider.
+    private var pairedBases: [String] { Array(Set(model.containers.map(\.baseUrl))).sorted() }
 
     private var skeleton: some View {
         ScrollView {
@@ -105,7 +99,12 @@ struct HomeTabView: View {
                         onConnectRepo: { showRepoConnect = true },
                         onEditObjective: { showObjectiveEditor = true }
                     )
-                    HomeUsageCard(summary: usage, loaded: usageLoaded) { showMetrics = true }
+                    // Plan usage (Claude / Codex limits from the desktop) in place of "This week".
+                    PlanUsageCard(
+                        providers: model.planUsage.providers,
+                        loaded: model.planUsage.loaded,
+                        onOpen: { showPlanUsage = true }
+                    )
                     if let cu = model.catchUp {
                         CatchUpCard(
                             previous: cu.previous,
@@ -191,8 +190,8 @@ struct HomeTabView: View {
         }
         .refreshable {
             async let snapshot: Void = model.refresh()
-            async let week: Void = loadUsage()
-            _ = await (snapshot, week)
+            async let plan: Void = model.planUsage.refresh(bases: pairedBases)
+            _ = await (snapshot, plan)
         }
     }
 }
