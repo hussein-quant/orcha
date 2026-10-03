@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254">
-  <!-- Embodent mark: a figure (head over an arch), split light | grey down the middle. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-25.5 -18 1254 1254">
+  <!-- Embodent mark: a "C" (thick arc with two round-capped arms) around a dot, split light | grey down x=627. -->
   <defs>
-    <clipPath id="l"><rect x="0" y="0" width="627" height="1254"/></clipPath>
-    <clipPath id="r"><rect x="627" y="0" width="627" height="1254"/></clipPath>
+    <clipPath id="l"><rect x="-200" y="-200" width="827" height="1654"/></clipPath>
+    <clipPath id="r"><rect x="627" y="-200" width="827" height="1654"/></clipPath>
     <g id="fig">
-      <circle cx="627" cy="299" r="146"/>
-      <path d="M366 940 L366 838 A261 261 0 0 1 888 838 L888 940" fill="none" stroke-width="222" stroke-linecap="round"/>
+      <circle cx="627" cy="609" r="148"/>
+      <path d="M930 255 L627 255 A354 354 0 0 0 627 963 L930 963" fill="none" stroke-width="204" stroke-linecap="round"/>
     </g>
   </defs>
   <g clip-path="url(#l)" fill="#ECEDF1" stroke="#ECEDF1"><use href="#fig"/></g>

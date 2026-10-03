@@ -134,11 +134,11 @@ def _qr_orca_tile(x: float, y: float, size: float) -> str:
     return (
         f'<g transform="translate({x:.2f},{y:.2f}) scale({s:.4f})" aria-hidden="true">'
         f'<rect width="100" height="100" rx="22" fill="{QR_TILE}"/>'
-        f'<g transform="translate(10,10) scale({m:.5f}) translate(-102,-77)">'
-        '<path fill="#ECEDF1" d="M627 153A146 146 0 0 0 627 445ZM255 838L255 940'
-        'A111 111 0 0 0 477 940L477 838A150 150 0 0 1 627 688L627 466A372 372 0 0 0 255 838Z"/>'
-        '<path fill="#7C808A" d="M627 153A146 146 0 0 1 627 445ZM999 838L999 940'
-        'A111 111 0 0 1 777 940L777 838A150 150 0 0 0 627 688L627 466A372 372 0 0 1 999 838Z"/>'
+        f'<g transform="translate(10,10) scale({m:.5f}) translate(-76.5,-84)">'
+        '<path fill="#ECEDF1" d="M627 153A456 456 0 0 0 627 1065L627 861A252 '
+        '252 0 0 1 627 357ZM627 461A148 148 0 0 0 627 757Z"/>'
+        '<path fill="#7C808A" d="M627 153L930 153A102 102 0 0 1 930 357L627 357ZM627 861L930'
+        ' 861A102 102 0 0 1 930 1065L627 1065ZM627 461A148 148 0 0 1 627 757Z"/>'
         "</g></g>"
     )
 

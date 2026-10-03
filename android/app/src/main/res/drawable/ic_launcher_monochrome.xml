@@ -7,11 +7,11 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:scaleX="0.058"
-        android:scaleY="0.058"
-        android:translateX="17.634"
-        android:translateY="19.084">
-        <path android:fillColor="#FFFFFFFF" android:pathData="M481,299 a146,146 0 1,0 292,0 a146,146 0 1,0 -292,0" />
-        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="222" android:strokeLineCap="round" android:pathData="M366,940 L366,838 A261,261 0 0,1 888,838 L888,940" />
+        android:scaleX="0.054"
+        android:scaleY="0.054"
+        android:translateX="21.519"
+        android:translateY="21.114">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M479,609 a148,148 0 1,0 296,0 a148,148 0 1,0 -296,0" />
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="204" android:strokeLineCap="round" android:pathData="M930,255 L627,255 A354,354 0 0,0 627,963 L930,963" />
     </group>
 </vector>

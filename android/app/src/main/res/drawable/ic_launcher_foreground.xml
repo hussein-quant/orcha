@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Embodent launcher foreground: the mark (head over arch, left half #ECEDF1,
-     right half #7C808A) from embodent-mark.svg's 1254-unit space, scaled by 0.058 and
-     centred so its farthest point (arch cap, ~538 units out) sits ~31dp from centre,
+<!-- Embodent launcher foreground: the mark (a "C" around a dot, left half #ECEDF1,
+     right half #7C808A) from embodent-mark.svg's 1254-unit space, scaled by 0.054 and
+     centred so its farthest point (arm cap, ~585 units out) sits ~31.6dp from centre,
      inside the 66dp adaptive-icon safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
@@ -9,19 +9,19 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:scaleX="0.058"
-        android:scaleY="0.058"
-        android:translateX="17.634"
-        android:translateY="19.084">
+        android:scaleX="0.054"
+        android:scaleY="0.054"
+        android:translateX="21.519"
+        android:translateY="21.114">
         <group>
-            <clip-path android:pathData="M0,0 h627 v1254 h-627 z" />
-            <path android:fillColor="#FFECEDF1" android:pathData="M481,299 a146,146 0 1,0 292,0 a146,146 0 1,0 -292,0" />
-            <path android:strokeColor="#FFECEDF1" android:strokeWidth="222" android:strokeLineCap="round" android:pathData="M366,940 L366,838 A261,261 0 0,1 888,838 L888,940" />
+            <clip-path android:pathData="M-200,-200 h827 v1654 h-827 z" />
+            <path android:fillColor="#FFECEDF1" android:pathData="M479,609 a148,148 0 1,0 296,0 a148,148 0 1,0 -296,0" />
+            <path android:strokeColor="#FFECEDF1" android:strokeWidth="204" android:strokeLineCap="round" android:pathData="M930,255 L627,255 A354,354 0 0,0 627,963 L930,963" />
         </group>
         <group>
-            <clip-path android:pathData="M627,0 h627 v1254 h-627 z" />
-            <path android:fillColor="#FF7C808A" android:pathData="M481,299 a146,146 0 1,0 292,0 a146,146 0 1,0 -292,0" />
-            <path android:strokeColor="#FF7C808A" android:strokeWidth="222" android:strokeLineCap="round" android:pathData="M366,940 L366,838 A261,261 0 0,1 888,838 L888,940" />
+            <clip-path android:pathData="M627,-200 h827 v1654 h-827 z" />
+            <path android:fillColor="#FF7C808A" android:pathData="M479,609 a148,148 0 1,0 296,0 a148,148 0 1,0 -296,0" />
+            <path android:strokeColor="#FF7C808A" android:strokeWidth="204" android:strokeLineCap="round" android:pathData="M930,255 L627,255 A354,354 0 0,0 627,963 L930,963" />
         </group>
     </group>
 </vector>

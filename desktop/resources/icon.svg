@@ -1,14 +1,14 @@
 <!-- Embodent app icon (macOS grid: 824px plate inset 100px on a 1024 canvas, rx 185.4, #121314),
-     the mark (resources/logo-mark.svg: head over an arch, light | grey halves) centred on it.
+     the mark (resources/logo-mark.svg: a "C" around a dot, light | grey halves) centred on it.
      icon.png / icon.icns are rendered from this (scripts in the PR notes: rsvg-convert + sips + iconutil). -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <defs>
-    <clipPath id="l"><rect x="0" y="0" width="627" height="1254"/></clipPath>
-    <clipPath id="r"><rect x="627" y="0" width="627" height="1254"/></clipPath>
+    <clipPath id="l"><rect x="-200" y="-200" width="827" height="1654"/></clipPath>
+    <clipPath id="r"><rect x="627" y="-200" width="827" height="1654"/></clipPath>
   </defs>
   <rect x="100" y="100" width="824" height="824" rx="185.4" fill="#121314"/>
-  <g transform="translate(185.96 198.96) scale(0.52)">
-    <g clip-path="url(#l)" fill="#ECEDF1" stroke="#ECEDF1"><circle cx="627" cy="299" r="146"/><path d="M366 940 L366 838 A261 261 0 0 1 888 838 L888 940" fill="none" stroke-width="222" stroke-linecap="round"/></g>
-    <g clip-path="url(#r)" fill="#7C808A" stroke="#7C808A"><circle cx="627" cy="299" r="146"/><path d="M366 940 L366 838 A261 261 0 0 1 888 838 L888 940" fill="none" stroke-width="222" stroke-linecap="round"/></g>
+  <g transform="translate(199.22 195.32) scale(0.52)">
+    <g clip-path="url(#l)" fill="#ECEDF1" stroke="#ECEDF1"><circle cx="627" cy="609" r="148"/><path d="M930 255 L627 255 A354 354 0 0 0 627 963 L930 963" fill="none" stroke-width="204" stroke-linecap="round"/></g>
+    <g clip-path="url(#r)" fill="#7C808A" stroke="#7C808A"><circle cx="627" cy="609" r="148"/><path d="M930 255 L627 255 A354 354 0 0 0 627 963 L930 963" fill="none" stroke-width="204" stroke-linecap="round"/></g>
   </g>
 </svg>
