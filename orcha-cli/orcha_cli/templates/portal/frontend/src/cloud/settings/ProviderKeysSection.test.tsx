@@ -237,6 +237,30 @@ describe("ProviderKeysSection (one home for every key, image-33 rows)", () => {
     expect(await screen.findByText("API key removed.")).toBeInTheDocument();
   });
 
+  it("Use for agent runs: a switch on the Anthropic and OpenAI rows (never xAI), state from the GETs", async () => {
+    stubFetch({
+      llmKey: { configured: true, masked: "sk-...anth", source: "db", stored: true, use_for_agents: true, agent_runtime: "claude" },
+      keys: {
+        keys: [
+          { provider: "anthropic", name: "Anthropic", configured: true, masked: "sk-...zzzz", source: "db", stored: true, use_for_agents: true, agent_runtime: "claude" },
+          { provider: "xai", name: "xAI (Grok)", configured: true, masked: "sk-...abcd", source: "db", stored: true, use_for_agents: false, agent_runtime: null },
+          { provider: "openai", name: "OpenAI", configured: false, masked: null, source: null, stored: false, use_for_agents: false, agent_runtime: "codex", agent_only: true },
+        ],
+      },
+    });
+    mount();
+    await waitFor(() => expect(row("openai")).not.toBeNull());
+    const anth = row("anthropic").querySelector(".ak-row")!;
+    expect(anth).toHaveAttribute("data-agent-key", "on");
+    expect(anth.querySelector(".ak-state.is-on")!.textContent).toBe("On — Claude Code runs on this project bill this API key.");
+    expect(row("xai").querySelector(".ak-row")).toBeNull();
+    const oa = row("openai").querySelector<HTMLElement>(".ak-row")!;
+    expect(oa).toHaveAttribute("data-agent-key", "off");
+    // panels stay mounted while collapsed (hidden), so query through the hidden tree
+    expect(within(oa).getByRole("switch", { name: "Use for agent runs", hidden: true })).toHaveAttribute("aria-disabled", "true");
+    expect(within(row("openai")).getByText(/Codex agents on the OpenAI API instead of a ChatGPT subscription/)).toBeInTheDocument();
+  });
+
   it("Refresh re-reads both key sources", async () => {
     const calls = stubFetch();
     mount();

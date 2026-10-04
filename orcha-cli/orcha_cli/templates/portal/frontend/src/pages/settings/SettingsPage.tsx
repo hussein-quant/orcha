@@ -51,6 +51,7 @@ import { PortabilitySection } from "./portability/PortabilitySection";
 import { VerdiktSettingsSection } from "./integrations/VerdiktSettings";
 import { ProjectModeSection } from "../onboarding/templates/ProjectModeSection";
 import { DefaultBadge, KeyDetail, PROVIDER_DOCS, ProviderRow, RuntimesGroup } from "./providerRows";
+import { AgentKeyToggle, agentEntryOf, providerUnsetCopy, type AgentKeyEntry } from "./AgentKeyToggle";
 import { DEVICE_NOT_A_MEMBER, DEVICE_SIGNIN_UNAVAILABLE, DeviceTokensSection } from "../../cloud/device/DeviceTokens";
 import { fetchMe } from "../../cloud/identity";
 import { pairingErrorView, type PairingErrorView } from "../../cloud/projects/PairingModal";
@@ -65,6 +66,10 @@ export interface KeyStatusResp {
   configured?: boolean;
   masked?: string | null;
   source?: string | null;
+  /** migration 071: a key is stored here / opted in to agent runs / the runtime it serves */
+  stored?: boolean;
+  use_for_agents?: boolean;
+  agent_runtime?: string | null;
 }
 export interface KeyVM {
   mode: "db" | "env" | "none";
@@ -252,6 +257,7 @@ export interface KeyRowOpts {
 export function KeyCard({ cid, asRow = false, isDefault = false, reload = 0, onState }: { cid: string | null } & KeyRowOpts) {
   const toast = useToast();
   const [vm, setVm] = useState<KeyVM | null>(null);
+  const [agentKey, setAgentKey] = useState<AgentKeyEntry | null>(null); // "Use for agent runs" state
   const [loadErr, setLoadErr] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testResult, setTestResult] = useState<KeyTestResult | null>(null);
@@ -268,7 +274,9 @@ export function KeyCard({ cid, asRow = false, isDefault = false, reload = 0, onS
     if (!cid) return;
     setLoadErr(false);
     try {
-      setVm(keyState(await getJSON<KeyStatusResp>(keyUrl())));
+      const resp = await getJSON<KeyStatusResp>(keyUrl());
+      setVm(keyState(resp));
+      setAgentKey(agentEntryOf("anthropic", resp));
     } catch {
       setVm(null);
       setLoadErr(true);
@@ -415,6 +423,7 @@ export function KeyCard({ cid, asRow = false, isDefault = false, reload = 0, onS
         locked={!auth.can}
         inRow={asRow}
       />
+      <AgentKeyToggle cid={cid} provider="anthropic" entry={agentKey} />
       {confirmClear && (
         <Modal
           title="Remove API key"
@@ -589,10 +598,15 @@ export interface ProviderKeyEntry {
   source?: string | null;
   masked?: string | null;
   set_at?: string | null;
+  stored?: boolean;
+  use_for_agents?: boolean;
+  agent_runtime?: string | null;
 }
 export interface ProviderKeyVM extends KeyVM {
   provider: string;
   name: string;
+  /** migration 071: the "Use for agent runs" state (null on an older portal) */
+  agent?: AgentKeyEntry | null;
 }
 interface ProviderKeyCardVM extends ProviderKeyVM {
   onSaved: () => void;
@@ -603,7 +617,7 @@ interface ProviderKeyCardVM extends ProviderKeyVM {
 export function otherProviderKeys(keysIn: ProviderKeyEntry[] | null | undefined): ProviderKeyVM[] {
   return (keysIn || [])
     .filter((k) => k.provider !== "anthropic")
-    .map((k) => ({ ...keyState(k), provider: k.provider, name: k.name }));
+    .map((k) => ({ ...keyState(k), provider: k.provider, name: k.name, agent: agentEntryOf(k.provider, k) }));
 }
 
 function PkCard({
@@ -703,7 +717,7 @@ function PkCard({
         vm={k}
         name={k.name}
         provider={k.provider}
-        unsetCopy="Use-cases on this provider stay off until you add one."
+        unsetCopy={providerUnsetCopy(k.provider)}
         draft={draft}
         onDraft={(v) => { setDraft(v); setTestResult(null); }}
         reveal={reveal}
@@ -740,6 +754,7 @@ function PkCard({
       >
         <div className="pk-card" data-provider={k.provider}>
           {keyBody}
+          <AgentKeyToggle cid={cid} provider={k.provider} entry={k.agent || null} />
           {confirm}
         </div>
       </ProviderRow>
@@ -749,6 +764,7 @@ function PkCard({
     <div className="pk-card" data-provider={k.provider}>
       <h3 className="pk-name">{k.name}</h3>
       {keyBody}
+      <AgentKeyToggle cid={cid} provider={k.provider} entry={k.agent || null} />
       {confirm}
     </div>
   );
@@ -1618,8 +1634,8 @@ export function ProvidersGroup({
   return (
     <SettingsGroup
       settab="provider-keys" title="Providers" flush className="mp-group"
-      lead="API keys for Embodent's own helpers."
-      help="Keys are stored encrypted on this project. ORCHA_LLM_API_KEY in the environment takes precedence over any stored key."
+      lead="API keys for Embodent's own helpers — and, if you switch on Use for agent runs, for your agents."
+      help="Keys are stored encrypted on this project. ORCHA_LLM_API_KEY in the environment takes precedence over any stored key for the helpers; agent runs only ever use a key stored here."
       action={
         <>
           {known ? <Chip size="sm">{connected + " connected"}</Chip> : null}

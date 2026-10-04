@@ -1,8 +1,9 @@
 """Container, credential, model-setting, and onboarding API schemas."""
 
+from datetime import datetime
 from typing import Any, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from portal_backend.limits import MAX_DESC_LEN, MAX_NAME_LEN, MAX_PAYLOAD_LEN
 
@@ -105,6 +106,71 @@ class LlmKeyTest(BaseModel):
         max_length=512,
         description="candidate key to test; omit to test the stored/resolved key",
     )
+
+
+class ProviderKeyAgentUse(BaseModel):
+    """Opt one stored provider key in (or out) of AGENT RUNS (PUT .../settings/provider-keys/
+    {provider}/agent-use, migration 071). HUMAN-AUTHORITY gated + audit-logged, same gate as
+    storing the key. When on, the notifier injects the stored key into every agent run on this
+    project for the matching runtime (anthropic -> Claude, openai -> Codex), so the run bills the
+    API key instead of a Claude/ChatGPT subscription. Strict: a JSON boolean only."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    actor_agent_id: str = Field(
+        ...,
+        description="UUID of the human agent performing the action (kind='human')",
+    )
+    use_for_agents: bool = Field(
+        ...,
+        description="true = agent runs on this project bill this API key; false = subscription (default)",
+    )
+
+
+class ProviderKeyAgentUseOut(BaseModel):
+    """Response of PUT .../settings/provider-keys/{provider}/agent-use."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    use_for_agents: bool
+    agent_runtime: Optional[Literal["claude", "codex"]] = Field(
+        default=None,
+        description="the agent runtime this provider's key is injected into, or null if none",
+    )
+
+
+class ProviderKeyStatus(BaseModel):
+    """One provider row of GET .../settings/provider-keys. NEVER carries a secret."""
+
+    provider: str
+    name: str
+    configured: bool
+    source: Optional[Literal["db", "env"]] = None
+    masked: Optional[str] = None
+    set_at: Optional[datetime] = None
+    stored: bool = Field(
+        default=False,
+        description="a key is stored (sealed) on this project — required for use_for_agents",
+    )
+    use_for_agents: bool = Field(
+        default=False,
+        description="agent runs on this project bill this stored key instead of a subscription",
+    )
+    agent_runtime: Optional[Literal["claude", "codex"]] = Field(
+        default=None,
+        description="the agent runtime this key can serve (anthropic->claude, openai->codex), else null",
+    )
+    agent_only: bool = Field(
+        default=False,
+        description="this provider's key is used ONLY for agent runs (no Embodent helper uses it yet)",
+    )
+
+
+class ProviderKeyList(BaseModel):
+    """GET .../settings/provider-keys."""
+
+    keys: list[ProviderKeyStatus]
 
 
 class GithubPatUpdate(BaseModel):

@@ -58,7 +58,7 @@ PORT_MIN, PORT_MAX = 1024, 65535
 _BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
 _ID = re.compile(r"^[0-9a-fA-F-]{36}$")
 # never handed to a project's preview command (it runs the agent's branch code)
-_SECRET_ENV = re.compile(r"^(ORCHA_.*|ANTHROPIC_API_KEY|OPENAI_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|GEMINI_API_KEY|XAI_API_KEY)$")
+_SECRET_ENV = re.compile(r"^(ORCHA_.*|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|OPENAI_API_KEY|CODEX_API_KEY|CODEX_ACCESS_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|GEMINI_API_KEY|XAI_API_KEY)$")
 
 
 class PreviewError(Exception):

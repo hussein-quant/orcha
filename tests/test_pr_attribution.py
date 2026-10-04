@@ -48,9 +48,11 @@ def test_migration_042_exists_and_is_next_sequential():
     # task a routine was made from (routines.origin_task_id); 067 agent-worktree clean-up
     # (containers.worktree_auto_cleanup / worktree_grace_days + agent_worktree_inventory /
     # agent_worktree_actions); 068 the Verdikt auto-fix loop (container_verdikt_settings.autofix_* +
-    # verdikt_runs.autofix + verdikt_task_autofix / verdikt_autofix_loops / verdikt_autofix_attempts).
+    # verdikt_runs.autofix + verdikt_task_autofix / verdikt_autofix_loops / verdikt_autofix_attempts); 069 plan-usage snapshots
+    # (plan_usage_snapshots); 070 the plan-usage display setting (plan_usage_display); 071 opt-in
+    # agent-run API keys (container_provider_keys.use_for_agents).
     # Keep this pin moving with the chain tip so gaps/dupes still fail loudly.
-    assert numbers[-1] == 68, f"068 must be the latest migration, saw {numbers[-1]:03d}"
+    assert numbers[-1] == 71, f"071 must be the latest migration, saw {numbers[-1]:03d}"
 
 
 def test_agents_git_email_column_applied(db):

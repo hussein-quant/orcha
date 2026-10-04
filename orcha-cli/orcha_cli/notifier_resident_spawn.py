@@ -181,6 +181,12 @@ def spawn_resident(
     else:
         env.pop("ORCHA_CONVERSATION_WORKER", None)
     env["ORCHA_HEADLESS_WORKER"] = "1"
+    # Agent runs on an API key (migration 071): when this project opted its provider key in, the
+    # key goes into THIS child env only (opened in memory; sandbox mode forwards it with `-e`).
+    # Off → env untouched (subscription). Never in argv, the repr, or any log line.
+    inject_key = getattr(services, "_inject_agent_key", None)
+    if inject_key is not None:
+        inject_key(env, services.RUNTIME_CLAUDE, cwd)
     out = services.subprocess.DEVNULL
     if log_path is not None:
         try:

@@ -3,6 +3,8 @@
 from fastapi import HTTPException, Request
 
 from portal_backend.agent_status import log_event
+from portal_backend.codex_pricing import estimate_codex_cost_usd
+from portal_backend.model_policy import resolve_model_runtime
 from portal_backend.application import app
 from portal_backend import stream_signal
 from portal_backend.database import db_cursor
@@ -30,6 +32,30 @@ def _require_run_machine_lane(cur, request: Request, agent_id) -> None:
         require_machine_lane_member(cur, request, str(owner["container_id"]))
 
 
+def _codex_cost_estimate(cur, run, body):
+    """Codex reports tokens but no dollar figure: estimate it from the agent's model
+    (codex_pricing — an ESTIMATE). Only for a Codex run that reported tokens; a Claude run
+    without a CLI-reported cost stays NULL (never a guessed $0)."""
+    if (
+        body.input_tokens is None
+        and body.output_tokens is None
+        and body.cache_read_input_tokens is None
+    ):
+        return None
+    cur.execute("SELECT model FROM agents WHERE id=%s", (run["agent_id"],))
+    agent = cur.fetchone()
+    model = agent["model"] if agent else None
+    runtime = run.get("runtime") or resolve_model_runtime(model)
+    if runtime != "codex":
+        return None
+    return estimate_codex_cost_usd(
+        model,
+        input_tokens=body.input_tokens,
+        cache_read_input_tokens=body.cache_read_input_tokens,
+        output_tokens=body.output_tokens,
+    )
+
+
 @app.post("/api/runs/{run_id}/finish", status_code=200)
 def finish_worker_run(run_id: str, body: WorkerRunFinish, request: Request):
     """A2: the notifier finishes a run on reap — exited (clean) or killed (ISS-15 watchdog),
@@ -43,7 +69,7 @@ def finish_worker_run(run_id: str, body: WorkerRunFinish, request: Request):
         )
     with db_cursor() as (conn, cur):
         cur.execute(
-            "SELECT run_id, agent_id, task_id, wake_kind, wake_event, conversation_id "
+            "SELECT run_id, agent_id, task_id, wake_kind, wake_event, conversation_id, runtime "
             "FROM worker_runs WHERE run_id=%s",
             (run_id,),
         )
@@ -61,6 +87,9 @@ def finish_worker_run(run_id: str, body: WorkerRunFinish, request: Request):
             )
             else None
         )
+        total_cost_usd = body.total_cost_usd
+        if total_cost_usd is None:
+            total_cost_usd = _codex_cost_estimate(cur, existing, body)
         cur.execute(
             """UPDATE worker_runs SET status=%s, exit_code=%s, output=%s,
                       task_id=COALESCE(task_id, %s),
@@ -83,7 +112,7 @@ def finish_worker_run(run_id: str, body: WorkerRunFinish, request: Request):
                 body.output_tokens,
                 body.cache_read_input_tokens,
                 body.cache_creation_input_tokens,
-                body.total_cost_usd,
+                total_cost_usd,
                 run_id,
             ),
         )

@@ -114,9 +114,12 @@ async def test_put_key_is_sealed_masked_and_never_returned(client, container, ma
     assert r.json()["default_provider"] == "openai"
     row = db.execute("SELECT key_enc FROM container_provider_keys WHERE container_id=%s AND provider='openai'", (cid,))[0]
     assert row["key_enc"].startswith("v1:") and OPENAI_KEY not in row["key_enc"]
-    # the LLM provider-keys list is untouched by a speech key
+    # One OpenAI key row per project: since migration 071 the provider-keys list shows the
+    # agent-only OpenAI slot, which is this same row — but a speech key never opts agent runs in.
     llm = await client.get(f"/api/containers/{cid}/settings/provider-keys")
-    assert "openai" not in {k["provider"] for k in llm.json()["keys"]}
+    oa = {k["provider"]: k for k in llm.json()["keys"]}["openai"]
+    assert oa["stored"] is True and oa["use_for_agents"] is False
+    assert OPENAI_KEY not in llm.text
 
 
 @pytest.mark.asyncio

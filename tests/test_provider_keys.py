@@ -48,9 +48,11 @@ async def test_list_covers_available_providers_unconfigured(client, container, m
     r = await client.get(f"/api/containers/{container['id']}/settings/provider-keys")
     assert r.status_code == 200, r.text
     by = _by_provider(r.json())
-    # every AVAILABLE catalog provider appears; stubbed (openai/gemini) do not
+    # every AVAILABLE catalog provider appears; stubbed gemini does not. OpenAI is stubbed in the
+    # catalog but gets an AGENT-ONLY key slot (migration 071: Codex agent runs on an API key).
     assert "anthropic" in by and "xai" in by
-    assert "openai" not in by and "gemini" not in by
+    assert "gemini" not in by
+    assert by["openai"]["agent_only"] is True and by["openai"]["agent_runtime"] == "codex"
     for entry in by.values():
         assert entry["configured"] is False and entry["masked"] is None
 
@@ -100,9 +102,10 @@ async def test_put_requires_human(client, container, make_agent, monkeypatch):
 async def test_put_rejects_unavailable_provider(client, container, make_agent, monkeypatch):
     monkeypatch.setenv("ORCHA_SECRET_KEY", "route-master-key")
     hid = await _human(make_agent)
-    r = await client.put(f"/api/containers/{container['id']}/settings/provider-keys/openai",
+    r = await client.put(f"/api/containers/{container['id']}/settings/provider-keys/gemini",
                          json={"actor_agent_id": hid, "api_key": "sk-x"})
     assert r.status_code == 400, r.text  # stubbed provider is not a catalog choice
+    # (openai is stubbed too, but has an agent-only key slot — see test_agent_run_api_keys.py)
 
 
 @pytest.mark.asyncio

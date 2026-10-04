@@ -8,7 +8,11 @@ from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
 from portal_backend.identity_routes import proxy_login, require_member_read
 from portal_backend.model_setting_routes import _resolve_use_case_model
-from portal_backend.provider_keys import effective_use_case_provider, provider_key_enc
+from portal_backend.provider_keys import (
+    agent_keys_enc,
+    effective_use_case_provider,
+    provider_key_enc,
+)
 from portal_backend.wake_backoff import apply_wake_backoff
 from portal_backend.wake_candidate_builder import build_wake_candidate
 from portal_backend.wake_scan_queries import list_wake_agents
@@ -86,6 +90,9 @@ def wake_scan(
         ack_key_enc = provider_key_enc(
             cur, cid, effective_use_case_provider(ack_model, "ack")
         )
+        # Agent runs on an API key (migration 071): the sealed key per agent runtime whose
+        # provider key is opted in (use_for_agents); None = leave the worker on its subscription.
+        agent_key_blobs = agent_keys_enc(cur, cid)
         candidates = [
             build_wake_candidate(
                 cur,
@@ -136,6 +143,11 @@ def wake_scan(
         # never hand ciphertext to a browser session, member or not.
         "triage_key_enc": None if browser else triage_key_enc,
         "ack_key_enc": None if browser else ack_key_enc,
+        # Same discipline: ciphertext, header-less daemon lane only. The daemon opens it in memory
+        # at spawn time and puts it in the agent subprocess env (never logs it).
+        "agent_keys_enc": (
+            {runtime: None for runtime in agent_key_blobs} if browser else agent_key_blobs
+        ),
         "ack_model": ack_model,
         "candidates": candidates,
     }

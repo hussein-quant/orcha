@@ -35,6 +35,7 @@ import { KeyBody, ProvidersGroup, type ProviderRowsSlot } from "../../pages/sett
 import { StatusLine, settingsErrText } from "../../pages/settings/settingsUi";
 import { DefaultBadge, KeyDetail, PROVIDER_DOCS, ProviderRow, RuntimesGroup } from "../../pages/settings/providerRows";
 import { useGrantAuthority } from "../../pages/settings/grantAuthority";
+import { AgentKeyToggle, agentEntryOf, providerUnsetCopy, type AgentKeyEntry } from "../../pages/settings/AgentKeyToggle";
 import { errorDetailText } from "../../api/client";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import { fetchMe, memActor, type Me } from "../identity";
@@ -47,6 +48,9 @@ interface PkKeyResp {
   configured?: boolean;
   masked?: string | null;
   source?: string | null;
+  stored?: boolean;
+  use_for_agents?: boolean;
+  agent_runtime?: string | null;
 }
 interface PkVM {
   provider: string;
@@ -56,6 +60,7 @@ interface PkVM {
   masked: string | null;
   editable: boolean; // env keys are managed outside the portal
   canClear: boolean; // only a DB-stored key can be removed here
+  agent: AgentKeyEntry | null; // "Use for agent runs" (migration 071); null on an older portal
 }
 export function pkKeyState(data: PkKeyResp): PkVM {
   const src = data.source === "db" || data.source === "env" ? data.source : null;
@@ -69,6 +74,7 @@ export function pkKeyState(data: PkKeyResp): PkVM {
     masked: data.masked || null,
     editable: mode !== "env",
     canClear: mode === "db",
+    agent: agentEntryOf(data.provider, data),
   };
 }
 
@@ -247,7 +253,7 @@ function CloudProviderKeyRows({ reload, onKeys, defaults }: ProviderRowsSlot) {
             vm={k}
             name={k.name}
             provider={p}
-            unsetCopy="Use-cases on this provider stay off until you add one."
+            unsetCopy={providerUnsetCopy(p)}
             draft={drafts[p] || ""}
             onDraft={(v) => {
               setDrafts((d) => ({ ...d, [p]: v }));
@@ -264,6 +270,7 @@ function CloudProviderKeyRows({ reload, onKeys, defaults }: ProviderRowsSlot) {
             locked={locked}
             inRow
           />
+          <AgentKeyToggle cid={cid} provider={p} entry={k.agent} />
         </div>
       </ProviderRow>
     );
