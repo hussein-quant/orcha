@@ -47,10 +47,25 @@ PLIST="$APP/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Embodent" "$PLIST"
 echo "patched CFBundleName/CFBundleDisplayName -> Embodent"
 
+# Give the dev bundle (and its helpers) its own bundle id. Notification Center keys an
+# app's icon by bundle id, and every npm Electron.app on this Mac shares
+# com.github.Electron — so notifications kept showing whatever icon was cached for that
+# id (another project's, or an old Embodent mark) no matter what icns we ship.
+DEV_ID="io.openorcha.desktop.dev"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $DEV_ID" "$PLIST"
+for HP in "$APP"/Contents/Frameworks/*.app/Contents/Info.plist; do
+  OLD_ID="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$HP")"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ${OLD_ID/com.github.Electron/$DEV_ID}" "$HP"
+done
+echo "patched CFBundleIdentifier -> $DEV_ID (+ helpers)"
+
 echo "signing $APP with: $IDENTITY"
 codesign --force --deep --sign "$IDENTITY" "$APP"
 codesign -dv "$APP" 2>&1 | grep -E "Authority|Signature" | head -3
 
-# macOS caches app icons aggressively; nudge the caches (both respawn instantly).
+# Register the re-identified bundle, then nudge the icon caches (all respawn instantly;
+# usernoted is the daemon that caches each app's notification icon).
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" || true
 killall Dock 2>/dev/null || true
 killall NotificationCenter 2>/dev/null || true
+killall usernoted 2>/dev/null || true
