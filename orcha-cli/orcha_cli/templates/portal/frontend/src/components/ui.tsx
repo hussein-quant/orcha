@@ -163,20 +163,19 @@ export function KindBadge({ kind }: { kind: string | null | undefined }) {
 }
 
 /* ---- the Embodent mark --------------------------------------------------- */
-// A "C" around a dot, split down the middle: light | grey on dark,
-// near-black | grey on light (--v2-logo-ink / --v2-logo-accent, v2-tokens.css).
-// Each half is its own filled outline (no clipPath), so many marks on one page
-// never collide on SVG ids. Same geometry as static/logo-mark.svg.
-export const EMBODENT_MARK_LEFT =
-  "M627 153A456 456 0 0 0 627 1065L627 861A252 252 0 0 1 627 357ZM627 461A148 148 0 0 0 627 757Z";
-export const EMBODENT_MARK_RIGHT =
-  "M627 153L930 153A102 102 0 0 1 930 357L627 357ZM627 861L930 861A102 102 0 0 1 930 1065L627 1065ZM627 461A148 148 0 0 1 627 757Z";
+// The "Halo E": a solid E inside a 50% halo arc, one colour — light on dark, near-black
+// on light (--v2-logo-ink, v2-tokens.css). Stroked paths, no ids, so many marks on one page
+// never collide. Same geometry as static/logo-mark.svg (mark units, centred on -57,0).
+export const EMBODENT_MARK_HALO = "M390 -504 L0 -504 A504 504 0 0 0 0 504 L390 504 M0 0 L330 0";
+export const EMBODENT_MARK_CORE = "M390 -354 L0 -354 A354 354 0 0 0 0 354 L390 354 M0 0 L330 0";
 export function OrcaMark() {
   // intrinsic size: downstream stylesheets may not carry .brand .mark rules
   return (
-    <svg viewBox="76.5 84 1050 1050" width={34} height={34} style={{ maxWidth: "100%", maxHeight: "100%" }} role="img" aria-label="Embodent">
-      <path fill="#ECEDF1" style={{ fill: "var(--v2-logo-ink, #ECEDF1)" }} d={EMBODENT_MARK_LEFT} />
-      <path fill="#7C808A" style={{ fill: "var(--v2-logo-accent, #7C808A)" }} d={EMBODENT_MARK_RIGHT} />
+    <svg viewBox="-720 -663 1326 1326" width={34} height={34} style={{ maxWidth: "100%", maxHeight: "100%" }} role="img" aria-label="Embodent">
+      <g fill="none" strokeWidth={204} strokeLinecap="round" strokeLinejoin="round" stroke="#ECEDF1" style={{ stroke: "var(--v2-logo-ink, #ECEDF1)" }}>
+        <path d={EMBODENT_MARK_HALO} strokeOpacity={0.5} />
+        <path d={EMBODENT_MARK_CORE} />
+      </g>
     </svg>
   );
 }

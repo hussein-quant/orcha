@@ -1,14 +1,6 @@
-<!-- Embodent app icon (macOS grid: 824px plate inset 100px on a 1024 canvas, rx 185.4, #121314),
-     the mark (resources/logo-mark.svg: a "C" around a dot, light | grey halves) centred on it.
-     icon.png / icon.icns are rendered from this (scripts in the PR notes: rsvg-convert + sips + iconutil). -->
+<!-- Embodent app icon (macOS grid: 824px plate inset 100px on a 1024 canvas, rx 185.4, #121314) with the
+     "Halo E" mark (resources/logo-mark.svg) centred on it. icon.png / icon.icns are rendered from this. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
-  <defs>
-    <clipPath id="l"><rect x="-200" y="-200" width="827" height="1654"/></clipPath>
-    <clipPath id="r"><rect x="627" y="-200" width="827" height="1654"/></clipPath>
-  </defs>
   <rect x="100" y="100" width="824" height="824" rx="185.4" fill="#121314"/>
-  <g transform="translate(199.22 195.32) scale(0.52)">
-    <g clip-path="url(#l)" fill="#ECEDF1" stroke="#ECEDF1"><circle cx="627" cy="609" r="148"/><path d="M930 255 L627 255 A354 354 0 0 0 627 963 L930 963" fill="none" stroke-width="204" stroke-linecap="round"/></g>
-    <g clip-path="url(#r)" fill="#7C808A" stroke="#7C808A"><circle cx="627" cy="609" r="148"/><path d="M930 255 L627 255 A354 354 0 0 0 627 963 L930 963" fill="none" stroke-width="204" stroke-linecap="round"/></g>
-  </g>
+  <g transform="translate(532.0 512) scale(0.3507)"><path d="M390 -504 L0 -504 A504 504 0 0 0 0 504 L390 504 M0 0 L330 0" fill="none" stroke="#ECEDF1" stroke-opacity="0.5" stroke-width="204" stroke-linecap="round" stroke-linejoin="round"/><path d="M390 -354 L0 -354 A354 354 0 0 0 0 354 L390 354 M0 0 L330 0" fill="none" stroke="#ECEDF1" stroke-width="204" stroke-linecap="round" stroke-linejoin="round"/></g>
 </svg>

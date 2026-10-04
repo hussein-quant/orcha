@@ -1,27 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Embodent launcher foreground: the mark (a "C" around a dot, left half #ECEDF1,
-     right half #7C808A) from embodent-mark.svg's 1254-unit space, scaled by 0.054 and
-     centred so its farthest point (arm cap, ~585 units out) sits ~31.6dp from centre,
-     inside the 66dp adaptive-icon safe zone. -->
+<!-- Embodent launcher foreground: the "Halo E" mark (#ECEDF1, halo at 50%).
+     Mark units scaled by 0.0412 and centred so its farthest point (an arm cap, ~776 units out)
+     sits ~32dp from centre, inside the 66dp adaptive-icon safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:scaleX="0.054"
-        android:scaleY="0.054"
-        android:translateX="21.519"
-        android:translateY="21.114">
-        <group>
-            <clip-path android:pathData="M-200,-200 h827 v1654 h-827 z" />
-            <path android:fillColor="#FFECEDF1" android:pathData="M479,609 a148,148 0 1,0 296,0 a148,148 0 1,0 -296,0" />
-            <path android:strokeColor="#FFECEDF1" android:strokeWidth="204" android:strokeLineCap="round" android:pathData="M930,255 L627,255 A354,354 0 0,0 627,963 L930,963" />
-        </group>
-        <group>
-            <clip-path android:pathData="M627,-200 h827 v1654 h-827 z" />
-            <path android:fillColor="#FF7C808A" android:pathData="M479,609 a148,148 0 1,0 296,0 a148,148 0 1,0 -296,0" />
-            <path android:strokeColor="#FF7C808A" android:strokeWidth="204" android:strokeLineCap="round" android:pathData="M930,255 L627,255 A354,354 0 0,0 627,963 L930,963" />
-        </group>
+        android:scaleX="0.0412"
+        android:scaleY="0.0412"
+        android:translateX="56.348"
+        android:translateY="54">
+        <path android:strokeColor="#FFECEDF1" android:strokeAlpha="0.5" android:strokeWidth="204" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M390 -504 L0 -504 A504 504 0 0 0 0 504 L390 504 M0 0 L330 0" />
+        <path android:strokeColor="#FFECEDF1" android:strokeWidth="204" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M390 -354 L0 -354 A354 354 0 0 0 0 354 L390 354 M0 0 L330 0" />
     </group>
 </vector>

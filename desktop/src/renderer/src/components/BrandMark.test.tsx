@@ -9,39 +9,37 @@ import master from '../../../../resources/logo-mark.svg?raw'
 import indexHtml from '../../index.html?raw'
 
 describe('BrandMark (Embodent mark)', () => {
-  it('renders a square dark tile with the light | grey figure, decorative', () => {
+  it('renders a square dark tile with the one-colour Halo E, decorative', () => {
     render(<BrandMark size={18} className="shrink-0" />)
     const svg = screen.getByTestId('brand-mark')
     expect(svg.getAttribute('height')).toBe('18')
     expect(svg.getAttribute('width')).toBe('18')
     expect(svg).toHaveAttribute('aria-hidden', 'true')
     expect(svg).toHaveClass('shrink-0')
-    // Always on its #121314 tile so the light half reads on the light canvas too.
+    // Always on its #121314 tile so the light mark reads on the light canvas too.
     expect(svg.querySelector(':scope > rect')?.getAttribute('fill')).toBe('#121314')
-    const halves = [...svg.querySelectorAll(':scope > g')].map((g) => g.getAttribute('fill'))
-    expect(halves).toEqual(['#ECEDF1', '#7C808A'])
+    expect(svg.querySelector(':scope > g')?.getAttribute('stroke')).toBe('#ECEDF1')
+    const opacities = [...svg.querySelectorAll('path')].map((p) => p.getAttribute('stroke-opacity'))
+    expect(opacities).toEqual(['0.5', null])
   })
 
   it('uses the same geometry as resources/logo-mark.svg', () => {
-    const arch = [...master.matchAll(/ d="([^"]+)"/g)].map((m) => m[1])
-    const head = master.match(/<circle cx="(\d+)" cy="(\d+)" r="(\d+)"/)!.slice(1)
+    const norm = (d: string) => (d.match(/[A-Za-z]|-?\d+(?:\.\d+)?/g) ?? []).map((t) => (/[A-Za-z]/.test(t) ? t : String(Number(t)))).join(' ')
+    const master_ds = [...master.matchAll(/ d="([^"]+)"/g)].map((m) => norm(m[1]))
     render(<BrandMark />)
     const svg = screen.getByTestId('brand-mark')
-    const ds = new Set([...svg.querySelectorAll('path')].map((p) => p.getAttribute('d')))
-    expect([...ds]).toEqual(arch)
-    const c = svg.querySelector('circle')!
-    expect([c.getAttribute('cx'), c.getAttribute('cy'), c.getAttribute('r')]).toEqual(head)
+    const ds = [...svg.querySelectorAll('path')].map((p) => norm(p.getAttribute('d')!))
+    expect(ds).toEqual(master_ds)
   })
 
-  it('gives each instance its own clip ids', () => {
+  it('uses no SVG ids, so many marks on one page never collide', () => {
     render(
       <>
         <BrandMark />
         <BrandMark />
       </>
     )
-    const ids = [...document.querySelectorAll('clipPath')].map((c) => c.id)
-    expect(new Set(ids).size).toBe(4)
+    expect(document.querySelectorAll('[id]').length).toBe(0)
   })
 
   it('keeps the OrchaMark API as a compat alias (components + onboarding re-export)', () => {

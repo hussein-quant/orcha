@@ -192,8 +192,8 @@
   --v2-shadow-lightbox: 0 20px 60px rgba(0, 0, 0, 0.5);
   --v2-live-pulse: rgba(76, 183, 130, 0.5);
   --v2-live-pulse-0: rgba(76, 183, 130, 0);
-  --v2-logo-ink: #ECEDF1;                   /* Embodent mark: left (light) half */
-  --v2-logo-accent: #7C808A;                /* Embodent mark: right (grey) half */
+  --v2-logo-ink: #ECEDF1;                   /* Embodent mark colour (halo drawn at 50%) */
+  --v2-logo-accent: #7C808A;                /* (legacy two-tone accent, unused by the Halo E) */
 
   /* ---- 1.4 typography (D6) ---- */
   --v2-font-sans: "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -458,7 +458,7 @@
   --v2-shadow-lightbox: 0 20px 60px rgba(0, 0, 0, 0.35);
   --v2-live-pulse: rgba(24, 122, 76, 0.40);
   --v2-live-pulse-0: rgba(24, 122, 76, 0);
-  --v2-logo-ink: #1C1D1F;                   /* light mode: near-black left half stays readable */
+  --v2-logo-ink: #1C1D1F;                   /* light mode: near-black mark stays readable */
   --v2-logo-accent: #7C808A;
 
   --v2-chip-border: #E1E1E5;

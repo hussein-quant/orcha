@@ -233,7 +233,7 @@ async def test_qr_svg_is_branded_and_payload_unchanged(
         "the light tile behind the code is baked into the SVG (never theme-inverted)"
     )
     # the centre Embodent mark on the rounded dark tile
-    assert 'rx="22" fill="#121314"' in svg and "#ECEDF1" in svg and "#7C808A" in svg, "embedded Embodent mark"
+    assert 'rx="22" fill="#121314"' in svg and "#ECEDF1" in svg and 'stroke-opacity="0.5"' in svg, "embedded Embodent Halo E mark"
 
     # the QR payload contract is unchanged by the restyle
     payload = json.loads(data["qrText"])

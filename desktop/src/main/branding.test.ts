@@ -20,7 +20,7 @@ describe('Embodent branding (packaging + assets)', () => {
     for (const f of ['icon.icns', 'icon.png', 'icon.svg', 'logo-mark.svg', 'logo-mark-mono.svg', 'trayTemplate.png', 'trayTemplate@2x.png']) {
       expect(readFileSync(path.join(resources, f)).length).toBeGreaterThan(100)
     }
-    expect(readFileSync(path.join(resources, 'logo-mark-mono.svg'), 'utf8')).toContain('fill="currentColor"')
+    expect(readFileSync(path.join(resources, 'logo-mark-mono.svg'), 'utf8')).toContain('stroke="currentColor"')
     // Old three-segment ring (lavender #9695F2) is gone from the masters.
     expect(readFileSync(path.join(resources, 'icon.svg'), 'utf8')).not.toContain('#9695F2')
   })

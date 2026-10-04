@@ -129,16 +129,14 @@ def _qr_finder_frame(x: float, y: float) -> str:
 def _qr_orca_tile(x: float, y: float, size: float) -> str:
     """The Embodent mark on its rounded dark tile, scaled into the centre knockout."""
     s = size / 100.0
-    # the mark's 1254-unit artwork, fitted into the inner ~80% of the 100-unit tile
-    m = 80.0 / 1050.0
+    # the mark (1212 units tall, centred on -57,0) fitted to ~60% of the 100-unit tile
     return (
         f'<g transform="translate({x:.2f},{y:.2f}) scale({s:.4f})" aria-hidden="true">'
         f'<rect width="100" height="100" rx="22" fill="{QR_TILE}"/>'
-        f'<g transform="translate(10,10) scale({m:.5f}) translate(-76.5,-84)">'
-        '<path fill="#ECEDF1" d="M627 153A456 456 0 0 0 627 1065L627 861A252 '
-        '252 0 0 1 627 357ZM627 461A148 148 0 0 0 627 757Z"/>'
-        '<path fill="#7C808A" d="M627 153L930 153A102 102 0 0 1 930 357L627 357ZM627 861L930'
-        ' 861A102 102 0 0 1 930 1065L627 1065ZM627 461A148 148 0 0 1 627 757Z"/>'
+        '<g transform="translate(52.85,50) scale(0.05)" fill="none" stroke="#ECEDF1" '
+        'stroke-width="204" stroke-linecap="round" stroke-linejoin="round">'
+        '<path stroke-opacity="0.5" d="M390 -504 L0 -504 A504 504 0 0 0 0 504 L390 504 M0 0 L330 0"/>'
+        '<path d="M390 -354 L0 -354 A354 354 0 0 0 0 354 L390 354 M0 0 L330 0"/>'
         "</g></g>"
     )
 
