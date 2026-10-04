@@ -42,3 +42,18 @@ data class PlanUsageTodayDto(
     val tokens: Long? = null,
     @SerialName("cost_usd") val costUsd: Double? = null,
 )
+
+/** GET/PUT /api/plan-usage/display: one portal-wide setting. `updated_at` null = never set. */
+@Serializable
+data class PlanUsageDisplayDto(
+    val show: Boolean = false,
+    val providers: String = "both",
+    @SerialName("updated_at") val updatedAt: String? = null,
+)
+
+/** PUT body: exactly these two fields (the portal 422s on anything extra). */
+@Serializable
+data class PlanUsageDisplayBody(
+    val show: Boolean,
+    val providers: String,
+)

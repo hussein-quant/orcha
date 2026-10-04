@@ -5,6 +5,7 @@ package io.openorcha.mobile.domain
    thresholds, and every user-facing string ("92% left · resets today 4:49 PM · in 3h 26m",
    "Today 601M tokens · Est. $237.61", "Updated 2m ago from …"). Unit-tested. */
 
+import io.openorcha.mobile.data.PlanUsageDisplayDto
 import io.openorcha.mobile.data.PlanUsageProviderDto
 import io.openorcha.mobile.data.PlanUsageSnapshotDto
 import io.openorcha.mobile.data.PlanUsageTodayDto
@@ -36,7 +37,35 @@ data class PlanUsageView(
     val isEmpty: Boolean get() = entries.isEmpty()
 }
 
+/** Which providers the summary surfaces show (portal value: "both" | "claude" | "codex"). */
+enum class PlanUsageProviders(val wire: String, val title: String) {
+    Both("both", "Both"), Claude("claude", "Claude"), Codex("codex", "Codex");
+
+    companion object {
+        /** Unknown or blank values read as [Both]. */
+        fun from(raw: String?): PlanUsageProviders = entries.firstOrNull { it.wire == raw?.trim()?.lowercase() } ?: Both
+    }
+}
+
+/** The portal-wide display setting after the sync rule; [updatedAt] null = never set. */
+data class PlanUsageDisplay(
+    val show: Boolean = false,
+    val providers: PlanUsageProviders = PlanUsageProviders.Both,
+    val updatedAt: Instant? = null,
+) {
+    companion object {
+        val DEFAULT = PlanUsageDisplay()
+        fun from(dto: PlanUsageDisplayDto): PlanUsageDisplay =
+            PlanUsageDisplay(dto.show, PlanUsageProviders.from(dto.providers), PlanUsageUx.parseInstant(dto.updatedAt))
+    }
+}
+
 object PlanUsageUx {
+    const val DISPLAY_TITLE = "Show plan usage"
+    const val DISPLAY_PROVIDERS_TITLE = "Providers"
+    const val DISPLAY_CAPTION =
+        "Shows your Claude and Codex plan limits in the sidebar and on each project's Home, on every device connected to this Embodent."
+
     const val EMPTY_MESSAGE = "Plan usage appears when the Embodent desktop app is running on your computer."
     const val STALE_NOTE = "may be out of date"
     val STALE_AFTER: Duration = Duration.ofMinutes(30)
@@ -215,5 +244,20 @@ object PlanUsageUx {
         val body = view.entries.joinToString(". ") { providerSummary(it, now) }
         val stale = if (isStale(view, now)) ". $STALE_NOTE" else ""
         return "$head. $body$stale. Opens details."
+    }
+
+    /** Sync rule: the newest `updated_at` wins; never-set (null) loses to any set value;
+     *  all never-set (or nothing read) → the default (off, both). */
+    fun mergeDisplay(values: List<PlanUsageDisplay>): PlanUsageDisplay =
+        values.filter { it.updatedAt != null }.maxByOrNull { it.updatedAt!! } ?: PlanUsageDisplay.DEFAULT
+
+    fun mergeDisplayDtos(dtos: List<PlanUsageDisplayDto>): PlanUsageDisplay = mergeDisplay(dtos.map(PlanUsageDisplay::from))
+
+    /** The view the summary card shows: only the chosen providers (a chosen one with no data is simply absent). */
+    fun filter(view: PlanUsageView, providers: PlanUsageProviders): PlanUsageView {
+        if (providers == PlanUsageProviders.Both) return view
+        val kept = view.entries.filter { it.usage.provider.trim().lowercase() == providers.wire }
+        val newest = kept.filter { it.capturedAt != null }.maxByOrNull { it.capturedAt!! }
+        return PlanUsageView(kept, newest?.capturedAt, newest?.host ?: kept.firstOrNull()?.host)
     }
 }

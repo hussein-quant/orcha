@@ -7,7 +7,11 @@ package io.openorcha.mobile.data
 import io.ktor.client.call.body
 import io.ktor.client.plugins.ResponseException
 import io.ktor.client.request.get
+import io.ktor.client.request.put
+import io.ktor.client.request.setBody
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeout
@@ -31,5 +35,44 @@ object PlanUsageApi {
         if (distinct.isEmpty()) return@coroutineScope emptyList()
         val results = distinct.map { url -> async { runCatching { snapshots(url) }.getOrNull() } }.map { it.await() }
         if (results.all { it == null }) null else results.filterNotNull().flatten()
+    }
+
+    /** The display setting on one portal; null for a portal that predates the route (404). */
+    suspend fun display(baseUrl: String): PlanUsageDisplayDto? = try {
+        withTimeout(8_000) {
+            client.get("${baseUrl.endpoint()}/api/plan-usage/display").body<PlanUsageDisplayDto>()
+        }
+    } catch (e: ResponseException) {
+        if (e.response.status == HttpStatusCode.NotFound) null else throw e
+    }
+
+    /** The display setting from every distinct portal, in parallel. 404s and unreachable
+     *  portals are dropped (older or offline portals are ignored by the sync rule). */
+    suspend fun allDisplays(baseUrls: Collection<String>): List<PlanUsageDisplayDto> = coroutineScope {
+        baseUrls.map { it.endpoint() }.distinct()
+            .map { url -> async { runCatching { display(url) }.getOrNull() } }
+            .mapNotNull { it.await() }
+    }
+
+    /** Stores the display setting on one portal; returns the stored value (with `updated_at`). */
+    suspend fun putDisplay(baseUrl: String, body: PlanUsageDisplayBody): PlanUsageDisplayDto = withTimeout(8_000) {
+        client.put("${baseUrl.endpoint()}/api/plan-usage/display") {
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }.body<PlanUsageDisplayDto>()
+    }
+
+    /** PUTs [body] to every distinct portal in parallel; failures are logged and skipped.
+     *  Returns the values the portals stored. */
+    suspend fun putDisplayEverywhere(baseUrls: Collection<String>, body: PlanUsageDisplayBody): List<PlanUsageDisplayDto> = coroutineScope {
+        baseUrls.map { it.endpoint() }.distinct()
+            .map { url ->
+                async {
+                    runCatching { putDisplay(url, body) }
+                        .onFailure { android.util.Log.w("OrchaApp", "plan usage display PUT failed for $url", it) }
+                        .getOrNull()
+                }
+            }
+            .mapNotNull { it.await() }
     }
 }

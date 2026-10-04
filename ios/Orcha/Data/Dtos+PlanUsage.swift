@@ -114,3 +114,30 @@ struct PlanUsageTodayDto: Decodable, Equatable, Sendable {
         case costUsd = "cost_usd"
     }
 }
+
+/// `GET|PUT /api/plan-usage/display` — the portal-wide "show plan usage" setting.
+/// `updated_at` is null until someone sets it (the default: hidden, both providers).
+struct PlanUsageDisplayDto: Decodable, Equatable, Sendable {
+    let show: Bool
+    /// `both` | `claude` | `codex`.
+    let providers: String
+    let updatedAt: String?
+
+    init(show: Bool, providers: String, updatedAt: String?) {
+        self.show = show
+        self.providers = providers
+        self.updatedAt = updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        show = try c.decodeIfPresent(Bool.self, forKey: .show) ?? false
+        providers = try c.decodeIfPresent(String.self, forKey: .providers) ?? "both"
+        updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case show, providers
+        case updatedAt = "updated_at"
+    }
+}

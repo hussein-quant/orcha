@@ -99,12 +99,15 @@ struct HomeTabView: View {
                         onConnectRepo: { showRepoConnect = true },
                         onEditObjective: { showObjectiveEditor = true }
                     )
-                    // Plan usage (Claude / Codex limits from the desktop) in place of "This week".
-                    PlanUsageCard(
-                        providers: model.planUsage.providers,
-                        loaded: model.planUsage.loaded,
-                        onOpen: { showPlanUsage = true }
-                    )
+                    // Plan usage (Claude / Codex limits from the desktop) in place of "This week",
+                    // only when the portal-wide "Show plan usage" setting is on (off by default).
+                    if model.planUsage.display.show {
+                        PlanUsageCard(
+                            providers: model.planUsage.shownProviders,
+                            loaded: model.planUsage.loaded,
+                            onOpen: { showPlanUsage = true }
+                        )
+                    }
                     if let cu = model.catchUp {
                         CatchUpCard(
                             previous: cu.previous,

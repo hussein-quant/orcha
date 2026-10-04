@@ -1,7 +1,7 @@
 /**
  * Settings › Interface › Appearance: the System / Light / Dark picker.
  */
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as prefs from "../../cloud/projects/prefs";
 import { InterfaceSection, themeStorageNote } from "./InterfaceSection";
@@ -38,7 +38,8 @@ afterEach(() => {
 describe("ThemePicker", () => {
   it("three radios with previews; Dark checked by default", () => {
     render(<InterfaceSection />);
-    const radios = screen.getAllByRole("radio");
+    // scoped: the Plan usage group below adds its own Providers radiogroup
+    const radios = within(screen.getByRole("radiogroup", { name: "Theme" })).getAllByRole("radio");
     expect(radios.map((r) => r.textContent)).toEqual(["System", "Light", "Dark"]);
     expect(screen.getByRole("radio", { name: "Dark" })).toHaveAttribute("aria-checked", "true");
     expect(document.querySelectorAll(".set-theme-pv")).toHaveLength(4); // System = light + dark split

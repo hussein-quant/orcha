@@ -270,7 +270,10 @@ export const USAGE_CHANNELS = {
   refresh: 'orcha:usage:refresh',
   update: 'orcha:usage:update',
   changed: 'orcha:usage:changed',
-  openStats: 'orcha:usage:openStats'
+  openStats: 'orcha:usage:openStats',
+  displayGet: 'orcha:usage:display:get',
+  displaySet: 'orcha:usage:display:set',
+  displayChanged: 'orcha:usage:display:changed'
 } as const
 
 export interface UsageApi {
@@ -283,6 +286,72 @@ export interface UsageApi {
   openStats(target?: 'stats' | 'accounts'): Promise<void>
   /** Manager: main asks to show Stats & Usage / Settings › Agents (from the tray). */
   onOpenStats?(cb: (target: 'stats' | 'accounts') => void): () => void
+  /** The portal-wide "Show plan usage" setting (cached value; main re-reads the portals). */
+  getDisplay?(): Promise<PlanUsageDisplay>
+  /** Change it: main updates its cache at once, then PUTs to every running portal. */
+  setDisplay?(d: PlanUsageDisplayInput): Promise<PlanUsageDisplay>
+  onDisplayChanged?(cb: (d: PlanUsageDisplay) => void): () => void
+}
+
+// ---------------------------------------------------------------------------------------
+// Plan-usage display setting (portal mig 070, `/api/plan-usage/display`): whether the
+// sidebar Usage row shows, and for which providers. Portal-wide, synced across every
+// portal this Mac knows: the newest `updated_at` wins; null ("never set") loses to any set
+// value; when nothing was ever set the default is OFF, both providers.
+
+export type PlanUsageProviders = 'both' | 'claude' | 'codex'
+
+export interface PlanUsageDisplayInput {
+  show: boolean
+  providers: PlanUsageProviders
+}
+
+export interface PlanUsageDisplay extends PlanUsageDisplayInput {
+  /** ISO time the setting was last changed (portal clock), null = never set. */
+  updatedAt: string | null
+}
+
+export const DEFAULT_PLAN_USAGE_DISPLAY: PlanUsageDisplay = { show: false, providers: 'both', updatedAt: null }
+
+export function isPlanUsageProviders(v: unknown): v is PlanUsageProviders {
+  return v === 'both' || v === 'claude' || v === 'codex'
+}
+
+/** Strict `{show, providers}` (the PUT body / the IPC set argument), else null. */
+export function parsePlanUsageDisplayInput(raw: unknown): PlanUsageDisplayInput | null {
+  if (!isRecord(raw)) return null
+  if (typeof raw.show !== 'boolean' || !isPlanUsageProviders(raw.providers)) return null
+  return { show: raw.show, providers: raw.providers }
+}
+
+/** A portal's GET/PUT response (`updated_at`) or the local cache (`updatedAt`), else null. */
+export function parsePlanUsageDisplay(raw: unknown): PlanUsageDisplay | null {
+  const input = parsePlanUsageDisplayInput(raw)
+  if (!input || !isRecord(raw)) return null
+  const at = raw.updated_at !== undefined ? raw.updated_at : raw.updatedAt
+  if (at !== null && at !== undefined && (typeof at !== 'string' || displayTime(at) === null)) return null
+  return { ...input, updatedAt: typeof at === 'string' ? at : null }
+}
+
+/** Epoch ms of an `updated_at` (Postgres may send microseconds), null when unparseable. */
+export function displayTime(iso: string | null): number | null {
+  if (iso === null) return null
+  const ms = Date.parse(iso.replace(/(\.\d{3})\d+/, '$1'))
+  return Number.isFinite(ms) ? ms : null
+}
+
+/** The sync rule: newest `updatedAt` wins, never-set loses, all never-set → the default. */
+export function mergePlanUsageDisplays(list: readonly (PlanUsageDisplay | null | undefined)[]): PlanUsageDisplay {
+  let best: PlanUsageDisplay | null = null
+  let bestAt = -Infinity
+  for (const d of list) {
+    const at = d ? displayTime(d.updatedAt) : null
+    if (d && at !== null && at > bestAt) {
+      best = d
+      bestAt = at
+    }
+  }
+  return best ?? DEFAULT_PLAN_USAGE_DISPLAY
 }
 
 // ---------------------------------------------------------------------------------------

@@ -152,8 +152,9 @@ fun SettingsScreen(
     var subPage by rememberSaveable { mutableStateOf<String?>(null) }
     var showPlanUsage by remember { mutableStateOf(false) }
     if (showPlanUsage) {
-        val planUsage = rememberPlanUsage(state.containers.map { it.baseUrl })
-        PlanUsageSheet(planUsage, onDismiss = { showPlanUsage = false })
+        val planUsageUrls = state.containers.map { it.baseUrl }
+        val planUsage = rememberPlanUsage(planUsageUrls)
+        PlanUsageSheet(planUsage, planUsageUrls, onDismiss = { showPlanUsage = false })
     }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()

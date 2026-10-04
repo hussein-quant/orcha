@@ -14,6 +14,7 @@ import ProfileSettings from './ProfileSettings'
 import StorageSettings from './StorageSettings'
 import VoiceSettings from './VoiceSettings'
 import type { UsageValue } from '../usage/useUsage'
+import { DEFAULT_PLAN_USAGE_DISPLAY, type PlanUsageProviders } from '../../../shared/usage'
 
 /** Portal section the desktop's Notifications entry opens (SettingsPage `#tab=notifications`). */
 export const NOTIFICATION_SETTINGS_PATH = '/settings#tab=notifications'
@@ -139,6 +140,7 @@ export default function SettingsView({
                 <p className="mb-6 mt-1 text-[13px] text-text-3">
                   Token use, estimated cost and plan limits for your coding agents, read from their own logs on this Mac.
                 </p>
+                <PlanUsageDisplaySetting usage={usage} />
                 <div className="flex flex-col divide-y divide-border rounded-[10px] border border-border">
                   <div className="flex min-h-[52px] items-center justify-between gap-6 px-4 py-3">
                     <div className="min-w-0">
@@ -217,6 +219,86 @@ export default function SettingsView({
               </section>
             )}
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const PLAN_PROVIDER_OPTIONS: { value: PlanUsageProviders; label: string }[] = [
+  { value: 'both', label: 'Both' },
+  { value: 'claude', label: 'Claude' },
+  { value: 'codex', label: 'Codex' }
+]
+
+/** Settings › Usage, top: the portal-wide "Show plan usage" switch (off by default) and,
+ *  while it is on, which providers the sidebar row shows. */
+function PlanUsageDisplaySetting({ usage }: { usage: UsageValue }) {
+  const d = usage.display ?? DEFAULT_PLAN_USAGE_DISPLAY
+  const ready = usage.display !== null
+  return (
+    <div className="mb-4 flex flex-col divide-y divide-border rounded-[10px] border border-border" data-testid="plan-usage-display">
+      <div className="flex min-h-[52px] items-center justify-between gap-6 px-4 py-3">
+        <div className="min-w-0">
+          <div id="plan-usage-show-label" className="text-[13px] font-medium text-text">
+            Show plan usage
+          </div>
+          <div className="text-[12px] text-text-3">
+            Shows your Claude and Codex plan limits in the sidebar and on each project’s Home, on every device connected to this
+            Embodent.
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={d.show}
+          aria-labelledby="plan-usage-show-label"
+          data-testid="plan-usage-show"
+          disabled={!ready}
+          onClick={() => void usage.setDisplay({ show: !d.show, providers: d.providers })}
+          className={`relative h-[18px] w-8 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+            d.show ? 'bg-accent' : 'bg-border-strong'
+          }`}
+        >
+          <span
+            aria-hidden="true"
+            className={`absolute left-0 top-[2px] h-[14px] w-[14px] rounded-full bg-bg shadow-sm transition-transform ${
+              d.show ? 'translate-x-[16px]' : 'translate-x-[2px]'
+            }`}
+          />
+        </button>
+      </div>
+      <div className={`flex min-h-[52px] items-center justify-between gap-6 px-4 py-3 ${d.show ? '' : 'opacity-50'}`}>
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-text">Providers</div>
+          <div className="text-[12px] text-text-3">Which plan limits the sidebar shows.</div>
+        </div>
+        <div
+          role="radiogroup"
+          aria-label="Providers"
+          aria-disabled={!d.show}
+          data-testid="plan-usage-providers"
+          className="inline-flex h-7 shrink-0 items-center rounded-md border border-border bg-bg p-[2px]"
+        >
+          {PLAN_PROVIDER_OPTIONS.map((o) => {
+            const on = d.providers === o.value
+            return (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                data-testid={`plan-usage-providers-${o.value}`}
+                disabled={!ready || !d.show}
+                onClick={() => !on && void usage.setDisplay({ show: d.show, providers: o.value })}
+                className={`h-[22px] rounded-[5px] px-2.5 text-[12.5px] font-medium leading-none transition-colors disabled:cursor-not-allowed ${
+                  on ? 'bg-selected text-text shadow-[var(--shadow-seg)]' : 'text-text-3 hover:text-text-2'
+                }`}
+              >
+                {o.label}
+              </button>
+            )
+          })}
         </div>
       </div>
     </div>

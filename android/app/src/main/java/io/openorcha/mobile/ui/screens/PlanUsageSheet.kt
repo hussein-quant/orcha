@@ -3,9 +3,23 @@ package io.openorcha.mobile.ui.screens
 /* Plan usage detail (mirrors the desktop "Usage" panel): per provider a header with name,
    plan and headline ("5h resets in 3h 26m"), each window as label · bar · %, with
    "92% left · resets today 4:49 PM · in 3h 26m" beneath (device-local time), then
-   "Today 601M tokens · Est. $237.61". Staleness line on top. */
+   "Today 601M tokens · Est. $237.61". Staleness line on top. Above it all, the portal-wide
+   display setting: "Show plan usage" switch, "Providers" (Both · Claude · Codex) and caption.
+   The sheet itself always lists every provider; the setting only drives the Home card. */
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import io.openorcha.mobile.domain.PlanUsageProviders
+import io.openorcha.mobile.ui.components.LSegmented
+import io.openorcha.mobile.ui.components.lPrimaryFill
+import io.openorcha.mobile.ui.components.lPrimaryText
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -44,7 +58,7 @@ import java.time.Instant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlanUsageSheet(usage: PlanUsageState, onDismiss: () -> Unit) {
+fun PlanUsageSheet(usage: PlanUsageState, baseUrls: List<String>, onDismiss: () -> Unit) {
     val p = Orcha.palette
     val view = usage.view
     val now = usage.now
@@ -80,6 +94,7 @@ fun PlanUsageSheet(usage: PlanUsageState, onDismiss: () -> Unit) {
                     }
                 }
             }
+            item(key = "display") { DisplaySettingCard(baseUrls) }
             when {
                 view == null -> item(key = "loading") {
                     Text("Loading plan usage…", style = ltype(LType.Meta), color = p.muted, modifier = Modifier.padding(vertical = LSpace.l))
@@ -149,5 +164,54 @@ private fun WindowRow(w: PlanUsageWindowDto, now: Instant) {
             Text(PlanUsageUx.pctText(w.usedPct), style = ltype(LType.Body), color = planUsageToneColor(PlanUsageUx.tone(w.usedPct)))
         }
         Text(detail, style = ltype(LType.Meta), color = p.muted)
+    }
+}
+
+/** "Show plan usage" switch, "Providers" segmented control (enabled only when on), caption. */
+@Composable
+private fun DisplaySettingCard(baseUrls: List<String>) {
+    val p = Orcha.palette
+    val display = PlanUsageDisplayStore.display
+    LCard {
+        Column(verticalArrangement = Arrangement.spacedBy(LSpace.s)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp)
+                    .toggleable(
+                        value = display.show,
+                        role = Role.Switch,
+                        onValueChange = { PlanUsageDisplayStore.update(it, display.providers, baseUrls) },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(PlanUsageUx.DISPLAY_TITLE, style = ltype(LType.BodyEmph), color = p.text, modifier = Modifier.weight(1f))
+                Switch(
+                    checked = display.show,
+                    onCheckedChange = null,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = p.lPrimaryFill, checkedThumbColor = p.lPrimaryText,
+                        uncheckedTrackColor = p.surface2, uncheckedBorderColor = p.border2, uncheckedThumbColor = p.faint,
+                    ),
+                )
+            }
+            LDivider()
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .alpha(if (display.show) 1f else 0.4f)
+                    .semantics { if (!display.show) disabled() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(LSpace.s),
+            ) {
+                Text(PlanUsageUx.DISPLAY_PROVIDERS_TITLE, style = ltype(LType.Body), color = p.text, modifier = Modifier.weight(1f))
+                LSegmented(
+                    options = PlanUsageProviders.entries.map { it to it.title },
+                    selection = display.providers,
+                    onSelect = { if (display.show) PlanUsageDisplayStore.update(true, it, baseUrls) },
+                )
+            }
+            Text(PlanUsageUx.DISPLAY_CAPTION, style = ltype(LType.Meta), color = p.muted)
+        }
     }
 }

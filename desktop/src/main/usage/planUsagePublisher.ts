@@ -92,6 +92,13 @@ export function buildPlanUsagePayload(snap: UsageSnapshot, host: string, now: nu
   return { host: clip(host.trim() || 'desktop', HOST_MAX), captured_at: new Date(snap.updatedAt ?? now).toISOString(), providers }
 }
 
+/** Base URL of every running portal on this Mac (one per stack, de-duplicated). */
+export function portalBases(stacks: readonly Stack[]): string[] {
+  const bases = new Set<string>()
+  for (const s of stacks) if (s.running && s.apiPort !== null) bases.add(`http://localhost:${s.apiPort}`)
+  return [...bases]
+}
+
 export interface PlanUsagePublisherDeps {
   listStacks(): Promise<Stack[]>
   fetch: typeof fetch
@@ -114,12 +121,10 @@ export function createPlanUsagePublisher(deps: PlanUsagePublisherDeps): { publis
         const now = deps.now()
         const payload = buildPlanUsagePayload(snap, deps.host(), now)
         if (!payload) return
-        const stacks = await deps.listStacks()
-        const bases = new Set<string>()
-        for (const s of stacks) if (s.running && s.apiPort !== null) bases.add(`http://localhost:${s.apiPort}`)
+        const bases = portalBases(await deps.listStacks())
         const body = JSON.stringify(payload)
         await Promise.all(
-          [...bases].map(async (base) => {
+          bases.map(async (base) => {
             const last = lastSent.get(base)
             if (last !== undefined && now - last < minMs) return
             lastSent.set(base, now)

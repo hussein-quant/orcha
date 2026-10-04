@@ -20,7 +20,8 @@
  *      shown agents work on, and the selected project's live agents (D11):
  *      status glyph, alias, ONE muted fragment (task · presence label from
  *      agents/presence.ts), capped at 3 with "+N more".
- *   6. Footer: acting identity (round avatar) · Help (circular) · rail toggle.
+ *   6. Footer: plan usage (only when Settings › Interface › Plan usage is on;
+ *      shell/PlanUsageRow) · acting identity (round avatar) · Help (circular) · rail toggle.
  * Section collapse state persists in `orcha:v2:sbSections` (SB_SECTIONS_KEY).
  *
  * Product directive D1: the sidebar does NOT repeat per-project sections
@@ -73,6 +74,7 @@ import { projectSwitchHref, switchProject } from "../lib/scope";
 import { relTime } from "../lib/format";
 import { agentPresence } from "../pages/agents/presence";
 import { useChrome } from "./chrome";
+import { PlanUsageRow } from "./PlanUsageRow";
 import { projectAgents, remoteProjectAgents, type ProjectAgentRow } from "./liveAgents";
 import { COMPOSE_HREF, GLOBAL_SECTIONS, HELP_HREF, NEEDS_ICON, RAIL_TOGGLE_KEY, agentPaletteSlots, projectSections, sidebarProjectRows } from "./nav";
 import { NEEDS_HREF } from "./optionalPages";
@@ -1159,6 +1161,7 @@ export function Sidebar() {
         </section>
       </div>
 
+      <PlanUsageRow collapsed={collapsed} />
       <div className="v2-sb-foot">
         <AccountButton collapsed={collapsed} />
         {!collapsed && <span className="v2-grow" />}

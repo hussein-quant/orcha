@@ -15,6 +15,7 @@
  */
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { SettingRow, SettingRows, SettingsGroup } from "./settingsUi";
+import { PlanUsageSettings } from "./PlanUsageSettings";
 import * as prefs from "../../cloud/projects/prefs";
 import { RAIL_TOGGLE_KEY } from "../../shell/nav";
 import { setThemePref, THEME_LABEL, useTheme, type ThemePref } from "../../shell/theme";
@@ -159,6 +160,7 @@ export function InterfaceSection() {
           </SettingRow>
         </SettingRows>
       </SettingsGroup>
+      <PlanUsageSettings />
       <SettingsGroup settab="interface" title="Keyboard shortcuts" flush>
         <dl className="set-keys" aria-label="Keyboard shortcuts">
           {SHORTCUTS.map(([k, d]) => (

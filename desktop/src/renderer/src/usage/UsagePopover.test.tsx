@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import UsagePopover, { popoverProviders } from './UsagePopover'
-import UsageIndicator from './UsageIndicator'
+import UsageIndicator, { shownProviders, usageRowVisible } from './UsageIndicator'
+import { DEFAULT_PLAN_USAGE_DISPLAY, type PlanUsageDisplay, type PlanUsageProviders } from '../../../shared/usage'
 import { claude, codex, gemini, NOW, snapshot, usageValue } from './fixtures'
 
 beforeEach(() => {
@@ -88,20 +89,87 @@ describe('UsagePopover', () => {
   })
 })
 
+const shown = (providers: PlanUsageProviders = 'both'): PlanUsageDisplay => ({ show: true, providers, updatedAt: '2026-09-30T14:00:00Z' })
+
 describe('UsageIndicator', () => {
-  it('shows the busiest window with its provider logo and tone', async () => {
+  it('is hidden by default: the setting off, or not known yet', () => {
+    const s = snapshot([claude(), codex()])
+    const { rerender } = render(<UsageIndicator snapshot={s} display={null} open={false} collapsed={false} onToggle={vi.fn()} />)
+    expect(screen.queryByTestId('usage-indicator')).toBeNull()
+    rerender(<UsageIndicator snapshot={s} display={DEFAULT_PLAN_USAGE_DISPLAY} open={false} collapsed={false} onToggle={vi.fn()} />)
+    expect(screen.queryByTestId('usage-indicator')).toBeNull()
+    rerender(<UsageIndicator snapshot={s} display={DEFAULT_PLAN_USAGE_DISPLAY} open={false} collapsed onToggle={vi.fn()} />)
+    expect(screen.queryByTestId('usage-indicator')).toBeNull()
+    expect(usageRowVisible(null)).toBe(false)
+    expect(usageRowVisible(DEFAULT_PLAN_USAGE_DISPLAY)).toBe(false)
+    expect(usageRowVisible(shown())).toBe(true)
+  })
+
+  it('both: each provider’s logo and percent side by side, toned, no bar — the label lists both', async () => {
     vi.useRealTimers()
     const onToggle = vi.fn()
-    render(<UsageIndicator snapshot={snapshot([claude(), codex()])} open={false} collapsed={false} onToggle={onToggle} />)
+    render(<UsageIndicator snapshot={snapshot([claude(), codex()])} display={shown('both')} open={false} collapsed={false} onToggle={onToggle} />)
     const b = screen.getByTestId('usage-indicator')
-    expect(b.textContent).toContain('95%')
-    expect(b.querySelector('[data-logo="codex"]')).not.toBeNull()
-    expect(b.querySelector('[role="meter"]')?.getAttribute('data-tone')).toBe('danger')
+    expect(b.getAttribute('aria-label')).toBe('Usage: Claude 77%, Codex 95%')
+    expect(b.textContent).toContain('Usage')
+    const cl = b.querySelector('[data-usage-provider="claude"]')!
+    const cx = b.querySelector('[data-usage-provider="codex"]')!
+    expect(cl.querySelector('[data-logo="claude"]')).not.toBeNull()
+    expect(cl.textContent).toBe('77%')
+    expect(cl.querySelector('.text-warning')).not.toBeNull()
+    expect(cx.querySelector('[data-logo="codex"]')).not.toBeNull()
+    expect(cx.textContent).toBe('95%')
+    expect(cx.querySelector('.text-danger')).not.toBeNull()
+    expect(b.querySelector('[role="meter"]')).toBeNull()
     await userEvent.click(b)
     expect(onToggle).toHaveBeenCalled()
   })
+
+  it('both, one without data: only the provider with data shows', () => {
+    const s = snapshot([claude(), codex({ limits: { status: 'unavailable', windows: [], source: null, fetchedAt: null } })])
+    render(<UsageIndicator snapshot={s} display={shown('both')} open={false} collapsed={false} onToggle={vi.fn()} />)
+    const b = screen.getByTestId('usage-indicator')
+    expect(b.getAttribute('aria-label')).toBe('Usage: Claude 77%')
+    expect(b.querySelector('[data-logo="codex"]')).toBeNull()
+  })
+
+  it('one provider: only that provider — logo, thin bar and percent — even when the other is busier', () => {
+    const s = snapshot([claude(), codex()])
+    const { rerender } = render(<UsageIndicator snapshot={s} display={shown('claude')} open={false} collapsed={false} onToggle={vi.fn()} />)
+    let b = screen.getByTestId('usage-indicator')
+    expect(b.getAttribute('aria-label')).toBe('Usage: Claude 77%')
+    expect(b.querySelector('[data-logo="claude"]')).not.toBeNull()
+    expect(b.querySelector('[data-logo="codex"]')).toBeNull()
+    expect(b.querySelector('[role="meter"]')?.getAttribute('data-tone')).toBe('warn')
+    expect(b.textContent).toContain('77%')
+    rerender(<UsageIndicator snapshot={s} display={shown('codex')} open={false} collapsed={false} onToggle={vi.fn()} />)
+    b = screen.getByTestId('usage-indicator')
+    expect(b.getAttribute('aria-label')).toBe('Usage: Codex 95%')
+    expect(b.querySelector('[data-logo="claude"]')).toBeNull()
+    expect(b.querySelector('[role="meter"]')?.getAttribute('data-tone')).toBe('danger')
+  })
+
+  it('collapsed: the gauge with the peak of the chosen providers', () => {
+    const s = snapshot([claude(), codex()])
+    const { rerender } = render(<UsageIndicator snapshot={s} display={shown('both')} open={false} collapsed onToggle={vi.fn()} />)
+    expect(screen.getByTestId('usage-indicator').textContent).toBe('95')
+    expect(screen.getByTestId('usage-indicator').getAttribute('aria-label')).toBe('Usage: Claude 77%, Codex 95%')
+    rerender(<UsageIndicator snapshot={s} display={shown('claude')} open={false} collapsed onToggle={vi.fn()} />)
+    expect(screen.getByTestId('usage-indicator').textContent).toBe('77')
+  })
+
   it('no known windows: a plain "Usage" entry', () => {
-    render(<UsageIndicator snapshot={snapshot([gemini()])} open={false} collapsed onToggle={vi.fn()} />)
+    render(<UsageIndicator snapshot={snapshot([gemini()])} display={shown()} open={false} collapsed onToggle={vi.fn()} />)
     expect(screen.getByTestId('usage-indicator').getAttribute('aria-label')).toBe('Usage')
+  })
+
+  it('shownProviders: Claude first, chosen ones only, missing data left out', () => {
+    const s = snapshot([codex(), claude(), gemini()])
+    expect(shownProviders(s, 'both').map((x) => [x.p.id, x.pct])).toEqual([
+      ['claude', 77],
+      ['codex', 95]
+    ])
+    expect(shownProviders(s, 'codex').map((x) => x.p.id)).toEqual(['codex'])
+    expect(shownProviders(null, 'both')).toEqual([])
   })
 })

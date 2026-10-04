@@ -35,6 +35,7 @@ struct PlanUsageScreen: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             ScrollView {
                 VStack(alignment: .leading, spacing: LSpace.l) {
+                    PlanUsageDisplayCard(usage: usage, bases: bases)
                     content(now: context.date)
                 }
                 .padding(.horizontal, LSpace.l)
@@ -89,6 +90,59 @@ struct PlanUsageScreen: View {
                 }
             }
             .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// "Show plan usage" switch, the Providers picker (enabled only when on) and the
+/// caption. Edits apply optimistically and PUT to every paired server.
+private struct PlanUsageDisplayCard: View {
+    @Environment(\.palette) private var p
+    let usage: PlanUsageModel
+    let bases: [String]
+
+    private var showBinding: Binding<Bool> {
+        Binding(
+            get: { usage.display.show },
+            set: { usage.setDisplay(show: $0, providers: usage.display.providers, bases: bases) }
+        )
+    }
+
+    private var providersBinding: Binding<PlanUsageUx.ProviderChoice> {
+        Binding(
+            get: { usage.display.providers },
+            set: { usage.setDisplay(show: usage.display.show, providers: $0, bases: bases) }
+        )
+    }
+
+    var body: some View {
+        LCard {
+            VStack(alignment: .leading, spacing: LSpace.m) {
+                Toggle(isOn: showBinding) {
+                    Text("Show plan usage")
+                        .ltype(.bodyEmph)
+                        .foregroundStyle(p.text)
+                }
+                .tint(p.accent)
+                LDivider()
+                VStack(alignment: .leading, spacing: LSpace.s) {
+                    Text("Providers")
+                        .ltype(.meta)
+                        .fontWeight(.medium)
+                        .foregroundStyle(p.text2)
+                    LSegmented(
+                        PlanUsageUx.ProviderChoice.allCases.map { ($0, $0.label) },
+                        selection: providersBinding
+                    )
+                    .accessibilityLabel("Providers")
+                }
+                .disabled(!usage.display.show)
+                .opacity(usage.display.show ? 1 : 0.5)
+                Text(PlanUsageUx.displayCaption)
+                    .ltype(.micro)
+                    .foregroundStyle(p.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

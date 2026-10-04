@@ -148,3 +148,33 @@ async def test_routes_in_openapi(client):
     assert "put" in spec["paths"]["/api/plan-usage"]
     assert "get" in spec["paths"]["/api/plan-usage"]
     assert "get" in spec["paths"]["/api/plan-usage/summary"]
+
+
+# ---- display setting (mig 070) ------------------------------------------------------------
+
+
+async def test_display_defaults_off_both(client, no_trust_proxy):
+    r = await client.get("/api/plan-usage/display")
+    assert r.status_code == 200, r.text
+    assert r.json() == {"show": False, "providers": "both", "updated_at": None}
+
+
+async def test_display_put_round_trips_and_upserts(client, no_trust_proxy):
+    r = await client.put("/api/plan-usage/display", json={"show": True, "providers": "claude"})
+    assert r.status_code == 200, r.text
+    assert r.json()["show"] is True and r.json()["providers"] == "claude"
+    assert r.json()["updated_at"]
+    r = await client.put("/api/plan-usage/display", json={"show": False})
+    assert r.json()["show"] is False and r.json()["providers"] == "both"
+    got = (await client.get("/api/plan-usage/display")).json()
+    assert got["show"] is False and got["providers"] == "both"
+
+
+async def test_display_rejects_unknown_provider_and_extra_fields(client, no_trust_proxy):
+    assert (await client.put("/api/plan-usage/display", json={"show": True, "providers": "gemini"})).status_code == 422
+    assert (await client.put("/api/plan-usage/display", json={"show": True, "x": 1})).status_code == 422
+
+
+async def test_display_routes_in_openapi(client, no_trust_proxy):
+    spec = (await client.get("/openapi.json")).json()
+    assert {"get", "put"} <= set(spec["paths"]["/api/plan-usage/display"])

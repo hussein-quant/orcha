@@ -159,3 +159,49 @@ def get_plan_usage_summary(request: Request):
         )
         row = cur.fetchone()
     return PlanUsageSummary(snapshot=_row_out(row) if row else None)
+
+
+# ---- display setting (mig 070) ------------------------------------------------------------
+# One portal-wide switch: does the plan-usage summary show (desktop sidebar, web sidebar,
+# mobile Home), and for which providers. OFF by default — no row means the default.
+
+
+class PlanUsageDisplayIn(_Strict):
+    show: bool
+    providers: Literal["both", "claude", "codex"] = "both"
+
+
+class PlanUsageDisplay(BaseModel):
+    show: bool = False
+    providers: Literal["both", "claude", "codex"] = "both"
+    updated_at: Optional[datetime] = None
+
+
+@app.get("/api/plan-usage/display", response_model=PlanUsageDisplay, tags=["plan-usage"])
+def get_plan_usage_display(request: Request):
+    """Whether the plan-usage summary shows on this stack, and which providers (default off)."""
+    with db_cursor() as (conn, cur):
+        _gate(cur, request, write=False)
+        cur.execute("SELECT show, providers, updated_at FROM plan_usage_display WHERE id=1")
+        row = cur.fetchone()
+    if not row:
+        return PlanUsageDisplay()
+    return PlanUsageDisplay(show=row["show"], providers=row["providers"], updated_at=row["updated_at"])
+
+
+@app.put("/api/plan-usage/display", response_model=PlanUsageDisplay, tags=["plan-usage"])
+def put_plan_usage_display(request: Request, body: PlanUsageDisplayIn):
+    """Turn the plan-usage summary on or off for every app on this stack, and pick providers."""
+    with db_cursor() as (conn, cur):
+        _gate(cur, request, write=True)
+        cur.execute(
+            """INSERT INTO plan_usage_display (id, show, providers, updated_at)
+               VALUES (1, %s, %s, now())
+               ON CONFLICT (id) DO UPDATE
+                 SET show=EXCLUDED.show, providers=EXCLUDED.providers, updated_at=now()
+               RETURNING show, providers, updated_at""",
+            (body.show, body.providers),
+        )
+        row = cur.fetchone()
+        conn.commit()
+    return PlanUsageDisplay(show=row["show"], providers=row["providers"], updated_at=row["updated_at"])

@@ -17,6 +17,7 @@ import { createTray, type TrayController } from './tray'
 import { AppStatsLedger, parseStatsFile } from './usage/appStats'
 import { UsageService } from './usage/service'
 import { createPlanUsagePublisher } from './usage/planUsagePublisher'
+import { createPlanUsageDisplaySync, DISPLAY_POLL_MS, type PlanUsageDisplaySync } from './usage/planUsageDisplay'
 import { createScanClient, readClaudeCredentials, readUsagePrefsFile, writeUsagePrefsFile } from './usage/usageHost'
 import { formatResetIn, peakWindow, trayUsageTitle, USAGE_CHANNELS, type UsageSnapshot } from '../shared/usage'
 import { buildStatus, writeStatusFile } from './statusFile'
@@ -439,6 +440,9 @@ let tray: TrayController | null = null
 let poller: AttentionPoller | null = null
 /** Usage & spend (main/usage/*): created in whenReady (needs the final userData path). */
 let usage: UsageService | null = null
+/** "Show plan usage" setting, synced with every running portal (mig 070). */
+let planDisplay: PlanUsageDisplaySync | null = null
+let planDisplayTimer: ReturnType<typeof setInterval> | null = null
 let appStats: AppStatsLedger | null = null
 let scanClient: ReturnType<typeof createScanClient> | null = null
 /** Tray popover windows (they get usage updates too). */
@@ -1937,6 +1941,46 @@ app.whenReady().then(() => {
     usageResult(event, () => openUsageInManager(target === 'accounts' ? 'accounts' : 'stats'))
   )
 
+  // "Show plan usage" (sidebar Usage row): cached in <userData>, re-read from every running
+  // portal at launch, on focus and every 2 minutes; a change is PUT to all of them.
+  const displayFile = path.join(userData, 'plan-usage-display.json')
+  const displaySync = createPlanUsageDisplaySync({
+    listStacks: () => listStacks(),
+    fetch: (input, init) => fetch(input, init),
+    now: () => Date.now(),
+    load: () => {
+      try {
+        return JSON.parse(readFileSync(displayFile, 'utf8')) as unknown
+      } catch {
+        return null
+      }
+    },
+    save: (d) => {
+      try {
+        writeFileSync(`${displayFile}.tmp`, JSON.stringify(d) + '\n', { mode: 0o600 })
+        renameSync(`${displayFile}.tmp`, displayFile)
+      } catch {
+        /* best-effort: the in-memory value stays */
+      }
+    },
+    onChange: (d) => {
+      sendToManager(USAGE_CHANNELS.displayChanged, d)
+      for (const w of popoverWindows) if (!w.isDestroyed()) w.webContents.send(USAGE_CHANNELS.displayChanged, d)
+    }
+  })
+  planDisplay = displaySync
+  ipcMain.handle(USAGE_CHANNELS.displayGet, (event) => usageResult(event, () => displaySync.get()))
+  ipcMain.handle(USAGE_CHANNELS.displaySet, (event, raw: unknown) =>
+    usageResult(event, () => {
+      const d = displaySync.set(raw)
+      if (!d) throw { code: 'USAGE_FAILED', reason: 'INVALID' } satisfies BridgeError
+      return d
+    })
+  )
+  void displaySync.refresh()
+  planDisplayTimer = setInterval(() => void displaySync.refresh(), DISPLAY_POLL_MS)
+  app.on('browser-window-focus', () => void displaySync.refresh({ force: false }))
+
   // Dev dock icon (packaged builds carry it in the bundle). app.getAppPath() = desktop/.
   if (process.platform === 'darwin' && app.dock) {
     const icon = nativeImage.createFromPath(path.join(app.getAppPath(), 'resources', 'icon.png'))
@@ -2002,6 +2046,8 @@ app.on('before-quit', () => {
   void hookReceiver?.close()
   poller?.stop()
   usage?.stop()
+  if (planDisplayTimer) clearInterval(planDisplayTimer)
+  void planDisplay?.flush()
   appStats?.flush()
   scanClient?.stop()
   tray?.destroy()

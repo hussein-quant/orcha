@@ -103,11 +103,15 @@ internal fun HomeTab(
             )
             if (connectRepo) InboxConnectRepoHost(state, onDismiss = { connectRepo = false })
             // Plan usage (Claude / Codex limits from the desktop) in place of "This week".
-            val planUsage = rememberPlanUsage(state.containers.map { it.baseUrl })
+            // Hidden unless the portal-wide "Show plan usage" setting is on (default off).
+            val planUsageUrls = state.containers.map { it.baseUrl }
+            val planUsage = rememberPlanUsage(planUsageUrls)
             var showPlanUsage by remember { mutableStateOf(false) }
-            if (showPlanUsage) PlanUsageSheet(planUsage, onDismiss = { showPlanUsage = false })
-            Spacer(Modifier.height(LSpace.m))
-            PlanUsageCard(planUsage, onOpen = { showPlanUsage = true })
+            if (showPlanUsage) PlanUsageSheet(planUsage, planUsageUrls, onDismiss = { showPlanUsage = false })
+            if (PlanUsageDisplayStore.display.show) {
+                Spacer(Modifier.height(LSpace.m))
+                PlanUsageCard(planUsage, onOpen = { showPlanUsage = true })
+            }
             HomeObjectiveEditor(state)
         }
 

@@ -114,5 +114,5 @@ export function snapshot(providers: ProviderUsage[], over: Partial<UsageSnapshot
 }
 
 export function usageValue(s: UsageSnapshot | null, over: Partial<UsageValue> = {}): UsageValue {
-  return { snapshot: s, available: true, refreshing: false, error: null, refresh: async () => {}, update: async () => {}, ...over }
+  return { snapshot: s, available: true, refreshing: false, error: null, refresh: async () => {}, update: async () => {}, display: null, setDisplay: async () => {}, ...over }
 }

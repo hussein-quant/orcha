@@ -64,7 +64,7 @@ const VOICE_SETTINGS_PATH = '/settings#tab=voice'
 import { BarChart3 } from 'lucide-react'
 import { useUsage } from './usage/useUsage'
 import UsagePopover from './usage/UsagePopover'
-import UsageIndicator from './usage/UsageIndicator'
+import UsageIndicator, { usageRowVisible } from './usage/UsageIndicator'
 import StatsView, { type StatsProject } from './usage/StatsView'
 import type { UsageProviderId } from '../../shared/usage'
 
@@ -1115,8 +1115,14 @@ function AppShell() {
           setSettingsOpen((v) => !v)
         }}
         usageSlot={
-          usage.available ? (
-            <UsageIndicator snapshot={usage.snapshot} open={usagePop.open} collapsed={collapsed} onToggle={() => (usagePop.open ? closeUsagePop() : void openUsagePop())} />
+          usage.available && usageRowVisible(usage.display) ? (
+            <UsageIndicator
+              snapshot={usage.snapshot}
+              display={usage.display}
+              open={usagePop.open}
+              collapsed={collapsed}
+              onToggle={() => (usagePop.open ? closeUsagePop() : void openUsagePop())}
+            />
           ) : undefined
         }
         settingsActive={settingsOpen}

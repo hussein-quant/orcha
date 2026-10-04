@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 import type { EmbedEvent, HostToPortal } from '../shared/embed'
 import type { TERM_CHANNELS, TermCommand, TermEvent, TermInfo, TermRestoreResult } from '../shared/terminal'
 import type { AGENT_CHANNELS, AgentsSnapshot } from '../shared/agents'
-import type { USAGE_CHANNELS, UsageSnapshot } from '../shared/usage'
+import type { PlanUsageDisplay, USAGE_CHANNELS, UsageSnapshot } from '../shared/usage'
 import type { THEME_CHANNELS, ThemeState } from '../shared/theme'
 import type { PROFILE_CHANNELS, ProfileSaveResult, ProfileState } from '../shared/profile'
 import type { MIC_CHANNELS, MicAccess } from '../shared/mic'
@@ -38,7 +38,10 @@ const USAGE = {
   refresh: 'orcha:usage:refresh',
   update: 'orcha:usage:update',
   changed: 'orcha:usage:changed',
-  openStats: 'orcha:usage:openStats'
+  openStats: 'orcha:usage:openStats',
+  displayGet: 'orcha:usage:display:get',
+  displaySet: 'orcha:usage:display:set',
+  displayChanged: 'orcha:usage:display:changed'
 } as const satisfies typeof USAGE_CHANNELS
 /** Appearance channels, inlined for the same reason (identical to shared/theme.ts). */
 const THEME = {
@@ -221,6 +224,13 @@ const api: OrchaDesktopApi = {
       const listener = (_e: IpcRendererEvent, target: 'stats' | 'accounts'): void => cb(target === 'accounts' ? 'accounts' : 'stats')
       ipcRenderer.on(USAGE.openStats, listener)
       return () => ipcRenderer.removeListener(USAGE.openStats, listener)
+    },
+    getDisplay: () => invoke<PlanUsageDisplay>(USAGE.displayGet),
+    setDisplay: (d) => invoke<PlanUsageDisplay>(USAGE.displaySet, d),
+    onDisplayChanged: (cb) => {
+      const listener = (_e: IpcRendererEvent, d: PlanUsageDisplay): void => cb(d)
+      ipcRenderer.on(USAGE.displayChanged, listener)
+      return () => ipcRenderer.removeListener(USAGE.displayChanged, listener)
     }
   },
   // Settings › Appearance: main validates the mode and drives nativeTheme.themeSource.

@@ -29,6 +29,11 @@ struct OrchaApp: App {
                 .onChange(of: model.skinMode) { _, skin in ChromeAppearance.apply(skin: skin) }
                 .task { NotificationCoordinator.shared.model = model }
                 .onChange(of: scenePhase) { _, phase in
+                    if phase == .active {
+                        // Plan usage + its display setting may have changed on another device.
+                        let bases = model.containers.map(\.baseUrl)
+                        Task { await model.planUsage.refresh(bases: bases) }
+                    }
                     if phase == .background, model.notificationsEnabled {
                         NotificationCoordinator.scheduleAppRefresh()
                     }

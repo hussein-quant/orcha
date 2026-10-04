@@ -43,6 +43,41 @@ describe('SettingsView › Usage', () => {
     expect(onOpenStats).toHaveBeenCalledTimes(1)
   })
 
+  it('"Show plan usage" sits at the top, off by default, with Providers disabled until it is on', async () => {
+    const { snapshot, claude, usageValue } = await import('../usage/fixtures')
+    const setDisplay = vi.fn()
+    const display = { show: false, providers: 'both' as const, updatedAt: null }
+    const { rerender } = render(
+      <SettingsView onClose={() => {}} initialSection="usage" usage={usageValue(snapshot([claude()]), { display, setDisplay })} />
+    )
+    const block = screen.getByTestId('plan-usage-display')
+    expect(screen.getByTestId('settings-usage').querySelector('[data-testid]')).toBe(block)
+    expect(block).toHaveTextContent('on every device connected to this Embodent')
+    const sw = screen.getByRole('switch', { name: 'Show plan usage' })
+    expect(sw).toHaveAttribute('aria-checked', 'false')
+    expect(screen.getByTestId('plan-usage-providers-claude')).toBeDisabled()
+    await userEvent.click(sw)
+    expect(setDisplay).toHaveBeenCalledWith({ show: true, providers: 'both' })
+
+    rerender(
+      <SettingsView
+        onClose={() => {}}
+        initialSection="usage"
+        usage={usageValue(snapshot([claude()]), { display: { ...display, show: true }, setDisplay })}
+      />
+    )
+    expect(screen.getByRole('switch', { name: 'Show plan usage' })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByTestId('plan-usage-providers-both')).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(screen.getByTestId('plan-usage-providers-codex'))
+    expect(setDisplay).toHaveBeenLastCalledWith({ show: true, providers: 'codex' })
+  })
+
+  it('the switch waits for the setting to load', async () => {
+    const { snapshot, claude, usageValue } = await import('../usage/fixtures')
+    render(<SettingsView onClose={() => {}} initialSection="usage" usage={usageValue(snapshot([claude()]))} />)
+    expect(screen.getByRole('switch', { name: 'Show plan usage' })).toBeDisabled()
+  })
+
   it('hides the Usage section on a preload without the usage bridge', () => {
     render(<SettingsView onClose={() => {}} />)
     expect(screen.queryByTestId('settings-nav-usage')).toBeNull()
