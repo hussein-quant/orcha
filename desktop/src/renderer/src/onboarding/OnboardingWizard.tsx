@@ -103,11 +103,14 @@ type Attempt =
 export default function OnboardingWizard({
   onDone,
   variant = 'first-run',
-  onCancel
+  onCancel,
+  onOpenApiKeys
 }: {
   onDone: () => void
   variant?: WizardVariant
   onCancel?: () => void
+  /** Opens Settings › API keys over the wizard (Setup's "Use an API key instead"). */
+  onOpenApiKeys?: () => void
 }) {
   const [phase, setPhaseState] = useState<Phase>(variant === 'first-run' ? 'welcome' : 'source')
   const phaseRef = useRef(phase)
@@ -369,9 +372,9 @@ export default function OnboardingWizard({
               {phase === 'welcome' && <WelcomeStep onContinue={() => setPhase('preflight')} />}
               {phase === 'preflight' &&
                 (variant === 'add-project' ? (
-                  <PreflightStep reason={detour?.reason} onBack={leaveSetup} onContinue={leaveSetup} />
+                  <PreflightStep reason={detour?.reason} onBack={leaveSetup} onContinue={leaveSetup} onUseApiKey={onOpenApiKeys} />
                 ) : (
-                  <PreflightStep onContinue={() => setPhase('source')} />
+                  <PreflightStep onContinue={() => setPhase('source')} onUseApiKey={onOpenApiKeys} />
                 ))}
               {phase === 'source' && (
                 <SourceStep

@@ -59,6 +59,8 @@ describe('FleetStep', () => {
     expect(screen.getByText('Sable')).toBeInTheDocument()
     expect(screen.getByText(/found ios\/ \+ package\.swift/i)).toBeInTheDocument()
     expect(screen.getByLabelText('Lead agent')).toBeInTheDocument()
+    // how the agents are billed: a subscription, or an API key
+    expect(screen.getByTestId('fleet-billing')).toHaveTextContent('Agents run on a Claude or ChatGPT subscription, or an API key')
   })
 
   it('toggles suggestions and posts accept with only the selected ones', async () => {

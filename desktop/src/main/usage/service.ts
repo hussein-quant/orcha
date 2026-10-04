@@ -103,6 +103,8 @@ export class UsageService {
   private updatedAt: number | null = null
   private error: string | null = null
   private timer: unknown = null
+  /** Agent CLIs whose runs bill an API key (Settings › API keys, any project). */
+  private apiBilling: Partial<Record<UsageProviderId, boolean>> = {}
 
   constructor(private readonly deps: UsageServiceDeps) {
     this.defs = providerDefs(deps.env, deps.home)
@@ -175,6 +177,14 @@ export class UsageService {
     this.scanning = false
     this.updatedAt = this.deps.now()
     return this.emit()
+  }
+
+  /** Settings › API keys changed which CLIs bill an API key: re-publish when it differs. */
+  setApiBilling(next: Partial<Record<UsageProviderId, boolean>>): void {
+    const ids = new Set([...Object.keys(this.apiBilling), ...Object.keys(next)]) as Set<UsageProviderId>
+    const changed = [...ids].some((id) => !!this.apiBilling[id] !== !!next[id])
+    this.apiBilling = { ...next }
+    if (changed) this.emit()
   }
 
   update(raw: unknown): UsageSnapshot | null {
@@ -254,7 +264,8 @@ export class UsageService {
         limitsExplainer: needOptIn ? CLAUDE_LIMITS_EXPLAINER : null,
         limits,
         local: pref.enabled ? local : null,
-        logPath: d.logs?.display ?? null
+        logPath: d.logs?.display ?? null,
+        billing: this.apiBilling[d.id] ? 'api-key' : 'plan'
       })
     }
     return {

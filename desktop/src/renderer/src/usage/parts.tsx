@@ -106,6 +106,7 @@ export function headlineReset(p: ProviderUsage, now: number): string | null {
 /** One muted line saying where a provider stands when there is no bar to show. */
 export function providerStatusText(p: ProviderUsage): string {
   if (p.state === 'off') return 'Tracking off'
+  if (p.billing === 'api-key') return 'API key'
   if (p.state === 'not-installed') return 'Not installed'
   const l = p.limits
   if (l?.status === 'expired') return 'Sign-in expired'

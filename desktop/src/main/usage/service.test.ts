@@ -113,4 +113,19 @@ describe('UsageService', () => {
     expect(s.error).toMatch(/EACCES/)
     expect(s.scanning).toBe(false)
   })
+
+  it('API-key billing (Settings › API keys): the provider is marked, has no peak window, and a change re-publishes', async () => {
+    const { svc, deps } = service()
+    await svc.refresh()
+    const before = (deps.onChange as ReturnType<typeof vi.fn>).mock.calls.length
+    expect(svc.snapshot().providers.find((p) => p.id === 'claude')!.billing).toBe('plan')
+    svc.setApiBilling({ claude: true, codex: false })
+    expect((deps.onChange as ReturnType<typeof vi.fn>).mock.calls.length).toBe(before + 1)
+    const s = svc.snapshot()
+    expect(s.providers.find((p) => p.id === 'claude')!.billing).toBe('api-key')
+    expect(s.providers.find((p) => p.id === 'codex')!.billing).toBe('plan')
+    // the same value again: no re-publish
+    svc.setApiBilling({ claude: true })
+    expect((deps.onChange as ReturnType<typeof vi.fn>).mock.calls.length).toBe(before + 1)
+  })
 })

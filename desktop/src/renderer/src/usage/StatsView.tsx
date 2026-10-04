@@ -14,7 +14,9 @@ import {
   formatTokens,
   formatUsd,
   heatmapWeeks,
+  localDay,
   sumLocal,
+  todaySpendText,
   totalTokens,
   type LocalUsage,
   type ProviderUsage,
@@ -271,7 +273,15 @@ function ProviderCard({
                 : 'Embodent can’t read this CLI’s usage yet.'}
         </div>
       )}
-      {on && p.hasLimits && (
+      {on && p.billing === 'api-key' && (
+        <div className="flex flex-col gap-1 border-t border-border pt-3" data-testid={`usage-api-key-${p.id}`}>
+          <span className="text-[12px] font-medium text-text-2">API key</span>
+          <span className="text-[12px] text-text-3">
+            Agent runs bill an API key (Settings › API keys), so no plan limits apply. {todaySpendText(p, localDay(now))} (Est.).
+          </span>
+        </div>
+      )}
+      {on && p.hasLimits && p.billing !== 'api-key' && (
         <div className="flex flex-col gap-1.5 border-t border-border pt-3" data-testid={`usage-limits-${p.id}`}>
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-medium text-text-2">Subscription limits</span>

@@ -84,6 +84,29 @@ describe('UsagePopover', () => {
     expect(screen.getByText('Reading usage…')).toBeTruthy()
   })
 
+  it('API-key billing: "API key · $X today" instead of windows or sign-in state', () => {
+    const s = snapshot([
+      claude({ billing: 'api-key', limits: { status: 'signed-out', windows: [], source: 'x', fetchedAt: NOW, note: 'No Claude Code sign-in found on this Mac' } }),
+      codex()
+    ])
+    render(<UsagePopover usage={usageValue(s)} onOpenDetails={vi.fn()} onManageAccounts={vi.fn()} />)
+    const row = screen.getByTestId('usage-row-claude')
+    expect(row.getAttribute('data-billing')).toBe('api-key')
+    expect(within(row).getByText('API key · $2.50 today')).toBeTruthy()
+    expect(within(row).queryByRole('meter')).toBeNull()
+    expect(row.textContent).not.toMatch(/sign-in|Not signed in|Max/)
+    // the header peak ignores the API-billed provider (Codex 95 % stays)
+    expect(screen.getByLabelText('Highest window 95 percent')).toBeTruthy()
+    expect(screen.getByTestId('usage-row-codex').getAttribute('data-billing')).toBe('plan')
+  })
+
+  it('API-key billing, compact: the same one line', () => {
+    const s = snapshot([codex({ billing: 'api-key' })], { prefs: { version: 1, trayTitle: true, popoverMode: 'compact', providers: {} } })
+    render(<UsagePopover usage={usageValue(s)} onOpenDetails={vi.fn()} onManageAccounts={vi.fn()} />)
+    expect(within(screen.getByTestId('usage-row-codex')).getByText('API key · $2.50 today')).toBeTruthy()
+    expect(within(screen.getByTestId('usage-row-codex')).queryByRole('meter')).toBeNull()
+  })
+
   it('lists installed or tracked providers only', () => {
     expect(popoverProviders([claude(), gemini(), codex({ enabled: false, state: 'off' })]).map((p) => p.id)).toEqual(['claude'])
   })
@@ -161,6 +184,30 @@ describe('UsageIndicator', () => {
   it('no known windows: a plain "Usage" entry', () => {
     render(<UsageIndicator snapshot={snapshot([gemini()])} display={shown()} open={false} collapsed onToggle={vi.fn()} />)
     expect(screen.getByTestId('usage-indicator').getAttribute('aria-label')).toBe('Usage')
+  })
+
+  it('API-key billing, one provider: logo + "$X today", no bar', () => {
+    const s = snapshot([claude({ billing: 'api-key' }), codex()])
+    render(<UsageIndicator snapshot={s} display={shown('claude')} open={false} collapsed={false} onToggle={vi.fn()} />)
+    const b = screen.getByTestId('usage-indicator')
+    expect(b.querySelector('[data-logo="claude"]')).not.toBeNull()
+    expect(b.querySelector('[data-billing="api-key"]')!.textContent).toBe('$2.50 today')
+    expect(b.querySelector('[role="meter"]')).toBeNull()
+    expect(b.getAttribute('aria-label')).toBe('Usage: Claude API key, $2.50 today')
+  })
+
+  it('API-key billing, both: the key provider shows its spend next to the other’s percent', () => {
+    const s = snapshot([claude(), codex({ billing: 'api-key', limits: null })])
+    const { rerender } = render(<UsageIndicator snapshot={s} display={shown('both')} open={false} collapsed={false} onToggle={vi.fn()} />)
+    const b = screen.getByTestId('usage-indicator')
+    expect(b.querySelector('[data-usage-provider="claude"]')!.textContent).toBe('77%')
+    const cx = b.querySelector('[data-usage-provider="codex"]')!
+    expect(cx.getAttribute('data-billing')).toBe('api-key')
+    expect(cx.querySelector('[data-logo="codex"]')).not.toBeNull()
+    expect(cx.textContent).toBe('$2.50 today')
+    // collapsed: the gauge's number is the plan provider's percent only
+    rerender(<UsageIndicator snapshot={s} display={shown('both')} open={false} collapsed onToggle={vi.fn()} />)
+    expect(screen.getByTestId('usage-indicator').textContent).toBe('77')
   })
 
   it('shownProviders: Claude first, chosen ones only, missing data left out', () => {

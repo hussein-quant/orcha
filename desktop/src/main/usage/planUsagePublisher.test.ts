@@ -55,6 +55,14 @@ function snapshot(): UsageSnapshot {
 }
 
 describe('buildPlanUsagePayload', () => {
+  it('API-key billing: plan "API key", no windows or headline, today’s spend kept', () => {
+    const snap = snapshot()
+    snap.providers[0] = { ...snap.providers[0], billing: 'api-key' }
+    const p = buildPlanUsagePayload(snap, 'mac', NOW)!
+    expect(p.providers[0]).toEqual({ provider: 'claude', plan: 'API key', headline: null, windows: [], today: { tokens: 601_000_000, cost_usd: 237.61 } })
+    expect(p.providers[1].plan).toBe('Plus')
+  })
+
   it('mirrors the Usage panel: plans, windows, headline, today', () => {
     const p = buildPlanUsagePayload(snapshot(), 'Husseins-MacBook-Pro.local', NOW)!
     expect(p.host).toBe('Husseins-MacBook-Pro.local')

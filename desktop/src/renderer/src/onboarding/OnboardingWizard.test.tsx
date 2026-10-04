@@ -21,8 +21,7 @@ beforeEach(() => {
       dockerEngine: true,
       orcha: true,
       claude: true,
-      codex: true,
-      apiKey: true
+      codex: true
     }),
     installPrereqs: vi.fn().mockResolvedValue({ ok: true, completed: [] }),
     onInstallProgress: vi.fn().mockReturnValue(() => {}),
@@ -610,8 +609,7 @@ describe('OnboardingWizard — add-project background setup check', () => {
       dockerEngine: true,
       orcha: false,
       claude: true,
-      codex: false,
-      apiKey: true
+      codex: false
     })
     render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
     const notice = await screen.findByTestId('setup-notice')

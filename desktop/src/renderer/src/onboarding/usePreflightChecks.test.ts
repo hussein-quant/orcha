@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { setupIssues, usePreflightChecks, type PreflightChecks } from './usePreflightChecks'
 
-const ALL = { homebrew: true, dockerEngine: true, orcha: true, claude: true, codex: false, apiKey: true }
+const ALL = { homebrew: true, dockerEngine: true, orcha: true, claude: true, codex: false }
 
 beforeEach(() => {
   window.orchaDesktop = {

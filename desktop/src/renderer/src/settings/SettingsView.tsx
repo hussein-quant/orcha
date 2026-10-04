@@ -1,29 +1,40 @@
 /** Desktop Settings (⌘, / sidebar footer "Settings"): fills the inset content panel while
  *  open (main hides the portal view, like a terminal session). Sections — Profile, Agents,
- *  Appearance, Notifications and Usage — in a Linear-style left section list.
+ *  API keys, Appearance, Notifications, Voice, Usage and Storage — in a Linear-style left
+ *  section list.
  *
  *  Notifications has no settings of its own: desktop alerts follow the same per-person
  *  rules as every other channel (portal Settings › Notifications, mig 063). The section
  *  says so and opens those preferences in the running project's portal. */
 import { useEffect, useRef, useState } from 'react'
-import { BarChart3, Bell, Bot, HardDrive, Mic, Settings as SettingsIcon, SunMoon, UserRound, X } from 'lucide-react'
+import { BarChart3, Bell, Bot, HardDrive, KeyRound, Mic, Settings as SettingsIcon, SunMoon, UserRound, X } from 'lucide-react'
 import type { AgentId } from '../../../shared/agents'
 import AgentsSettings from './AgentsSettings'
+import ApiKeysSettings from './ApiKeysSettings'
 import AppearanceSettings from './AppearanceSettings'
 import ProfileSettings from './ProfileSettings'
 import StorageSettings from './StorageSettings'
 import VoiceSettings from './VoiceSettings'
 import type { UsageValue } from '../usage/useUsage'
-import { DEFAULT_PLAN_USAGE_DISPLAY, type PlanUsageProviders } from '../../../shared/usage'
+import {
+  DEFAULT_PLAN_USAGE_DISPLAY,
+  isApiBilled,
+  localDay,
+  peakWindow,
+  todaySpendText,
+  type PlanUsageProviders
+} from '../../../shared/usage'
+import { ProviderLogo, providerStatusText } from '../usage/parts'
 
 /** Portal section the desktop's Notifications entry opens (SettingsPage `#tab=notifications`). */
 export const NOTIFICATION_SETTINGS_PATH = '/settings#tab=notifications'
 
-type Section = 'profile' | 'agents' | 'appearance' | 'notifications' | 'voice' | 'usage' | 'storage'
+export type Section = 'profile' | 'agents' | 'apiKeys' | 'appearance' | 'notifications' | 'voice' | 'usage' | 'storage'
 
 const SECTIONS: { key: Section; label: string; Icon: typeof Bot }[] = [
   { key: 'profile', label: 'Profile', Icon: UserRound },
   { key: 'agents', label: 'Agents', Icon: Bot },
+  { key: 'apiKeys', label: 'API keys', Icon: KeyRound },
   { key: 'appearance', label: 'Appearance', Icon: SunMoon },
   { key: 'notifications', label: 'Notifications', Icon: Bell },
   { key: 'voice', label: 'Voice', Icon: Mic },
@@ -61,6 +72,8 @@ export default function SettingsView({
   const hasProfile = !!window.orchaDesktop?.profile
   /** Settings › Storage needs the storage bridge (same rule). */
   const hasStorage = !!window.orchaDesktop?.storageScan
+  /** Settings › API keys needs the providerKeys bridge (same rule). */
+  const hasApiKeys = !!window.orchaDesktop?.providerKeys
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     ref.current?.focus()
@@ -100,7 +113,7 @@ export default function SettingsView({
         <nav aria-label="Settings sections" className="w-[188px] shrink-0 border-r border-border p-2">
           <div className="px-2 pb-1 pt-1.5 text-[11.5px] font-medium text-text-3">Desktop</div>
           {SECTIONS.filter(
-            (x) => (x.key !== 'usage' || usage?.available) && (x.key !== 'appearance' || hasTheme) && (x.key !== 'profile' || hasProfile) && (x.key !== 'storage' || hasStorage)
+            (x) => (x.key !== 'usage' || usage?.available) && (x.key !== 'appearance' || hasTheme) && (x.key !== 'profile' || hasProfile) && (x.key !== 'storage' || hasStorage) && (x.key !== 'apiKeys' || hasApiKeys)
           ).map(({ key, label, Icon }) => (
             <button
               key={key}
@@ -128,6 +141,8 @@ export default function SettingsView({
                 </p>
                 <AgentsSettings onTestLaunch={onTestLaunch} />
               </>
+            ) : section === 'apiKeys' && hasApiKeys ? (
+              <ApiKeysSettings />
             ) : section === 'appearance' && hasTheme ? (
               <AppearanceSettings />
             ) : section === 'voice' ? (
@@ -141,6 +156,7 @@ export default function SettingsView({
                   Token use, estimated cost and plan limits for your coding agents, read from their own logs on this Mac.
                 </p>
                 <PlanUsageDisplaySetting usage={usage} />
+                <BillingRows usage={usage} />
                 <div className="flex flex-col divide-y divide-border rounded-[10px] border border-border">
                   <div className="flex min-h-[52px] items-center justify-between gap-6 px-4 py-3">
                     <div className="min-w-0">
@@ -221,6 +237,36 @@ export default function SettingsView({
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Settings › Usage: how each agent CLI is billed — its plan (busiest window) or, when its
+ *  runs bill an API key (Settings › API keys), "API key" with today's Est. spend. */
+function BillingRows({ usage }: { usage: UsageValue }) {
+  const rows = (usage.snapshot?.providers ?? []).filter((p) => (p.id === 'claude' || p.id === 'codex') && p.enabled)
+  if (rows.length === 0) return null
+  const today = localDay(Date.now())
+  return (
+    <div className="mb-4 flex flex-col divide-y divide-border rounded-[10px] border border-border" data-testid="settings-usage-billing">
+      {rows.map((p) => {
+        const api = isApiBilled(p)
+        const peak = peakWindow(p)
+        const plan = p.limits?.plan ?? null
+        return (
+          <div key={p.id} data-testid={`settings-billing-${p.id}`} data-billing={api ? 'api-key' : 'plan'} className="flex min-h-[44px] items-center gap-3 px-4 py-2.5">
+            <ProviderLogo id={p.id} size={20} />
+            <span className="min-w-0 flex-1 text-[13px] font-medium text-text">{p.label}</span>
+            <span className="shrink-0 text-[12.5px] tabular-nums text-text-2">
+              {api
+                ? `API key · ${todaySpendText(p, today)}`
+                : peak
+                  ? `${plan ? `${plan} · ` : ''}${peak.label} ${Math.round(peak.usedPercent)}% used`
+                  : providerStatusText(p) || plan || 'Subscription'}
+            </span>
+          </div>
+        )
+      })}
     </div>
   )
 }

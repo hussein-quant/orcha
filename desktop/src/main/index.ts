@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, screen, session, shell, systemPreferences, WebContentsView } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, screen, session, shell, systemPreferences, WebContentsView } from 'electron'
 import { installMediaPermissions, micAccessStatus, requestMicAccess } from './micPermission'
 import { MIC_CHANNELS, MIC_SETTINGS_URL } from '../shared/mic'
 import { classifyVerdiktLink, launchMacApp, openVerdiktLink } from './verdiktLinks'
@@ -59,6 +59,8 @@ import { createThemeController, readThemeMode, writeThemeMode, type ThemeControl
 import { canvasFor, THEME_CHANNELS, type ThemeState } from '../shared/theme'
 import { normalizeProfileName, PROFILE_CHANNELS, profileState, type ProfileSaveResult, type ProfileState } from '../shared/profile'
 import { readProfileName, renameSelfInProjects, writeProfileName } from './profileStore'
+import { createProviderKeys } from './providerKeys'
+import { parseProviderKeysInput, PROVIDER_KEYS_CHANNELS } from '../shared/providerKeys'
 import { EmbedTracker } from './embedTracker'
 import { PtyHost, type PtyProcess } from './ptyHost'
 import { acceptTermSender as acceptTermSenderFacts, closeAction, createTermController, TermRequestError, type SenderFacts, type TermControllerHooks } from './terminalIpc'
@@ -200,27 +202,9 @@ function engineDeps(): EngineDeps {
 
 // ---- Prerequisites: probe + guided auto-install ----------------------------------------
 // A fresh Mac has none of the host tools that actually run agents (Homebrew, the Docker
-// engine, the orcha CLI, Claude Code, an API key). These helpers detect what's missing and
+// engine, the orcha CLI, Claude Code). API keys are not a host prerequisite: Settings › API
+// keys stores them on each project, and the notifier hands them to each run. These helpers detect what's missing and
 // install it behind native dialogs — the pure plan/orchestration lives in ./installers.
-
-/** Where the Anthropic API key is stored (this Mac only). Loaded into the process env on
- *  startup so the orcha worker we spawn inherits it; never written to the user's shell. */
-function apiKeyFile(): string {
-  return path.join(app.getPath('userData'), 'anthropic-api-key')
-}
-
-/** Load a previously-saved API key into the env so spawned `orcha up` → `claude` can see it. */
-function loadApiKeyIntoEnv(): void {
-  try {
-    const f = apiKeyFile()
-    if (!process.env.ANTHROPIC_API_KEY && existsSync(f)) {
-      const key = readFileSync(f, 'utf8').trim()
-      if (key) process.env.ANTHROPIC_API_KEY = key
-    }
-  } catch {
-    // A missing/unreadable key file just means "no key yet" — the worker reports it plainly.
-  }
-}
 
 /** `which <cmd>` against the host-tool PATH (the Finder-launched .app's PATH omits brew etc.). */
 function whichHostTool(cmd: string): Promise<string | null> {
@@ -244,8 +228,7 @@ async function probePrereqs(): Promise<PrereqProbe> {
     dockerEngine: !!docker,
     orcha: !!orcha,
     claude: !!claude,
-    codex: !!codex,
-    apiKey: !!process.env.ANTHROPIC_API_KEY || existsSync(apiKeyFile())
+    codex: !!codex
   }
 }
 
@@ -282,38 +265,6 @@ function runAdminInstall(script: string): Promise<void> {
       err ? reject(Object.assign(err, { stderr: stderr || (err as Error).message })) : resolve()
     )
   })
-}
-
-/** Prompt for the Anthropic API key with a native, masked text field; null if cancelled. */
-function promptApiKey(): Promise<string | null> {
-  return new Promise((resolve) => {
-    const args = [
-      '-e',
-      'try',
-      '-e',
-      'set k to text returned of (display dialog "Paste your Anthropic API key (starts with sk-ant-). It is stored only on this Mac." default answer "" with hidden answer with title "Embodent" buttons {"Cancel", "Save"} default button "Save")',
-      '-e',
-      'return k',
-      '-e',
-      'on error',
-      '-e',
-      'return "__CANCELLED__"',
-      '-e',
-      'end try'
-    ]
-    execFile('osascript', args, (err, stdout) => {
-      if (err) return resolve(null)
-      const v = stdout.trim()
-      resolve(!v || v === '__CANCELLED__' ? null : v)
-    })
-  })
-}
-
-async function persistApiKey(key: string): Promise<void> {
-  const f = apiKeyFile()
-  mkdirSync(path.dirname(f), { recursive: true })
-  writeFileSync(f, key, { mode: 0o600 })
-  process.env.ANTHROPIC_API_KEY = key
 }
 
 // ---- Add project / From GitHub -----------------------------------------------------------
@@ -1043,7 +994,7 @@ function publishUsage(snap: UsageSnapshot): void {
   for (const w of popoverWindows) if (!w.isDestroyed()) w.webContents.send(USAGE_CHANNELS.changed, snap)
   const now = Date.now()
   const rows = snap.providers
-    .filter((p) => p.enabled && p.limits?.status === 'ok' && p.limits.windows.length > 0)
+    .filter((p) => p.enabled && p.billing !== 'api-key' && p.limits?.status === 'ok' && p.limits.windows.length > 0)
     .map((p) => {
       const bars = (p.limits?.windows ?? []).map((w) => `${w.label} ${Math.round(w.usedPercent)}%`).join(' · ')
       const peak = peakWindow(p)
@@ -1229,9 +1180,6 @@ app.whenReady().then(() => {
       return true
     })
   )
-
-  // Make a saved API key visible to any worker we spawn this session.
-  loadApiKeyIntoEnv()
 
   // A display went away / changed resolution: never leave the window (and its sidebar)
   // hanging off-screen.
@@ -1653,8 +1601,6 @@ app.whenReady().then(() => {
       return runInstall(steps, {
         runUser: runUserInstall,
         runAdmin: runAdminInstall,
-        promptSecret: promptApiKey,
-        persistApiKey,
         onProgress: (e) => sendToManager('orcha:install:progress', e)
       })
     })
@@ -1978,7 +1924,77 @@ app.whenReady().then(() => {
     })
   )
   void displaySync.refresh()
-  planDisplayTimer = setInterval(() => void displaySync.refresh(), DISPLAY_POLL_MS)
+
+  // Settings › API keys: an Anthropic / OpenAI key stored on every running project (sealed by
+  // its portal) and switched on/off for its agent runs; remembered on this Mac with the
+  // Keychain-backed safeStorage so projects started later get it too. The key arrives here
+  // once (save) and never goes back to any renderer, log or error.
+  const keysFile = path.join(userData, 'provider-keys.json')
+  const keys = createProviderKeys({
+    listStacks: () => listStacks(),
+    fetch: (input, init) => fetch(input, init),
+    profileName: () => currentProfile().effective,
+    load: () => {
+      try {
+        return JSON.parse(readFileSync(keysFile, 'utf8')) as unknown
+      } catch {
+        return null
+      }
+    },
+    save: (data) => {
+      writeFileSync(`${keysFile}.tmp`, JSON.stringify(data) + '\n', { mode: 0o600 })
+      renameSync(`${keysFile}.tmp`, keysFile)
+    },
+    canSeal: () => {
+      try {
+        return safeStorage.isEncryptionAvailable()
+      } catch {
+        return false
+      }
+    },
+    seal: (plain) => {
+      try {
+        return safeStorage.isEncryptionAvailable() ? safeStorage.encryptString(plain).toString('base64') : null
+      } catch {
+        return null
+      }
+    },
+    unseal: (sealed) => {
+      try {
+        return safeStorage.decryptString(Buffer.from(sealed, 'base64'))
+      } catch {
+        return null
+      }
+    },
+    onBilling: (b) => usageSvc.setApiBilling(b),
+    now: () => Date.now()
+  })
+  ipcMain.handle(PROVIDER_KEYS_CHANNELS.get, (event) =>
+    asResult(async () => {
+      if (!themeSender(event)) throw { code: 'INVALID_PROVIDER_KEYS' } satisfies BridgeError
+      return keys.get()
+    })
+  )
+  ipcMain.handle(PROVIDER_KEYS_CHANNELS.refresh, (event) =>
+    asResult(async () => {
+      if (!themeSender(event)) throw { code: 'INVALID_PROVIDER_KEYS' } satisfies BridgeError
+      return keys.refresh()
+    })
+  )
+  ipcMain.handle(PROVIDER_KEYS_CHANNELS.save, (event, raw: unknown) =>
+    asResult(async () => {
+      if (!themeSender(event)) throw { code: 'INVALID_PROVIDER_KEYS' } satisfies BridgeError
+      const input = parseProviderKeysInput(raw)
+      if (!input) throw { code: 'INVALID_PROVIDER_KEYS' } satisfies BridgeError
+      return keys.save(input)
+    })
+  )
+  void keys.refresh()
+
+  planDisplayTimer = setInterval(() => {
+    void displaySync.refresh()
+    void keys.refresh()
+  }, DISPLAY_POLL_MS)
   app.on('browser-window-focus', () => void displaySync.refresh({ force: false }))
 
   // Dev dock icon (packaged builds carry it in the bundle). app.getAppPath() = desktop/.

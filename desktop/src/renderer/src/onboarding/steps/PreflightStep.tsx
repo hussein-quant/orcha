@@ -23,6 +23,23 @@ const AI_COMMANDS = [
   { name: 'Codex', cmd: 'npm install -g @openai/codex', doc: LINKS.codexDocs }
 ]
 
+/** How agents are billed — shown under the AI coding agent row. */
+export const BILLING_COPY = 'Agents run on a Claude or ChatGPT subscription, or an API key.'
+
+/** "Use an API key instead": opens Settings › API keys (absent: no link). */
+function BillingLine({ onUseApiKey }: { onUseApiKey?: () => void }) {
+  return (
+    <span className="ob-row-sub" data-testid="preflight-billing">
+      {BILLING_COPY}{' '}
+      {onUseApiKey && (
+        <button type="button" className="ob-link" data-testid="use-api-key" onClick={onUseApiKey}>
+          Use an API key instead
+        </button>
+      )}
+    </span>
+  )
+}
+
 const UNRESPONSIVE_HINT =
   'Docker isn’t responding. Quit and reopen Docker Desktop (or choose Restart from its menu), then re-check.'
 
@@ -85,11 +102,14 @@ interface Row {
 export default function PreflightStep({
   onContinue,
   onBack,
-  reason
+  reason,
+  onUseApiKey
 }: {
   onContinue: () => void
   onBack?: () => void
   reason?: string | null
+  /** Opens Settings › API keys (no Claude / ChatGPT subscription). */
+  onUseApiKey?: () => void
 }) {
   const checks = usePreflightChecks()
   const { report, probe, checking, probeLoading, slow, stuck, waitedS, checkError, dockerOk, aiOk, brewOk, ready } =
@@ -225,7 +245,8 @@ export default function PreflightStep({
           key: 'ai',
           label: 'AI coding agent',
           glyph: 'done',
-          aside: probe!.claude && probe!.codex ? 'Claude Code, Codex' : probe!.claude ? 'Claude Code' : 'Codex'
+          aside: probe!.claude && probe!.codex ? 'Claude Code, Codex' : probe!.claude ? 'Claude Code' : 'Codex',
+          extra: <BillingLine onUseApiKey={onUseApiKey} />
         }
       : {
           key: 'ai',
@@ -238,6 +259,7 @@ export default function PreflightStep({
               {AI_COMMANDS.map((c) => (
                 <CommandLine key={c.name} {...c} />
               ))}
+              <BillingLine onUseApiKey={onUseApiKey} />
             </>
           )
         }

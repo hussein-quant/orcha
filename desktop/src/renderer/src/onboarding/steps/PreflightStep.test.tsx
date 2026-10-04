@@ -9,8 +9,7 @@ const ALL = {
   dockerEngine: true,
   orcha: true,
   claude: true,
-  codex: false,
-  apiKey: true
+  codex: false
 }
 
 function stub(over: Record<string, unknown> = {}) {
@@ -41,6 +40,20 @@ describe('PreflightStep (Setup)', () => {
     expect(within(row('ai')).getByText('Claude Code')).toBeInTheDocument()
     expect(within(row('orcha')).getByText('Installed')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^continue$/i })).toBeEnabled()
+  })
+
+  it('says agents can run on a subscription or an API key, with a link to Settings › API keys', async () => {
+    const onUseApiKey = vi.fn()
+    const { rerender } = render(<PreflightStep onContinue={vi.fn()} onUseApiKey={onUseApiKey} />)
+    await waitFor(() => expect(within(row('ai')).getByText('Claude Code')).toBeInTheDocument())
+    expect(within(row('ai')).getByTestId('preflight-billing')).toHaveTextContent(
+      'Agents run on a Claude or ChatGPT subscription, or an API key.'
+    )
+    await userEvent.click(within(row('ai')).getByRole('button', { name: 'Use an API key instead' }))
+    expect(onUseApiKey).toHaveBeenCalledTimes(1)
+    // no handler (older bridge): the copy stays, the link goes
+    rerender(<PreflightStep onContinue={vi.fn()} />)
+    expect(screen.queryByTestId('use-api-key')).toBeNull()
   })
 
   it('offers "Start Docker" (not a download link) when Docker is installed but not running', async () => {

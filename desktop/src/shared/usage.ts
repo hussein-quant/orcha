@@ -167,6 +167,27 @@ export interface ProviderUsage {
   local: LocalUsage | null
   /** The log folder read (display only, `~`-relative). */
   logPath: string | null
+  /** `api-key`: agent runs bill an API key (Settings › API keys is on for at least one
+   *  project) — no plan limits apply, so the surfaces show "API key" + today's spend instead
+   *  of windows. Absent/`plan`: the CLI's own subscription. */
+  billing?: ProviderBilling
+}
+
+export type ProviderBilling = 'plan' | 'api-key'
+
+export function isApiBilled(p: ProviderUsage): boolean {
+  return p.billing === 'api-key'
+}
+
+/** Today's Est. spend from the local logs (0 when there is none) — the API-key headline. */
+export function todaySpendUsd(p: ProviderUsage, today: string): number {
+  const d = p.local?.days.find((x) => x.date === today)
+  return d && Number.isFinite(d.costUsd) ? Math.max(0, d.costUsd) : 0
+}
+
+/** `$1.20 today`. */
+export function todaySpendText(p: ProviderUsage, today: string): string {
+  return `${formatUsd(todaySpendUsd(p, today))} today`
 }
 
 export interface AppStats {
@@ -480,6 +501,9 @@ export function bestDay(cols: readonly HeatCell[][]): HeatCell | null {
 
 /** The window a provider's headline rests on: the highest used %. */
 export function peakWindow(p: ProviderUsage): LimitWindow | null {
+  // API-key billing has no plan limits: whatever a subscription login still reports is not
+  // what these runs draw on.
+  if (isApiBilled(p)) return null
   if (!p.enabled || !p.limits || p.limits.status !== 'ok') return null
   let best: LimitWindow | null = null
   for (const w of p.limits.windows) if (!best || w.usedPercent > best.usedPercent) best = w

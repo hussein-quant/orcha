@@ -3,6 +3,7 @@ import type { AgentsApi } from './agents'
 import type { UsageApi } from './usage'
 import type { ThemeApi } from './theme'
 import type { ProfileApi } from './profile'
+import type { ProviderKeysApi } from './providerKeys'
 import type { MicApi } from './mic'
 import type { EmbedEvent, EmbedMode, HostToPortal, PortalToHost } from './embed'
 import type { ProjectIcon } from './projectIcon'
@@ -224,6 +225,8 @@ export type BridgeError =
   | { code: 'INVALID_THEME' }
   /** Settings › Profile: a non-string / over-long name, or a foreign sender. */
   | { code: 'INVALID_PROFILE' }
+  /** Settings › API keys: a malformed save (bad provider / key / switch), or a foreign sender. */
+  | { code: 'INVALID_PROVIDER_KEYS' }
   /** Microphone (dictation): a sender that isn't our window or an embedded portal view. */
   | { code: 'INVALID_MIC' }
   /** Settings › Storage: the item isn't a leftover the current scan offers (or no confirm). */
@@ -318,7 +321,7 @@ export interface PreflightReport {
 /** The host-side tools Orcha needs that the Docker stack can't provide. Agents run as a
  *  host `claude -p` process launched by the orcha CLI, so a fresh Mac needs all of these
  *  before assigned tasks actually run. */
-export type Prereq = 'homebrew' | 'dockerEngine' | 'orcha' | 'claude' | 'apiKey'
+export type Prereq = 'homebrew' | 'dockerEngine' | 'orcha' | 'claude'
 
 /** What's already present on this Mac. Each false → one install step. */
 export interface PrereqProbe {
@@ -333,8 +336,6 @@ export interface PrereqProbe {
   /** `codex` (OpenAI Codex CLI) resolves on PATH. Either claude or codex satisfies the
    *  "AI coding agent" requirement. */
   codex: boolean
-  /** An Anthropic API key is available to the agent worker. */
-  apiKey: boolean
 }
 
 /** A single shell command in an install step. `admin` actions run as root via the native
@@ -344,8 +345,7 @@ export interface InstallAction {
   script: string
 }
 
-/** One installable prerequisite, in plain language, plus the commands that install it.
- *  `apiKey` carries no actions — it's handled by prompting for + storing the key. */
+/** One installable prerequisite, in plain language, plus the commands that install it. */
 export interface InstallStep {
   id: Prereq
   /** Short plain-English name shown to a non-engineer. */
@@ -519,6 +519,8 @@ export interface OrchaDesktopApi {
   theme?: ThemeApi
   /** Settings › Profile (absent on an older preload: the section is hidden). */
   profile?: ProfileApi
+  /** Settings › API keys (absent on an older preload: the section is hidden). */
+  providerKeys?: ProviderKeysApi
   /** Microphone access for dictation (Settings › Voice). */
   mic?: MicApi
   /** Forward a host → portal message (navigate / openSearch) to the ACTIVE portal view.

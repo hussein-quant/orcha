@@ -28,11 +28,16 @@ type LoadState =
  *  `onUnavailable`, so the wizard's walker treats it like it was never there.
  *
  *  Alongside the instant heuristic suggestions, a deep analysis of the project via the
- *  user's own local Claude Code subscription runs in the background (see
+ *  user's own local Claude Code sign-in (a Claude or ChatGPT subscription, or an API key)
+ *  runs in the background (see
  *  onboarding/steps/useProjectAnalysis.ts) — its suggested agents get merged into the same
  *  card grid (badged "Claude"), and its summary appears in a card above them once it
  *  resolves. The step is fully usable before/without it: accept is enabled immediately, and
  *  a late analysis result just appends more cards. */
+/** How the created agents are billed (user-visible, under the cards). */
+export const FLEET_BILLING_COPY =
+  'Agents run on a Claude or ChatGPT subscription, or an API key (Settings › API keys).'
+
 export interface AcceptError {
   message: string
   detail?: string
@@ -365,6 +370,9 @@ export default function FleetStep({
           />
         ))}
       </div>
+      <p className="m-0 text-xs text-text-3" data-testid="fleet-billing">
+        {FLEET_BILLING_COPY}
+      </p>
 
       {acceptError && (
         <Notice tone="danger" title="The agents couldn’t be created">

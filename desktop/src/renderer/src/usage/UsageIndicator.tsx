@@ -1,13 +1,17 @@
 /** The compact usage indicator in the host sidebar's footer (the app's status area). Shown
  *  only when the portal-wide "Show plan usage" setting is on (off by default), for the
  *  chosen providers: both → each provider's logo + the percent of its busiest window, side
- *  by side; one → its logo, a thin bar and the percent. Collapsed: the gauge with the peak of
- *  the chosen providers. Click opens the Usage popover. */
+ *  by side; one → its logo, a thin bar and the percent. A provider whose agent runs bill an
+ *  API key (Settings › API keys) has no plan limits: its logo + "$X today" instead. Collapsed:
+ *  the gauge with the peak of the chosen providers. Click opens the Usage popover. */
 import { Gauge } from 'lucide-react'
 import {
   barTone,
   clampPercent,
+  isApiBilled,
+  localDay,
   peakWindow,
+  todaySpendText,
   type PlanUsageDisplay,
   type PlanUsageProviders,
   type ProviderUsage,
@@ -28,19 +32,35 @@ export function peakProvider(s: UsageSnapshot | null): { p: ProviderUsage; perce
 
 const PLAN_PROVIDERS = ['claude', 'codex'] as const
 
-/** The providers the row shows for a choice, Claude first: each with the rounded percent of
- *  its busiest window. A chosen provider with no known window is left out. */
-export function shownProviders(s: UsageSnapshot | null, choice: PlanUsageProviders): { p: ProviderUsage; pct: number }[] {
+/** One provider in the row: on a plan, the rounded percent of its busiest window (`pct`); on
+ *  API-key billing (Settings › API keys), no limits — today's Est. spend (`spend`, `$1.20 today`). */
+export interface ShownProvider {
+  p: ProviderUsage
+  pct: number | null
+  spend: string | null
+}
+
+/** The providers the row shows for a choice, Claude first. A chosen provider on a plan with no
+ *  known window is left out; one billed to an API key always shows its spend. */
+export function shownProviders(s: UsageSnapshot | null, choice: PlanUsageProviders, now = Date.now()): ShownProvider[] {
   if (!s) return []
   const ids = choice === 'both' ? PLAN_PROVIDERS : [choice]
-  const out: { p: ProviderUsage; pct: number }[] = []
+  const today = localDay(now)
+  const out: ShownProvider[] = []
   for (const id of ids) {
     const p = s.providers.find((x) => x.id === id)
-    const w = p ? peakWindow(p) : null
-    if (p && w) out.push({ p, pct: Math.round(clampPercent(w.usedPercent)) })
+    if (!p) continue
+    if (isApiBilled(p)) {
+      if (p.enabled) out.push({ p, pct: null, spend: todaySpendText(p, today) })
+      continue
+    }
+    const w = peakWindow(p)
+    if (w) out.push({ p, pct: Math.round(clampPercent(w.usedPercent)), spend: null })
   }
   return out
 }
+
+const rowText = (x: ShownProvider): string => `${x.p.label} ${x.pct !== null ? `${x.pct}%` : `API key, ${x.spend}`}`
 
 /** Whether the sidebar row shows at all (the setting; unknown = off, the default). */
 export function usageRowVisible(display: PlanUsageDisplay | null | undefined): boolean {
@@ -63,9 +83,11 @@ export default function UsageIndicator({
 }) {
   if (!display || !usageRowVisible(display)) return null
   const shown = shownProviders(snapshot, display.providers)
-  const pct = shown.length > 0 ? Math.max(...shown.map((x) => x.pct)) : null
+  const pcts = shown.flatMap((x) => (x.pct !== null ? [x.pct] : []))
+  const pct = pcts.length > 0 ? Math.max(...pcts) : null
   const tone = pct === null ? 'neutral' : barTone(pct)
-  const label = shown.length > 0 ? `Usage: ${shown.map((x) => `${x.p.label} ${x.pct}%`).join(', ')}` : 'Usage'
+  const label = shown.length > 0 ? `Usage: ${shown.map(rowText).join(', ')}` : 'Usage'
+  const one = shown.length === 1 ? shown[0] : null
   if (collapsed) {
     return (
       <button
@@ -82,9 +104,11 @@ export default function UsageIndicator({
         )}
       >
         <Gauge className="h-4 w-4" />
-        {pct !== null && (
+        {pct !== null ? (
           <span className={cn('absolute -bottom-0.5 right-0 text-[9px] font-semibold tabular-nums', TONE_TEXT[tone])}>{pct}</span>
-        )}
+        ) : shown.length > 0 ? (
+          <span className="absolute -bottom-0.5 right-0 text-[9px] font-semibold text-text-2">$</span>
+        ) : null}
       </button>
     )
   }
@@ -101,22 +125,28 @@ export default function UsageIndicator({
         open && 'bg-selected text-text'
       )}
     >
-      {shown.length === 1 ? (
-        <ProviderLogo id={shown[0].p.id} size={16} />
-      ) : (
-        <Gauge className="h-4 w-4 shrink-0 text-text-3" aria-hidden="true" />
-      )}
+      {one ? <ProviderLogo id={one.p.id} size={16} /> : <Gauge className="h-4 w-4 shrink-0 text-text-3" aria-hidden="true" />}
       <span className="min-w-0 flex-1 truncate">Usage</span>
-      {shown.length === 1 ? (
-        <>
-          <LimitBar percent={shown[0].pct} className="w-10" thin />
-          <span className={cn('w-8 text-right text-[11.5px] tabular-nums', TONE_TEXT[barTone(shown[0].pct)])}>{shown[0].pct}%</span>
-        </>
+      {one ? (
+        one.pct !== null ? (
+          <>
+            <LimitBar percent={one.pct} className="w-10" thin />
+            <span className={cn('w-8 text-right text-[11.5px] tabular-nums', TONE_TEXT[barTone(one.pct)])}>{one.pct}%</span>
+          </>
+        ) : (
+          <span data-usage-provider={one.p.id} data-billing="api-key" className="shrink-0 text-[11.5px] tabular-nums text-text-2">
+            {one.spend}
+          </span>
+        )
       ) : (
-        shown.map(({ p, pct: v }) => (
-          <span key={p.id} data-usage-provider={p.id} className="flex shrink-0 items-center gap-1">
+        shown.map(({ p, pct: v, spend }) => (
+          <span key={p.id} data-usage-provider={p.id} data-billing={v === null ? 'api-key' : 'plan'} className="flex shrink-0 items-center gap-1">
             <ProviderLogo id={p.id} size={14} />
-            <span className={cn('text-[11.5px] tabular-nums', TONE_TEXT[barTone(v)])}>{v}%</span>
+            {v !== null ? (
+              <span className={cn('text-[11.5px] tabular-nums', TONE_TEXT[barTone(v)])}>{v}%</span>
+            ) : (
+              <span className="text-[11.5px] tabular-nums text-text-2">{spend}</span>
+            )}
           </span>
         ))
       )}

@@ -83,3 +83,27 @@ describe('SettingsView › Usage', () => {
     expect(screen.queryByTestId('settings-nav-usage')).toBeNull()
   })
 })
+
+describe('SettingsView › Usage › billing', () => {
+  it('shows a provider on API-key billing as "API key" with today’s spend, the other on its plan', async () => {
+    const { snapshot, claude, codex, usageValue, NOW } = await import('../usage/fixtures')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+    try {
+      render(
+        <SettingsView
+          onClose={() => {}}
+          initialSection="usage"
+          usage={usageValue(snapshot([claude({ billing: 'api-key', limits: { status: 'signed-out', windows: [], source: null, fetchedAt: null } }), codex()]))}
+        />
+      )
+      const cl = screen.getByTestId('settings-billing-claude')
+      expect(cl).toHaveAttribute('data-billing', 'api-key')
+      expect(cl).toHaveTextContent('API key · $2.50 today')
+      expect(cl).not.toHaveTextContent(/signed/i)
+      expect(screen.getByTestId('settings-billing-codex')).toHaveTextContent('Plus · wk 95% used')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

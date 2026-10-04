@@ -6,6 +6,7 @@ import type { PlanUsageDisplay, USAGE_CHANNELS, UsageSnapshot } from '../shared/
 import type { THEME_CHANNELS, ThemeState } from '../shared/theme'
 import type { PROFILE_CHANNELS, ProfileSaveResult, ProfileState } from '../shared/profile'
 import type { MIC_CHANNELS, MicAccess } from '../shared/mic'
+import type { PROVIDER_KEYS_CHANNELS, ProviderKeysState } from '../shared/providerKeys'
 
 /** Terminal channel names, inlined: this sandboxed preload imports shared/* for TYPES only
  *  (no shared runtime chunk). `satisfies` keeps them identical to shared/terminal.ts. */
@@ -54,6 +55,12 @@ const PROFILE = {
   get: 'orcha:profile:get',
   set: 'orcha:profile:set'
 } as const satisfies typeof PROFILE_CHANNELS
+/** API-key channels, inlined for the same reason (identical to shared/providerKeys.ts). */
+const PROVIDER_KEYS = {
+  get: 'orcha:providerKeys:get',
+  refresh: 'orcha:providerKeys:refresh',
+  save: 'orcha:providerKeys:save'
+} as const satisfies typeof PROVIDER_KEYS_CHANNELS
 /** Microphone channels, inlined for the same reason (identical to shared/mic.ts). */
 const MIC = {
   status: 'orcha:mic:status',
@@ -247,6 +254,12 @@ const api: OrchaDesktopApi = {
   profile: {
     get: () => invoke<ProfileState>(PROFILE.get),
     set: (name) => invoke<ProfileSaveResult>(PROFILE.set, name)
+  },
+  // Settings › API keys: a key goes to main once (save); only masked hints come back.
+  providerKeys: {
+    get: () => invoke<ProviderKeysState>(PROVIDER_KEYS.get),
+    refresh: () => invoke<ProviderKeysState>(PROVIDER_KEYS.refresh),
+    save: (input) => invoke<ProviderKeysState>(PROVIDER_KEYS.save, input)
   },
   // Dictation: macOS microphone access (main asks TCC; portal views ask via window.orchaHost).
   mic: {

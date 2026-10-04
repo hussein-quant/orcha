@@ -76,7 +76,7 @@ beforeEach(() => {
     setHostModal: vi.fn().mockResolvedValue(undefined),
     probePrereqs: vi
       .fn()
-      .mockResolvedValue({ homebrew: true, dockerEngine: true, orcha: true, claude: true, codex: true, apiKey: true }),
+      .mockResolvedValue({ homebrew: true, dockerEngine: true, orcha: true, claude: true, codex: true }),
     installPrereqs: vi.fn().mockResolvedValue({ ok: true, completed: [] }),
     onInstallProgress: vi.fn().mockReturnValue(() => {})
   } as never

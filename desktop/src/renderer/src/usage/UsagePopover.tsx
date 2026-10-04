@@ -5,7 +5,9 @@
 import { BarChart3, ChevronRight, RefreshCw, UserCog } from 'lucide-react'
 import {
   clampPercent,
+  isApiBilled,
   localDay,
+  todaySpendText,
   peakWindow,
   type PopoverMode,
   type ProviderUsage,
@@ -59,14 +61,16 @@ function ProviderRow({
   onOpen(): void
   onEnableLimits?(): void
 }) {
-  const ok = p.limits?.status === 'ok' ? p.limits : null
-  const reset = headlineReset(p, now)
+  // API-key billing: no plan limits — "API key · $X today" instead of windows / sign-in state.
+  const api = isApiBilled(p)
+  const ok = !api && p.limits?.status === 'ok' ? p.limits : null
+  const reset = api ? `API key · ${todaySpendText(p, today)}` : headlineReset(p, now)
   const status = providerStatusText(p)
   const peak = peakWindow(p)
-  const plan = ok?.plan ?? p.limits?.plan ?? null
+  const plan = api ? null : (ok?.plan ?? p.limits?.plan ?? null)
   const today1 = todayLine(p, today)
   return (
-    <li data-testid={`usage-row-${p.id}`} data-state={p.state}>
+    <li data-testid={`usage-row-${p.id}`} data-state={p.state} data-billing={api ? 'api-key' : 'plan'}>
       <button
         type="button"
         onClick={onOpen}
@@ -93,7 +97,7 @@ function ProviderRow({
                 <LimitBar percent={peak.usedPercent} className="w-12" thin />
               </>
             ) : (
-              <span className="text-[11.5px] text-text-3">{status || reset}</span>
+              <span className="text-[11.5px] tabular-nums text-text-3">{api ? reset : status || reset}</span>
             )}
           </span>
         )}
@@ -102,7 +106,7 @@ function ProviderRow({
       {mode === 'detailed' && (
         <div className="flex flex-col gap-1 pb-2 pl-[42px] pr-7">
           {ok && ok.windows.map((w) => <WindowRow key={w.key} w={w} now={now} />)}
-          {!ok && status && p.limits?.status === 'off' && onEnableLimits && (
+          {!api && !ok && status && p.limits?.status === 'off' && onEnableLimits && (
             <div className="flex items-center gap-2 text-[11.5px] text-text-3">
               <span className="min-w-0 truncate">5h / weekly limits are off</span>
               <button
@@ -115,7 +119,7 @@ function ProviderRow({
               </button>
             </div>
           )}
-          {!ok && p.limits?.note && p.limits.status !== 'off' && (
+          {!api && !ok && p.limits?.note && p.limits.status !== 'off' && (
             <span className={cn('text-[11.5px]', p.limits.status === 'expired' ? 'text-warning' : 'text-text-3')}>{p.limits.note}</span>
           )}
           {today1 && <span className="text-[11.5px] text-text-3 tabular-nums">{today1}</span>}

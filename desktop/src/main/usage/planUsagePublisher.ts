@@ -64,13 +64,15 @@ function windowKey(key: string): string {
 function providerPayload(p: ProviderUsage, now: number): PlanUsageProviderPayload | null {
   if (p.id !== 'claude' && p.id !== 'codex') return null
   if (!p.enabled) return null
-  const ok = p.limits?.status === 'ok' ? p.limits : null
+  // API-key billing has no plan limits: publish today's spend under the plan name "API key".
+  const apiKey = p.billing === 'api-key'
+  const ok = !apiKey && p.limits?.status === 'ok' ? p.limits : null
   const windows = (ok?.windows ?? []).slice(0, MAX_WINDOWS)
   const day = p.local?.days.find((d) => d.date === localDay(now))
   const today = day && day.tokens > 0 ? { tokens: Math.round(day.tokens), cost_usd: Math.round(Math.max(0, day.costUsd) * 100) / 100 } : null
   if (windows.length === 0 && !today) return null
   const headline = ok ? planHeadline(windows, now) : null
-  const plan = p.limits?.plan ?? null
+  const plan = apiKey ? 'API key' : (p.limits?.plan ?? null)
   return {
     provider: p.id,
     plan: plan ? clip(plan, PLAN_MAX) : null,

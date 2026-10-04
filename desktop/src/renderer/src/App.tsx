@@ -138,6 +138,8 @@ function AppShell() {
   const agents = useAgents()
   const launchers = useLaunchers()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** Settings › API keys opened over the onboarding wizard ("Use an API key instead"). */
+  const [onbKeysOpen, setOnbKeysOpen] = useState(false)
   // Stats & Usage fills the panel like Settings; `null` = closed, else the view to open on.
   const [statsView, setStatsView] = useState<'overview' | UsageProviderId | null>(null)
   const statsOpen = statsView !== null
@@ -639,7 +641,7 @@ function AppShell() {
 
   if (mode === 'onboarding') {
     return (
-      <div className="h-full">
+      <div className="relative h-full">
         <OnboardingWizard
           variant={wizardVariant}
           onDone={() => {
@@ -647,7 +649,10 @@ function AppShell() {
             void host.refresh()
           }}
           onCancel={wizardVariant === 'add-project' ? () => setMode('manager') : undefined}
+          onOpenApiKeys={window.orchaDesktop.providerKeys ? () => setOnbKeysOpen(true) : undefined}
         />
+        {/* Setup's "Use an API key instead": Settings opens over the wizard on API keys. */}
+        {onbKeysOpen && <SettingsView initialSection="apiKeys" onClose={() => setOnbKeysOpen(false)} />}
       </div>
     )
   }
