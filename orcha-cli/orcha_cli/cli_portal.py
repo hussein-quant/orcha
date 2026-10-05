@@ -23,6 +23,7 @@ import sys
 
 from . import cli_project_setup
 from .cli_env import _append_env_file, _read_env_file_value, _tighten_env_file
+from .cli_runtime_mode import NATIVE, db_path
 
 LAN_BIND = "0.0.0.0"
 LOOPBACK_BIND = "127.0.0.1"
@@ -75,9 +76,12 @@ def build_portal_env(project_root: pathlib.Path, cfg: dict, base_env=None) -> di
     env = dict(os.environ if base_env is None else base_env)
     for key, value in read_env_file(project_root / ".orcha" / ".env").items():
         env.setdefault(key, value)
-    env.setdefault(
-        "DATABASE_URL", f"postgresql://orcha:orcha@localhost:{cfg['db_port']}/orcha"
-    )
+    if cfg.get("db_port"):  # Docker Postgres until the SQLite cutover (PR 7b)
+        env.setdefault(
+            "DATABASE_URL", f"postgresql://orcha:orcha@localhost:{cfg['db_port']}/orcha"
+        )
+    if cfg.get("runtime") == NATIVE:  # the SQLite file, read by database.py after PR 7b
+        env.setdefault("ORCHA_DB_PATH", str(db_path(project_root, cfg)))
     env.setdefault("MIGRATIONS_DIR", str(templates_dir() / "migrations"))
     env.setdefault("ORCHA_TERMINAL_WS_URL", f"ws://127.0.0.1:{cfg['bridge_port']}")
     # These replace the compose bind mounts, so a stray value in .env must not win.
