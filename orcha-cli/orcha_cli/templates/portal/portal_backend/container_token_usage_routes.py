@@ -120,7 +120,7 @@ def container_token_usage(cid: str, request: Request):
 
         cur.execute(
             f"""SELECT a.id AS agent_id, a.alias,
-                      count(wr.*) AS runs,
+                      count(wr.run_id) AS runs,
                       COALESCE(sum(COALESCE(wr.input_tokens,0)+COALESCE(wr.output_tokens,0)
                                +COALESCE(wr.cache_read_input_tokens,0)
                                +COALESCE(wr.cache_creation_input_tokens,0)),0) AS total_tokens,

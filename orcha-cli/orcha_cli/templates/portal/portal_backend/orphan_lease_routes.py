@@ -48,17 +48,18 @@ def _reap_lane(
                  AND w.{lease_col} > now()
                  AND ({heartbeat_expr}) IS NOT NULL
                  AND ({floored_expr}) < %s
-           ), released AS (
-               UPDATE agent_wake_state w
-               SET {set_release}
-               FROM orphans o
-               WHERE w.agent_id = o.agent_id
-               RETURNING w.agent_id
            )
            SELECT agent_id, alias, lease_kind, idle_seconds FROM orphans""",
         (cid, stale_before),
     )
     reaped = cur.fetchall()
+    # SQLite has no data-modifying CTE: release in a second statement of the same transaction.
+    if reaped:
+        cur.execute(
+            f"""UPDATE agent_wake_state SET {set_release}
+               WHERE {sql.in_list('CAST(agent_id AS TEXT)')}""",
+            (sql.list_param([str(row["agent_id"]) for row in reaped]),),
+        )
     runs_by_agent = {}
     reaped_ids = [str(row["agent_id"]) for row in reaped]
     if reaped_ids:

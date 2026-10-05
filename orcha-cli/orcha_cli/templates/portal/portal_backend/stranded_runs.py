@@ -93,18 +93,24 @@ def reconcile_stranded_runs(cur, cid: str, orphan_secs: float, lane: str) -> lis
                  AND {lease_lapsed_expr(lane)}
                  AND {activity} < CASE WHEN wr.sandbox_container_id IS NULL THEN %s
                                        ELSE %s END
-           ), orphaned AS (
-               UPDATE worker_runs r
-               SET status = 'orphaned', ended_at = now()
-               FROM stranded s
-               WHERE r.run_id = s.run_id AND r.status = 'running'
-               RETURNING r.run_id
            )
            SELECT s.run_id, s.agent_id, s.alias, s.wake_kind, s.idle_seconds
-           FROM stranded s JOIN orphaned o ON o.run_id = s.run_id""",
+           FROM stranded s""",
         (cid, lane, sql.ago(orphan_secs), sql.ago(orphan_secs + SANDBOX_STRANDED_EXTRA_SECS)),
     )
-    rows = cur.fetchall()
+    stranded = cur.fetchall()
+    # SQLite has no data-modifying CTE: orphan them in a second statement of the same
+    # transaction, keeping only the rows this UPDATE actually flipped (status still running).
+    orphaned = set()
+    if stranded:
+        cur.execute(
+            f"""UPDATE worker_runs SET status = 'orphaned', ended_at = now()
+               WHERE {sql.in_list('CAST(run_id AS TEXT)')} AND status = 'running'
+               RETURNING run_id""",
+            (sql.list_param([str(row["run_id"]) for row in stranded]),),
+        )
+        orphaned = {str(row["run_id"]) for row in cur.fetchall()}
+    rows = [row for row in stranded if str(row["run_id"]) in orphaned]
     run_ids = [str(row["run_id"]) for row in rows]
     if run_ids:
         cur.execute(
