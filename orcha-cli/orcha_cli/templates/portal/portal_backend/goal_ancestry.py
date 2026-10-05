@@ -27,6 +27,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+from portal_backend import sql
+
 _log = logging.getLogger(__name__)
 
 MAX_DEPTH = 8  # parent hops walked before the chain is marked truncated
@@ -39,11 +41,7 @@ def has_parent_column(cur) -> bool:
     global _HAS_PARENT_COLUMN
     if _HAS_PARENT_COLUMN:
         return True
-    cur.execute(
-        """SELECT 1 FROM information_schema.columns
-            WHERE table_schema = current_schema()
-              AND table_name = 'tasks' AND column_name = 'parent_task_id'"""
-    )
+    cur.execute(f"SELECT 1 WHERE {sql.column_exists('tasks', 'parent_task_id')}")
     _HAS_PARENT_COLUMN = cur.fetchone() is not None
     return _HAS_PARENT_COLUMN
 

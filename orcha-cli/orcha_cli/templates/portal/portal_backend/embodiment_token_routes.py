@@ -54,15 +54,17 @@ def attribute_token_run_to_task(cur, aid, token, task_id) -> bool:
     if not token or not task_id:
         return False
     cur.execute(
-        """UPDATE worker_runs wr SET task_id=%s
-             FROM embodiment_tokens et
-            WHERE et.run_token=%s AND et.agent_id=%s AND et.lane='work'
-              AND et.revoked_at IS NULL AND et.run_id IS NOT NULL
-              AND wr.run_id=et.run_id AND wr.agent_id=et.agent_id
+        # No UPDATE ... FROM: SQLite's RETURNING can't name the alias, and Postgres would find
+        # a bare run_id ambiguous with the joined token row.
+        """UPDATE worker_runs AS wr SET task_id=%s
+            WHERE EXISTS (SELECT 1 FROM embodiment_tokens et
+                           WHERE et.run_token=%s AND et.agent_id=%s AND et.lane='work'
+                             AND et.revoked_at IS NULL AND et.run_id IS NOT NULL
+                             AND et.run_id=wr.run_id AND et.agent_id=wr.agent_id)
               AND wr.status='running' AND wr.task_id IS NULL
               AND EXISTS (SELECT 1 FROM tasks t
                            WHERE t.id=%s AND t.status='in_progress')
-        RETURNING wr.run_id""",
+        RETURNING run_id""",
         (task_id, token, aid, task_id),
     )
     pinned = cur.fetchone() is not None

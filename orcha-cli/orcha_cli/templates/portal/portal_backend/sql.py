@@ -318,6 +318,16 @@ def table_exists(name: str) -> str:
     return f"EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='{name}')"
 
 
+def column_exists(table: str, column: str) -> str:
+    """Predicate: `table` has a column `column` (information_schema on Postgres)."""
+    if not (_JSON_KEY.match(table) and _JSON_KEY.match(column)):
+        raise ValueError(f"column_exists: plain identifiers only, got {table!r}.{column!r}")
+    if _pg():
+        return ("EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = "
+                f"current_schema() AND table_name = '{table}' AND column_name = '{column}')")
+    return f"EXISTS (SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}')"
+
+
 def is_unique_violation(exc: BaseException) -> bool:
     """True when `exc` is a unique-constraint violation from either engine.
 
