@@ -326,6 +326,14 @@ def test_json_bool_decodes_as_bool_inside_json_object(eng):
         assert sql.json_bool("a AND b") == "(a AND b)"
 
 
+def test_json_nested_keeps_an_inner_object_as_json(eng):
+    inner = "SELECT " + sql.json_object("'n'", "1")
+    expr = sql.json_object("'last'", sql.json_nested(inner), "'none'", sql.json_nested(
+        f"{inner} WHERE 1 = 0"))
+    assert _decoded(eng.one(f"SELECT {expr}")) == {"last": {"n": 1}, "none": None}
+    assert sql.json_nested("SELECT 1") == ("(SELECT 1)" if eng.pg else "json((SELECT 1))")
+
+
 def test_int_rows(eng):
     got = eng.rows(f"SELECT v.number FROM {sql.int_rows('number')} v ORDER BY v.number",
                    (sql.list_param([3, 1, 2]),))
