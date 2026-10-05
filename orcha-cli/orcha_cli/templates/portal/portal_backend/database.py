@@ -65,22 +65,24 @@ BOOL_ALIASES = frozenset({
 
 # ---------------------------------------------------------------- Postgres (transition only)
 
+def _pg_connect(dict_rows: bool = False):
+    """The one place the Postgres driver is touched (allow-listed until the switch goes)."""
+    import psycopg.rows
+
+    return psycopg.connect(DB, **({"row_factory": psycopg.rows.dict_row} if dict_rows else {}))
+
+
 @contextmanager
 def _pg_cursor():
-    import psycopg
-    from psycopg.rows import dict_row
-
-    with psycopg.connect(DB, row_factory=dict_row) as conn:
+    with _pg_connect(dict_rows=True) as conn:
         with conn.cursor() as cur:
             yield conn, cur
 
 
 def _pg_run_migrations(mdir: pathlib.Path) -> list[str]:
-    import psycopg
-
     files = sorted(mdir.glob("*.sql")) if mdir.is_dir() else []
     applied: list[str] = []
-    with psycopg.connect(DB) as conn:
+    with _pg_connect() as conn:
         conn.execute("SELECT pg_advisory_lock(%s)", (_MIGRATION_LOCK_KEY,))
         try:
             conn.execute(
@@ -425,9 +427,7 @@ def db_cursor(*, readonly: bool = False):
 def ping() -> None:
     """Raise unless the database answers a trivial query."""
     if BACKEND == "postgres":
-        import psycopg
-
-        with psycopg.connect(DB) as conn:
+        with _pg_connect() as conn:
             conn.execute("SELECT 1")
         return
     raw = _acquire()
@@ -465,9 +465,8 @@ def _sqlite_run_migrations(mdir: pathlib.Path) -> list[str]:
         raw.execute("BEGIN IMMEDIATE")  # the migration mutex (replaces pg_advisory_lock)
         try:
             raw.execute(
-                "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY NOT NULL, "
-                "applied_at TIMESTAMPTZ NOT NULL DEFAULT "
-                "(strftime('%Y-%m-%dT%H:%M:%f','now') || '000+00:00'))"
+                "CREATE TABLE IF NOT EXISTS schema_migrations "
+                "(version TEXT PRIMARY KEY NOT NULL, applied_at TIMESTAMPTZ NOT NULL)"
             )
             done = {r["version"] for r in raw.execute("SELECT version FROM schema_migrations")}
             for migration in files:
@@ -479,7 +478,8 @@ def _sqlite_run_migrations(mdir: pathlib.Path) -> list[str]:
                     for stmt in split_statements(migration.read_text()):
                         raw.execute(stmt)
                     raw.execute(
-                        "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?)", (version,)
+                        "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                        (version, sql.ts(sql.utcnow())),
                     )
                     raw.execute("RELEASE migration")
                 except Exception as exc:

@@ -28,7 +28,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-import psycopg
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
@@ -334,7 +333,9 @@ def import_project_template(cid: str, body: TemplateImport, request: Request):
             })
         try:
             result = _apply(cur, cid, actor, bundle, preview)
-        except psycopg.errors.UniqueViolation:
+        except Exception as exc:  # noqa: BLE001 — re-raised unless a unique violation
+            if not sql.is_unique_violation(exc):
+                raise
             raise HTTPException(409, "something with the same name was just added — preview again") from None
         log_event(cur, cid, "human", actor, "container", cid, "template_imported", {
             "source_project": bundle.source.project_name,

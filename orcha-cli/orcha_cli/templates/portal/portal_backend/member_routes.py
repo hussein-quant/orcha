@@ -3,7 +3,6 @@
 
 from typing import Optional
 
-import psycopg
 from fastapi import HTTPException, Request
 
 from portal_backend import sql
@@ -183,7 +182,9 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
                        RETURNING {_MEMBER_FIELDS}""",
                     (cid, body.github_login, body.github_login, body.role),
                 )
-            except psycopg.errors.UniqueViolation:
+            except Exception as exc:  # noqa: BLE001 — re-raised unless a unique violation
+                if not sql.is_unique_violation(exc):
+                    raise
                 raise HTTPException(
                     409,
                     f"'{body.github_login}' is already a member "
