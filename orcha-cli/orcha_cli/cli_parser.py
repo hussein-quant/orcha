@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Callable
 
+from .cli_parser_native import register_native_commands
 from .cli_parser_project import register_project_commands
 from .cli_parser_runtime import register_runtime_commands
 from .cli_parser_session import register_session_commands
@@ -23,6 +24,8 @@ def build_parser(
     register_project_commands(sub, handlers)
     register_session_commands(sub, handlers)
     register_runtime_commands(sub, handlers)
+    if "serve" in handlers:
+        register_native_commands(sub, handlers)
     if "worktrees" in handlers:
         register_worktree_commands(sub, handlers["worktrees"])
     return parser

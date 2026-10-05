@@ -8,6 +8,8 @@ import pathlib
 import sys
 from typing import Optional
 
+from orcha_cli import cli_native_lifecycle, cli_runtime_mode
+
 def cmd_init(args: argparse.Namespace, services) -> None:
     """Initialize a project while resolving patchable services from the CLI facade."""
     PKG_TEMPLATES = services.PKG_TEMPLATES
@@ -43,7 +45,10 @@ def cmd_init(args: argparse.Namespace, services) -> None:
         sys.exit("error: .orcha/ already exists; pass --force to overwrite")
 
     project_name = _sanitize_name(args.name or project_root.name)
-    db_port = args.db_port or _find_free_port(start=5432)
+    # GH #258 R2: a native project runs the portal from the installed package against a
+    # SQLite file — no compose file, no template copy, no Postgres port.
+    native = getattr(args, "runtime", None) == cli_runtime_mode.NATIVE
+    db_port = None if native else (args.db_port or _find_free_port(start=5432))
     api_port = args.api_port or _find_free_port(start=8000)
     # ISS-84/#235: the live-terminal bridge port must be per-project too — api_port/db_port
     # already are, but the bridge port was a fixed 8765 constant, so a 2nd project's browser
@@ -65,22 +70,23 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     if not getattr(args, "no_github", False):
         github_repo = _detect_github_repo(project_root)
 
-    # 1. Render docker-compose template
-    template_text = (PKG_TEMPLATES / "docker-compose.yml.j2").read_text()
-    rendered = (
-        template_text
-        .replace("{{ project_name }}", project_name)
-        .replace("{{ db_port }}", str(db_port))
-        .replace("{{ api_port }}", str(api_port))
-        .replace("{{ bridge_port }}", str(bridge_port))
-    )
     orcha_dir.mkdir(parents=True, exist_ok=True)
-    (orcha_dir / "docker-compose.yml").write_text(rendered)
+    if not native:
+        # 1. Render docker-compose template
+        template_text = (PKG_TEMPLATES / "docker-compose.yml.j2").read_text()
+        rendered = (
+            template_text
+            .replace("{{ project_name }}", project_name)
+            .replace("{{ db_port }}", str(db_port))
+            .replace("{{ api_port }}", str(api_port))
+            .replace("{{ bridge_port }}", str(bridge_port))
+        )
+        (orcha_dir / "docker-compose.yml").write_text(rendered)
 
-    # 2. Copy migrations/ and portal/
-    _copy_tree(PKG_TEMPLATES / "migrations", orcha_dir / "migrations")
-    _copy_tree(PKG_TEMPLATES / "portal", orcha_dir / "portal")
-    _install_llm_util(orcha_dir)  # #290 llm_util + #294 secret_box + #287 digest_curate into portal build
+        # 2. Copy migrations/ and portal/
+        _copy_tree(PKG_TEMPLATES / "migrations", orcha_dir / "migrations")
+        _copy_tree(PKG_TEMPLATES / "portal", orcha_dir / "portal")
+        _install_llm_util(orcha_dir)  # #290 llm_util + #294 secret_box + #287 digest_curate into portal build
 
     # 3. Copy Orcha command templates for Claude Code and Codex.
     claude_commands, codex_skills = _install_orcha_skill_templates(project_root)
@@ -106,6 +112,10 @@ def cmd_init(args: argparse.Namespace, services) -> None:
         "db_port": db_port,
         "bridge_port": bridge_port,
     }
+    if native:
+        del config["db_port"]
+        config.update(runtime=cli_runtime_mode.NATIVE,
+                      db_path=str(cli_runtime_mode.DEFAULT_DB_PATH), bind="loopback")
     if github_repo:
         # Recorded locally as well as bound via the API below, so folder-side tooling
         # (and a later `orcha up` on a fresh box) can see the binding without a portal
@@ -125,14 +135,22 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     #     `down -v` removes the volume → fresh initdb on the next `up` → empty DB.
     #     Explicit flag ONLY — init NEVER wipes data implicitly. The just-written
     #     compose file names the same project, so this targets the right volume.
-    if args.reset_data:
+    if args.reset_data and native:
+        print(f"[orcha] --reset-data: deleting the database for project '{project_name}' "
+              f"(DESTRUCTIVE — wiping all prior data) ...")
+        cli_native_lifecycle.down(project_root, volumes=True, yes=True)
+    elif args.reset_data:
         print(f"[orcha] --reset-data: dropping DB volume for project '{project_name}' "
               f"(DESTRUCTIVE — wiping all prior data) ...")
         _compose(orcha_dir, "down", "-v", check=False)
 
     # 5. docker compose up
-    print(f"[orcha] starting stack '{project_name}' on api={api_port}, db={db_port} ...")
-    _compose(orcha_dir, "up", "-d", "--build")
+    if native:
+        print(f"[orcha] starting native stack '{project_name}' on api={api_port} ...")
+        cli_native_lifecycle.up(project_root)
+    else:
+        print(f"[orcha] starting stack '{project_name}' on api={api_port}, db={db_port} ...")
+        _compose(orcha_dir, "up", "-d", "--build")
 
     # 6. Wait for portal readiness — the next two API calls need it up.
     if not args.no_container:
@@ -241,13 +259,15 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     #     (it resolves its container once at startup; a stale daemon would watch the
     #     old, dead container). Idempotent otherwise.
     try:
-        ensure_daemon(project_root, restart=True)
+        if not native:  # under native, `orcha serve` owns the notifier and bridge children
+            ensure_daemon(project_root, restart=True)
     except Exception as e:
         print(f"[orcha] warn: notifier daemon didn't start ({e}); start it with `orcha notifier --ensure`")
     try:    # S3 §3b: bring the host-side live-terminal bridge up with the workspace too. restart=True
             # so a re-init binds a fresh bridge to the JUST-created container (mirrors the daemon).
         from orcha_cli.terminal_bridge import ensure_bridge
-        ensure_bridge(project_root, restart=True)
+        if not native:
+            ensure_bridge(project_root, restart=True)
     except Exception as e:
         print(f"[orcha] warn: terminal bridge didn't start ({e}); start it with `orcha terminal-bridge --ensure`")
 
@@ -255,7 +275,10 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     print()
     print(f"[orcha] ✓ initialized in {project_root}")
     print(f"        api:      {api_base}/")
-    print(f"        db:       postgresql://orcha:orcha@localhost:{db_port}/orcha")
+    if native:
+        print(f"        db:       {cli_runtime_mode.db_path(project_root, config)}")
+    else:
+        print(f"        db:       postgresql://orcha:orcha@localhost:{db_port}/orcha")
     print(f"        skills:   {claude_commands}")
     print(f"        codex:    {codex_skills}")
     print(f"        config:   {claude_config}")

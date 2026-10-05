@@ -2,6 +2,7 @@
 
 from portal_backend import (
     active_conversation_routes,
+    admin_migration_routes,  # GH #258 DB-tip guard input
     agent_config_history_routes,
     agent_digest_routes,
     agent_event_routes,

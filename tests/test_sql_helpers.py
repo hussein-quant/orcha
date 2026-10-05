@@ -331,3 +331,15 @@ def test_json_array_has_match(eng):
     assert [eng.one(q, (f,)) for f in ("role", "name", "nope", "5")] == [1, 1, 0, 0]
     with pytest.raises(ValueError):
         sql.json_array_has_match("changes", "a' OR '1")
+
+
+def test_is_undefined_table(eng):
+    errors = (psycopg.Error, sqlite3.Error)
+    with pytest.raises(errors) as missing:
+        eng.rows("SELECT 1 FROM no_such_table_258")
+    eng.table("present", "k text", "k TEXT")
+    with pytest.raises(errors) as bad_column:
+        eng.rows("SELECT nope FROM present")
+    assert sql.is_undefined_table(missing.value) is True
+    assert sql.is_undefined_table(bad_column.value) is False
+    assert sql.is_undefined_table(ValueError("no such table: x")) is False

@@ -8,6 +8,7 @@ from . import notifier_request_sweep as _request_sweep
 from . import notifier_routines as _routines
 from . import notifier_verdikt_sweep as _verdikt_sweep
 from . import notifier_worktree_gc as _worktree_gc
+from . import sandbox as _sandbox
 
 
 def cmd_notifier(args, *, services) -> None:
@@ -226,7 +227,8 @@ def cmd_notifier(args, *, services) -> None:
                 # this shield the orphan pass would stop either mid-flight (M7).
                 live_sandbox = live_sandbox_shield(live_workers, live_residents)
                 reap_orphaned_runs(api_base, cid, live_pids,
-                                   live_sandbox=live_sandbox, quiet=args.quiet)
+                                   live_sandbox=live_sandbox, quiet=args.quiet,
+                                   sandbox_enabled=_sandbox.SandboxConfig.load(cwd).enabled)
                 # GH#110 §2c: reclaim durable per-(agent+task) worktrees whose task went terminal
                 # (completed/cancelled) so orcha/task-* trees don't accumulate forever — conservative
                 # (never touches a live worktree, preserves any dirty tree, keeps committed/PR

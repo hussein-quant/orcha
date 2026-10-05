@@ -33,6 +33,11 @@ def register_project_commands(
         default=None,
         help="host port for the live-terminal bridge (default: first free 8765+)",
     )
+    init.add_argument(
+        "--runtime", choices=("docker", "native"), default="docker",
+        help="docker (default): Postgres + portal in Docker. native: run the portal, notifier "
+             "and bridge on this machine under `orcha serve`, with a SQLite file (GH #258)",
+    )
     init.add_argument("--force", action="store_true", help="overwrite existing .orcha/")
     init.add_argument(
         "--reset-data",
@@ -97,6 +102,10 @@ def register_project_commands(
     )
     down.add_argument(
         "-v", "--volumes", action="store_true", help="also drop the DB volume"
+    )
+    down.add_argument(
+        "--yes", action="store_true",
+        help="native runtime: confirm `-v` (delete the database file) without a prompt",
     )
     down.add_argument(
         "--project",
