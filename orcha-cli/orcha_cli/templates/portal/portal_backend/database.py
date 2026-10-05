@@ -178,6 +178,9 @@ def _connect() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.create_function("now", 0, _now_text, deterministic=False)  # D4: now() keeps working
+    # wall-clock per call, like now() here (Postgres now() is the transaction start; the
+    # import path asks for clock_timestamp() so each row of one import gets its own time)
+    conn.create_function("clock_timestamp", 0, _now_text, deterministic=False)
     return conn
 
 

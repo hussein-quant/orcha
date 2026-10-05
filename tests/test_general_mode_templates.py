@@ -11,6 +11,8 @@ Run: ORCHA_TEST_DB_NAME=orcha_test_on_general_mode_templates pytest tests/test_g
 """
 import copy
 
+import contextlib
+
 import psycopg
 import pytest
 from fastapi import HTTPException
@@ -143,10 +145,10 @@ async def test_mode_authority_trust_off(client, arena, make_agent, db):
     m = await make_agent("hubot", "Dev", kind="human")
     x = await client.put(url, json={"mode": "general", "actor_agent_id": m["agent_id"]})
     assert x.status_code == 403 and "manage_autonomy" in x.text
-    db.execute("""UPDATE agents SET grants='["manage_autonomy"]'::jsonb WHERE id=%s""", (m["agent_id"],))
+    db.execute("""UPDATE agents SET grants='["manage_autonomy"]' WHERE id=%s""", (m["agent_id"],))
     assert (await client.put(url, json={"mode": "general", "actor_agent_id": m["agent_id"]})).status_code == 200
     v = await make_agent("vera", "Viewer", kind="human")
-    db.execute("""UPDATE agents SET member_role='viewer', grants='["manage_autonomy"]'::jsonb WHERE id=%s""",
+    db.execute("""UPDATE agents SET member_role='viewer', grants='["manage_autonomy"]' WHERE id=%s""",
                (v["agent_id"],))
     assert (await client.put(url, json={"mode": "code", "actor_agent_id": v["agent_id"]})).status_code == 403
     assert (await client.put(url, json={"mode": "code"})).status_code == 400  # no actor
@@ -371,7 +373,7 @@ async def test_apply_authority_trust_off(client, arena, make_agent, db):
     _, r = await apply(client, cid, "research", actor_agent_id=m["agent_id"])
     assert r.status_code == 403 and "manage_agents" in r.text
     # manage_agents alone may apply, but not switch the project's mode
-    db.execute("""UPDATE agents SET grants='["manage_agents"]'::jsonb WHERE id=%s""", (m["agent_id"],))
+    db.execute("""UPDATE agents SET grants='["manage_agents"]' WHERE id=%s""", (m["agent_id"],))
     _, r = await apply(client, cid, "research", actor_agent_id=m["agent_id"])
     assert r.status_code == 403 and "manage_autonomy" in r.text
     _, r = await apply(client, cid, "research", actor_agent_id=m["agent_id"], set_mode=False)
@@ -434,11 +436,27 @@ async def test_a_failing_item_is_reported_not_hidden(client, arena, db, monkeypa
     assert appl["result"]["failures"]
 
 
+@contextlib.contextmanager
+def _hold_template_lock(cid):
+    """Hold the per-project apply lock from outside the request (GH #258: per backend)."""
+    if conftest.BACKEND == "postgres":
+        with psycopg.connect(conftest.TEST_URL, autocommit=True) as holder:
+            holder.execute("SELECT pg_advisory_lock(hashtext('orcha-template:' || %s))", (cid,))
+            yield
+        return
+    from portal_backend import templates_routes
+
+    templates_routes._APPLYING.add(cid)
+    try:
+        yield
+    finally:
+        templates_routes._APPLYING.discard(cid)
+
+
 async def test_concurrent_apply_is_refused_while_one_is_running(client, arena):
     """The per-project advisory lock: a second apply while one holds it gets a clean 409."""
     plan = await preview(client, arena["cid"], "research", actor_agent_id=arena["owner"])
-    with psycopg.connect(conftest.TEST_URL, autocommit=True) as holder:
-        holder.execute("SELECT pg_advisory_lock(hashtext('orcha-template:' || %s))", (arena["cid"],))
+    with _hold_template_lock(arena["cid"]):
         r = await client.post(f"/api/containers/{arena['cid']}/templates/research/apply", json={
             "actor_agent_id": arena["owner"], "confirm": True, "plan_fingerprint": plan["plan_fingerprint"]})
         assert r.status_code == 409 and "already being applied" in r.text

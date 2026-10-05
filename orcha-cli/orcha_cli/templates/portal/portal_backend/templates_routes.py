@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+from contextlib import contextmanager
 from typing import Literal, Optional
 
 from fastapi import HTTPException, Request, Response
@@ -382,6 +384,37 @@ def preview_template(cid: str, key: str, body: TemplateSelection, request: Reque
         return build_plan(cur, cid, t, body, actor)
 
 
+# GH #258 S3: one application per project at a time. Postgres: a session advisory lock on the
+# dedicated lock connection (released by the clean exit below, or when that connection closes
+# on error). SQLite: one portal process owns the database file, so a process-level set does it.
+_APPLYING: set = set()
+_APPLYING_GUARD = threading.Lock()
+_BUSY = "a template is already being applied to this project — try again shortly"
+
+
+@contextmanager
+def _template_lock(lock_conn, lock_cur, cid: str):
+    if sql.DIALECT == "postgres":
+        lock_cur.execute("SELECT pg_try_advisory_lock(hashtext('orcha-template:' || %s)) AS ok", (cid,))
+        if not lock_cur.fetchone()["ok"]:
+            raise HTTPException(409, _BUSY)
+        lock_conn.commit()
+        yield
+        lock_cur.execute("SELECT pg_advisory_unlock(hashtext('orcha-template:' || %s))", (cid,))
+        lock_conn.commit()
+        return
+    with _APPLYING_GUARD:
+        if cid in _APPLYING:
+            raise HTTPException(409, _BUSY)
+        _APPLYING.add(cid)
+    try:
+        lock_conn.commit()  # hold no write lock while the items are created one by one
+        yield
+    finally:
+        with _APPLYING_GUARD:
+            _APPLYING.discard(cid)
+
+
 @app.post("/api/containers/{cid}/templates/{key}/apply", status_code=201, responses={
     200: {"description": "No-op re-apply: nothing would change, so nothing was recorded "
                          "(``noop: true``; ``application_id`` is the latest existing application)"}})
@@ -404,13 +437,7 @@ def apply_template(cid: str, key: str, body: TemplateApply, request: Request, re
     if not body.confirm:
         raise HTTPException(400, "confirm must be true — review the preview, then confirm")
 
-    with db_cursor() as (lock_conn, lock_cur):
-        # one application per project at a time (session lock; released when this
-        # dedicated connection closes, even on error)
-        lock_cur.execute("SELECT pg_try_advisory_lock(hashtext('orcha-template:' || %s)) AS ok", (cid,))
-        if not lock_cur.fetchone()["ok"]:
-            raise HTTPException(409, "a template is already being applied to this project — try again shortly")
-        lock_conn.commit()
+    with db_cursor() as (lock_conn, lock_cur), _template_lock(lock_conn, lock_cur, cid):
 
         with db_cursor() as (conn, cur):
             require_container(cur, cid)
@@ -430,8 +457,6 @@ def apply_template(cid: str, key: str, body: TemplateApply, request: Request, re
             conn.rollback()
 
         if noop_last is not False:
-            lock_cur.execute("SELECT pg_advisory_unlock(hashtext('orcha-template:' || %s))", (cid,))
-            lock_conn.commit()
             response.status_code = 200
             return {
                 "application_id": noop_last,
@@ -554,8 +579,6 @@ def apply_template(cid: str, key: str, body: TemplateApply, request: Request, re
             })
             conn.commit()
 
-        lock_cur.execute("SELECT pg_advisory_unlock(hashtext('orcha-template:' || %s))", (cid,))
-        lock_conn.commit()
 
     return {
         "application_id": str(app_row["id"]),
