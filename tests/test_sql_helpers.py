@@ -13,10 +13,21 @@ import uuid
 import psycopg
 import pytest
 
-from conftest import TEST_URL
+from conftest import ADMIN_URL, BACKEND, TEST_URL
 from portal_backend import sql
 
 T0 = dt.datetime(2026, 9, 29, 12, 0, 0, 123456, tzinfo=dt.timezone.utc)
+
+
+def _pg_conn():
+    # The Postgres leg has the suite's test DB. The SQLite leg (no test DB on the server) only
+    # needs TEMP tables, so it uses the admin DB, and skips the cross-check without a server.
+    if BACKEND == "postgres":
+        return psycopg.connect(TEST_URL, autocommit=True)
+    try:
+        return psycopg.connect(ADMIN_URL, autocommit=True, connect_timeout=3)
+    except psycopg.OperationalError as exc:
+        pytest.skip(f"no Postgres server for the dialect cross-check: {exc}")
 
 
 def _sqlite_conn():
@@ -31,7 +42,7 @@ class Engine:
     def __init__(self, dialect):
         self.dialect = dialect
         self.pg = dialect == "postgres"
-        self.conn = psycopg.connect(TEST_URL, autocommit=True) if self.pg else _sqlite_conn()
+        self.conn = _pg_conn() if self.pg else _sqlite_conn()
 
     def rows(self, query, params=()):
         if not self.pg:
