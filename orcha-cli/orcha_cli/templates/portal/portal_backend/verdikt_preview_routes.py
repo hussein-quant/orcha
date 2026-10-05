@@ -23,6 +23,7 @@ from typing import Optional
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
+from portal_backend import sql
 from portal_backend import verdikt_integration as vi, verdikt_preview as vp
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
@@ -109,7 +110,7 @@ def get_verdikt_preview_log(tid: str, rid: str, request: Request):
 def _lane_preview(cur, request: Request, pid: str) -> dict:
     if not valid_uuid(pid):
         raise HTTPException(400, "preview id is not a valid UUID")
-    cur.execute("SELECT * FROM verdikt_previews WHERE id=%s FOR UPDATE", (pid,))
+    cur.execute("SELECT * FROM verdikt_previews WHERE id=%s " + sql.for_update(), (pid,))
     row = cur.fetchone()
     if not row:
         raise HTTPException(404, "preview not found")
@@ -143,7 +144,7 @@ def claim_verdikt_preview(cid: str, body: PreviewClaimBody, request: Request):
         while True:
             cur.execute(
                 """SELECT * FROM verdikt_previews WHERE container_id=%s AND status='requested'
-                    ORDER BY created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED""",
+                    ORDER BY created_at ASC LIMIT 1 """ + sql.for_update(skip_locked=True),
                 (cid,),
             )
             row = cur.fetchone()

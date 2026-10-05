@@ -411,7 +411,7 @@ def pending_prereview_for_request(cur, request_row):
     if detail.get("kind") != MANAGER_REVIEW_KIND or not detail.get("task_id"):
         return None
     cur.execute(
-        "SELECT id, container_id, status, title, manager_review FROM tasks WHERE id=%s FOR UPDATE",
+        "SELECT id, container_id, status, title, manager_review FROM tasks WHERE id=%s " + sql.for_update(),
         (detail["task_id"],),
     )
     t = cur.fetchone()

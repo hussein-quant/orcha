@@ -14,6 +14,7 @@ from typing import Optional
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -125,7 +126,7 @@ def set_task_parent(tid: str, body: TaskParentUpdate, request: Request):
                 403, "an agent may only set the parent of a task it created or is assigned to"
             )
 
-        cur.execute("SELECT parent_task_id FROM tasks WHERE id = %s FOR UPDATE", (tid,))
+        cur.execute("SELECT parent_task_id FROM tasks WHERE id = %s " + sql.for_update(), (tid,))
         before = cur.fetchone()["parent_task_id"]
         before = str(before) if before else None
         new_parent = body.parent_task_id

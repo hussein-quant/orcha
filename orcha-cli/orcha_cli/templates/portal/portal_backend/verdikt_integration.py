@@ -328,7 +328,7 @@ def create_run(cur, task: dict, settings: dict, pack: dict, *, trigger: str, act
     if not settings.get("base_url") or not settings.get("verdikt_project"):
         raise TriggerRefused(409, "Verdikt settings are incomplete — a Verdikt URL and project are required")
     tid = str(task["id"])
-    cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("verdikt:" + tid,))
+    cur.execute(sql.xact_lock("%s"), ("verdikt:" + tid,))
     if not allow_open:
         cur.execute("SELECT id FROM verdikt_runs WHERE task_id=%s AND status IN ('queued','running') LIMIT 1", (tid,))
         if cur.fetchone():

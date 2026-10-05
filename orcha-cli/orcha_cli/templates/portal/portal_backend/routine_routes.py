@@ -34,6 +34,7 @@ from typing import Optional
 from fastapi import HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -279,7 +280,7 @@ def _serialize_run(row) -> dict:
 def _load_routine(cur, rid, *, lock=False):
     _require_uuid(rid, "routine_id")
     cur.execute(
-        "SELECT * FROM routines WHERE id=%s AND archived_at IS NULL" + (" FOR UPDATE" if lock else ""),
+        "SELECT * FROM routines WHERE id=%s AND archived_at IS NULL" + (" " + sql.for_update() if lock else ""),
         (rid,),
     )
     row = cur.fetchone()
@@ -533,8 +534,7 @@ def run_due_routines(cid: str, now: Optional[datetime] = None) -> dict:
         )
         cur.execute(
             """UPDATE routine_runs SET outcome='failed', finished_at=%s,
-                      detail='Interrupted: the scheduler stopped before the task was created. '
-                             'Check Tasks before running it again.'
+                      detail='Interrupted: the scheduler stopped before the task was created. Check Tasks before running it again.'
                 WHERE container_id=%s AND outcome='pending' AND created_at < %s""",
             (now, cid, now - PENDING_STALE),
         )
@@ -604,7 +604,7 @@ def _claim_next_due(cid: str, now: datetime) -> Optional[dict]:
                 WHERE container_id=%s AND enabled AND archived_at IS NULL
                   AND next_run_at IS NOT NULL AND next_run_at <= %s
                 ORDER BY next_run_at ASC LIMIT 1
-                FOR UPDATE SKIP LOCKED""",
+                """ + sql.for_update(skip_locked=True),
             (cid, now),
         )
         r = cur.fetchone()

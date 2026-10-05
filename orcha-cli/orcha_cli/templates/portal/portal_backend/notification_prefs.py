@@ -33,6 +33,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from portal_backend import sql
+
 # ---------------------------------------------------------------------------- catalog
 
 CATEGORIES = (
@@ -535,8 +537,8 @@ def identity_key(member) -> str:
 def tables_ready(cur) -> bool:
     """False on a half-migrated stack — delivery then behaves exactly as pre-063."""
     cur.execute(
-        "SELECT to_regclass('public.notification_prefs') IS NOT NULL AS a,"
-        " to_regclass('public.notification_pref_defaults') IS NOT NULL AS b"
+        f"SELECT {sql.table_exists('notification_prefs')} AS a,"
+        f" {sql.table_exists('notification_pref_defaults')} AS b"
     )
     row = cur.fetchone()
     return bool(row and row["a"] and row["b"])

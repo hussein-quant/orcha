@@ -4,6 +4,7 @@ import json
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.attachment_references import (
@@ -61,7 +62,7 @@ def append_turn(conv_id: str, body: TurnAppend, request: Request):
     if body.run_id is not None and not _valid_uuid(body.run_id):
         raise HTTPException(400, "run_id is not a valid UUID")
     with db_cursor() as (conn, cur):
-        cur.execute("SELECT * FROM conversations WHERE id=%s FOR UPDATE", (conv_id,))
+        cur.execute("SELECT * FROM conversations WHERE id=%s " + sql.for_update(), (conv_id,))
         conversation = cur.fetchone()
         if not conversation:
             raise HTTPException(404, f"conversation {conv_id} not found")

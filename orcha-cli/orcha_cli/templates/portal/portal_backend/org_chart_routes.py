@@ -9,6 +9,7 @@ Every change is audit-logged (``agent_reports_to_changed``).
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -103,7 +104,7 @@ def set_reports_to(aid: str, body: ReportsToUpdate, request: Request):
 
         # Serialize org edits per project so two concurrent edits can't form a loop
         # that each one alone would not (A→B racing B→A).
-        cur.execute("SELECT pg_advisory_xact_lock(hashtext('orcha-org:' || %s))", (cid,))
+        cur.execute(sql.xact_lock("'orcha-org:' || %s"), (cid,))
 
         mgr_alias = None
         if mid is not None:

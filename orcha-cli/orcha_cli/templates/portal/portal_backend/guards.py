@@ -215,7 +215,7 @@ def reroute_open_requests(cur, container_id, from_id):
         """SELECT id, requester_id FROM requests
            WHERE container_id=%s AND target_id=%s AND status IN ('open', 'escalated')
            ORDER BY created_at ASC
-           FOR UPDATE""",
+           """ + sql.for_update(),
         (container_id, from_id),
     )
     rows = cur.fetchall()

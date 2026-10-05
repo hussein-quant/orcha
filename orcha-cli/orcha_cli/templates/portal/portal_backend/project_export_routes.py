@@ -32,6 +32,7 @@ import psycopg
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -317,8 +318,8 @@ def import_project_template(cid: str, body: TemplateImport, request: Request):
         member = _authorize(cur, request, cid, body.actor_agent_id)
         actor = str(member["id"])
         # serialize imports and org edits in this project (same key as PUT reports-to)
-        cur.execute("SELECT id FROM containers WHERE id=%s FOR UPDATE", (cid,))
-        cur.execute("SELECT pg_advisory_xact_lock(hashtext('orcha-org:' || %s))", (cid,))
+        cur.execute("SELECT id FROM containers WHERE id=%s " + sql.for_update(), (cid,))
+        cur.execute(sql.xact_lock("'orcha-org:' || %s"), (cid,))
         preview = _preview(cur, cid, member, body.bundle, bundle, body.options)
         if not body.preview_digest or body.preview_digest != preview["preview_digest"]:
             raise HTTPException(409, {

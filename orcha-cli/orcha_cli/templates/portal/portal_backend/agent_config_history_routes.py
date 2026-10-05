@@ -123,7 +123,7 @@ def _restoring(restored_from, actor_agent_id, reason):
 def config_before(cur, aid) -> Optional[dict]:
     """The agent's captured config, row-locked for this transaction (call before UPDATE)."""
     cur.execute(
-        f"SELECT container_id, {', '.join(CAPTURED_FIELDS)} FROM agents WHERE id=%s FOR UPDATE",
+        f"SELECT container_id, {', '.join(CAPTURED_FIELDS)} FROM agents WHERE id=%s " + sql.for_update(),
         (aid,),
     )
     return cur.fetchone()
@@ -290,7 +290,7 @@ def list_config_revisions(
         require_member_read(cur, request, str(agent["container_id"]))
         # lock the agent row so a concurrent first write and this backfill can't both
         # claim revision #1 (ON CONFLICT DO NOTHING is the second belt)
-        cur.execute("SELECT 1 FROM agents WHERE id=%s FOR UPDATE", (aid,))
+        cur.execute("SELECT 1 FROM agents WHERE id=%s " + sql.for_update(), (aid,))
         _ensure_initial(cur, aid, agent)
         conn.commit()
         where, params = ["agent_id=%s"], [aid]

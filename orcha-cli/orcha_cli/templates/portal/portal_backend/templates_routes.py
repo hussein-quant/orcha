@@ -320,7 +320,7 @@ def update_project_profile(cid: str, body: ProjectProfileUpdate, request: Reques
         require_container(cur, cid)
         member = require_grant(cur, request, cid, body.actor_agent_id, MODE_GRANT)
         actor = str(member["id"])
-        cur.execute("SELECT project_mode FROM containers WHERE id=%s FOR UPDATE", (cid,))
+        cur.execute("SELECT project_mode FROM containers WHERE id=%s " + sql.for_update(), (cid,))
         before = cur.fetchone()["project_mode"]
         if body.mode != before:
             cur.execute("UPDATE containers SET project_mode=%s WHERE id=%s", (body.mode, cid))

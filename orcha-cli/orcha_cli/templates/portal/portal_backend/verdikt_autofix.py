@@ -438,7 +438,7 @@ def evaluate(cur, run: dict) -> list[Callable[[], None]]:
     if cur.fetchone():
         return []
     cur.execute("SELECT id, container_id, title, description, definition_of_done, status, result "
-                "FROM tasks WHERE id=%s FOR UPDATE", (tid,))
+                "FROM tasks WHERE id=%s " + sql.for_update(), (tid,))
     task = cur.fetchone()
     if not task:
         return []
@@ -539,7 +539,7 @@ def evaluate(cur, run: dict) -> list[Callable[[], None]]:
 
 
 def _lock(cur, tid: str) -> None:
-    cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("verdikt-autofix:" + str(tid),))
+    cur.execute(sql.xact_lock("%s"), ("verdikt-autofix:" + str(tid),))
 
 
 def process_task(tid: str) -> int:

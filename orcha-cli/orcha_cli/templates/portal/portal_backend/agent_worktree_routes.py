@@ -309,7 +309,8 @@ def claim_agent_worktree_actions(cid: str, body: WorktreeClaimBody, request: Req
                 """UPDATE agent_worktree_actions SET status='claimed', claimed_at=%s, claimed_by=%s
                     WHERE id IN (SELECT id FROM agent_worktree_actions
                                   WHERE container_id=%s AND status='requested'
-                                  ORDER BY created_at ASC LIMIT 20 FOR UPDATE SKIP LOCKED)
+                                  ORDER BY created_at ASC LIMIT 20"""
+                + sql.for_update(skip_locked=True) + """)
                     RETURNING *""",
                 (now, (body.claimed_by or "notifier")[:200], cid))
             actions = sorted((_action_out(r) for r in cur.fetchall()), key=lambda a: a["created_at"])
@@ -325,7 +326,7 @@ def finish_agent_worktree_action(aid: str, body: WorktreeActionResult, request: 
     if not valid_uuid(aid):
         raise HTTPException(400, "action id is not a valid UUID")
     with db_cursor() as (conn, cur):
-        cur.execute("SELECT * FROM agent_worktree_actions WHERE id=%s FOR UPDATE", (aid,))
+        cur.execute("SELECT * FROM agent_worktree_actions WHERE id=%s " + sql.for_update(), (aid,))
         row = cur.fetchone()
         if not row:
             raise HTTPException(404, "request not found")

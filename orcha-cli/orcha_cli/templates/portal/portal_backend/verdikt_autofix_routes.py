@@ -24,6 +24,7 @@ from typing import Literal, Optional
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
+from portal_backend import sql
 from portal_backend import verdikt_autofix as vaf
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
@@ -89,7 +90,7 @@ def stop_verdikt_autofix(tid: str, body: AutofixActorBody, request: Request):
     with db_cursor() as (conn, cur):
         task = _load_task(cur, tid)
         actor = _human(cur, request, str(task["container_id"]), body.actor_agent_id)
-        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("verdikt-autofix:" + tid,))
+        cur.execute(sql.xact_lock("%s"), ("verdikt-autofix:" + tid,))
         if not vaf.stop_by_person(cur, task, actor):
             raise HTTPException(409, "auto-fix isn't running for this task")
         out = vaf.state(cur, task)

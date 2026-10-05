@@ -26,6 +26,7 @@ from typing import Optional
 from fastapi import File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -361,7 +362,7 @@ def _commit_version(tid, task, logical, kind, source, run, author, note, staging
                 (cid, tid, logical, kind),
             )
             did = str(cur.fetchone()["id"])
-            cur.execute("SELECT * FROM task_deliverables WHERE id=%s FOR UPDATE", (did,))
+            cur.execute("SELECT * FROM task_deliverables WHERE id=%s " + sql.for_update(), (did,))
             d = cur.fetchone()
             prev = None
             if d["latest_version"] > 0:

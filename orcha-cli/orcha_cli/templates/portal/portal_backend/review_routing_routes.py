@@ -12,6 +12,7 @@ pre-review request ("APPROVE: …" / "SEND BACK: …"). Either way it never veri
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import bump_agent, log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -117,7 +118,7 @@ def record_manager_review(tid: str, body: ManagerReviewDecision, request: Reques
         reject_if_retired(cur, actor)
         cur.execute(
             "SELECT id, container_id, status, title, manager_review FROM tasks "
-            "WHERE id=%s FOR UPDATE",
+            "WHERE id=%s " + sql.for_update(),
             (tid,),
         )
         row = cur.fetchone()

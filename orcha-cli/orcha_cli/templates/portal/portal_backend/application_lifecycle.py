@@ -3,13 +3,12 @@
 import os
 import time
 
-import psycopg
 from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from portal_backend.application import app
-from portal_backend.database import DB
+from portal_backend import database
 
 _run_migrations_getter = None
 
@@ -101,11 +100,12 @@ def start_verdikt_sweeper() -> None:
 
 
 def startup_migrate() -> None:
-    """Wait briefly for Postgres, then apply pending migrations at startup."""
-    for _ in range(20):
+    """Wait briefly for the database, then apply pending migrations at startup."""
+    # SQLite is a file open, so three tries cover a slow mounted volume; Postgres keeps its
+    # twenty while the transition switch exists (GH #258 S3 note 6).
+    for _ in range(3 if database.BACKEND == "sqlite" else 20):
         try:
-            with psycopg.connect(DB) as connection:
-                connection.execute("SELECT 1")
+            database.ping()
             break
         except Exception:
             time.sleep(0.5)

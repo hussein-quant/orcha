@@ -408,7 +408,7 @@ def resolve_stale_notices(cur, container_id: str, *, period: str, reasons,
                AND {sql.in_list("e.detail->>'reason'")}
                AND e.detail->>'period' = %s
                AND {scope_sql}
-             FOR UPDATE OF r""",
+             """ + sql.for_update(of="r"),
         params,
     )
     rows = cur.fetchall()
@@ -533,7 +533,7 @@ def fire_threshold_notices(cur, container_id: str, statuses: dict) -> None:
 def _any_budget(cur, container_id: str) -> bool:
     # Tolerate a database the budgets migration has not reached yet (the scan must never
     # break because of an optional feature): no table → no budgets → nothing to enforce.
-    cur.execute("SELECT to_regclass('public.agent_budgets') IS NOT NULL AS ready")
+    cur.execute(f"SELECT {sql.table_exists('agent_budgets')} AS ready")
     if not cur.fetchone()["ready"]:
         return False
     cur.execute(
@@ -636,7 +636,7 @@ def _apply_update(cur, table: str, key_col: str, key: str, container_id: str,
             "ON CONFLICT (container_id) DO NOTHING",
             (key, actor),
         )
-    cur.execute(f"SELECT {_BUDGET_COLS} FROM {table} WHERE {key_col}=%s FOR UPDATE", (key,))
+    cur.execute(f"SELECT {_BUDGET_COLS} FROM {table} WHERE {key_col}=%s " + sql.for_update(), (key,))
     before = cur.fetchone()
     fields = body.model_fields_set
     sets, params, changed = [], [], {}

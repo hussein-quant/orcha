@@ -21,11 +21,11 @@ from __future__ import annotations
 
 from typing import Optional
 
-import psycopg
 from fastapi import HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 from pydantic_core import PydanticCustomError
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -175,7 +175,9 @@ def _create(kind: str, cid: str, body, request: Request):
                 f"(%s, {', '.join(['%s'] * len(vals))}, %s, %s) RETURNING id",
                 (cid, *vals, actor, actor),
             )
-        except psycopg.errors.UniqueViolation:
+        except Exception as exc:  # noqa: BLE001 — re-raised unless a unique violation
+            if not sql.is_unique_violation(exc):
+                raise
             raise HTTPException(409, f"a {k['label']} named '{body.name}' already exists here") from None
         xid = str(cur.fetchone()["id"])
         log_event(cur, cid, "human", actor, kind, xid, f"{kind}_created", {"name": body.name})
@@ -187,7 +189,7 @@ def _create(kind: str, cid: str, body, request: Request):
 def _load(cur, kind: str, xid: str):
     _uuid(xid, "id")
     k = _KINDS[kind]
-    cur.execute(f"SELECT * FROM {k['table']} WHERE id=%s AND archived_at IS NULL FOR UPDATE", (xid,))
+    cur.execute(f"SELECT * FROM {k['table']} WHERE id=%s AND archived_at IS NULL " + sql.for_update(), (xid,))
     row = cur.fetchone()
     if not row:
         raise HTTPException(404, f"{k['label']} {xid} not found")
@@ -211,7 +213,9 @@ def _update(kind: str, xid: str, body, request: Request):
                     f"UPDATE {k['table']} SET {sets}, updated_by_agent_id=%s, updated_at=now() WHERE id=%s",
                     (*changed.values(), actor, xid),
                 )
-            except psycopg.errors.UniqueViolation:
+            except Exception as exc:  # noqa: BLE001 — re-raised unless a unique violation
+                if not sql.is_unique_violation(exc):
+                    raise
                 raise HTTPException(409, f"a {k['label']} named '{changed.get('name')}' already exists here") from None
             log_event(cur, cid, "human", actor, kind, xid, f"{kind}_updated", {"fields": sorted(changed)})
             conn.commit()

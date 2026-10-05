@@ -1,8 +1,8 @@
 """Agent registration route and optional first-task creation."""
 
-import psycopg
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import bump_agent, log_event, recompute_agent_status
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -30,7 +30,7 @@ def _lock_pickable_task(cur, cid: str, tid: str):
     so the client never silently creates a duplicate or steals someone's work."""
     cur.execute(
         """SELECT id, title, status, is_root, container_id FROM tasks
-           WHERE id=%s FOR UPDATE""",
+           WHERE id=%s """ + sql.for_update(),
         (tid,),
     )
     row = cur.fetchone()
@@ -123,10 +123,13 @@ def register_agent(cid: str, body: AgentCreate, request: Request):
                 (cid, body.alias, body.role, body.kind, body.prompt, model,
                  github_login, git_email, body.kind, cid),
             )
-        except psycopg.errors.UniqueViolation as exc:
+        except Exception as exc:  # noqa: BLE001 — re-raised unless a unique violation
+            if not sql.is_unique_violation(exc):
+                raise
             # Two unique surfaces can trip here: (container_id, alias) and the
             # 036 partial index on (container_id, lower(github_login)).
-            constraint = (exc.diag.constraint_name or "") if exc.diag else ""
+            diag = getattr(exc, "diag", None)  # psycopg names the constraint; sqlite3 says it
+            constraint = (diag.constraint_name or "") if diag else str(exc)
             if "github_login" in constraint:
                 raise HTTPException(
                     409,

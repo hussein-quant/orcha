@@ -2,7 +2,6 @@
 
 from typing import List, Optional
 
-import psycopg
 from fastapi import HTTPException, Query, Request
 
 from portal_backend import sql
@@ -68,7 +67,9 @@ def create_container(body: ContainerCreate, request: Request):
                 "INSERT INTO containers (name, description) VALUES (%s, %s) RETURNING id",
                 (body.name, body.description),
             )
-        except psycopg.errors.UniqueViolation:
+        except Exception as exc:  # noqa: BLE001 — re-raised unless a unique violation
+            if not sql.is_unique_violation(exc):
+                raise
             # containers_name_uq (mig 037): project names are unique per stack,
             # case-insensitively — same 409 convention as a duplicate agent alias.
             raise HTTPException(

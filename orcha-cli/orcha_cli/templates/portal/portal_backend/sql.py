@@ -290,9 +290,32 @@ def ilike() -> str:
     return "ILIKE" if _pg() else "LIKE"
 
 
-def for_update() -> str:
-    """Row-lock suffix. SQLite has none: the S3 `BEGIN IMMEDIATE` write lock covers it."""
-    return " FOR UPDATE" if _pg() else ""
+def for_update(*, of: str | None = None, skip_locked: bool = False) -> str:
+    """Row-lock suffix: ` FOR UPDATE [OF t] [SKIP LOCKED]`. SQLite has none: the S3
+    `BEGIN IMMEDIATE` write lock serialises writers, so nothing is ever locked to skip."""
+    if of is not None and not _JSON_KEY.match(of):
+        raise ValueError(f"for_update(of=...) must be a plain identifier, got {of!r}")
+    if not _pg():
+        return ""
+    return " FOR UPDATE" + (f" OF {of}" if of else "") + (" SKIP LOCKED" if skip_locked else "")
+
+
+def xact_lock(key_expr: str) -> str:
+    """A transaction-scoped lock on the text key `key_expr` (bind its parameters as usual):
+    `SELECT pg_advisory_xact_lock(hashtext(key))` on Postgres. On SQLite the scope's
+    `BEGIN IMMEDIATE` already serialises every writer, so this only evaluates the key."""
+    if _pg():
+        return f"SELECT pg_advisory_xact_lock(hashtext({key_expr}))"
+    return f"SELECT ({key_expr}) AS lock_key"
+
+
+def table_exists(name: str) -> str:
+    """Predicate: the table `name` exists (`to_regclass('public.x') IS NOT NULL` on Postgres)."""
+    if not _JSON_KEY.match(name):
+        raise ValueError(f"table_exists: name must be a plain identifier, got {name!r}")
+    if _pg():
+        return f"(to_regclass('public.{name}') IS NOT NULL)"
+    return f"EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name='{name}')"
 
 
 def is_unique_violation(exc: BaseException) -> bool:

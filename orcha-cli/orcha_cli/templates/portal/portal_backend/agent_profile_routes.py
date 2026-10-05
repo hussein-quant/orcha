@@ -1,8 +1,8 @@
 """Retire agents and edit their human-controlled profile fields."""
 
-import psycopg
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_config_history_routes import config_before, record_config_change
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
@@ -187,7 +187,9 @@ def update_agent(aid: str, body: AgentUpdate, request: Request):
                 "autonomy_override",
                 params,
             )
-        except psycopg.errors.UniqueViolation:
+        except Exception as exc:  # noqa: BLE001 — re-raised unless a unique violation
+            if not sql.is_unique_violation(exc):
+                raise
             raise HTTPException(
                 409, f"alias '{body.alias}' already exists in this container"
             )

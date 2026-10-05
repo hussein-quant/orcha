@@ -731,7 +731,7 @@ def _settle_thread_request(cur, rid: str, actor_id: str, reply: str, *, human_re
     or None when it was already settled (idempotent — a retried post changes nothing)."""
     cur.execute(
         """SELECT id, container_id, status, requester_id, target_id, originating_task_id
-             FROM requests WHERE id=%s FOR UPDATE""",
+             FROM requests WHERE id=%s """ + sql.for_update(),
         (rid,),
     )
     r = cur.fetchone()
@@ -799,7 +799,7 @@ def post_code_thread_message(tid: str, body: CodeThreadMessageCreate, request: R
     if not _valid_uuid(tid):
         raise HTTPException(400, "thread_id is not a valid UUID")
     with db_cursor() as (conn, cur):
-        cur.execute("SELECT * FROM code_threads WHERE id=%s FOR UPDATE", (tid,))
+        cur.execute("SELECT * FROM code_threads WHERE id=%s " + sql.for_update(), (tid,))
         thread = cur.fetchone()
         if not thread:
             raise HTTPException(404, f"code thread {tid} not found")

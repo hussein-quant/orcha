@@ -327,7 +327,7 @@ def set_container_limits(cid: str, body: ContainerLimitsUpdate, request: Request
         # creation, so an agent can never raise it for itself
         require_kind(cur, actor, ("human",))
         cur.execute(
-            "SELECT max_auto_agents FROM containers WHERE id=%s FOR UPDATE", (cid,)
+            "SELECT max_auto_agents FROM containers WHERE id=%s " + sql.for_update(), (cid,)
         )
         before = int(cur.fetchone()["max_auto_agents"])
         cur.execute(

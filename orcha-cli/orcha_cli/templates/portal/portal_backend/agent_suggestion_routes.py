@@ -1,6 +1,5 @@
 """Resolve a proposed agent by creating, reassigning, or refusing it."""
 
-import psycopg
 from fastapi import HTTPException, Request
 
 from portal_backend import sql
@@ -100,7 +99,9 @@ def decide_suggestion(rid: str, body: SuggestionDecision, request: Request):
                         body.turn_budget,
                     ),
                 )
-            except psycopg.errors.UniqueViolation:
+            except Exception as exc:  # noqa: BLE001 — re-raised unless a unique violation
+                if not sql.is_unique_violation(exc):
+                    raise
                 raise HTTPException(
                     409,
                     f"alias '{detail['proposed_alias']}' already exists in this container",

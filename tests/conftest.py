@@ -10,17 +10,19 @@ worker thread (`asyncio.to_thread`), so it can only see rows the request handler
 has actually committed. Transactional-rollback isolation would hide those rows,
 so we commit-and-truncate uniformly rather than special-casing bus tests.
 
-The app reads `DATABASE_URL` at import time, so we (re)create the test DB and set
-the env var *before* importing `main`.
+The app binds its database at import time, so we (re)create the test DB and set
+the env var *before* importing `main`: `ORCHA_DB_PATH` (a temp SQLite file, the default)
+or `DATABASE_URL` (Postgres, with ORCHA_TEST_BACKEND=postgres).
 """
 import asyncio
+import datetime as _dt
 import json as _json
 import os
 import pathlib
+import sqlite3
 import sys
+import tempfile
 
-import psycopg
-from psycopg.rows import dict_row
 import pytest
 import pytest_asyncio
 import httpx
@@ -31,7 +33,14 @@ PORTAL_DIR = REPO / "orcha-cli" / "orcha_cli" / "templates" / "portal"
 MIGRATIONS_DIR = REPO / "orcha-cli" / "orcha_cli" / "templates" / "migrations"
 SCHEMA_SQL = MIGRATIONS_DIR / "001_init.sql"
 
-# --- a SEPARATE database so a test run never touches a live stack's data ---
+# GH #258 PR 7b: the suite runs on SQLite by default (a temp file per session, no server).
+# ORCHA_TEST_BACKEND=postgres keeps the Postgres leg alive until the cleanup PR (plan S9).
+BACKEND = os.environ.get("ORCHA_TEST_BACKEND", "sqlite")
+if BACKEND not in ("sqlite", "postgres"):
+    raise RuntimeError(f"ORCHA_TEST_BACKEND must be sqlite or postgres, got {BACKEND!r}")
+
+# --- Postgres leg: a SEPARATE database so a test run never touches a live stack's data ---
+# (also read by tests/test_schema_parity.py, which always compares against Postgres)
 ADMIN_URL = os.environ.get("ORCHA_TEST_ADMIN_URL", "postgresql://orcha:orcha@localhost:5432/postgres")
 TEST_DB = os.environ.get("ORCHA_TEST_DB_NAME", "orcha_test")
 TEST_URL = os.environ.get(
@@ -40,6 +49,7 @@ TEST_URL = os.environ.get(
 
 # Truncate order doesn't matter with CASCADE, but list every app table explicitly
 # so a new table added to the schema fails loudly here until it's wired in.
+# (Postgres leg only: the SQLite leg derives its table list from sqlite_master.)
 APP_TABLES = [
     "conversation_turns", "conversations",
     "agent_wake_state", "agent_reachability", "agent_memory_digests",
@@ -59,6 +69,8 @@ def _bootstrap_database() -> None:
     """Drop+recreate the test DB, load 001_init.sql, then apply incremental
     migrations (002+) — so the test schema matches a live DB after `orcha up`
     runs the R1 migration runner, not just the initdb baseline."""
+    import psycopg
+
     with psycopg.connect(ADMIN_URL, autocommit=True) as conn:
         conn.execute(f'DROP DATABASE IF EXISTS "{TEST_DB}" WITH (FORCE)')
         conn.execute(f'CREATE DATABASE "{TEST_DB}"')
@@ -73,21 +85,57 @@ def _bootstrap_database() -> None:
         conn.commit()
 
 
-# Run once at collection, BEFORE importing main (which binds DATABASE_URL).
-_bootstrap_database()
-os.environ["DATABASE_URL"] = TEST_URL
+# Run once at collection, BEFORE importing main (which binds the database at import).
+if BACKEND == "postgres":
+    _bootstrap_database()
+    os.environ.pop("ORCHA_DB_PATH", None)
+    os.environ["DATABASE_URL"] = TEST_URL
+    TEST_DB_PATH = None
+else:
+    TEST_DB_PATH = str(pathlib.Path(tempfile.mkdtemp(prefix="orcha-test-")) / "orcha.db")
+    os.environ.pop("DATABASE_URL", None)
+    os.environ["ORCHA_DB_PATH"] = TEST_DB_PATH
+    os.environ.setdefault("ORCHA_DB_ASSERT_READONLY", "1")  # plan S3 note 5: on in tests
 sys.path.insert(0, str(PORTAL_DIR))
 # Also expose the CLI package so tests can `from orcha_cli import notifier` even when
 # collected standalone (orcha-cli isn't installed in every env — e.g. a targeted run).
 sys.path.insert(0, str(REPO / "orcha-cli"))
-import main  # noqa: E402  (must follow the env + path setup above)
+from portal_backend import database  # noqa: E402  (must follow the env + path setup above)
+
+if BACKEND == "sqlite":
+    database.run_migrations()  # the real runner, on the shipped SQLite baseline
+import main  # noqa: E402
+
+
+def _sqlite_app_tables() -> list:
+    with sqlite3.connect(TEST_DB_PATH) as conn:
+        return [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+            "AND name <> 'schema_migrations' ORDER BY name")]
+
+
+SQLITE_TABLES = _sqlite_app_tables() if BACKEND == "sqlite" else []
 
 
 @pytest.fixture(autouse=True)
 def _clean_db():
-    """Truncate every app table before each test → each test starts empty."""
-    with psycopg.connect(TEST_URL, autocommit=True) as conn:
-        conn.execute("TRUNCATE " + ", ".join(APP_TABLES) + " RESTART IDENTITY CASCADE")
+    """Empty every app table before each test → each test starts empty."""
+    if BACKEND == "postgres":
+        import psycopg
+
+        with psycopg.connect(TEST_URL, autocommit=True) as conn:
+            conn.execute("TRUNCATE " + ", ".join(APP_TABLES) + " RESTART IDENTITY CASCADE")
+    else:
+        conn = sqlite3.connect(TEST_DB_PATH, isolation_level=None, timeout=10)
+        try:
+            conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("BEGIN IMMEDIATE")
+            for table in SQLITE_TABLES:
+                conn.execute(f'DELETE FROM "{table}"')
+            conn.execute("DELETE FROM sqlite_sequence")  # RESTART IDENTITY
+            conn.execute("COMMIT")
+        finally:
+            conn.close()
     yield
 
 
@@ -118,13 +166,32 @@ class Db:
     row-level assertions the API doesn't expose (e.g. the event-bus fan-out).
     """
 
+    backend = BACKEND
+
     def execute(self, sql, params=()):
-        with psycopg.connect(TEST_URL, row_factory=dict_row, autocommit=True) as conn:
-            cur = conn.execute(sql, params)
-            try:
-                return cur.fetchall()
-            except psycopg.ProgrammingError:
-                return []
+        if BACKEND == "postgres":
+            import psycopg
+            from psycopg.rows import dict_row
+
+            with psycopg.connect(TEST_URL, row_factory=dict_row, autocommit=True) as conn:
+                cur = conn.execute(sql, params)
+                try:
+                    return cur.fetchall()
+                except psycopg.ProgrammingError:
+                    return []
+        with database.db_cursor() as (_conn, cur):  # same adapters + %s translation as the app
+            cur.execute(sql, params)
+            return cur.fetchall() if cur.description else []
+
+    @staticmethod
+    def ago(seconds):
+        """A bound timestamp `seconds` in the past: replaces `now() - interval '...'` in raw SQL."""
+        return _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(seconds=seconds)
+
+    @staticmethod
+    def from_now(seconds):
+        """A bound timestamp `seconds` in the future: replaces `now() + make_interval(...)`."""
+        return _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(seconds=seconds)
 
     def event_rows(self, event_key):
         """All agent_events rows for a delivery key, in insertion order."""
