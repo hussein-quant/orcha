@@ -95,7 +95,7 @@ def poke_path_forward(
 
 def fetch_next_event(key: str, since_ts: float) -> Optional[dict]:
     """Return the first event newer than the supplied cursor."""
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):  # polled every 0.5 s per long-poll/SSE client
         cur.execute(
             """SELECT event_name, ts, payload FROM agent_events
                WHERE event_key = %s AND ts > %s

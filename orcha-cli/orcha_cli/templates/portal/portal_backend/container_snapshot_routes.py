@@ -60,7 +60,7 @@ def get_container(
         raise HTTPException(400, "container_id is not a valid UUID")
     task_limit = max(1, min(task_limit, 1000))
     request_limit = max(1, min(request_limit, 1000))
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):  # the 3 s dashboard poll: no write lock
         # Access model: reads are project-isolated — a trusted non-member is 403'd
         # (trust off / no header, and the unmapped bootstrap state, unchanged).
         _require_member_read(cur, request, cid)
