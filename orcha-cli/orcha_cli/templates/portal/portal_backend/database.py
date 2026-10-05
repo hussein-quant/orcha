@@ -55,6 +55,10 @@ JSON_ALIASES = frozenset({
     "task_link", "waiting_on",
 })
 
+# Boolean EXPRESSION columns (COALESCE(r.wake_enabled, true), CASE ... END) lose the declared
+# BOOLEAN type on SQLite and come back as 1/0; these aliases are turned back into bools.
+BOOL_ALIASES = frozenset({"cold_required", "wake_enabled"})
+
 
 # ---------------------------------------------------------------- Postgres (transition only)
 
@@ -160,7 +164,9 @@ def _now_text() -> str:
 def _dict_row(cur, row):
     d = {}
     for (name, *_), value in zip(cur.description, row):
-        if isinstance(value, str):
+        if isinstance(value, int) and name in BOOL_ALIASES:
+            value = bool(value)
+        elif isinstance(value, str):
             if name in JSON_ALIASES:
                 value = json.loads(value)  # json_object()/json_group_array() come back as TEXT
             elif len(value) == 32 and _CANONICAL_TS.fullmatch(value):

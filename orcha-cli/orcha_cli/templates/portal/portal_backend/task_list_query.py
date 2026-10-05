@@ -58,9 +58,9 @@ def _task_list_sql(where: str, order: str) -> str:
         "'author_alias'", "ma.alias")
     message_summary_obj = sql.json_object(
         "'count'", "(SELECT count(*) FROM task_messages m WHERE m.task_id = t.id)",
-        "'last'", f"""(SELECT {last_message_obj}
+        "'last'", sql.json_nested(f"""SELECT {last_message_obj}
                                    FROM task_messages m LEFT JOIN agents ma ON ma.id = m.author_id
-                                   WHERE m.task_id = t.id ORDER BY m.created_at DESC LIMIT 1)""")
+                                   WHERE m.task_id = t.id ORDER BY m.created_at DESC LIMIT 1"""))
     decision_obj = sql.json_object(
         "'decision'", "d.decision", "'reason'", "d.reason",
         "'actor'", "da.alias", "'at'", "d.created_at")
@@ -71,11 +71,11 @@ def _task_list_sql(where: str, order: str) -> str:
         "'started_at'", "l.started_at", "'ended_at'", "l.ended_at")
     runs_obj = sql.json_object(
         "'count'", "(SELECT count(*) FROM worker_run_tasks wrt WHERE wrt.task_id = t.id)",
-        "'latest'", f"""(SELECT {latest_run_obj}
+        "'latest'", sql.json_nested(f"""SELECT {latest_run_obj}
                                      FROM worker_runs l
                                      JOIN worker_run_tasks wrt ON wrt.run_id = l.run_id
                                      WHERE wrt.task_id = t.id
-                                     ORDER BY l.started_at DESC LIMIT 1)""")
+                                     ORDER BY l.started_at DESC LIMIT 1"""))
     return f"""SELECT t.id, t.title, t.description, t.definition_of_done, t.status, t.priority,
                       t.is_root, t.created_by_agent_id, t.result,
                       -- SPEC-4: per-task working agreement {{review_chain,handoff_to,autonomy,notes}}

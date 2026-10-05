@@ -156,6 +156,15 @@ def json_object(*pairs: str) -> str:
     return f"{fn}({', '.join(pairs)})"
 
 
+def json_nested(select: str) -> str:
+    """A JSON value from a scalar subquery (pass the bare SELECT), nested inside
+    json_object()/json_array_agg().
+
+    SQLite drops the JSON subtype at a subquery boundary, so an inner json_object() lands in
+    the outer one as a quoted string; json(...) re-marks it as JSON. Postgres keeps the type."""
+    return f"({select})" if _pg() else f"json(({select}))"
+
+
 def json_array_agg(expr: str, order_by: str | None = None) -> str:
     """json_agg(expr [ORDER BY ...]) / json_group_array(expr).
 
