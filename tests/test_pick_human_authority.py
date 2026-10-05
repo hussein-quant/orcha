@@ -16,6 +16,7 @@ Contract under test:
 """
 import pytest
 from conftest import ts_ago
+from portal_backend import sql
 
 OCTO = {"X-Auth-Request-User": "octocat"}   # bound owner
 VERA = {"X-Auth-Request-User": "vera"}      # invited viewer
@@ -39,8 +40,8 @@ def _team_plan(monkeypatch):
 def _touch(db, agent_id, seconds_ago=0):
     """Make a human look recently active (what a sign-in / message turn stamps)."""
     db.execute(
-        "UPDATE agents SET last_heartbeat_at = now() - make_interval(secs => %s) WHERE id=%s",
-        (seconds_ago, agent_id),
+        "UPDATE agents SET last_heartbeat_at = %s WHERE id=%s",
+        (sql.ago(seconds_ago), agent_id),
     )
 
 

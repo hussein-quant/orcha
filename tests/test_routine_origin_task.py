@@ -97,7 +97,7 @@ async def test_make_recurring_needs_routine_authority_trust_off(client, arena, m
     x = await client.post(f"/api/containers/{cid}/routines", json=body(m["agent_id"], tid))
     assert x.status_code == 403 and "manage_agents" in x.text
     v = await make_agent("vera", "Viewer", kind="human")
-    db.execute("""UPDATE agents SET member_role='viewer', grants='["manage_agents"]'::jsonb WHERE id=%s""", (v["agent_id"],))
+    db.execute("""UPDATE agents SET member_role='viewer', grants='["manage_agents"]' WHERE id=%s""", (v["agent_id"],))
     assert (await client.post(f"/api/containers/{cid}/routines", json=body(v["agent_id"], tid))).status_code == 403
     assert db.execute("SELECT count(*) AS n FROM routines WHERE origin_task_id=%s", (tid,))[0]["n"] == 0
 

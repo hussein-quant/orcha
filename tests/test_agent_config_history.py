@@ -240,7 +240,7 @@ async def test_secrets_are_redacted_and_never_restored(client, boss_and_bot, db)
         "actor_agent_id": human, "system_prompt": f"use key {SECRET} carefully"})
     assert r.status_code == 200
     await client.patch(f"/api/agents/{aid}", json={"actor_agent_id": human, "system_prompt": "clean"})
-    raw = db.execute("SELECT snapshot::text AS s, changes::text AS c FROM agent_config_revisions WHERE agent_id=%s", (aid,))
+    raw = db.execute("SELECT CAST(snapshot AS TEXT) AS s, CAST(changes AS TEXT) AS c FROM agent_config_revisions WHERE agent_id=%s", (aid,))
     assert raw and all(SECRET not in row["s"] and SECRET not in row["c"] for row in raw)
     rev2 = await _rev(client, aid, 2)
     assert rev2["redacted_fields"] == ["system_prompt"]

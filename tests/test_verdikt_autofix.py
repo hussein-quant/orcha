@@ -15,7 +15,7 @@ import pytest
 
 from fake_verdikt import FakeVerdikt, scripted
 from test_evidence_verdikt import DIFF, OCTO, HUBOT, VERA, _members, _run, _wait
-from conftest import ts_ago
+from conftest import ts_ago, ts_from_now
 
 DOD = """- All tests pass
 - The login page shows "Wrong password" after a bad password
@@ -82,7 +82,7 @@ class Loop:
         self.reworks += 1
         if run:
             _run(self.db, self.wid, self.tid, output="fixed it", diff=diff if diff is not None else _diff(self.reworks),
-                 started="clock_timestamp() + interval '1 second'")
+                 started=ts_from_now(1))
         r = await self.client.post(f"/api/tasks/{self.tid}/done",
                                    json={"agent_id": self.wid, "result": f"rework {self.reworks}"},
                                    headers=self.headers)

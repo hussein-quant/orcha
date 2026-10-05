@@ -203,7 +203,7 @@ async def test_trusted_gate_owner_grant_member_viewer_nonmember(
     assert (await client.get(f"/api/agents/{dev}/reports-to", headers=MALLORY)).status_code == 403
 
     db.execute(
-        "UPDATE agents SET grants='[\"manage_agents\"]'::jsonb WHERE id=%s", (hubot,)
+        "UPDATE agents SET grants='[\"manage_agents\"]' WHERE id=%s", (hubot,)
     )
     r = await _put(client, dev, None, headers=HUBOT)
     assert r.status_code == 200, r.text
@@ -413,7 +413,7 @@ async def test_suggestion_without_manager_skips_member_who_cannot_approve(
     assert row["detail"]["routed_via"] == "fallback"
 
     # a member WITH manage_agents qualifies (freshest wins)
-    db.execute("""UPDATE agents SET grants='["manage_agents"]'::jsonb WHERE id=%s""", (maya,))
+    db.execute("""UPDATE agents SET grants='["manage_agents"]' WHERE id=%s""", (maya,))
     s = await client.post(
         f"/api/requests/{rid}/suggest-agent",
         json={

@@ -70,7 +70,7 @@ async def _scan(client, cid, aid, *, cooldown=15.0, min_idle=30.0):
 def _emit_event(db, *, container_id, agent_id, event_name, ts, payload=None):
     db.execute(
         """INSERT INTO agent_events (container_id, target_id, event_key, event_name, ts, payload)
-           VALUES (%s, %s, %s, %s, %s, %s::jsonb)""",
+           VALUES (%s, %s, %s, %s, %s, %s)""",
         (container_id, agent_id, agent_id, event_name, ts, json.dumps(payload or {})),
     )
 
@@ -165,12 +165,12 @@ async def test_wake_scan_ranks_before_manifest_limit(client, container, make_age
     """
     b = await make_agent("B")
     aid = b["agent_id"]
+    rows = [(container["id"], aid, aid, float(i), json.dumps({"request_id": f"old-{i}", "preview": "old"}))
+            for i in range(1, 526)]
     db.execute(
-        """INSERT INTO agent_events (container_id, target_id, event_key, event_name, ts, payload)
-           SELECT %s, %s, %s, 'request_answered', gs::float,
-                  jsonb_build_object('request_id', 'old-' || gs::text, 'preview', 'old')
-           FROM generate_series(1, 525) AS gs""",
-        (container["id"], aid, aid),
+        "INSERT INTO agent_events (container_id, target_id, event_key, event_name, ts, payload) VALUES "
+        + ", ".join(["(%s, %s, %s, 'request_answered', %s, %s)"] * len(rows)),
+        tuple(v for row in rows for v in row),
     )
     _emit_event(db, container_id=container["id"], agent_id=aid, event_name="prompt",
                 ts=1000.0, payload={"message": "stop and read this first"})

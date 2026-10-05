@@ -189,13 +189,13 @@ async def test_rows_stored_by_an_older_build_still_work(client, container, make_
     tid, v, vrid = await _completed(client, container, make_agent, make_task, work_headers, db, fake)
     legacy = [{"url": f"{fake.base}/api/artifacts/qa-runs/{vrid}/evidence/001-major.png", "label": "old",
                "kind": "evidence", "seq": 1}]
-    db.execute("UPDATE verdikt_runs SET screenshots=%s::jsonb WHERE id=%s", (json.dumps(legacy), v["id"]))
+    db.execute("UPDATE verdikt_runs SET screenshots=%s WHERE id=%s", (json.dumps(legacy), v["id"]))
     runs = (await client.get(f"/api/tasks/{tid}/verdikt/runs")).json()["runs"]
     s = next(r for r in runs if r["id"] == v["id"])["screenshots"]
     assert s[0]["url"] == f"/api/tasks/{tid}/verdikt/runs/{v['id']}/artifact?path={vrid}/evidence/001-major.png"
     assert (await client.get(s[0]["url"])).content == PNG_BYTES
     # a stored URL that isn't a Verdikt artifact of this run is dropped, never passed through
-    db.execute("UPDATE verdikt_runs SET screenshots=%s::jsonb WHERE id=%s",
+    db.execute("UPDATE verdikt_runs SET screenshots=%s WHERE id=%s",
                (json.dumps([{"url": "http://evil.example/x.png", "label": "x", "kind": "evidence"}]), v["id"]))
     p = (await client.get(f"/api/tasks/{tid}/evidence")).json()
     assert p["verdikt"]["screenshots"] == []

@@ -13,6 +13,7 @@ import uuid
 
 from portal_backend.container_metrics_routes import parse_output_tail
 from conftest import ts_ago
+from portal_backend import sql
 
 CLAUDE_TAIL = (
     '{"type":"system","subtype":"init"}\n'
@@ -190,8 +191,8 @@ async def test_metrics_sandbox_seconds_only_from_sandbox_rows(client, container,
     sbx = await _run(client, aid, wake_kind="sandbox")
     eph = await _run(client, aid, wake_kind="ephemeral")
     db.execute(
-        "UPDATE worker_runs SET started_at=ended_at - interval '90 seconds' "
-        "WHERE run_id IN (%s, %s)", (sbx, eph))
+        "UPDATE worker_runs SET started_at=%s, ended_at=%s "
+        "WHERE run_id IN (%s, %s)", (sql.ago(90), sql.utcnow(), sbx, eph))
     d = await _metrics(client, cid)
     assert d["totals"]["sandbox_seconds"] == 90.0                     # ephemeral time excluded
     assert d["per_agent"][0]["sandbox_seconds"] == 90.0

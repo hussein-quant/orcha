@@ -79,7 +79,7 @@ async def _register(client, token, headers, platform=None):
 
 def _outbox(db):
     return db.execute(
-        "SELECT container_id::text AS cid, kind, ref_id::text AS ref, title, body,"
+        "SELECT CAST(container_id AS TEXT) AS cid, kind, CAST(ref_id AS TEXT) AS ref, title, body,"
         " delivered_at, failed FROM push_outbox ORDER BY created_at, id"
     )
 
@@ -258,7 +258,7 @@ async def test_opening_plan_message_enqueues_once(
 
     # a HUMAN post first — not a plan, no push
     human = db.execute(
-        "SELECT id::text AS id FROM agents WHERE kind='human'"
+        "SELECT CAST(id AS TEXT) AS id FROM agents WHERE kind='human'"
     )[0]["id"]
     r = await client.post(
         f"/api/tasks/{t['task_id']}/messages",

@@ -393,7 +393,7 @@ async def test_setting_trusted_lane_gating(client, container, make_agent, db, mo
                              headers={"X-Auth-Request-User": "vera"})).status_code == 403
     assert (await client.put(f"/api/containers/{cid}/review-routing", json=body,
                              headers={"X-Auth-Request-User": "hubot"})).status_code == 403
-    db.execute("UPDATE agents SET grants='[\"assign_reviewers\"]'::jsonb WHERE id=%s", (mem,))
+    db.execute("UPDATE agents SET grants='[\"assign_reviewers\"]' WHERE id=%s", (mem,))
     assert (await client.put(f"/api/containers/{cid}/review-routing", json=body,
                              headers={"X-Auth-Request-User": "hubot"})).status_code == 200
     assert (await client.put(f"/api/containers/{cid}/review-routing", json=body,

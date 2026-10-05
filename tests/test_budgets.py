@@ -6,7 +6,11 @@ in-flight runs excluded from spend), thresholds (80% warning + Needs-you once pe
 in-flight run untouched, notifier skips), the audited one-time override, month rollover, the
 project-wide cap, and authority (owner / manage_autonomy only; viewers, members without the
 grant and AI agents refused; reads member-only)."""
+import datetime as _dt
+
 import pytest
+
+from portal_backend import sql
 
 OCTO = {"X-Auth-Request-User": "octocat"}
 HUBOT = {"X-Auth-Request-User": "hubot"}
@@ -192,7 +196,9 @@ async def test_month_rollover_resets(client, container, make_agent, db):
     hid, aid = await _setup(client, container, make_agent)
     _make_due(db, aid)
     await _put(client, aid, {"actor_agent_id": hid, "monthly_limit_usd": 1})
-    last_month = "(date_trunc('month', now()) - interval '3 days')"
+    now = sql.utcnow()
+    last_month = "'" + sql.ts(now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                                - _dt.timedelta(days=3)) + "'"
     _run(db, aid, cost=50, started=last_month)
     db.execute("UPDATE agent_budgets SET warned_period='1999-01', paused_period='1999-01' WHERE agent_id=%s", (aid,))
     b = (await client.get(f"/api/agents/{aid}/budget")).json()

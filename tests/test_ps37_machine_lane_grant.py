@@ -23,7 +23,7 @@ async def _setup(client, container, make_agent, db):
         r = await client.post(f"/api/containers/{cid}/members",
                               json={"github_login": login, "role": "member"}, headers=OCTO)
         assert r.status_code == 201, r.text
-    db.execute("""UPDATE agents SET grants='["manage_agents"]'::jsonb
+    db.execute("""UPDATE agents SET grants='["manage_agents"]'
                    WHERE container_id=%s AND github_login='gina'""", (cid,))
     return (await make_agent("Pixel"))["agent_id"]
 

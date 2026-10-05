@@ -406,13 +406,13 @@ async def test_trust_off_requires_a_human_owner_or_manage_agents(client, arena, 
     m = await make_agent("hubot", "Dev", kind="human")
     x = await client.post(f"/api/containers/{cid}/routines", json=routine_body(m["agent_id"]))
     assert x.status_code == 403 and "manage_agents" in x.text
-    db.execute("""UPDATE agents SET grants='["manage_agents"]'::jsonb WHERE id=%s""", (m["agent_id"],))
+    db.execute("""UPDATE agents SET grants='["manage_agents"]' WHERE id=%s""", (m["agent_id"],))
     x = await client.post(f"/api/containers/{cid}/routines", json=routine_body(m["agent_id"]))
     assert x.status_code == 201, x.text
     rid = x.json()["id"]
     # a viewer is refused even with the grant
     v = await make_agent("vera", "Viewer", kind="human")
-    db.execute("""UPDATE agents SET member_role='viewer', grants='["manage_agents"]'::jsonb WHERE id=%s""", (v["agent_id"],))
+    db.execute("""UPDATE agents SET member_role='viewer', grants='["manage_agents"]' WHERE id=%s""", (v["agent_id"],))
     for call in (
         client.post(f"/api/containers/{cid}/routines", json=routine_body(v["agent_id"])),
         client.patch(f"/api/routines/{rid}", json={"actor_agent_id": v["agent_id"], "enabled": False}),

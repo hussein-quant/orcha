@@ -641,7 +641,7 @@ async def _drive_to_needs_verification(client, make_agent, make_task, work_heade
 
 
 def _outbox(db):
-    return db.execute("SELECT kind, ref_id::text AS ref, failed FROM push_outbox ORDER BY created_at")
+    return db.execute("SELECT kind, CAST(ref_id AS TEXT) AS ref, failed FROM push_outbox ORDER BY created_at")
 
 
 async def test_muted_category_writes_no_push_row_but_needs_you_keeps_it(

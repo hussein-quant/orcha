@@ -7,8 +7,15 @@ quota signal; total_cost_usd is the dollar figure and is never folded in."""
 import uuid
 
 import pytest
+from portal_backend import sql
 
 pytestmark = pytest.mark.asyncio
+
+
+def _secs(span):
+    """'6 hours' -> seconds (the old Postgres interval literal, as a bound timestamp offset)."""
+    n, unit = span.split()
+    return float(n) * {"second": 1, "minute": 60, "hour": 3600, "day": 86400}[unit.rstrip("s")]
 
 
 async def _run_with(client, aid, *, task_id=None, ended_ago=None, db=None, **toks):
@@ -24,8 +31,8 @@ async def _run_with(client, aid, *, task_id=None, ended_ago=None, db=None, **tok
     assert f.status_code == 200, f.text
     if ended_ago and db is not None:
         db.execute(
-            f"UPDATE worker_runs SET ended_at = now() - interval '{ended_ago}' WHERE run_id=%s",
-            (rid,),
+            "UPDATE worker_runs SET ended_at = %s WHERE run_id=%s",
+            (sql.ago(_secs(ended_ago)), rid),
         )
     return rid
 

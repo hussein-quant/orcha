@@ -170,14 +170,14 @@ async def test_full_scenario_per_agent_and_project(client, container, make_agent
     p2 = (await make_task("p2", "dod", assignee_alias="Pixel"))["id"]
     db.execute(
         "INSERT INTO events (container_id, actor_type, actor_id, entity_type, entity_id, event_type, detail) "
-        "VALUES (%s, 'ai', NULL, 'task', %s, 'manager_review_recorded', %s::jsonb)",
+        "VALUES (%s, 'ai', NULL, 'task', %s, 'manager_review_recorded', %s)",
         (cid, p2, json.dumps({"decision": "send_back", "status": "sent_back",
                               "reassigned_to_agent_ids": [pixel]})),
     )
     # a 'commented' manager review is NOT rework
     db.execute(
         "INSERT INTO events (container_id, actor_type, entity_type, entity_id, event_type, detail) "
-        "VALUES (%s, 'ai', 'task', %s, 'manager_review_recorded', %s::jsonb)",
+        "VALUES (%s, 'ai', 'task', %s, 'manager_review_recorded', %s)",
         (cid, p2, json.dumps({"decision": "comment", "status": "commented"})),
     )
 
