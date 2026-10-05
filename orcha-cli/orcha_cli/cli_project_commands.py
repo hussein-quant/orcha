@@ -6,6 +6,13 @@ import json
 import pathlib
 import sys
 
+from orcha_cli import cli_runtime_mode
+
+
+def _native_pending(verb: str) -> None:
+    # GH #258 PR 6 work in progress: the native branch of each verb lands with `orcha serve`.
+    sys.exit(f"error: `orcha {verb}` for a native-runtime project is not built yet (GH #258).")
+
 
 def cmd_up(args: argparse.Namespace, services) -> None:
     if args.project:
@@ -17,11 +24,13 @@ def cmd_up(args: argparse.Namespace, services) -> None:
         services._by_project(args.project, "up", "-d")
         return
     orcha_dir = pathlib.Path.cwd() / ".orcha"
-    if not (orcha_dir / "docker-compose.yml").exists():
-        sys.exit(
-            "error: no .orcha/docker-compose.yml here — run `orcha init` first, "
-            "or pass `--project <name>` to target a specific stack from anywhere."
-        )
+    runtime = cli_runtime_mode.require_project(
+        pathlib.Path.cwd(),
+        "error: no .orcha/docker-compose.yml here — run `orcha init` first, "
+        "or pass `--project <name>` to target a specific stack from anywhere.",
+    )
+    if runtime == cli_runtime_mode.NATIVE:
+        return _native_pending("up")
     services._compose(orcha_dir, "up", "-d")
     # #298: backfill the project-preferences file if a pre-#298 project is missing it.
     prefs_path = services._install_project_preferences(pathlib.Path.cwd())
@@ -63,11 +72,13 @@ def cmd_down(args: argparse.Namespace, services) -> None:
         services._by_project(args.project, "down", *extra)
         return
     orcha_dir = pathlib.Path.cwd() / ".orcha"
-    if not (orcha_dir / "docker-compose.yml").exists():
-        sys.exit(
-            "error: no .orcha/docker-compose.yml here — nothing to bring down. "
-            "Pass `--project <name>` to target a specific stack from anywhere."
-        )
+    runtime = cli_runtime_mode.require_project(
+        pathlib.Path.cwd(),
+        "error: no .orcha/docker-compose.yml here — nothing to bring down. "
+        "Pass `--project <name>` to target a specific stack from anywhere.",
+    )
+    if runtime == cli_runtime_mode.NATIVE:
+        return _native_pending("down")
     services._compose(orcha_dir, "down", *extra)
 
 
@@ -102,9 +113,16 @@ def cmd_upgrade(args: argparse.Namespace, services) -> None:
     cwd = pathlib.Path.cwd()
     orcha_dir = cwd / ".orcha"
     config_path = cwd / ".claude" / "orcha.json"
-    if not (orcha_dir / "docker-compose.yml").exists() or not config_path.exists():
+    runtime = cli_runtime_mode.require_project(
+        cwd,
+        "error: no .orcha/ + .claude/orcha.json here — `orcha upgrade` is for an "
+        "existing project (run `orcha init` to bootstrap a new one).",
+    )
+    if not config_path.exists():
         sys.exit("error: no .orcha/ + .claude/orcha.json here — `orcha upgrade` is for an "
                  "existing project (run `orcha init` to bootstrap a new one).")
+    if runtime == cli_runtime_mode.NATIVE:
+        return _native_pending("upgrade")
     cfg = json.loads(config_path.read_text())
     project_name = cfg.get("project_name") or services._sanitize_name(cwd.name)
     db_port, api_port = cfg.get("db_port"), cfg.get("api_port")

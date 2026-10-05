@@ -11,6 +11,8 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from orcha_cli import cli_runtime_mode
+
 
 def source_root() -> pathlib.Path | None:
     """Return the editable orcha-cli source root, if this is a source install."""
@@ -137,14 +139,13 @@ def update_command(
 ) -> None:
     """Apply an idempotent host and project update without changing project data."""
     cwd = pathlib.Path.cwd()
-    if (
-        not (cwd / ".orcha" / "docker-compose.yml").exists()
-        or not (cwd / ".claude" / "orcha.json").exists()
-    ):
-        sys.exit(
-            "error: no .orcha/ + .claude/orcha.json here — run `orcha update` from an "
-            "existing project directory (or `orcha init` to bootstrap a new one)."
-        )
+    missing = (
+        "error: no .orcha/ + .claude/orcha.json here — run `orcha update` from an "
+        "existing project directory (or `orcha init` to bootstrap a new one)."
+    )
+    cli_runtime_mode.require_project(cwd, missing)
+    if not (cwd / ".claude" / "orcha.json").exists():
+        sys.exit(missing)
 
     if not args.no_self:
         _self_update(

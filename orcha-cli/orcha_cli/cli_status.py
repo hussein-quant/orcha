@@ -7,6 +7,8 @@ import pathlib
 import sys
 from typing import Any
 
+from orcha_cli import cli_runtime_mode
+
 
 def status_command(_: Any, services: Any) -> None:
     """Show the connected project and its Compose process state."""
@@ -24,7 +26,7 @@ def status_command(_: Any, services: Any) -> None:
         f"{config.get('current_container_id', '(none — run /orcha-container)')}"
     )
     print()
-    if (orcha_dir / "docker-compose.yml").exists():
+    if cli_runtime_mode.is_docker_project(cwd, config):
         services._compose(orcha_dir, "ps")
         print()
         print(
