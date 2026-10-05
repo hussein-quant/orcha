@@ -49,7 +49,7 @@ UTC = _dt.timezone.utc
 # GH #258 S2b: result columns built by sql.json_object()/sql.json_array_agg(). Postgres returns
 # json that psycopg decodes; SQLite returns TEXT, so the row adapter decodes these by name.
 JSON_ALIASES = frozenset({
-    "active_run", "assignees", "close_decision", "current_task", "message_summary",
+    "active_run", "assignees", "attachments", "close_decision", "current_task", "message_summary",
     "plan_decision", "plan_message", "previous_plan_decision", "reassigned", "reviewer", "running_run",
     "runs",
     "task_link", "waiting_on",
@@ -57,7 +57,7 @@ JSON_ALIASES = frozenset({
 
 # Boolean EXPRESSION columns (COALESCE(r.wake_enabled, true), CASE ... END) lose the declared
 # BOOLEAN type on SQLite and come back as 1/0; these aliases are turned back into bools.
-BOOL_ALIASES = frozenset({"cold_required", "wake_enabled"})
+BOOL_ALIASES = frozenset({"cold_required", "is_human", "wake_enabled"})
 
 
 # ---------------------------------------------------------------- Postgres (transition only)
