@@ -235,11 +235,13 @@ def spawn_headless(
             # Task-5 REQUIREMENT: the drain sidecar's container is label-exempt
             # from the reaper's orphan pass (it owns no run row by design).
             sbx_labels.append(_sandbox.LABEL_SIDECAR)
+        # Resolved at the ROOT (worktrees never carry the generated compose file or the
+        # runtime key). GH #258 X2: compose network, host network (native Linux) or host gateway.
+        network, add_hosts = _sandbox.network_for(ws_root, sandbox_cfg)
         argv = _sandbox.build_docker_argv(
             argv, cfg=sandbox_cfg, name=sbx_name, workspace=ws_root, workdir=cwd,
-            # The stack's compose file lives at the ROOT (worktrees never carry
-            # the generated .orcha/docker-compose.yml).
-            network=sandbox_cfg.network or _sandbox.compose_network(ws_root),
+            network=network,
+            add_hosts=add_hosts,
             api_config_mount=api_cfg,
             extra_labels=tuple(sbx_labels),
         )

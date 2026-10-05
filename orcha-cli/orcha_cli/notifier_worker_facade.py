@@ -175,6 +175,7 @@ def reap_orphaned_runs(
     *,
     live_sandbox=frozenset(),
     quiet: bool = True,
+    sandbox_enabled=None,
 ) -> int:
     return _orphan_cleanup.reap_orphaned_runs(
         api_base,
@@ -182,6 +183,7 @@ def reap_orphaned_runs(
         live_pids,
         live_sandbox=live_sandbox,
         quiet=quiet,
+        sandbox_enabled=sandbox_enabled,
         services=_compat(),
     )
 

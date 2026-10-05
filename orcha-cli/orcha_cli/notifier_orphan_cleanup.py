@@ -240,6 +240,7 @@ def reap_orphaned_runs(
     *,
     live_sandbox=frozenset(),
     quiet: bool = True,
+    sandbox_enabled: Optional[bool] = None,
     services,
 ) -> int:
     """Reconcile database run rows whose host processes no longer exist.
@@ -295,7 +296,15 @@ def reap_orphaned_runs(
     # stops), shield EVERY sandbox row's lane (unknown ≠ dead — its lease must
     # not be ripped either), and skip the orphan pass. With a healthy daemon,
     # probe-None ⇒ genuinely gone is sound.
-    docker_ok = _sandbox.daemon_reachable()
+    # GH #258 X2/R4: only pay for `docker info` when sandboxing can be in play — the sandbox
+    # is on (None = caller doesn't know → probe as before), a run row is sandboxed, or this
+    # daemon holds a live sandbox handle. A Docker-free laptop never shells out per tick.
+    needs_docker = (
+        sandbox_enabled is not False
+        or bool(live_sandbox)
+        or any(row.get("sandbox_container_id") for row in runs)
+    )
+    docker_ok = needs_docker and _sandbox.daemon_reachable()
     for row in runs:
         sbx = row.get("sandbox_container_id")
         if not sbx:
