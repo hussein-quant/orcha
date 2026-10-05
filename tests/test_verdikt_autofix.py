@@ -64,8 +64,15 @@ class Loop:
     def status(self):
         return self.db.execute("SELECT status FROM tasks WHERE id=%s", (self.tid,))[0]["status"]
 
+    def _handed_off(self, n):
+        # The auto-trigger thread commits the run row first and stamps verdikt_request_id after
+        # the send, so wait for the handoff too, not just the row (a sweep in between sees an
+        # unsent run and judges nothing).
+        rows = self.runs()
+        return len(rows) >= n and all(r["verdikt_request_id"] or r["status"] != "queued" for r in rows)
+
     async def wait_runs(self, n):
-        assert _wait(lambda: len(self.runs()) >= n, timeout=8), f"expected {n} Verdikt runs, got {len(self.runs())}"
+        assert _wait(lambda: self._handed_off(n), timeout=8), f"expected {n} Verdikt runs, got {len(self.runs())}"
 
     async def sweep(self):
         r = await self.client.post(f"/api/containers/{self.cid}/verdikt/sweep", json={})

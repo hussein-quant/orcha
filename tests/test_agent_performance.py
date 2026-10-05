@@ -17,6 +17,7 @@ import pytest
 from portal_backend import agent_performance as perf
 from portal_backend import agent_performance_routes  # noqa: F401  (registers the routes)
 from conftest import ts_ago
+from portal_backend import sql
 
 
 
@@ -247,7 +248,7 @@ async def test_full_scenario_per_agent_and_project(client, container, make_agent
     # approval is in the window: move f2's rejection back 40 days
     db.execute(
         f"UPDATE events SET created_at = {ts_ago(3456000)} WHERE entity_id=%s "
-        "AND event_type='verified' AND detail->>'approved'='false'", (f2,))
+        f"AND event_type='verified' AND NOT {sql.json_bool_is_true('detail', 'approved')}", (f2,))
     fm2 = _row(await _perf(client, cid, "30d"), "Forge")["metrics"]
     assert fm2["first_pass_rate"]["numerator"] == 3          # still not first-pass
     assert fm2["rework"]["total"] == 0                        # but rework counted only in range
