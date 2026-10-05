@@ -52,7 +52,7 @@ def list_command(_: Any, services: Any) -> None:
     print("-" * len(header))
     for stack in stacks:
         api_port = stack["api_port"] or "?"
-        db_port = stack["db_port"] or "?"
+        db_port = stack["db_port"] or ("-" if stack.get("runtime") == "native" else "?")
         api_url = f"http://localhost:{api_port}/"
         container_name = "(none — run orcha init)"
         container_status = "-"

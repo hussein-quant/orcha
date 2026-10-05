@@ -24,7 +24,7 @@ import sys
 import time
 from typing import Optional
 
-from . import cli_portal
+from . import cli_portal, cli_stacks_registry
 from .cli_runtime_mode import NATIVE, db_path, read_config, require_project
 from .cli_serve_support import ChildSpec, child_specs, pump, read_state, rotating_logger, write_state
 
@@ -238,6 +238,10 @@ def cmd_serve(args: argparse.Namespace) -> None:
     cli_portal._prepare_host_state(root)
     env = cli_portal.build_portal_env(root, read_config(root))
     sup = Supervisor(root, child_specs(root, no_bridge=args.no_bridge), env=env)
+    cfg = read_config(root)
+    cli_stacks_registry.register(cfg.get("project_name") or root.name, path=root,
+                                 api_port=cfg.get("api_port"), bridge_port=cfg.get("bridge_port"),
+                                 cli_version=_cli_version())
     if sys.stderr.isatty():
         sup.log.addHandler(logging.StreamHandler(sys.stderr))
     sys.exit(sup.run())
