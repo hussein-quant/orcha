@@ -1,3 +1,4 @@
+from conftest import ts_ago
 """PS-36: a human's untargeted ask is never routed back to the asker — it goes to
 another human who can act, or 409 when nobody else can."""
 
@@ -8,7 +9,7 @@ async def test_human_untargeted_ask_goes_to_someone_else(client, container, make
     maya = (await make_agent("maya", kind="human"))["agent_id"]
     # gina has the freshest heartbeat — the plain ranking would pick her
     db.execute("UPDATE agents SET last_heartbeat_at=now() WHERE id=%s", (gina,))
-    db.execute("UPDATE agents SET last_heartbeat_at=now() - interval '1 hour' WHERE id=%s", (maya,))
+    db.execute(f"UPDATE agents SET last_heartbeat_at={ts_ago(3600)} WHERE id=%s", (maya,))
     r = await client.post(f"/api/containers/{cid}/requests",
                           json={"requester_agent_id": gina, "payload": "who owns billing?", "type": "info"})
     assert r.status_code == 201, r.text

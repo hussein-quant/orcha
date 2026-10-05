@@ -1,3 +1,4 @@
+from conftest import ts_ago, ts_from_now
 """Snapshot facts that let every portal surface agree on an agent's status.
 
 Linear review r3: the workspace header said "Working" (it reads GET /api/agents/{aid}/runs)
@@ -37,10 +38,10 @@ async def test_runtime_served_is_server_computed(client, db, container):
     cid = container["id"]
     c = (await _snap(client, cid))["container"]
     assert c["runtime_served"] is False and c["wake_scan_age_secs"] is None
-    db.execute("UPDATE containers SET last_wake_scan_at = now() - interval '30 seconds' WHERE id=%s", (cid,))
+    db.execute(f"UPDATE containers SET last_wake_scan_at = {ts_ago(30)} WHERE id=%s", (cid,))
     c = (await _snap(client, cid))["container"]
     assert c["runtime_served"] is True and 25 <= float(c["wake_scan_age_secs"]) < 120
-    db.execute("UPDATE containers SET last_wake_scan_at = now() - interval '5 minutes' WHERE id=%s", (cid,))
+    db.execute(f"UPDATE containers SET last_wake_scan_at = {ts_ago(300)} WHERE id=%s", (cid,))
     c = (await _snap(client, cid))["container"]
     assert c["runtime_served"] is False and float(c["wake_scan_age_secs"]) >= 300
 
@@ -53,7 +54,7 @@ async def test_running_run_matches_the_runs_list(client, db, container, make_age
 
     # a running row with NO live lease (no runtime / orphan): /runs says running,
     # active_run (lease-gated) stays null — running_run carries it with lease_live=false
-    _run(db, aid, started="now() - interval '10 minutes'")
+    _run(db, aid, started=f"{ts_ago(600)}")
     newest = _run(db, aid)
     ag = _agent(await _snap(client, cid), aid)
     runs = (await client.get(f"/api/agents/{aid}/runs")).json()["runs"]
@@ -65,8 +66,8 @@ async def test_running_run_matches_the_runs_list(client, db, container, make_age
 
     # with a live work lease it is the same run, lease_live=true, and active_run agrees
     db.execute(
-        """INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind)
-           VALUES (%s, now() + interval '5 minutes', 'ephemeral')""",
+        f"""INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind)
+           VALUES (%s, {ts_from_now(300)}, 'ephemeral')""",
         (aid,),
     )
     ag = _agent(await _snap(client, cid), aid)
@@ -83,8 +84,8 @@ async def test_conversation_run_lease_is_read_from_its_own_lane(client, db, cont
     aid = (await make_agent("chat"))["agent_id"]
     _run(db, aid, lane="conversation")
     db.execute(
-        """INSERT INTO agent_wake_state (agent_id, conv_lease_until, conv_lease_kind)
-           VALUES (%s, now() + interval '5 minutes', 'resident')""",
+        f"""INSERT INTO agent_wake_state (agent_id, conv_lease_until, conv_lease_kind)
+           VALUES (%s, {ts_from_now(300)}, 'resident')""",
         (aid,),
     )
     assert _agent(await _snap(client, cid), aid)["running_run"]["lease_live"] is True

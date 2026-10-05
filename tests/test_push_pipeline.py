@@ -18,6 +18,7 @@ Contract under test (portal_backend/push_routes.py + push_outbox.py):
     rows older than 48h.
 """
 import pytest
+from conftest import ts_ago
 
 
 @pytest.fixture(autouse=True)
@@ -437,7 +438,7 @@ async def test_claim_prunes_rows_older_than_48h(
     await _register(client, TOKEN_A, OCTO)
     asker = await make_agent("asker", "eng")
     await make_request(asker["agent_id"], "stale")
-    db.execute("UPDATE push_outbox SET created_at = now() - interval '49 hours'")
+    db.execute(f"UPDATE push_outbox SET created_at = {ts_ago(176400)}")
     r = await client.post("/api/push/outbox/claim", json={"limit": 10})
     assert r.json()["events"] == []
     assert _outbox(db) == []  # pruned, not failed

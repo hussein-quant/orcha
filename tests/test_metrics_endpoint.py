@@ -12,6 +12,7 @@ import json
 import uuid
 
 from portal_backend.container_metrics_routes import parse_output_tail
+from conftest import ts_ago
 
 CLAUDE_TAIL = (
     '{"type":"system","subtype":"init"}\n'
@@ -133,8 +134,8 @@ async def test_metrics_window_filters_out_old_runs(client, container, make_agent
     inside = await _run(client, aid, output=CLAUDE_TAIL)
     outside = await _run(client, aid, output=CLAUDE_TAIL)
     db.execute(
-        "UPDATE worker_runs SET started_at=now() - interval '9 days', "
-        "ended_at=now() - interval '9 days' WHERE run_id=%s", (outside,))
+        f"UPDATE worker_runs SET started_at={ts_ago(777600)}, "
+        f"ended_at={ts_ago(777600)} WHERE run_id=%s", (outside,))
     d = await _metrics(client, cid, days=7)
     assert d["totals"]["runs"] == 1 and d["totals"]["est_cost_usd"] == 0.25
     d30 = await _metrics(client, cid, days=30)
@@ -169,8 +170,8 @@ async def test_metrics_daily_gap_fill_and_bucketing(client, container, make_agen
     today_run = await _run(client, aid, output=CLAUDE_TAIL)
     old_run = await _run(client, aid, output=CLAUDE_TAIL)
     db.execute(
-        "UPDATE worker_runs SET started_at=now() - interval '3 days', "
-        "ended_at=now() - interval '3 days' WHERE run_id=%s", (old_run,))
+        f"UPDATE worker_runs SET started_at={ts_ago(259200)}, "
+        f"ended_at={ts_ago(259200)} WHERE run_id=%s", (old_run,))
     d = await _metrics(client, cid, days=7)
     days = d["daily"]
     assert len(days) == 7                                             # full window, gaps filled
@@ -209,9 +210,9 @@ async def test_metrics_tasks_completed_and_verified_in_window(
                               json={"actor_agent_id": human, "approve": True})
         assert r.status_code == 200, r.text
     # push one completion + its audit event out of the window
-    db.execute("UPDATE tasks SET completed_at=now() - interval '9 days' WHERE id=%s", (t2,))
+    db.execute(f"UPDATE tasks SET completed_at={ts_ago(777600)} WHERE id=%s", (t2,))
     db.execute(
-        "UPDATE events SET created_at=now() - interval '9 days' "
+        f"UPDATE events SET created_at={ts_ago(777600)} "
         "WHERE entity_type='task' AND entity_id=%s AND event_type='verified'", (t2,))
     d = await _metrics(client, cid, days=7)
     assert d["totals"]["tasks_completed"] == 1

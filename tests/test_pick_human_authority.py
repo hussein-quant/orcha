@@ -15,6 +15,7 @@ Contract under test:
   * an owner cannot name a viewer as a task's reviewer (a viewer can never /verify).
 """
 import pytest
+from conftest import ts_ago
 
 OCTO = {"X-Auth-Request-User": "octocat"}   # bound owner
 VERA = {"X-Auth-Request-User": "vera"}      # invited viewer
@@ -102,7 +103,7 @@ async def test_escalate_and_sweep_skip_viewer(
 
     # expires_at sweep re-targets expired AI-targeted asks at a human, too.
     req2 = await make_request(ai["agent_id"], "expire me", target_alias="worker2")
-    db.execute("UPDATE requests SET expires_at = now() - interval '1 minute' WHERE id=%s",
+    db.execute(f"UPDATE requests SET expires_at = {ts_ago(60)} WHERE id=%s",
                (req2["id"],))
     r = await client.post(
         f"/api/containers/{container['id']}/sweep",

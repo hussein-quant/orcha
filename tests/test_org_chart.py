@@ -14,6 +14,7 @@ Contract under test:
     `detail.routed_via` records why.
 """
 import pytest
+from conftest import ts_ago, ts_from_now
 
 
 OCTO = {"X-Auth-Request-User": "octocat"}
@@ -226,7 +227,7 @@ async def test_untargeted_ask_goes_to_nearest_human_manager(
     _set(db, lead, boss)
     _set(db, dev, lead)
     # make `other` the freshest human so the old fallback would pick them
-    db.execute("UPDATE agents SET last_heartbeat_at=now() + interval '1 hour' WHERE id=%s", (other,))
+    db.execute(f"UPDATE agents SET last_heartbeat_at={ts_from_now(3600)} WHERE id=%s", (other,))
 
     r = await make_request(dev, "Which DB should I use?")
     rid = r["request_id"]
@@ -342,9 +343,9 @@ async def test_sweep_routes_expired_asks_to_requesters_manager(
     await make_agent("peer")
     dev = (await make_agent("dev"))["agent_id"]
     _set(db, dev, mgr)
-    db.execute("UPDATE agents SET last_heartbeat_at=now() + interval '1 hour' WHERE id=%s", (op,))
+    db.execute(f"UPDATE agents SET last_heartbeat_at={ts_from_now(3600)} WHERE id=%s", (op,))
     r = await make_request(dev, "q", target_alias="peer")
-    db.execute("UPDATE requests SET expires_at=now() - interval '1 minute' WHERE id=%s", (r["request_id"],))
+    db.execute(f"UPDATE requests SET expires_at={ts_ago(60)} WHERE id=%s", (r["request_id"],))
     s = await client.post(f"/api/containers/{cid}/sweep?actor_agent_id={op}")
     assert s.status_code == 200, s.text
     row = _detail(db, r["request_id"])
@@ -392,7 +393,7 @@ async def test_suggestion_without_manager_skips_member_who_cannot_approve(
     owner = (await make_agent("owner", kind="human"))["agent_id"]
     _role(db, owner, "owner")
     maya = (await make_agent("maya", kind="human"))["agent_id"]  # member, no grant
-    db.execute("UPDATE agents SET last_heartbeat_at=now() - interval '1 hour' WHERE id=%s", (owner,))
+    db.execute(f"UPDATE agents SET last_heartbeat_at={ts_ago(3600)} WHERE id=%s", (owner,))
     db.execute("UPDATE agents SET last_heartbeat_at=now() WHERE id=%s", (maya,))
     zed = (await make_agent("zed"))["agent_id"]  # no reports_to
     await make_agent("peer")

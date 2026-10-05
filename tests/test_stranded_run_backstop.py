@@ -31,6 +31,8 @@ from orcha_cli import notifier
 from orcha_cli import notifier_embodiment
 from orcha_cli import notifier_wake_candidate
 from orcha_cli import notifier_worktree_cleanup as cleanup
+from conftest import ts_ago
+from portal_backend import sql
 
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
@@ -47,15 +49,13 @@ async def _running_work_run(client, db, aid, *, silent_secs, lease="lapsed"):
     run_id = (await client.post(f"/api/agents/{aid}/runs",
                                 json={"wake_kind": "ephemeral", "pid": 91071,
                                       "token_id": tok})).json()["run_id"]
-    ago = f"{int(silent_secs)} seconds"
-    db.execute("UPDATE worker_runs SET started_at = now() - %s::interval WHERE run_id=%s",
-               (ago, run_id))
-    db.execute("UPDATE agent_wake_state SET work_last_heartbeat_at = now() - %s::interval, "
-               "last_woken_at = now() - %s::interval WHERE agent_id=%s", (ago, ago, aid))
-    db.execute("UPDATE agents SET last_heartbeat_at = now() - %s::interval WHERE id=%s",
-               (ago, aid))
+    ago = db.ago(int(silent_secs))
+    db.execute("UPDATE worker_runs SET started_at = %s WHERE run_id=%s", (ago, run_id))
+    db.execute("UPDATE agent_wake_state SET work_last_heartbeat_at = %s, "
+               "last_woken_at = %s WHERE agent_id=%s", (ago, ago, aid))
+    db.execute("UPDATE agents SET last_heartbeat_at = %s WHERE id=%s", (ago, aid))
     if lease == "lapsed":
-        db.execute("UPDATE agent_wake_state SET wake_lease_until = now() - interval '1 minute' "
+        db.execute(f"UPDATE agent_wake_state SET wake_lease_until = {ts_ago(60)} "
                    "WHERE agent_id=%s", (aid,))
     return run_id, tok
 
@@ -126,7 +126,7 @@ async def test_lapsed_lease_with_recent_activity_waits_for_threshold(
     aid = (await make_agent("Quiet"))["agent_id"]
     run_id, tok = await _running_work_run(client, db, aid, silent_secs=3000)
     db.execute("INSERT INTO worker_run_lines (run_id, seq, line, ts) "
-               "VALUES (%s, 1, '{}', now() - interval '60 seconds')", (run_id,))
+               f"VALUES (%s, 1, '{{}}', {ts_ago(60)})", (run_id,))
 
     r = await client.post(f"/api/containers/{cid}/reap-orphan-leases")
     assert r.json()["stranded"] == []
@@ -134,7 +134,7 @@ async def test_lapsed_lease_with_recent_activity_waits_for_threshold(
     reason = (await _candidate(client, cid, aid))["reason"]
     assert "reconciled automatically in ~20m" in reason
 
-    db.execute("UPDATE worker_run_lines SET ts = now() - interval '1300 seconds' "
+    db.execute(f"UPDATE worker_run_lines SET ts = {ts_ago(1300)} "
                "WHERE run_id=%s", (run_id,))
     r = await client.post(f"/api/containers/{cid}/reap-orphan-leases")
     assert [s["run_id"] for s in r.json()["stranded"]] == [run_id]
@@ -146,7 +146,7 @@ async def test_recent_lane_heartbeat_keeps_lapsed_run(client, make_agent, contai
     cid = container["id"]
     aid = (await make_agent("Polling"))["agent_id"]
     run_id, _ = await _running_work_run(client, db, aid, silent_secs=3000)
-    db.execute("UPDATE agent_wake_state SET work_last_heartbeat_at = now() - interval '30 seconds' "
+    db.execute(f"UPDATE agent_wake_state SET work_last_heartbeat_at = {ts_ago(30)} "
                "WHERE agent_id=%s", (aid,))
     r = await client.post(f"/api/containers/{cid}/reap-orphan-leases")
     assert r.json()["stranded"] == [] and _status(db, run_id) == "running"
@@ -161,11 +161,11 @@ async def test_conversation_lane_stranded_run_is_orphaned(client, make_agent, co
     run_id = (await client.post(f"/api/agents/{aid}/runs",
                                 json={"wake_kind": "resident", "pid": 97263,
                                       "lane": "conversation"})).json()["run_id"]
-    db.execute("UPDATE worker_runs SET started_at = now() - interval '2000 seconds' "
+    db.execute(f"UPDATE worker_runs SET started_at = {ts_ago(2000)} "
                "WHERE run_id=%s", (run_id,))
-    db.execute("UPDATE agent_wake_state SET conv_lease_until = now() - interval '1 minute', "
-               "conv_last_heartbeat_at = now() - interval '2000 seconds', "
-               "conv_last_woken_at = now() - interval '2000 seconds' WHERE agent_id=%s", (aid,))
+    db.execute(f"UPDATE agent_wake_state SET conv_lease_until = {ts_ago(60)}, "
+               f"conv_last_heartbeat_at = {ts_ago(2000)}, "
+               f"conv_last_woken_at = {ts_ago(2000)} WHERE agent_id=%s", (aid,))
 
     r = await client.post(f"/api/containers/{cid}/reap-orphan-leases")
     assert [(s["run_id"], s["lane"]) for s in r.json()["stranded"]] == [(run_id, "conversation")]
@@ -180,12 +180,12 @@ async def test_sandbox_row_gets_its_runtime_window(client, make_agent, container
     run_id = (await client.post(f"/api/agents/{aid}/runs",
                                 json={"wake_kind": "sandbox", "pid": 1,
                                       "sandbox_container_id": "orcha-run-abc"})).json()["run_id"]
-    db.execute("UPDATE worker_runs SET started_at = now() - interval '2000 seconds' "
+    db.execute(f"UPDATE worker_runs SET started_at = {ts_ago(2000)} "
                "WHERE run_id=%s", (run_id,))
     r = await client.post(f"/api/containers/{cid}/reap-orphan-leases")
     assert r.json()["stranded"] == [] and _status(db, run_id) == "running"
 
-    db.execute("UPDATE worker_runs SET started_at = now() - interval '9000 seconds' "
+    db.execute(f"UPDATE worker_runs SET started_at = {ts_ago(9000)} "
                "WHERE run_id=%s", (run_id,))
     r = await client.post(f"/api/containers/{cid}/reap-orphan-leases")
     assert [s["run_id"] for s in r.json()["stranded"]] == [run_id]
@@ -319,8 +319,9 @@ def test_fresh_daemon_reconciles_dead_and_recycled_pids(monkeypatch, db):
         sleeper.kill()
         sleeper.wait()
     rows = {str(r["run_id"]): r for r in db.execute(
-        "SELECT run_id, status, exit_code FROM worker_runs WHERE run_id::text = ANY(%s)",
-        ([dead, recycled, genuine],))}
+        f"SELECT run_id, status, exit_code FROM worker_runs "
+        f"WHERE {sql.in_list('CAST(run_id AS TEXT)')}",
+        (sql.list_param([dead, recycled, genuine]),))}
     assert (rows[dead]["status"], rows[dead]["exit_code"]) == ("killed", -1)
     assert rows[recycled]["status"] == "killed"
     assert rows[genuine]["status"] == "running"

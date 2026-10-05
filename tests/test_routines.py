@@ -16,6 +16,7 @@ import pytest
 import conftest
 from portal_backend import routine_routes
 from portal_backend import routine_schedule as sched
+from conftest import ts_ago
 
 UTC = timezone.utc
 
@@ -357,7 +358,7 @@ async def test_stale_pending_run_is_marked_interrupted(client, arena, db):
     r = await make_routine(client, arena)
     db.execute(
         "INSERT INTO routine_runs (routine_id, container_id, trigger, outcome, created_at) "
-        "VALUES (%s, %s, 'manual', 'pending', now() - interval '1 hour')",
+        f"VALUES (%s, %s, 'manual', 'pending', {ts_ago(3600)})",
         (r["id"], arena["cid"]),
     )
     routine_routes.run_due_routines(arena["cid"])

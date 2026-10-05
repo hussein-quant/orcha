@@ -11,6 +11,7 @@ import hashlib
 import uuid
 
 import pytest
+from conftest import ts_ago
 
 
 @pytest.fixture(autouse=True)
@@ -234,7 +235,7 @@ async def test_check_touch_throttled(client, container, make_agent, trust_proxy,
     assert t2 == t1                                    # inside the window: no write
 
     db.execute(
-        "UPDATE device_tokens SET last_used_at = now() - interval '2 minutes'"
+        f"UPDATE device_tokens SET last_used_at = {ts_ago(120)}"
     )
     assert (await client.get("/api/auth/check", headers=hdr)).status_code == 202
     t3 = db.execute("SELECT last_used_at FROM device_tokens")[0]["last_used_at"]

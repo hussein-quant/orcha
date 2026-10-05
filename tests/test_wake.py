@@ -18,6 +18,7 @@ import pytest
 # notifier lives in the CLI package, not on the portal path conftest sets up.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "orcha-cli"))
 from orcha_cli import notifier  # noqa: E402
+from conftest import ts_from_now
 
 
 # ---------- reachability registry ----------
@@ -481,8 +482,8 @@ async def test_task_assigned_guarded_when_agent_has_live_run_on_different_task(
         "INSERT INTO worker_runs (agent_id, task_id, status, lane) VALUES (%s, %s, 'running', 'work')",
         (aid, task_a["id"]))
     db.execute(
-        """INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind)
-           VALUES (%s, now() + interval '1 hour', 'ephemeral')
+        f"""INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind)
+           VALUES (%s, {ts_from_now(3600)}, 'ephemeral')
            ON CONFLICT (agent_id) DO UPDATE SET wake_lease_until = EXCLUDED.wake_lease_until""",
         (aid,))
     task_b = await make_task("Task B — newly assigned mid-run", "n/a", assignee_alias="B")
@@ -542,8 +543,8 @@ async def test_task_assigned_not_guarded_when_live_run_is_same_task(
         "INSERT INTO worker_runs (agent_id, task_id, status, lane) VALUES (%s, %s, 'running', 'work')",
         (aid, t["id"]))
     db.execute(
-        """INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind)
-           VALUES (%s, now() + interval '1 hour', 'ephemeral')
+        f"""INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind)
+           VALUES (%s, {ts_from_now(3600)}, 'ephemeral')
            ON CONFLICT (agent_id) DO UPDATE SET wake_lease_until = EXCLUDED.wake_lease_until""",
         (aid,))
     _, cand = await _scan(client, container["id"], aid, min_idle=0)

@@ -15,6 +15,7 @@ import pytest
 
 from fake_verdikt import FakeVerdikt, scripted
 from test_evidence_verdikt import DIFF, OCTO, HUBOT, VERA, _members, _run, _wait
+from conftest import ts_ago
 
 DOD = """- All tests pass
 - The login page shows "Wrong password" after a bad password
@@ -547,7 +548,7 @@ async def test_sweep_endpoint_reports_and_closes_the_loop(client, container, mak
     # 3am: Verdikt's worker finishes while nobody has the task open
     req = fake.tables["run_requests"][0]
     fake.complete(req["id"], "fail", [{"text": C2, "outcome": "fail", "expected": "red", "actual": "black"}])
-    db.execute("UPDATE verdikt_runs SET last_polled_at = now() - interval '1 minute'")
+    db.execute(f"UPDATE verdikt_runs SET last_polled_at = {ts_ago(60)}")
     from portal_backend import verdikt_autofix as vaf
 
     out = vaf.sweep(None)  # what the portal's own timer runs

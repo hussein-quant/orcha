@@ -23,6 +23,7 @@ import time
 
 import httpx
 import pytest
+from conftest import ts_ago, ts_from_now
 
 OCTO = {"X-Auth-Request-User": "octocat"}   # bound owner
 HUBOT = {"X-Auth-Request-User": "hubot"}    # invited member
@@ -126,7 +127,7 @@ async def test_human_escalation_skips_the_requester(
     await make_agent("worker", "eng")
     req = await make_request(alice["agent_id"], "help?", target_alias="worker")
     # alice is the freshest human (she just clicked) — pre-fix she got her own ask back.
-    db.execute("UPDATE agents SET last_heartbeat_at = now() - interval '1 hour' WHERE id=%s",
+    db.execute(f"UPDATE agents SET last_heartbeat_at = {ts_ago(3600)} WHERE id=%s",
                (bob["agent_id"],))
     db.execute("UPDATE agents SET last_heartbeat_at = now() WHERE id=%s", (alice["agent_id"],))
     r = await client.post(f"/api/requests/{req['request_id']}/escalate",
@@ -235,14 +236,14 @@ async def test_container_list_live_agents(client, db, container, make_agent, mak
     t = await make_task("Fix double-charge", "fixed", assignee_alias="forge")
     # forge: live work lease + a running work-lane run on the task
     db.execute("INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind) "
-               "VALUES (%s, now() + interval '5 minutes', 'ephemeral') "
+               f"VALUES (%s, {ts_from_now(300)}, 'ephemeral') "
                "ON CONFLICT (agent_id) DO UPDATE SET wake_lease_until=EXCLUDED.wake_lease_until, "
                "lease_kind=EXCLUDED.lease_kind", (forge["agent_id"],))
     db.execute("INSERT INTO worker_runs (agent_id, task_id, status, lane) "
                "VALUES (%s, %s, 'running', 'work')", (forge["agent_id"], t["id"]))
     # lease-only: a live lease with no run and no task reads idle — never listed
     db.execute("INSERT INTO agent_wake_state (agent_id, wake_lease_until, lease_kind) "
-               "VALUES (%s, now() + interval '5 minutes', 'ephemeral') "
+               f"VALUES (%s, {ts_from_now(300)}, 'ephemeral') "
                "ON CONFLICT (agent_id) DO UPDATE SET wake_lease_until=EXCLUDED.wake_lease_until",
                (leased_idle["agent_id"],))
 
@@ -259,7 +260,7 @@ async def test_container_list_live_agents(client, db, container, make_agent, mak
 
     # VD-09: a lapsed lease with the run still 'running' stays Working — the snapshot's
     # running_run (roster / board / selected sidebar) reports it regardless of lease.
-    db.execute("UPDATE agent_wake_state SET wake_lease_until = now() - interval '1 minute'")
+    db.execute(f"UPDATE agent_wake_state SET wake_lease_until = {ts_ago(60)}")
     r = await client.get("/api/containers")
     row = next(c for c in r.json()["containers"] if c["id"] == container["id"])
     assert [x["alias"] for x in row["live_agents"]] == ["forge"]

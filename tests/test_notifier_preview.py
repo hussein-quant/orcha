@@ -22,6 +22,7 @@ from fastapi.testclient import TestClient
 
 from orcha_cli import notifier_command
 from orcha_cli import notifier_preview as npv
+from conftest import ts_ago
 
 PY = shlex.quote(sys.executable)
 SERVE = f"{PY} -m http.server {{port}} --bind 127.0.0.1"
@@ -415,7 +416,7 @@ async def test_end_to_end_portal_notifier_and_verdikt(client, container, make_ag
         assert _get(req["locator"]) == "<h1>the agent's change</h1>"
         proc = state.active[p["id"]].proc
         fake.complete(req["id"], "pass", [])
-        db.execute("UPDATE verdikt_runs SET last_polled_at = now() - interval '1 minute' WHERE id=%s", (run["id"],))
+        db.execute(f"UPDATE verdikt_runs SET last_polled_at = {ts_ago(60)} WHERE id=%s", (run["id"],))
         for pv in state.active.values():
             pv.last_heartbeat = 0
         v = await until(lambda v: v["preview"]["status"] == "stopped")

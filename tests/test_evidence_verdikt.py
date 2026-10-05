@@ -15,6 +15,7 @@ from datetime import timedelta
 import pytest
 
 from fake_verdikt import FakeVerdikt
+from conftest import ts_ago, ts_from_now
 
 
 OCTO = {"X-Auth-Request-User": "octocat"}
@@ -182,7 +183,7 @@ async def test_basis_rebuild_and_rounds(client, container, make_agent, make_task
     assert fresh["rebuilt"] is True and fresh["runs"] == [] and fresh["tests"]["status"] == "none"
     assert fresh["round_started_at"]
     _run(db, wid, tid, output=_claude("pytest", "1 failed, 29 passed in 1s", err=True), diff="",
-         started="now() + interval '1 second'")
+         started=f"{ts_from_now(1)}")
     r = await client.post(f"/api/tasks/{tid}/evidence/rebuild")
     assert r.status_code == 200
     assert r.json()["tests"]["status"] == "failed"
@@ -397,7 +398,7 @@ async def test_unavailable_failed_timeout_missing_project(client, container, mak
     # 5) Verdikt goes quiet → timeout after the configured minutes, request cancelled best-effort
     r = await client.post(f"/api/tasks/{tid}/verdikt/runs", json={"actor_agent_id": hid})
     rid = r.json()["id"]
-    db.execute("UPDATE verdikt_runs SET created_at = now() - interval '31 minutes' WHERE id=%s", (rid,))
+    db.execute(f"UPDATE verdikt_runs SET created_at = {ts_ago(1860)} WHERE id=%s", (rid,))
     v = (await client.post(f"/api/tasks/{tid}/verdikt/runs/{rid}/refresh")).json()
     assert v["status"] == "timeout" and v["error"] == "no result from Verdikt within 30 min"
     assert fake.tables["run_requests"][-1]["status"] == "cancelled"
@@ -498,14 +499,14 @@ async def test_late_result_is_kept_not_overwritten_as_timeout(client, container,
     run = (await client.post(f"/api/tasks/{tid}/verdikt/runs", json={"actor_agent_id": hid})).json()
     req = fake.tables["run_requests"][0]
     fake.complete(req["id"], "fail", _CRIT)
-    db.execute("UPDATE verdikt_runs SET created_at = now() - interval '6 minutes' WHERE id=%s", (run["id"],))
+    db.execute(f"UPDATE verdikt_runs SET created_at = {ts_ago(360)} WHERE id=%s", (run["id"],))
     p = (await client.get(f"/api/tasks/{tid}/evidence")).json()
     assert p["verdikt"]["status"] == "completed" and p["verdikt"]["verdict"] == "fail"
     assert [i["status"] for i in p["dod"]["items"]][2:] == ["proven", "not_proven"]
     assert not any(c[0] == "PATCH" and c[1].startswith("/api/requests/") for c in fake.calls)
     # a run that really got no answer still times out (and is cancelled in Verdikt)
     run2 = (await client.post(f"/api/tasks/{tid}/verdikt/runs", json={"actor_agent_id": hid})).json()
-    db.execute("UPDATE verdikt_runs SET created_at = now() - interval '6 minutes' WHERE id=%s", (run2["id"],))
+    db.execute(f"UPDATE verdikt_runs SET created_at = {ts_ago(360)} WHERE id=%s", (run2["id"],))
     v = (await client.post(f"/api/tasks/{tid}/verdikt/runs/{run2['id']}/refresh")).json()
     assert v["status"] == "timeout" and fake.tables["run_requests"][-1]["status"] == "cancelled"
 
@@ -551,7 +552,7 @@ async def test_previous_round_verdict_does_not_prove_the_rework(client, containe
     r = await client.post(f"/api/tasks/{tid}/verify", json={"approve": False, "actor_agent_id": hid,
                                                            "feedback": "not red enough"})
     assert r.status_code == 200, r.text
-    _run(db, wid, tid, output=_claude("pytest -q", "==== 30 passed in 1.02s ===="), started="now() + interval '1 second'")
+    _run(db, wid, tid, output=_claude("pytest -q", "==== 30 passed in 1.02s ===="), started=f"{ts_from_now(1)}")
     p = (await client.get(f"/api/tasks/{tid}/evidence")).json()
     assert p["round_started_at"]
     assert [i["status"] for i in p["dod"]["items"]][2:] == ["needs_human", "needs_human"]

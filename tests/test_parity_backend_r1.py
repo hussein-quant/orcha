@@ -11,6 +11,7 @@
   * GET /api/containers carries the caller's own role/grants per project (additive).
 """
 import pytest
+from conftest import ts_ago
 
 OCTO = {"X-Auth-Request-User": "octocat"}   # bound owner
 HUBOT = {"X-Auth-Request-User": "hubot"}    # invited member
@@ -134,7 +135,7 @@ async def test_expiry_sweep_escalation_is_visible(
     await make_agent("scout", "worker")
     req = await make_request(lead["agent_id"], "expire me", target_alias="scout")
     rid = req["id"]
-    db.execute("UPDATE requests SET expires_at = now() - interval '1 minute' WHERE id=%s",
+    db.execute(f"UPDATE requests SET expires_at = {ts_ago(60)} WHERE id=%s",
                (rid,))
     r = await client.post(
         f"/api/containers/{cid}/sweep",

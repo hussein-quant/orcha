@@ -173,6 +173,21 @@ def _isolate_persona_cache():
         notifier._clear_persona_cache()
 
 
+def ts_ago(seconds):
+    """A quoted timestamp literal `seconds` before sql.utcnow(), for raw test SQL on either
+    backend: replaces `now() - interval '...'` (Postgres casts the text; SQLite stores it)."""
+    from portal_backend import sql
+
+    return "'" + sql.ts(sql.ago(seconds)) + "'"
+
+
+def ts_from_now(seconds):
+    """A quoted timestamp literal `seconds` after sql.utcnow(): replaces `now() + interval`."""
+    from portal_backend import sql
+
+    return "'" + sql.ts(sql.from_now(seconds)) + "'"
+
+
 class Db:
     """Thin DB accessor for tests — no ORM, just raw rows.
 

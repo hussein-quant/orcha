@@ -10,6 +10,7 @@ in /openapi.json.
 import pytest
 
 from test_evidence_verdikt import HUBOT, MALLORY, OCTO, VERA, _members
+from conftest import ts_ago
 
 BASE = "/Users/dev/acme"
 WT = f"{BASE}/.orcha-worktrees"
@@ -172,7 +173,7 @@ async def test_stale_claims_fail_instead_of_hanging(client, container, make_agen
     a = (await client.post(f"/api/containers/{cid}/agent-worktrees/actions",
                            json={"action": "refresh", "actor_agent_id": hid})).json()
     await client.post(f"/api/containers/{cid}/agent-worktrees/claim", json={})
-    db.execute("UPDATE agent_worktree_actions SET claimed_at = now() - interval '1 hour' WHERE id=%s", (a["id"],))
+    db.execute(f"UPDATE agent_worktree_actions SET claimed_at = {ts_ago(3600)} WHERE id=%s", (a["id"],))
     await client.post(f"/api/containers/{cid}/agent-worktrees/claim", json={"peek": True})
     row = (await client.get(f"/api/containers/{cid}/agent-worktrees/actions/{a['id']}")).json()
     assert row["status"] == "failed" and "notifier stopped" in row["error"]

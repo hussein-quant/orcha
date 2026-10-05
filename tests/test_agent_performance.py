@@ -16,6 +16,7 @@ import pytest
 
 from portal_backend import agent_performance as perf
 from portal_backend import agent_performance_routes  # noqa: F401  (registers the routes)
+from conftest import ts_ago
 
 
 
@@ -160,7 +161,7 @@ async def test_full_scenario_per_agent_and_project(client, container, make_agent
     # a Forge run with NO cost on f3 as well → f3 becomes not metered
     await _run(client, forge, f1, cost=0.10)  # f1 total 0.50, still fully priced
     # backdate f1's start so the median has spread
-    db.execute("UPDATE tasks SET started_at = now() - interval '2 hours' WHERE id=%s", (f1,))
+    db.execute(f"UPDATE tasks SET started_at = {ts_ago(7200)} WHERE id=%s", (f1,))
 
     # Pixel: 1 verified (below threshold for rates)
     await _task_verified(client, make_task, work_headers, "Pixel", pixel, human, title="p1", cost=1.0)
@@ -245,7 +246,7 @@ async def test_full_scenario_per_agent_and_project(client, container, make_agent
     # the reject event of f2 before the window still breaks first-pass when the
     # approval is in the window: move f2's rejection back 40 days
     db.execute(
-        "UPDATE events SET created_at = now() - interval '40 days' WHERE entity_id=%s "
+        f"UPDATE events SET created_at = {ts_ago(3456000)} WHERE entity_id=%s "
         "AND event_type='verified' AND detail->>'approved'='false'", (f2,))
     fm2 = _row(await _perf(client, cid, "30d"), "Forge")["metrics"]
     assert fm2["first_pass_rate"]["numerator"] == 3          # still not first-pass
@@ -260,7 +261,7 @@ async def test_range_window_excludes_old_verifications(client, container, make_a
     forge = (await make_agent("Forge"))["agent_id"]
     old = await _task_verified(client, make_task, work_headers, "Forge", forge, human, title="old")
     await _task_verified(client, make_task, work_headers, "Forge", forge, human, title="new")
-    db.execute("UPDATE events SET created_at = now() - interval '20 days' "
+    db.execute(f"UPDATE events SET created_at = {ts_ago(1728000)} "
                "WHERE entity_id=%s AND event_type='verified'", (old,))
     assert _row(await _perf(client, cid, "7d"), "Forge")["metrics"]["tasks_verified"] == 1
     assert _row(await _perf(client, cid, "30d"), "Forge")["metrics"]["tasks_verified"] == 2

@@ -22,6 +22,7 @@ import pytest
 
 from fake_verdikt import FakeVerdikt
 from test_evidence_verdikt import HUBOT, MALLORY, OCTO, VERA, _members, _nv_task
+from conftest import ts_ago
 
 WT = "/Users/dev/acme/.orcha-worktrees/task-pixel-abc"
 BASE = "/Users/dev/acme"
@@ -203,7 +204,7 @@ async def test_preview_lifecycle_hands_verdikt_the_preview_url(client, container
     # Verdikt finishes → the heartbeat polls it (nobody reads the task) and says stop
     fake.complete(req["id"], "pass", [{"text": 'The login page shows "Wrong password" after a bad password',
                                        "outcome": "pass"}])
-    db.execute("UPDATE verdikt_runs SET last_polled_at = now() - interval '1 minute' WHERE id=%s", (run["id"],))
+    db.execute(f"UPDATE verdikt_runs SET last_polled_at = {ts_ago(60)} WHERE id=%s", (run["id"],))
     hb = (await client.post(f"/api/verdikt/previews/{claim['id']}/heartbeat", json={})).json()
     assert hb["stop"] is True and "completed" in hb["reason"]
     assert db.execute("SELECT status, verdict FROM verdikt_runs WHERE id=%s", (run["id"],))[0] == \
@@ -248,7 +249,7 @@ async def test_preview_failure_is_reported_in_plain_words(client, container, mak
 async def test_no_notifier_or_silent_notifier_fails_honestly(client, container, make_agent, make_task, work_headers, db, fake):
     _hid, tid, run = await _previewed(client, container, make_agent, make_task, work_headers, db, fake)
     # nobody claims it for > 2 min
-    db.execute("UPDATE verdikt_previews SET created_at = now() - interval '3 minutes' WHERE verdikt_run_id=%s", (run["id"],))
+    db.execute(f"UPDATE verdikt_previews SET created_at = {ts_ago(180)} WHERE verdikt_run_id=%s", (run["id"],))
     v = (await client.post(f"/api/tasks/{tid}/verdikt/runs/{run['id']}/refresh")).json()
     assert v["status"] == "failed" and v["error"].startswith("Preview failed: no notifier picked up the preview request")
     assert "orcha notifier" in v["error"]
@@ -256,7 +257,7 @@ async def test_no_notifier_or_silent_notifier_fails_honestly(client, container, 
     r2 = (await client.post(f"/api/tasks/{tid}/verdikt/runs", json={"actor_agent_id": _hid})).json()
     claim = await _claim(client, container["id"])
     assert claim["id"] == r2["preview"]["id"]
-    db.execute("UPDATE verdikt_previews SET last_seen_at = now() - interval '10 minutes' WHERE id=%s", (claim["id"],))
+    db.execute(f"UPDATE verdikt_previews SET last_seen_at = {ts_ago(600)} WHERE id=%s", (claim["id"],))
     v = (await client.post(f"/api/tasks/{tid}/verdikt/runs/{r2['id']}/refresh")).json()
     assert v["status"] == "failed" and v["error"] == "Preview failed: the notifier stopped reporting on the preview"
 
@@ -288,7 +289,7 @@ async def test_cancel_and_ttl_stop_the_preview(client, container, make_agent, ma
     r3 = (await client.post(f"/api/tasks/{tid}/verdikt/runs", json={"actor_agent_id": hid})).json()
     c3 = await _claim(client, container["id"])
     await client.post(f"/api/verdikt/previews/{c3['id']}/ready", json={"port": 41236})
-    db.execute("UPDATE verdikt_previews SET claimed_at = now() - interval '61 minutes' WHERE id=%s", (c3["id"],))
+    db.execute(f"UPDATE verdikt_previews SET claimed_at = {ts_ago(3660)} WHERE id=%s", (c3["id"],))
     hb = (await client.post(f"/api/verdikt/previews/{c3['id']}/heartbeat", json={})).json()
     assert hb["stop"] is True and "time limit (60 min)" in hb["reason"]
     # the preview stopping on its own while Verdikt still tests is written on the run

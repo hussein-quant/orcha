@@ -15,6 +15,7 @@ import main  # noqa: F401  (conftest binds the app before import)
 from orcha_cli import notifier  # noqa: E402
 from portal_backend import code_space_routes as cs
 from portal_backend import github_repo_browse_routes as browse
+from conftest import ts_from_now
 
 MIGRATION_065 = (
     pathlib.Path(__file__).resolve().parents[1]
@@ -220,9 +221,9 @@ def _run_sql(sql):
 
 async def make_request_row(db, cid, requester, target, payload):
     return str(db.execute(
-        """INSERT INTO requests (container_id, type, requester_id, target_id, priority, status, payload,
+        f"""INSERT INTO requests (container_id, type, requester_id, target_id, priority, status, payload,
                                  expires_at, chain_depth)
-           VALUES (%s, 'info', %s, %s, 100, 'open', %s, now() + interval '1 hour', 0) RETURNING id""",
+           VALUES (%s, 'info', %s, %s, 100, 'open', %s, {ts_from_now(3600)}, 0) RETURNING id""",
         (cid, requester, target, payload))[0]["id"])
 
 

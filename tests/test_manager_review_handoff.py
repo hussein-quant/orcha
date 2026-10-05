@@ -17,6 +17,7 @@ Contract under test:
 import pathlib
 
 import pytest
+from conftest import ts_ago
 
 
 @pytest.fixture(autouse=True)
@@ -459,7 +460,7 @@ async def test_expiry_sweep_never_escalates_a_prereview(
     t = await make_task("x", "y", assignee_alias="probe")
     await _done(client, work_headers, t["task_id"], probe)
     rq = _prereview_requests(db, t["task_id"])[0]
-    db.execute("UPDATE requests SET expires_at=now() - interval '1 minute' WHERE id=%s", (rq["id"],))
+    db.execute(f"UPDATE requests SET expires_at={ts_ago(60)} WHERE id=%s", (rq["id"],))
     s = await client.post(f"/api/containers/{container['id']}/sweep?actor_agent_id={hussein}")
     assert s.status_code == 200, s.text
     assert str(rq["id"]) not in s.json()["request_ids"]
