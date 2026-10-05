@@ -50,7 +50,8 @@ UTC = _dt.timezone.utc
 # json that psycopg decodes; SQLite returns TEXT, so the row adapter decodes these by name.
 JSON_ALIASES = frozenset({
     "active_run", "assignees", "close_decision", "current_task", "message_summary",
-    "plan_decision", "plan_message", "previous_plan_decision", "reviewer", "running_run", "runs",
+    "plan_decision", "plan_message", "previous_plan_decision", "reassigned", "reviewer", "running_run",
+    "runs",
     "task_link", "waiting_on",
 })
 

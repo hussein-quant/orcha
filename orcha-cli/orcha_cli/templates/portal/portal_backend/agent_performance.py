@@ -255,7 +255,7 @@ def load_facts(cur, cid: str, since: Optional[_dt.datetime]) -> dict:
                                          ORDER BY e.created_at DESC) AS rn
                  FROM events e JOIN tasks t ON t.id = e.entity_id
                 WHERE e.container_id=%s AND e.entity_type='task' AND e.event_type='verified'
-                  AND e.detail->>'approved' = 'true' AND NOT t.is_root
+                  AND {sql.json_bool_is_true('e.detail', 'approved', default=False)} AND NOT t.is_root
                   AND ({sql.ts_param()} IS NULL OR e.created_at >= {sql.ts_param()})
              ) d
             WHERE rn = 1
@@ -270,11 +270,11 @@ def load_facts(cur, cid: str, since: Optional[_dt.datetime]) -> dict:
 
     # Rework events, ALL time (first-pass needs history before the window).
     cur.execute(
-        """SELECT e.entity_id AS task_id, e.created_at AS at, e.event_type,
+        f"""SELECT e.entity_id AS task_id, e.created_at AS at, e.event_type,
                   e.detail->'reassigned_to_agent_ids' AS reassigned
              FROM events e JOIN tasks t ON t.id = e.entity_id
             WHERE e.container_id=%s AND e.entity_type='task' AND NOT t.is_root
-              AND ((e.event_type='verified' AND e.detail->>'approved' = 'false')
+              AND ((e.event_type='verified' AND NOT {sql.json_bool_is_true('e.detail', 'approved')})
                 OR (e.event_type='manager_review_recorded'
                     AND e.detail->>'decision' = 'send_back'))""",
         (cid,),

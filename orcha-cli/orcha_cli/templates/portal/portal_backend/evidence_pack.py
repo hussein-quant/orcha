@@ -62,9 +62,9 @@ def _round_start(cur, tid: str):
     — a person's reject, or the Verdikt auto-fix loop sending it back (mig 068) — whose rework
     runs are what the new claim rests on; else None (all runs count)."""
     cur.execute(
-        """SELECT max(created_at) AS at FROM events
+        f"""SELECT max(created_at) AS at FROM events
             WHERE entity_type='task' AND entity_id=%s
-              AND ((event_type='verified' AND coalesce(detail->>'approved','') = 'false')
+              AND ((event_type='verified' AND NOT {sql.json_bool_is_true('detail', 'approved')})
                    OR event_type='verdikt_auto_rework')""",
         (tid,),
     )
