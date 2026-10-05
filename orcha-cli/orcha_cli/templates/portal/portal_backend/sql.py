@@ -194,3 +194,12 @@ def is_unique_violation(exc: BaseException) -> bool:
         return "UNIQUE constraint failed" in str(exc)
     psycopg = sys.modules.get("psycopg")
     return psycopg is not None and isinstance(exc, psycopg.errors.UniqueViolation)
+
+
+def is_undefined_table(exc: BaseException) -> bool:
+    """True when `exc` says a queried table does not exist, from either engine (same
+    sys.modules rule as is_unique_violation)."""
+    if isinstance(exc, sqlite3.OperationalError):
+        return str(exc).startswith("no such table")
+    psycopg = sys.modules.get("psycopg")
+    return psycopg is not None and isinstance(exc, psycopg.errors.UndefinedTable)

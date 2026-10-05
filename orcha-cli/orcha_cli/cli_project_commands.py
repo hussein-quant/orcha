@@ -9,11 +9,6 @@ import sys
 from orcha_cli import cli_native_lifecycle, cli_runtime_mode
 
 
-def _native_pending(verb: str) -> None:
-    # GH #258: native `upgrade` (DB-tip guard via GET /api/admin/migrations) is not built yet.
-    sys.exit(f"error: `orcha {verb}` for a native-runtime project is not built yet (GH #258).")
-
-
 def cmd_up(args: argparse.Namespace, services) -> None:
     if args.project:
         if not services._project_exists(args.project):
@@ -125,7 +120,8 @@ def cmd_upgrade(args: argparse.Namespace, services) -> None:
         sys.exit("error: no .orcha/ + .claude/orcha.json here — `orcha upgrade` is for an "
                  "existing project (run `orcha init` to bootstrap a new one).")
     if runtime == cli_runtime_mode.NATIVE:
-        return _native_pending("upgrade")
+        return cli_native_lifecycle.upgrade(
+            cwd, services, allow_downgrade=getattr(args, "allow_downgrade", False))
     cfg = json.loads(config_path.read_text())
     project_name = cfg.get("project_name") or services._sanitize_name(cwd.name)
     db_port, api_port = cfg.get("db_port"), cfg.get("api_port")

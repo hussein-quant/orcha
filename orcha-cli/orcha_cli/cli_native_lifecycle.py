@@ -10,11 +10,19 @@ from __future__ import annotations
 import os
 import pathlib
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
 
-from orcha_cli import cli_runtime_mode, cli_serve, cli_serve_support, cli_stacks_registry
+from orcha_cli import (
+    cli_http,
+    cli_project_setup,
+    cli_runtime_mode,
+    cli_serve,
+    cli_serve_support,
+    cli_stacks_registry,
+)
 
 PORTAL_WAIT_SECS = 30.0
 STOP_WAIT_SECS = 15.0  # serve itself gives each child up to 8 s before SIGKILL
@@ -134,3 +142,58 @@ def status(root: pathlib.Path, cfg: dict) -> None:
               f"restarts {restarts})")
     print(f"database:             {db} ({_size(db)})")
     print(f"logs:                 {cli_serve_support.logs_dir(root)}  (`orcha logs -f`)")
+
+
+def db_migration_tip(root: pathlib.Path, cfg: dict | None = None, *,
+                     get_json=None) -> int | None:
+    """The database's migration tip (plan R-D1): asked of the running portal
+    (``GET /api/admin/migrations``), else read straight from the SQLite file. ``None`` when
+    neither answers (no database yet), which never blocks an upgrade."""
+    cfg = cli_runtime_mode.read_config(root) if cfg is None else cfg
+    data = (get_json or cli_http._get_json)(f"{_api_base(cfg)}/api/admin/migrations", timeout=3.0)
+    if isinstance(data, dict) and isinstance(data.get("tip"), int):
+        return data["tip"]
+    db = cli_runtime_mode.db_path(root, cfg)
+    if not db.exists():
+        return None
+    try:
+        con = sqlite3.connect(f"{db.as_uri()}?mode=ro", uri=True)
+        try:
+            rows = con.execute("SELECT version FROM schema_migrations").fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return None
+    return cli_project_setup.migration_tip_of(row[0] for row in rows)
+
+
+def upgrade(root: pathlib.Path, services, *, allow_downgrade: bool = False,
+            get_json=None) -> None:
+    """Native `orcha upgrade`: nothing to re-render or rebuild (the portal is this CLI's own
+    package), so refuse a downgrade, refresh skills/hooks, and restart `orcha serve`."""
+    cfg = cli_runtime_mode.read_config(root)
+    cli_tip = services._migration_tip(services.PKG_TEMPLATES / "migrations")
+    db_tip = db_migration_tip(root, cfg, get_json=get_json)
+    if db_tip is not None and cli_tip < db_tip and not allow_downgrade:
+        sys.exit(
+            f"error: this project's database is on a NEWER Orcha than your CLI "
+            f"(database migrations reach {db_tip:03d}, this CLI ships {cli_tip:03d}).\n"
+            "Running this CLI's portal against it would be a DOWNGRADE. Update the orcha CLI "
+            "first (e.g. `uv tool upgrade orcha-cli`), then re-run `orcha upgrade` — or pass "
+            "--allow-downgrade to roll back deliberately."
+        )
+    claude_commands, codex_skills = services._install_orcha_skill_templates(root)
+    prefs_path = services._install_project_preferences(root)
+    if prefs_path:
+        print(f"[orcha] backfilled {prefs_path} (#298 loosely-hardened project rules)")
+    print(f"[orcha] refreshed Claude commands: {claude_commands}")
+    print(f"[orcha] refreshed Codex skills: {codex_skills}")
+    if services._write_hook_config(root / ".claude"):
+        print("[orcha] registered newly-shipped notification hooks / refreshed hook timeouts "
+              "in .claude/settings.json")
+    else:
+        print("[orcha] notification hooks already up to date (.claude/settings.json)")
+    print("[orcha] restarting orcha serve on this CLI's package (data preserved) ...")
+    down(root)
+    up(root)
+    print("[orcha] ✓ upgraded. Pending migrations apply on portal startup; `orcha migrate` to force now.")

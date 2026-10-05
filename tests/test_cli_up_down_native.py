@@ -254,3 +254,114 @@ def test_init_parser_runtime_flag_defaults_to_docker():
     assert parser.parse_args(["init", "--runtime", "native"]).runtime == "native"
     with pytest.raises(SystemExit):
         parser.parse_args(["init", "--runtime", "podman"])
+
+
+# ── native `orcha upgrade` / `orcha update` (plan R-D1 DB-tip guard) ─────────────────────
+
+def _migrated_db(root, *versions):
+    import sqlite3
+    db = root / ".orcha" / "orcha.db"
+    db.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY)")
+    con.executemany("INSERT INTO schema_migrations VALUES (?)", [(v,) for v in versions])
+    con.commit()
+    con.close()
+    return db
+
+
+def test_db_tip_prefers_the_running_portal(native):
+    _migrated_db(native, "005_a.sql")
+    seen = []
+
+    def get_json(url, timeout=5.0):
+        seen.append(url)
+        return {"applied": ["001_init.sql", "090_x.sql"], "count": 2, "tip": 90}
+
+    assert cli_native_lifecycle.db_migration_tip(native, get_json=get_json) == 90
+    assert seen == ["http://localhost:8123/api/admin/migrations"]
+
+
+def test_db_tip_reads_the_sqlite_file_when_the_portal_is_down(native):
+    _migrated_db(native, "001_init.sql", "072_next.sql", "baseline-note")
+    tip = cli_native_lifecycle.db_migration_tip(native, get_json=lambda *_a, **_k: None)
+    assert tip == 72
+
+
+def test_db_tip_is_none_without_a_database(native):
+    assert cli_native_lifecycle.db_migration_tip(
+        native, get_json=lambda *_a, **_k: None) is None
+
+
+class _UpgradeServices(_Tripwire):
+    PKG_TEMPLATES = __import__("pathlib").Path("/nonexistent")
+
+    def __init__(self, cli_tip):
+        self.cli_tip, self.calls = cli_tip, []
+
+    def _migration_tip(self, _source):
+        return self.cli_tip
+
+    def _install_orcha_skill_templates(self, root):
+        self.calls.append("skills")
+        return ["c"], ["s"]
+
+    def _write_hook_config(self, claude_dir):
+        self.calls.append(("hooks", claude_dir.name))
+        return False
+
+
+@pytest.fixture
+def upgrade_stubs(native, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli_native_lifecycle, "down", lambda root, **k: calls.append(("down", k)))
+    monkeypatch.setattr(cli_native_lifecycle, "up", lambda root, **k: calls.append(("up", k)))
+    monkeypatch.setattr(cli_native_lifecycle.cli_http, "_get_json", lambda *_a, **_k: None)
+    return calls
+
+
+def _upgrade_args(**kw):
+    return types.SimpleNamespace(allow_downgrade=False, **kw)
+
+
+def test_native_upgrade_refuses_a_newer_database(native, upgrade_stubs):
+    _migrated_db(native, "001_init.sql", "080_future.sql")
+    services = _UpgradeServices(cli_tip=71)
+    with pytest.raises(SystemExit) as exc:
+        cli_project_commands.cmd_upgrade(_upgrade_args(), services)
+    assert "080" in str(exc.value) and "071" in str(exc.value)
+    assert services.calls == [] and upgrade_stubs == []  # refused before any write/restart
+
+
+def test_native_upgrade_refreshes_hooks_and_restarts_serve(native, upgrade_stubs, capsys):
+    _migrated_db(native, "001_init.sql", "071_now.sql")
+    services = _UpgradeServices(cli_tip=72)
+    cli_project_commands.cmd_upgrade(_upgrade_args(), services)
+    assert services.calls == ["skills", ("hooks", ".claude")]
+    assert [c[0] for c in upgrade_stubs] == ["down", "up"]
+    assert upgrade_stubs[0][1] == {}  # never down -v
+    assert "✓ upgraded" in capsys.readouterr().out
+
+
+def test_native_upgrade_allow_downgrade_overrides(native, upgrade_stubs):
+    _migrated_db(native, "080_future.sql")
+    cli_project_commands.cmd_upgrade(
+        types.SimpleNamespace(allow_downgrade=True), _UpgradeServices(cli_tip=71))
+    assert [c[0] for c in upgrade_stubs] == ["down", "up"]
+
+
+def test_native_update_leaves_notifier_and_bridge_to_serve(native, monkeypatch, capsys):
+    from orcha_cli import cli_update, terminal_bridge
+
+    def boom(*_a, **_k):
+        raise AssertionError("serve owns the notifier and bridge under native")
+
+    monkeypatch.setattr(terminal_bridge, "ensure_bridge", boom)
+    upgraded = []
+    cli_update.update_command(
+        types.SimpleNamespace(no_self=True, no_bridge=False),
+        source_root=None, brew_keg=None, reinstall_cli=None, brew_upgrade=None,
+        upgrade=upgraded.append, ensure_notifier=boom,
+    )
+    assert len(upgraded) == 1
+    assert "orcha serve restarted" in capsys.readouterr().out

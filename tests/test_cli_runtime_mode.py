@@ -98,6 +98,18 @@ class _Services:
     def stop_daemon(self, *_a, **_k):
         pass
 
+    # native `orcha upgrade` helpers (no compose involved)
+    PKG_TEMPLATES = pathlib.Path("/nonexistent")
+
+    def _migration_tip(self, _source):
+        return 0
+
+    def _install_orcha_skill_templates(self, _root):
+        return [], []
+
+    def _write_hook_config(self, _claude_dir):
+        return False
+
 
 @pytest.fixture
 def bridge_noop(monkeypatch):
@@ -131,12 +143,10 @@ def test_native_project_never_reaches_compose(tmp_path, monkeypatch, bridge_noop
 
     monkeypatch.setattr(cli_native_lifecycle, "up", lambda *a, **k: None)
     monkeypatch.setattr(cli_native_lifecycle, "down", lambda *a, **k: None)
+    monkeypatch.setattr(cli_native_lifecycle.cli_http, "_get_json", lambda *a, **k: None)
     svc = _Services()
     args = types.SimpleNamespace(project=None, volumes=False, allow_downgrade=False)
-    try:
-        getattr(cli_project_commands, verb)(args, svc)
-    except SystemExit:
-        pass
+    getattr(cli_project_commands, verb)(args, svc)  # native branches complete without compose
     assert svc.compose == []
 
 

@@ -143,7 +143,7 @@ def update_command(
         "error: no .orcha/ + .claude/orcha.json here — run `orcha update` from an "
         "existing project directory (or `orcha init` to bootstrap a new one)."
     )
-    cli_runtime_mode.require_project(cwd, missing)
+    runtime = cli_runtime_mode.require_project(cwd, missing)
     if not (cwd / ".claude" / "orcha.json").exists():
         sys.exit(missing)
 
@@ -157,6 +157,10 @@ def update_command(
         )
 
     upgrade(args)
+    if runtime == cli_runtime_mode.NATIVE:
+        # `orcha serve` owns the notifier and bridge; upgrade already restarted it.
+        print("[orcha] ✓ update complete — hooks current, orcha serve restarted.")
+        return
     try:
         ensure_notifier(cwd, restart=True)
     except Exception as exc:
