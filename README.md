@@ -151,7 +151,7 @@ create a key, **load $20 of credit**, and drop it in your environment:
 
 ### First run
 
-<!-- TODO(#258): `orcha init` defaulting to native + installing the login service lands in plan PR 10. -->
+<!-- TODO(#258): `orcha init` defaulting to native + installing the login service lands in plan PR 10. Until then init defaults to Docker; `orcha init --runtime native` opts in (plan PR 6). -->
 
 In any project you want to orchestrate:
 
@@ -623,7 +623,7 @@ it straight from the installed CLI, so updating the CLI updates every project.
 to commit. Keep `.orcha/` and `.claude/orcha-tabs/` out of git: they hold your
 data, secrets and per-terminal state.
 
-<!-- TODO(#258): command names below follow plan Part 5 (R2-R4); confirm with the orcha serve author (plan PR 6/10) before release. -->
+<!-- TODO(#258): confirmed by the orcha serve author (plan PR 6): up, down, down -v, status, logs, ls, serve. Still unconfirmed: doctor (R4), backup/restore (S7), service + --no-service (plan PR 10), migrate-runtime (plan PR 8). -->
 ### Lifecycle
 
 Two distinct concepts share the word "container," so the verbs are split:
@@ -636,7 +636,7 @@ plain background processes supervised by `orcha serve`):
 orcha up                  # make sure Orcha is running for this project
 orcha down                # stop it, KEEP the data (.orcha/orcha.db stays)
 orcha status              # runtime, ports, and each process's health
-orcha logs -f [portal|notifier|bridge|serve]   # follow a log in .orcha/logs/
+orcha logs [-f] [-n N] [portal|notifier|bridge|serve]   # last 50 lines of each log in .orcha/logs/; -f follows
 orcha doctor              # one-screen health check — paste it into bug reports
 orcha backup              # snapshot .orcha/orcha.db (safe while running)
 orcha restore <file>      # put a backup back (stop with `orcha down` first)
@@ -697,7 +697,7 @@ a clone, the uv wheel-cache footgun, and the release runbook all live there.
 
 ## Troubleshooting cheatsheet
 
-<!-- TODO(#258): command names below follow plan Part 5 (R2-R4); confirm with the orcha serve author (plan PR 6/10) before release. -->
+<!-- TODO(#258): `orcha doctor` (R4) and `orcha service` (plan PR 10) are not built yet; the other commands below are confirmed. -->
 | Symptom | Cause | Fix |
 |---|---|---|
 | Anything odd, and you want to file a bug | — | run `orcha doctor` and paste its output into the issue |

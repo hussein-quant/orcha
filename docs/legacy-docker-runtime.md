@@ -10,9 +10,10 @@
 
 ## Who this page is for
 
-You have a project whose `.orcha/` folder contains `docker-compose.yml`. That
-project still runs its Postgres database and web portal as Docker containers,
-and keeps doing so — untouched — until you move it.
+You have a project whose `.orcha/` folder contains `docker-compose.yml` (its
+`.claude/orcha.json` has no `"runtime": "native"` entry; only projects with that
+entry run natively). That project still runs its Postgres database and web
+portal as Docker containers, and keeps doing so — untouched — until you move it.
 
 ## Moving a project off Docker
 

@@ -30,7 +30,7 @@ missing.
   `<project>/.orcha/orcha.db`. The recommended install is now the Mac app or
   `uv tool install orcha-cli`; Homebrew still works. Docker-era instructions
   moved to `docs/legacy-docker-runtime.md`.
-  <!-- TODO(#258): command names (serve/service/logs/doctor/backup/migrate-runtime) pending confirmation from the orcha serve work (plan PR 6/10). -->
+  <!-- TODO(#258): `orcha serve`/`logs` confirmed (plan PR 6); the login service (`orcha service`, plan PR 10), `doctor`, `backup` and `migrate-runtime` are still unconfirmed. -->
 - The product is now called **Embodent** (formerly Quorate). The portal's
   title, sidebar, pairing dialog, device page and every user-facing message
   say Embodent, and the portal carries the new Embodent mark (a figure split
