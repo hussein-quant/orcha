@@ -105,6 +105,7 @@
             "zone": "str"
           }
         ],
+        "prefs_state": "null",
         "read_through_ts": "float"
       }
     },
@@ -128,9 +129,11 @@
       "types": {
         "outgoing_requests": [
           {
+            "agent_payload": "null",
             "chain_depth": "int",
             "closed_at": "null",
             "created_at": "iso-datetime",
+            "detail": "null",
             "expires_at": "iso-datetime",
             "id": "str",
             "is_stale": "bool",
@@ -171,9 +174,11 @@
       "types": {
         "outgoing_requests": [
           {
+            "agent_payload": "null",
             "chain_depth": "int",
             "closed_at": "null",
             "created_at": "iso-datetime",
+            "detail": "null",
             "expires_at": "iso-datetime",
             "id": "str",
             "is_stale": "bool",
@@ -395,6 +400,7 @@
             "zone": "str"
           }
         ],
+        "prefs_state": "null",
         "read_through_ts": "float"
       }
     },
@@ -406,18 +412,36 @@
         ],
         "$.containers[*].last_wake_scan_at": [
           "T+00:00"
+        ],
+        "$.containers[*].live_agents[*].last_active": [
+          "T+00:00"
+        ],
+        "$.containers[*].live_agents[*].started_at": [
+          "T+00:00"
         ]
       },
       "types": {
         "containers": [
           {
             "agents": "int",
+            "ai_agents": "int",
             "completed_at": "null",
             "created_at": "iso-datetime",
             "description": "null",
             "github_repo": "null",
+            "icon": "null",
             "id": "str",
             "last_wake_scan_at": "iso-datetime",
+            "live_agents": [
+              {
+                "alias": "str",
+                "last_active": "iso-datetime",
+                "started_at": "iso-datetime",
+                "status": "str",
+                "task_title": "null"
+              }
+            ],
+            "live_agents_total": "int",
             "member_count": "int",
             "members": [
               {
@@ -426,11 +450,19 @@
                 "member_role": "str"
               }
             ],
+            "my_grants": "null",
+            "my_member_role": "null",
             "name": "str",
             "needs_you": "int",
+            "needs_you_breakdown": {
+              "plan": "int",
+              "request": "int",
+              "verify": "int"
+            },
             "root_task_id": "str",
             "status": "str",
-            "tasks": "int"
+            "tasks": "int",
+            "tasks_done": "int"
           }
         ]
       }
@@ -442,15 +474,42 @@
           false,
           false
         ],
+        "$.agents[*].pause_stops_running_run": [
+          false,
+          false,
+          false
+        ],
+        "$.agents[*].running_run.lease_live": [
+          false
+        ],
         "$.agents[*].wake_enabled": [
           true,
           true,
           true
         ],
+        "$.agents[*].wakes_paused": [
+          false,
+          false,
+          false
+        ],
+        "$.container.ai_manager_prereview": true,
         "$.container.autonomy_enforced": false,
+        "$.container.runtime_served": true,
         "$.container.wakes_enabled": true,
         "$.container.worktrees_disabled": false,
+        "$.requests[*].escalated": [
+          false,
+          false
+        ],
         "$.requests[*].is_stale": [
+          false,
+          false
+        ],
+        "$.requests[*].requester_retired": [
+          false,
+          false
+        ],
+        "$.requests[*].target_retired": [
           false,
           false
         ],
@@ -472,6 +531,9 @@
           "T+00:00"
         ],
         "$.agents[*].last_heartbeat_at": [
+          "T+00:00"
+        ],
+        "$.agents[*].running_run.started_at": [
           "T+00:00"
         ],
         "$.container.created_at": [
@@ -536,18 +598,41 @@
             "last_heartbeat_at": "iso-datetime",
             "member_role": "str",
             "model": "null|str",
+            "pause_stops_running_run": "bool",
             "prompt_preview": "null|str",
             "reasoning_effort": "null",
+            "reports_to": "null",
             "role": "str",
+            "running_run": {
+              "anyOf": [
+                "null",
+                {
+                  "base_cwd": "null",
+                  "lane": "str",
+                  "lease_live": "bool",
+                  "run_id": "str",
+                  "runtime": "null",
+                  "started_at": "iso-datetime",
+                  "task_id": "null",
+                  "task_title": "null",
+                  "wake_kind": "str",
+                  "worktree": "null"
+                }
+              ]
+            },
             "status": "str",
             "terminated_at": "null",
             "turn_budget": "int",
             "turns_used": "int",
             "waiting_on": [],
-            "wake_enabled": "bool"
+            "wake_enabled": "bool",
+            "wakes_paused": "bool",
+            "wakes_paused_reason": "null"
           }
         ],
         "container": {
+          "ai_manager_prereview": "bool",
+          "auto_agents_in_use": "int",
           "autonomy_enforced": "bool",
           "autonomy_level": "str",
           "completed_at": "null",
@@ -555,13 +640,17 @@
           "description": "null",
           "execution_mode": "str",
           "github_repo": "null",
+          "icon": "null",
           "id": "str",
           "last_wake_scan_at": "iso-datetime",
           "max_auto_agents": "int",
           "max_tasks": "int",
           "name": "str",
+          "review_route": "str",
           "root_task_id": "str",
+          "runtime_served": "bool",
           "status": "str",
+          "wake_scan_age_secs": "float",
           "wakes_enabled": "bool",
           "worktrees_disabled": "bool"
         },
@@ -570,9 +659,15 @@
         "requests": [
           {
             "chain_depth": "int",
+            "close_decision": "null",
             "closed_at": "null",
+            "closed_by_alias": "null",
             "created_at": "iso-datetime",
             "detail": "null",
+            "escalated": "bool",
+            "escalated_at": "null",
+            "escalated_from_alias": "null",
+            "escalated_from_id": "null",
             "expires_at": "iso-datetime",
             "id": "str",
             "is_stale": "bool",
@@ -583,12 +678,17 @@
             "pending_action": "str",
             "priority": "int",
             "rejection_reason": "null",
+            "requester_alias": "str",
             "requester_id": "str",
+            "requester_kind": "str",
+            "requester_retired": "bool",
             "responded_at": "iso-datetime",
             "response": "str",
             "spawned_task_id": "null",
             "status": "str",
+            "target_alias": "str",
             "target_id": "str",
+            "target_retired": "bool",
             "task_link": "null",
             "type": "str"
           }
@@ -607,6 +707,7 @@
             "description": "null|str",
             "id": "str",
             "is_root": "bool",
+            "manager_review": "null",
             "message_summary": {
               "count": "int",
               "last": {
@@ -632,6 +733,7 @@
                 }
               ]
             },
+            "previous_plan_decision": "null",
             "priority": "int",
             "protocol": "null",
             "result": {
@@ -643,6 +745,7 @@
                 }
               ]
             },
+            "review_routing": "null",
             "reviewer": "null",
             "reviewer_agent_id": "null",
             "runs": {
@@ -774,6 +877,7 @@
             "model": "str",
             "ok_runs": "int",
             "runs": "int",
+            "runs_with_tokens": "int",
             "sandbox_seconds": "float",
             "tokens_in": "int",
             "tokens_out": "int"
@@ -783,6 +887,7 @@
           "est_cost_usd": "float",
           "runs": "int",
           "runs_with_cost": "int",
+          "runs_with_tokens": "int",
           "sandbox_seconds": "float",
           "tasks_completed": "int",
           "tasks_verified": "int",
@@ -817,6 +922,7 @@
             "last_run_at": "iso-datetime",
             "output_tokens": "int",
             "runs": "int",
+            "runs_with_cost": "int",
             "status": "str",
             "task_id": "str",
             "title": "str",
@@ -830,6 +936,7 @@
           "input_tokens": "int",
           "output_tokens": "int",
           "runs": "int",
+          "runs_with_cost": "int",
           "total_cost_usd": "float",
           "total_tokens": "int"
         },
@@ -862,6 +969,10 @@
     "GET /api/containers/{cid}/requests": {
       "booleans": {
         "$.has_more": false,
+        "$.requests[*].escalated": [
+          false,
+          false
+        ],
         "$.requests[*].is_stale": [
           false,
           false
@@ -882,10 +993,17 @@
         "has_more": "bool",
         "requests": [
           {
+            "agent_payload": "null",
             "chain_depth": "int",
+            "close_decision": "null",
             "closed_at": "null",
+            "closed_by_alias": "null",
             "created_at": "iso-datetime",
             "detail": "null",
+            "escalated": "bool",
+            "escalated_at": "null",
+            "escalated_from_alias": "null",
+            "escalated_from_id": "null",
             "expires_at": "iso-datetime",
             "id": "str",
             "is_stale": "bool",
@@ -982,6 +1100,7 @@
             "description": "null|str",
             "id": "str",
             "is_root": "bool",
+            "manager_review": "null",
             "message_summary": {
               "count": "int",
               "last": {
@@ -1007,6 +1126,7 @@
                 }
               ]
             },
+            "previous_plan_decision": "null",
             "priority": "int",
             "protocol": "null",
             "result": {
@@ -1018,6 +1138,7 @@
                 }
               ]
             },
+            "review_routing": "null",
             "reviewer": "null",
             "reviewer_agent_id": "null",
             "runs": {
@@ -1188,6 +1309,10 @@
         "ack_key_enc": "null",
         "ack_model": "null",
         "active": "bool",
+        "agent_keys_enc": {
+          "claude": "null",
+          "codex": "null"
+        },
         "autonomy_enforced": "bool",
         "autonomy_level": "str",
         "candidates": [
@@ -1208,6 +1333,7 @@
             ],
             "effective_autonomy": "str",
             "embodiment_running": "bool",
+            "embodiment_silent_seconds": "null",
             "handled_event_ids": [
               "int"
             ],
@@ -1353,15 +1479,42 @@
           false,
           false
         ],
+        "$.agents[*].pause_stops_running_run": [
+          false,
+          false,
+          false
+        ],
+        "$.agents[*].running_run.lease_live": [
+          false
+        ],
         "$.agents[*].wake_enabled": [
           true,
           true,
           true
         ],
+        "$.agents[*].wakes_paused": [
+          false,
+          false,
+          false
+        ],
+        "$.container.ai_manager_prereview": true,
         "$.container.autonomy_enforced": false,
+        "$.container.runtime_served": true,
         "$.container.wakes_enabled": true,
         "$.container.worktrees_disabled": false,
+        "$.requests[*].escalated": [
+          false,
+          false
+        ],
         "$.requests[*].is_stale": [
+          false,
+          false
+        ],
+        "$.requests[*].requester_retired": [
+          false,
+          false
+        ],
+        "$.requests[*].target_retired": [
           false,
           false
         ],
@@ -1383,6 +1536,9 @@
           "T+00:00"
         ],
         "$.agents[*].last_heartbeat_at": [
+          "T+00:00"
+        ],
+        "$.agents[*].running_run.started_at": [
           "T+00:00"
         ],
         "$.container.created_at": [
@@ -1447,18 +1603,41 @@
             "last_heartbeat_at": "iso-datetime",
             "member_role": "str",
             "model": "null|str",
+            "pause_stops_running_run": "bool",
             "prompt_preview": "null|str",
             "reasoning_effort": "null",
+            "reports_to": "null",
             "role": "str",
+            "running_run": {
+              "anyOf": [
+                "null",
+                {
+                  "base_cwd": "null",
+                  "lane": "str",
+                  "lease_live": "bool",
+                  "run_id": "str",
+                  "runtime": "null",
+                  "started_at": "iso-datetime",
+                  "task_id": "null",
+                  "task_title": "null",
+                  "wake_kind": "str",
+                  "worktree": "null"
+                }
+              ]
+            },
             "status": "str",
             "terminated_at": "null",
             "turn_budget": "int",
             "turns_used": "int",
             "waiting_on": [],
-            "wake_enabled": "bool"
+            "wake_enabled": "bool",
+            "wakes_paused": "bool",
+            "wakes_paused_reason": "null"
           }
         ],
         "container": {
+          "ai_manager_prereview": "bool",
+          "auto_agents_in_use": "int",
           "autonomy_enforced": "bool",
           "autonomy_level": "str",
           "completed_at": "null",
@@ -1466,13 +1645,17 @@
           "description": "null",
           "execution_mode": "str",
           "github_repo": "null",
+          "icon": "null",
           "id": "str",
           "last_wake_scan_at": "iso-datetime",
           "max_auto_agents": "int",
           "max_tasks": "int",
           "name": "str",
+          "review_route": "str",
           "root_task_id": "str",
+          "runtime_served": "bool",
           "status": "str",
+          "wake_scan_age_secs": "float",
           "wakes_enabled": "bool",
           "worktrees_disabled": "bool"
         },
@@ -1481,9 +1664,15 @@
         "requests": [
           {
             "chain_depth": "int",
+            "close_decision": "null",
             "closed_at": "null",
+            "closed_by_alias": "null",
             "created_at": "iso-datetime",
             "detail": "null",
+            "escalated": "bool",
+            "escalated_at": "null",
+            "escalated_from_alias": "null",
+            "escalated_from_id": "null",
             "expires_at": "iso-datetime",
             "id": "str",
             "is_stale": "bool",
@@ -1494,12 +1683,17 @@
             "pending_action": "str",
             "priority": "int",
             "rejection_reason": "null",
+            "requester_alias": "str",
             "requester_id": "str",
+            "requester_kind": "str",
+            "requester_retired": "bool",
             "responded_at": "iso-datetime",
             "response": "str",
             "spawned_task_id": "null",
             "status": "str",
+            "target_alias": "str",
             "target_id": "str",
+            "target_retired": "bool",
             "task_link": "null",
             "type": "str"
           }
@@ -1518,6 +1712,7 @@
             "description": "null|str",
             "id": "str",
             "is_root": "bool",
+            "manager_review": "null",
             "message_summary": {
               "count": "int",
               "last": {
@@ -1543,6 +1738,7 @@
                 }
               ]
             },
+            "previous_plan_decision": "null",
             "priority": "int",
             "protocol": "null",
             "result": {
@@ -1554,6 +1750,7 @@
                 }
               ]
             },
+            "review_routing": "null",
             "reviewer": "null",
             "reviewer_agent_id": "null",
             "runs": {
@@ -1610,15 +1807,18 @@
         "spawned_from_request": "null",
         "status": "str",
         "summary": {
+          "blocked_by": "int",
           "completes_container": "bool",
           "downstream_total": "int",
           "in_flight_agents": "int",
           "open_requests": "int",
           "still_blocked": "int",
+          "upstream_total": "int",
           "would_unblock": "int"
         },
         "task_id": "str",
-        "title": "str"
+        "title": "str",
+        "upstream_tasks": []
       }
     },
     "GET /api/tasks/{t1}/messages": {
@@ -1751,7 +1951,11 @@
     "GET /api/tasks/{t3}/close-implications": {
       "booleans": {
         "$.is_root": false,
-        "$.summary.completes_container": false
+        "$.summary.completes_container": false,
+        "$.upstream_tasks[*].satisfied": [
+          false,
+          false
+        ]
       },
       "datetime_formats": {},
       "types": {
@@ -1776,15 +1980,25 @@
         "spawned_from_request": "null",
         "status": "str",
         "summary": {
+          "blocked_by": "int",
           "completes_container": "bool",
           "downstream_total": "int",
           "in_flight_agents": "int",
           "open_requests": "int",
           "still_blocked": "int",
+          "upstream_total": "int",
           "would_unblock": "int"
         },
         "task_id": "str",
-        "title": "str"
+        "title": "str",
+        "upstream_tasks": [
+          {
+            "satisfied": "bool",
+            "status": "str",
+            "task_id": "str",
+            "title": "str"
+          }
+        ]
       }
     }
   }
