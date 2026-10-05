@@ -4,6 +4,8 @@ import uuid
 
 from fastapi import HTTPException
 
+from portal_backend import sql
+
 
 def valid_uuid(value: str) -> bool:
     """Return whether a value is a UUID string."""
@@ -131,12 +133,12 @@ def find_actionable_human(cur, container_id, exclude_id=None, also_exclude=None,
     from portal_backend.identity_routes import _proxy_trusted  # avoid import cycle
 
     cur.execute(
-        """SELECT id FROM agents
+        f"""SELECT id FROM agents
            WHERE container_id=%s AND kind='human' AND terminated_at IS NULL
              AND member_role <> 'viewer'
-             AND (%s::uuid IS NULL OR id <> %s::uuid)
-             AND (%s::uuid IS NULL OR id <> %s::uuid)
-             AND (%s::text IS NULL OR member_role = 'owner' OR grants ? %s::text)
+             AND ({sql.uuid_param()} IS NULL OR id <> {sql.uuid_param()})
+             AND ({sql.uuid_param()} IS NULL OR id <> {sql.uuid_param()})
+             AND (CAST(%s AS TEXT) IS NULL OR member_role = 'owner' OR {sql.json_array_has('grants')})
            ORDER BY CASE WHEN %s AND github_login IS NULL THEN 1 ELSE 0 END,
                     CASE WHEN %s AND last_heartbeat_at IS NULL THEN 1 ELSE 0 END,
                     COALESCE(last_heartbeat_at, created_at) DESC,
@@ -237,8 +239,8 @@ def reroute_open_requests(cur, container_id, from_id):
         cur.execute(
             """UPDATE requests
                   SET target_id=%s,
-                      detail = COALESCE(detail, '{}'::jsonb)
-                               || jsonb_build_object('rerouted_from_alias', %s::text)
+                      detail = COALESCE(detail, '{}')
+                               || jsonb_build_object('rerouted_from_alias', CAST(%s AS TEXT))
                 WHERE id=%s""",
             (to, from_alias, rid),
         )

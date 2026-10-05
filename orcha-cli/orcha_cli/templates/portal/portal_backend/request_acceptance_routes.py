@@ -133,7 +133,7 @@ def accept_task_request(
             """INSERT INTO tasks
                  (container_id, title, description, definition_of_done,
                   status, priority, created_by_agent_id, protocol, started_at)
-               VALUES (%s, %s, %s, %s, 'in_progress', %s, %s, %s::jsonb, now())
+               VALUES (%s, %s, %s, %s, 'in_progress', %s, %s, %s, now())
                RETURNING id""",
             (
                 str(r["container_id"]),

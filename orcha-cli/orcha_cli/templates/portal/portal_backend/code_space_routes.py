@@ -86,9 +86,8 @@ import urllib.parse
 
 from fastapi import HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from psycopg.types.json import Jsonb
 
-from portal_backend import local_git, request_creation_routes
+from portal_backend import local_git, request_creation_routes, sql
 from portal_backend.agent_status import bump_agent, log_event, recompute_agent_status
 from portal_backend.event_acknowledgement import _ack_events_handled
 from portal_backend.events import publish_event as _publish_event
@@ -476,9 +475,11 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
                 (request_id, thread_id),
             )
             cur.execute(
-                "UPDATE requests SET detail = COALESCE(detail, '{}'::jsonb) || %s WHERE id=%s",
+                f"UPDATE requests SET detail = COALESCE(detail, '{{}}') || {sql.json_cast()} WHERE id=%s",
                 (
-                    Jsonb(code_thread_request_detail(thread_id, anchor, body.kind, body.body)),
+                    sql.json_param(
+                        code_thread_request_detail(thread_id, anchor, body.kind, body.body)
+                    ),
                     request_id,
                 ),
             )
@@ -556,11 +557,11 @@ def list_code_threads(
             if recent_threads:
                 ids = [t["id"] for t in recent_threads]
                 cur.execute(
-                    """SELECT DISTINCT ON (thread_id) thread_id, body
+                    f"""SELECT DISTINCT ON (thread_id) thread_id, body
                          FROM code_thread_messages
-                        WHERE thread_id = ANY(%s)
+                        WHERE {sql.in_list('thread_id')}
                         ORDER BY thread_id, created_at ASC""",
-                    (ids,),
+                    (sql.list_param(ids),),
                 )
                 first_body_by_thread = {str(r["thread_id"]): r["body"] for r in cur.fetchall()}
                 for t in recent_threads:
@@ -597,11 +598,11 @@ def list_code_threads(
         first_body_by_thread: dict = {}
         if thread_rows:
             cur.execute(
-                """SELECT DISTINCT ON (thread_id) thread_id, body
+                f"""SELECT DISTINCT ON (thread_id) thread_id, body
                      FROM code_thread_messages
-                    WHERE thread_id = ANY(%s)
+                    WHERE {sql.in_list('thread_id')}
                     ORDER BY thread_id, created_at ASC""",
-                ([r["id"] for r in thread_rows],),
+                (sql.list_param([r["id"] for r in thread_rows]),),
             )
             first_body_by_thread = {str(r["thread_id"]): r["body"] for r in cur.fetchall()}
 
@@ -767,10 +768,10 @@ def _settle_thread_request(cur, rid: str, actor_id: str, reply: str, *, human_re
 
     reason = AUTO_RESOLVED_RESOLVED if human_resolved else AUTO_RESOLVED_ANSWERED
     cur.execute(
-        """UPDATE requests SET status='closed', closed_at=now(),
-                  detail = COALESCE(detail, '{}'::jsonb) || %s
+        f"""UPDATE requests SET status='closed', closed_at=now(),
+                  detail = COALESCE(detail, '{{}}') || {sql.json_cast()}
             WHERE id=%s""",
-        (Jsonb({"auto_resolved": reason}), rid),
+        (sql.json_param({"auto_resolved": reason}), rid),
     )
     log_event(
         cur, cid, "human" if human_resolved else "ai", actor_id, "request", rid, "closed",

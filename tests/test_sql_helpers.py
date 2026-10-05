@@ -114,6 +114,18 @@ def test_age_secs_and_epoch(eng):
 
 # --- set membership ---
 
+def test_ts_param_types_a_null_or_timestamp(eng):
+    assert sql.ts_param() == ("%s::timestamptz" if eng.pg else "%s")
+    eng.table("evts", "at timestamptz", "at TEXT")
+    old, new = sql.ago(3600), sql.ago(60)
+    for when in (old, new):
+        eng.rows("INSERT INTO evts VALUES (%s)", (eng.bind_ts(when),))
+    since = f"SELECT count(*) FROM evts WHERE ({sql.ts_param()} IS NULL OR at >= {sql.ts_param()})"
+    assert eng.one(since, (None, None)) == 2  # untyped NULL would fail on PG without the cast
+    cut = eng.bind_ts(sql.ago(600))
+    assert eng.one(since, (cut, cut)) == 1
+
+
 def test_in_list_and_list_param(eng):
     assert sql.in_list("id") == ("id = ANY(%s)" if eng.pg else "id IN (SELECT value FROM json_each(%s))")
     ids = [uuid.uuid4() for _ in range(3)]
@@ -131,6 +143,29 @@ def test_in_list_and_list_param(eng):
 
 
 # --- JSON ---
+
+def test_not_in_list(eng):
+    eng.table("names", "n text", "n TEXT")
+    eng.rows("INSERT INTO names VALUES ('a'), ('b'), ('c'), (NULL)")
+    q = f"SELECT n FROM names WHERE {sql.not_in_list('n')}"
+    assert [r[0] for r in eng.rows(q, (sql.list_param(["a", "c"]),))] == ["b"]  # NULL excluded
+    got = [r[0] for r in eng.rows(q, (sql.list_param([]),))]
+    assert len(got) == 4 and set(got) == {"a", "b", "c", None}  # empty list: vacuously true, NULL too
+
+
+def test_uuid_param_and_json_array_has(eng):
+    assert sql.uuid_param() == ("%s::uuid" if eng.pg else "%s")
+    eng.table("mem", "id uuid, grants jsonb", "id TEXT, grants TEXT")
+    a, b = str(uuid.uuid4()), str(uuid.uuid4())
+    eng.rows("INSERT INTO mem VALUES (%s, %s), (%s, %s)",
+             (a, sql.json_param(["approve", "merge"]), b, sql.json_param([])))
+    q = (f"SELECT count(*) FROM mem WHERE ({sql.uuid_param()} IS NULL OR id <> {sql.uuid_param()}) "
+         f"AND (CAST(%s AS TEXT) IS NULL OR {sql.json_array_has('grants')})")
+    assert eng.one(q, (None, None, None, None)) == 2
+    assert eng.one(q, (b, b, "merge", "merge")) == 1
+    assert eng.one(q, (a, a, "merge", "merge")) == 0
+    assert eng.one(q, (None, None, "merg", "merg")) == 0
+
 
 def test_json_object(eng):
     expr = sql.json_object("'k'", "1", "'s'", "'x'")
@@ -162,6 +197,35 @@ def test_json_param_and_cast(eng):
     doc = {"a": [1, True, None], "b": "x"}
     eng.rows("INSERT INTO docs VALUES (%s)", (sql.json_param(doc),))  # no cast needed on PG either
     assert _decoded(eng.one("SELECT d FROM docs")) == doc
+
+
+def test_ts_neg_infinity_sorts_first(eng):
+    eng.table("evts2", "at timestamptz", "at TEXT")
+    eng.rows("INSERT INTO evts2 VALUES (%s)", (eng.bind_ts(sql.ago(86400 * 365 * 50)),))
+    lo = sql.ts_neg_infinity()
+    assert eng.one(f"SELECT count(*) FROM evts2 WHERE at > {lo}") == 1
+    assert eng.one(f"SELECT COALESCE((SELECT max(at) FROM evts2 WHERE at IS NULL), {lo}) = {lo}") in (True, 1)
+
+
+def test_json_key_removal_presence_and_merge(eng):
+    eng.table("reqs", "detail jsonb", "detail TEXT")
+    eng.rows("INSERT INTO reqs VALUES (%s), (%s), (NULL)",
+             (sql.json_param({"a": 1, "b": None, "keep": "x"}), sql.json_param({"keep": "y"})))
+    keys = ["a", "b"]
+    hits = eng.rows(f"SELECT detail FROM reqs WHERE {sql.json_has_any_key('detail', keys)}")
+    assert [_decoded(r[0]) for r in hits] == [{"a": 1, "b": None, "keep": "x"}]  # JSON null counts
+    eng.rows(f"UPDATE reqs SET detail = {sql.json_remove_keys('detail', keys)}")
+    got = sorted(json.dumps(_decoded(r[0]), sort_keys=True) for r in eng.rows("SELECT detail FROM reqs")
+                 if r[0] is not None)
+    assert got == ['{"keep": "x"}', '{"keep": "y"}']
+    merged = sql.json_merge(sql.json_remove_keys("COALESCE(detail, '{}')", keys), sql.json_cast())
+    eng.rows(f"UPDATE reqs SET detail = {merged}", (sql.json_param({"a": 2}),))
+    got = sorted(json.dumps(_decoded(r[0]), sort_keys=True) for r in eng.rows("SELECT detail FROM reqs"))
+    assert got == ['{"a": 2, "keep": "x"}', '{"a": 2, "keep": "y"}', '{"a": 2}']
+    with pytest.raises(ValueError):
+        sql.json_remove_keys("detail", ["a'; DROP"])
+    with pytest.raises(ValueError):
+        sql.json_has_any_key("detail", [])
 
 
 @pytest.mark.parametrize("default, expected", [(True, [1, 3, 4]), (False, [1])])

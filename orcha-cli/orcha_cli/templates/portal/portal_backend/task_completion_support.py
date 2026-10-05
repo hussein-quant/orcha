@@ -69,7 +69,7 @@ def _recalibrate_agent_digest_on_close(
         """INSERT INTO agent_memory_digests
              (container_id, agent_id, snapshot_ts, current_focus,
               decisions, learnings, open_threads, audience)
-           VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
            RETURNING id""",
         (
             str(container_id),

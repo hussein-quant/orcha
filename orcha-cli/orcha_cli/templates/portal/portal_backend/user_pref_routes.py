@@ -150,7 +150,7 @@ def put_prefs(request: Request, body: PrefsBody):
             )
         cur.execute(
             """INSERT INTO user_prefs (github_login, prefs, updated_at)
-               VALUES (%s, %s::jsonb, now())
+               VALUES (%s, %s, now())
                ON CONFLICT (github_login)
                DO UPDATE SET prefs=EXCLUDED.prefs, updated_at=now()""",
             (login.lower(), json.dumps(body.prefs)),

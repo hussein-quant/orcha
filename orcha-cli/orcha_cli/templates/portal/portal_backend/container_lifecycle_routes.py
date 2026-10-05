@@ -5,6 +5,7 @@ from typing import List, Optional
 import psycopg
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.attention_counts import (
@@ -357,7 +358,7 @@ def _live_agents_by_container(cur, cids):
     if not cids:
         return {}
     cur.execute(
-        """SELECT a.container_id, a.alias,
+        f"""SELECT a.container_id, a.alias,
                   run.task_title AS run_task_title, run.started_at,
                   COALESCE(run.present, false) AS has_run,
                   (SELECT t2.title FROM agent_tasks at2 JOIN tasks t2 ON t2.id = at2.task_id
@@ -389,13 +390,13 @@ def _live_agents_by_container(cur, cids):
                            wr.started_at DESC
                   LIMIT 1
              ) run ON true
-            WHERE a.container_id = ANY(%s::uuid[])
+            WHERE {sql.in_list('a.container_id')}
               AND a.terminated_at IS NULL
               AND COALESCE(a.kind, 'ai') <> 'human'
               AND (COALESCE(ws.wake_lease_until > now(), false)
                    OR COALESCE(ws.conv_lease_until > now(), false)
                    OR run.present IS TRUE)""",
-        (cids,),
+        (sql.list_param(cids),),
     )
     out: dict = {}
     for r in cur.fetchall():

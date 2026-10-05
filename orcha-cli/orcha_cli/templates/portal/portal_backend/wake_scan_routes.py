@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.budget_routes import apply_budget_gate
 from portal_backend.database import db_cursor
@@ -69,8 +70,8 @@ def wake_scan(
             cur.execute(
                 """UPDATE containers SET last_wake_scan_at = now()
                     WHERE id=%s AND (last_wake_scan_at IS NULL
-                                     OR last_wake_scan_at < now() - interval '15 seconds')""",
-                (cid,),
+                                     OR last_wake_scan_at < %s)""",
+                (cid, sql.ago(15)),
             )
             if cur.rowcount:
                 conn.commit()

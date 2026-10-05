@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -133,9 +134,9 @@ def wake_ack(aid: str, body: WakeAck):
             reconciled = [str(run["run_id"]) for run in cur.fetchall()]
             if reconciled:
                 cur.execute(
-                    """UPDATE embodiment_tokens SET revoked_at=now()
-                       WHERE run_id=ANY(%s) AND revoked_at IS NULL""",
-                    (reconciled,),
+                    f"""UPDATE embodiment_tokens SET revoked_at=now()
+                       WHERE {sql.in_list('run_id')} AND revoked_at IS NULL""",
+                    (sql.list_param(reconciled),),
                 )
                 log_event(
                     cur,
@@ -197,11 +198,11 @@ def events_ack_handled(aid: str, body: EventsAckHandled):
         ]
         if event_ids:
             cur.execute(
-                """INSERT INTO agent_event_acks (agent_id, event_id)
+                f"""INSERT INTO agent_event_acks (agent_id, event_id)
                    SELECT %s, e.id FROM agent_events e
-                   WHERE e.event_key=%s AND e.id=ANY(%s)
+                   WHERE e.event_key=%s AND {sql.in_list('e.id')}
                    ON CONFLICT DO NOTHING""",
-                (aid, aid, event_ids),
+                (aid, aid, sql.list_param(event_ids)),
             )
         new_floor = recompute_delivered_floor(cur, aid)
         log_event(

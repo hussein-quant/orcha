@@ -30,7 +30,7 @@ import os
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
-from portal_backend import local_git
+from portal_backend import local_git, sql
 from portal_backend.agent_registration_routes import register_agent
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -196,8 +196,8 @@ def accept_roster_suggestions(cid: str, body: RosterAcceptBody, request: Request
         # accept all-or-nothing for alias clashes.
         aliases = [s.alias for s in body.suggestions]
         cur.execute(
-            "SELECT alias FROM agents WHERE container_id=%s AND alias = ANY(%s)",
-            (cid, aliases),
+            f"SELECT alias FROM agents WHERE container_id=%s AND {sql.in_list('alias')}",
+            (cid, sql.list_param(aliases)),
         )
         taken = sorted({r["alias"] for r in cur.fetchall()})
         seen, repeated = set(), []

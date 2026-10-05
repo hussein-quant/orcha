@@ -132,7 +132,7 @@ def mark_done(
         _ack_events_handled(cur, body.agent_id, "task_verified", "task_id", tid)
         if level == "full":
             cur.execute(
-                "UPDATE tasks SET result=%s::jsonb WHERE id=%s", (result_json, tid)
+                "UPDATE tasks SET result=%s WHERE id=%s", (result_json, tid)
             )
             unblocked = _complete_and_unblock_getter()(cur, t["container_id"], tid)
             bump_agent(cur, body.agent_id)
@@ -160,7 +160,7 @@ def mark_done(
                 "unblocked": unblocked,
             }
         cur.execute(
-            "UPDATE tasks SET status='needs_verification', result=%s::jsonb WHERE id=%s",
+            "UPDATE tasks SET status='needs_verification', result=%s WHERE id=%s",
             (result_json, tid),
         )
         cur.execute("DELETE FROM agent_self_wake WHERE task_id=%s", (tid,))

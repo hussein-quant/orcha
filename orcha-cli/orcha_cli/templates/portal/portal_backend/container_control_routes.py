@@ -1,8 +1,8 @@
 """Manage container wake and autonomy controls."""
 
 from fastapi import HTTPException, Request
-from psycopg.types.json import Jsonb
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -198,7 +198,7 @@ def set_container_icon(cid: str, body: ContainerIconUpdate, request: Request):
             raise HTTPException(400, "actor_agent_id is not a valid UUID")
         cur.execute(
             "UPDATE containers SET icon=%s WHERE id=%s RETURNING icon",
-            (Jsonb(icon) if icon is not None else None, cid),
+            (sql.json_param(icon) if icon is not None else None, cid),
         )
         row = cur.fetchone()
         log_event(

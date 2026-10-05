@@ -4,6 +4,7 @@ import json
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event, recompute_agent_status
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -65,7 +66,7 @@ def verify_task(tid: str, body: TaskVerify, request: Request):
             )
         if overriding_send_back:
             cur.execute(
-                "UPDATE tasks SET manager_review = manager_review || %s::jsonb WHERE id=%s",
+                f"UPDATE tasks SET manager_review = manager_review || {sql.json_cast()} WHERE id=%s",
                 (json.dumps({"status": "overridden", "overridden_by": body.actor_agent_id}), tid),
             )
             cur.execute(

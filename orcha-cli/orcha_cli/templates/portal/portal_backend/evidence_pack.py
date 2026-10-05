@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from portal_backend import evidence_parse as ep
+from portal_backend import sql
 
 PACK_VERSION = 2  # bump when the heuristics change: cached packs rebuild on next read
 MAX_RUNS = 12
@@ -74,7 +75,7 @@ def _round_start(cur, tid: str):
 def _round_runs(cur, tid: str) -> list[dict]:
     start = _round_start(cur, tid)
     cur.execute(
-        """SELECT wr.run_id, wr.agent_id, wr.status, wr.exit_code, wr.started_at, wr.ended_at,
+        f"""SELECT wr.run_id, wr.agent_id, wr.status, wr.exit_code, wr.started_at, wr.ended_at,
                   wr.worktree, wr.branch, wr.base_cwd, wr.runtime,
                   coalesce(wr.lane, 'work') AS lane,
                   (wr.diff IS NOT NULL) AS has_diff, length(wr.output) AS out_len,
@@ -82,7 +83,7 @@ def _round_runs(cur, tid: str) -> list[dict]:
              FROM worker_runs wr
              JOIN worker_run_tasks wrt ON wrt.run_id = wr.run_id
              LEFT JOIN agents a ON a.id = wr.agent_id
-            WHERE wrt.task_id=%s AND (%s::timestamptz IS NULL OR wr.started_at >= %s::timestamptz)
+            WHERE wrt.task_id=%s AND ({sql.ts_param()} IS NULL OR wr.started_at >= {sql.ts_param()})
             ORDER BY wr.started_at ASC""",
         (tid, start, start),
     )
@@ -263,7 +264,7 @@ def ensure_pack(cur, task: dict, *, reason: str = "read", force: bool = False) -
     pack = build_pack(cur, task)
     cur.execute(
         """INSERT INTO task_evidence_packs (task_id, container_id, basis, pack, built_reason, built_at)
-           VALUES (%s, %s, %s, %s::jsonb, %s, now())
+           VALUES (%s, %s, %s, %s, %s, now())
            ON CONFLICT (task_id) DO UPDATE
              SET basis=EXCLUDED.basis, pack=EXCLUDED.pack, built_reason=EXCLUDED.built_reason,
                  built_at=now()""",

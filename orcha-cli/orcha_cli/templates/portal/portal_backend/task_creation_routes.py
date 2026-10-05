@@ -4,6 +4,7 @@ import json
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event, recompute_agent_status
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -44,8 +45,8 @@ def create_task(cid: str, body: TaskCreateBody, request: Request):
         deps_unmet = False
         if body.depends_on:
             cur.execute(
-                "SELECT id, container_id, is_root, status FROM tasks WHERE id = ANY(%s::uuid[])",
-                (list(body.depends_on),),
+                f"SELECT id, container_id, is_root, status FROM tasks WHERE {sql.in_list('id')}",
+                (sql.list_param(body.depends_on),),
             )
             found = {str(r["id"]): r for r in cur.fetchall()}
             for dep in body.depends_on:
@@ -95,7 +96,7 @@ def create_task(cid: str, body: TaskCreateBody, request: Request):
             f"""INSERT INTO tasks
                   (container_id, title, description, definition_of_done,
                    status, priority, created_by_agent_id, protocol, started_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, {started_clause})
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, {started_clause})
                 RETURNING id""",
             (
                 cid,

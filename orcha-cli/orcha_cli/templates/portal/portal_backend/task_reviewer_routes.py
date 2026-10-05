@@ -1,8 +1,8 @@
 """Assign (or clear) the human reviewer an owner wants verifying a task."""
 
 from fastapi import HTTPException, Request
-from psycopg.types.json import Jsonb
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -66,7 +66,7 @@ def set_task_reviewer(tid: str, body: TaskReviewerUpdate, request: Request):
             "UPDATE tasks SET reviewer_agent_id=%s, review_routing=%s WHERE id=%s",
             (
                 body.reviewer_agent_id,
-                Jsonb({"routed_via": "manual", "set_by_alias": owner["alias"]}),
+                sql.json_param({"routed_via": "manual", "set_by_alias": owner["alias"]}),
                 tid,
             ),
         )

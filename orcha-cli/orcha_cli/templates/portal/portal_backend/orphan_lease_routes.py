@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -30,10 +31,11 @@ def _reap_lane(
         [f"{lease_col} = NULL", f"{kind_col} = NULL"]
         + [f"{column} = NULL" for column in preempt_cols]
     )
+    stale_before = sql.ago(orphan_secs)
     cur.execute(
         f"""WITH orphans AS (
                SELECT w.agent_id, a.alias, w.{kind_col} AS lease_kind,
-                      EXTRACT(EPOCH FROM (now() - ({floored_expr}))) AS idle_seconds
+                      {sql.age_secs(floored_expr)} AS idle_seconds
                FROM agent_wake_state w
                JOIN agents a ON a.id = w.agent_id
                WHERE a.container_id = %s
@@ -41,7 +43,7 @@ def _reap_lane(
                  AND w.{lease_col} IS NOT NULL
                  AND w.{lease_col} > now()
                  AND ({heartbeat_expr}) IS NOT NULL
-                 AND ({floored_expr}) < now() - make_interval(secs => %s)
+                 AND ({floored_expr}) < %s
            ), released AS (
                UPDATE agent_wake_state w
                SET {set_release}
@@ -50,17 +52,17 @@ def _reap_lane(
                RETURNING w.agent_id
            )
            SELECT agent_id, alias, lease_kind, idle_seconds FROM orphans""",
-        (cid, orphan_secs),
+        (cid, stale_before),
     )
     reaped = cur.fetchall()
     runs_by_agent = {}
     reaped_ids = [str(row["agent_id"]) for row in reaped]
     if reaped_ids:
         cur.execute(
-            """UPDATE worker_runs SET status='orphaned', ended_at=now()
-               WHERE agent_id::text = ANY(%s) AND status='running' AND lane=%s
+            f"""UPDATE worker_runs SET status='orphaned', ended_at=now()
+               WHERE {sql.in_list('CAST(agent_id AS TEXT)')} AND status='running' AND lane=%s
                RETURNING run_id, agent_id""",
-            (reaped_ids, run_lane),
+            (sql.list_param(reaped_ids), run_lane),
         )
         for run in cur.fetchall():
             runs_by_agent.setdefault(str(run["agent_id"]), []).append(
@@ -69,9 +71,9 @@ def _reap_lane(
     reconciled = [run_id for run_ids in runs_by_agent.values() for run_id in run_ids]
     if reconciled:
         cur.execute(
-            """UPDATE embodiment_tokens SET revoked_at=now()
-               WHERE run_id = ANY(%s) AND revoked_at IS NULL""",
-            (reconciled,),
+            f"""UPDATE embodiment_tokens SET revoked_at=now()
+               WHERE {sql.in_list('run_id')} AND revoked_at IS NULL""",
+            (sql.list_param(reconciled),),
         )
     for row in reaped:
         log_event(
@@ -180,7 +182,8 @@ def reap_orphan_leases(
             """UPDATE embodiment_tokens SET revoked_at=now()
                WHERE run_id IS NULL AND revoked_at IS NULL
                  AND kind <> 'resident'
-                 AND created_at < now() - interval '2 minutes'"""
+                 AND created_at < %s""",
+            (sql.ago(2 * 60),),
         )
         conn.commit()
     reaped = list(work_reaped) + list(conversation_reaped)

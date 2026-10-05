@@ -39,6 +39,7 @@ import json
 import re
 from typing import Callable
 
+from portal_backend import sql
 from portal_backend import verdikt_integration as vi
 
 ACTOR = "system:verdikt"
@@ -151,8 +152,8 @@ def may_start_loop(cur, tid: str) -> bool:
     Stop auto-fix — never restarts by itself; a person's reject begins a new cycle.)"""
     at = _last_human_verdict_at(cur, tid)
     cur.execute(
-        """SELECT 1 FROM verdikt_autofix_loops WHERE task_id=%s
-             AND (%s::timestamptz IS NULL OR started_at > %s::timestamptz) LIMIT 1""",
+        f"""SELECT 1 FROM verdikt_autofix_loops WHERE task_id=%s
+             AND ({sql.ts_param()} IS NULL OR started_at > {sql.ts_param()}) LIMIT 1""",
         (tid, at, at),
     )
     return cur.fetchone() is None
@@ -214,8 +215,8 @@ def change_snapshot(cur, task: dict) -> dict:
     for f in ch.get("list") or []:
         h.update(f"{f.get('path')}:{f.get('status')}:{f.get('additions')}:{f.get('deletions')}\n".encode())
     if run_ids:
-        cur.execute("SELECT run_id, diff FROM worker_runs WHERE run_id = ANY(%s::uuid[]) ORDER BY started_at",
-                    (run_ids,))
+        cur.execute(f"SELECT run_id, diff FROM worker_runs WHERE {sql.in_list('run_id')} ORDER BY started_at",
+                    (sql.list_param(run_ids),))
         for r in cur.fetchall():
             h.update(hashlib.sha1((r.get("diff") or "").encode()).hexdigest().encode())
     href = next((l["href"] for l in reversed(pack.get("links") or [])
@@ -355,10 +356,10 @@ def _blocked(cur, task: dict, agent_ids: list[str]) -> tuple[str, str] | None:
     if c.get("wakes_enabled") is False:
         return "agent_paused", "agent wakes are turned off for this project"
     cur.execute(
-        """SELECT a.id, a.alias, coalesce(r.wake_enabled, true) AS wake_enabled
+        f"""SELECT a.id, a.alias, coalesce(r.wake_enabled, true) AS wake_enabled
              FROM agents a LEFT JOIN agent_reachability r ON r.agent_id = a.id
-            WHERE a.id = ANY(%s::uuid[])""",
-        (agent_ids,),
+            WHERE {sql.in_list('a.id')}""",
+        (sql.list_param(agent_ids),),
     )
     for a in cur.fetchall():
         if not a["wake_enabled"]:
@@ -381,8 +382,8 @@ def _send_back(cur, task: dict, run: dict, loop: dict, attempt: int, changes: di
     supersede_pending_prereview(cur, cid, tid, reason="verdikt_auto_rework")
     cur.execute(
         "UPDATE agent_tasks SET assignment_status='working' "
-        "WHERE task_id=%s AND assignment_status='done' AND agent_id = ANY(%s::uuid[]) RETURNING agent_id",
-        (tid, agent_ids),
+        f"WHERE task_id=%s AND assignment_status='done' AND {sql.in_list('agent_id')} RETURNING agent_id",
+        (tid, sql.list_param(agent_ids)),
     )
     restored = [str(r["agent_id"]) for r in cur.fetchall()]
     for aid in restored:
@@ -479,7 +480,7 @@ def evaluate(cur, run: dict) -> list[Callable[[], None]]:
         cur.execute(
             """INSERT INTO verdikt_autofix_attempts (loop_id, task_id, attempt, verdikt_run_id, outcome, action,
                                                     failure_signature, change_signature, failed, changes)
-               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb) ON CONFLICT (verdikt_run_id) DO NOTHING RETURNING id""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (verdikt_run_id) DO NOTHING RETURNING id""",
             (loop["id"], tid, n, rid, outcome, action, fsig, changes.get("signature"),
              json.dumps(pub_failed, default=str), json.dumps(ch, default=str)),
         )
@@ -642,8 +643,8 @@ def stop_where_off(cur, cid: str, actor_id: str | None, *, tid: str | None = Non
     the person who changed it knows."""
     settings = vi.settings_row(cur, cid)
     cur.execute(
-        """SELECT l.*, t.title, t.container_id AS cid FROM verdikt_autofix_loops l JOIN tasks t ON t.id=l.task_id
-            WHERE l.container_id=%s AND l.status='running' AND (%s::uuid IS NULL OR l.task_id=%s::uuid)""",
+        f"""SELECT l.*, t.title, t.container_id AS cid FROM verdikt_autofix_loops l JOIN tasks t ON t.id=l.task_id
+            WHERE l.container_id=%s AND l.status='running' AND ({sql.uuid_param()} IS NULL OR l.task_id={sql.uuid_param()})""",
         (cid, tid, tid),
     )
     n = 0
@@ -700,8 +701,8 @@ def sweep(cid: str | None = None) -> dict:
     try:
         with db_cursor() as (_, cur):
             cur.execute(
-                """SELECT r.id FROM verdikt_runs r WHERE r.status IN ('queued','running')
-                     AND (%s::uuid IS NULL OR r.container_id=%s::uuid)
+                f"""SELECT r.id FROM verdikt_runs r WHERE r.status IN ('queued','running')
+                     AND ({sql.uuid_param()} IS NULL OR r.container_id={sql.uuid_param()})
                    ORDER BY r.last_polled_at ASC NULLS FIRST LIMIT %s""",
                 (cid, cid, SWEEP_BATCH),
             )
@@ -721,8 +722,8 @@ def sweep(cid: str | None = None) -> dict:
                 continue
         with db_cursor() as (_, cur):
             cur.execute(
-                """SELECT DISTINCT task_id FROM verdikt_runs WHERE autofix AND autofix_done_at IS NULL
-                     AND status NOT IN ('queued','running') AND (%s::uuid IS NULL OR container_id=%s::uuid)
+                f"""SELECT DISTINCT task_id FROM verdikt_runs WHERE autofix AND autofix_done_at IS NULL
+                     AND status NOT IN ('queued','running') AND ({sql.uuid_param()} IS NULL OR container_id={sql.uuid_param()})
                    LIMIT %s""",
                 (cid, cid, SWEEP_BATCH),
             )
@@ -731,10 +732,10 @@ def sweep(cid: str | None = None) -> dict:
             out["judged"] += process_task(tid)
         with db_cursor() as (_, cur):
             cur.execute(
-                """SELECT (SELECT count(*) FROM verdikt_runs WHERE status IN ('queued','running')
-                              AND (%s::uuid IS NULL OR container_id=%s::uuid)) AS open,
+                f"""SELECT (SELECT count(*) FROM verdikt_runs WHERE status IN ('queued','running')
+                              AND ({sql.uuid_param()} IS NULL OR container_id={sql.uuid_param()})) AS open,
                           (SELECT count(*) FROM verdikt_autofix_loops WHERE status='running'
-                              AND (%s::uuid IS NULL OR container_id=%s::uuid)) AS loops""",
+                              AND ({sql.uuid_param()} IS NULL OR container_id={sql.uuid_param()})) AS loops""",
                 (cid, cid, cid, cid),
             )
             row = cur.fetchone()

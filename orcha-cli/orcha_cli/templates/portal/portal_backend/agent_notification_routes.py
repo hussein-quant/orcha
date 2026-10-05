@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import HTTPException, Request
 
 from portal_backend import notification_prefs as _np
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_agent, valid_uuid
@@ -99,8 +100,8 @@ def agent_notifications(
         people: dict[str, dict] = {}
         if actor_ids:
             cur.execute(
-                "SELECT id, alias, kind FROM agents WHERE id = ANY(%s)",
-                (list(actor_ids),),
+                f"SELECT id, alias, kind FROM agents WHERE {sql.in_list('id')}",
+                (sql.list_param(actor_ids),),
             )
             people = {str(agent["id"]): agent for agent in cur.fetchall()}
 

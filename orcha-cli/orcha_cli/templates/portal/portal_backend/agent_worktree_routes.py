@@ -25,9 +25,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import HTTPException, Request
-from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -252,7 +252,7 @@ def create_agent_worktree_action(cid: str, body: WorktreeActionCreate, request: 
                   unmerged_paths, requested_by)
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *""",
             (cid, body.action, body.path if body.action in ("remove", "save_output") else None, branch,
-             body.keep_branch, confirm_unmerged, body.include_output, Jsonb(unmerged), actor))
+             body.keep_branch, confirm_unmerged, body.include_output, sql.json_param(unmerged), actor))
         row = cur.fetchone()
         log_event(cur, cid, "human", actor, "container", cid, "agent_worktree_action_requested",
                   {"action": body.action, "path": body.path, "branch": branch,
@@ -336,7 +336,7 @@ def finish_agent_worktree_action(aid: str, body: WorktreeActionResult, request: 
             return _action_out(row)
         cur.execute("""UPDATE agent_worktree_actions SET status=%s, result=%s, error=%s, finished_at=now()
                         WHERE id=%s RETURNING *""",
-                    (body.status, Jsonb(body.result) if body.result is not None else None,
+                    (body.status, sql.json_param(body.result) if body.result is not None else None,
                      body.error, aid))
         row = cur.fetchone()
         conn.commit()
@@ -362,7 +362,7 @@ def report_agent_worktree_inventory(cid: str, body: WorktreeInventoryReport, req
                VALUES (%s,%s,%s,%s,now())
                ON CONFLICT (container_id) DO UPDATE SET host=EXCLUDED.host, base_cwd=EXCLUDED.base_cwd,
                  items=EXCLUDED.items, scanned_at=EXCLUDED.scanned_at""",
-            (cid, body.host, body.base_cwd, Jsonb(items)))
+            (cid, body.host, body.base_cwd, sql.json_param(items)))
         conn.commit()
     return {"ok": True, "count": len(items)}
 
@@ -379,15 +379,15 @@ def agent_worktree_context(cid: str, body: WorktreeContextBody, request: Request
         items: dict[str, dict] = {}
         if body.paths:
             cur.execute(
-                """SELECT DISTINCT ON (wr.worktree) wr.worktree, wr.run_id, wr.task_id, a.alias,
+                f"""SELECT DISTINCT ON (wr.worktree) wr.worktree, wr.run_id, wr.task_id, a.alias,
                           t.status AS task_status, t.title AS task_title, t.completed_at,
                           EXISTS (SELECT 1 FROM worker_runs r2 WHERE r2.worktree = wr.worktree
                                      AND r2.status = 'running') AS running
                      FROM worker_runs wr JOIN agents a ON a.id = wr.agent_id
                      LEFT JOIN tasks t ON t.id = wr.task_id
-                    WHERE a.container_id=%s AND wr.worktree = ANY(%s)
+                    WHERE a.container_id=%s AND {sql.in_list('wr.worktree')}
                     ORDER BY wr.worktree, (wr.task_id IS NULL), wr.started_at DESC""",
-                (cid, list(body.paths)))
+                (cid, sql.list_param(body.paths)))
             for r in cur.fetchall():
                 items[r["worktree"]] = {
                     "task_id": str(r["task_id"]) if r["task_id"] else None,
@@ -402,7 +402,7 @@ def agent_worktree_context(cid: str, body: WorktreeContextBody, request: Request
             if len(ref) < 8 or not all(c in "0123456789abcdef-" for c in ref):
                 continue
             cur.execute("""SELECT id, status, title, completed_at FROM tasks
-                            WHERE container_id=%s AND id::text LIKE %s LIMIT 2""", (cid, ref + "%"))
+                            WHERE container_id=%s AND CAST(id AS TEXT) LIKE %s LIMIT 2""", (cid, ref + "%"))
             rows = cur.fetchall()
             if len(rows) == 1:
                 t = rows[0]

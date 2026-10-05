@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
@@ -154,6 +155,7 @@ def container_metrics(
         require_container(cur, cid)
         # Access model: reads are project-isolated (trusted non-member 403).
         require_member_read(cur, request, cid)
+        since = sql.ago(days * 86400)  # the window start, bound once for all three queries
         cur.execute(
             """SELECT wr.run_id, wr.agent_id, wr.wake_kind, wr.status, wr.exit_code,
                       wr.started_at, wr.ended_at,
@@ -162,15 +164,15 @@ def container_metrics(
                       a.alias, a.model
                  FROM worker_runs wr JOIN agents a ON a.id = wr.agent_id
                 WHERE a.container_id = %s
-                  AND wr.started_at >= now() - make_interval(days => %s)""",
-            (OUTPUT_TAIL_BYTES, cid, days),
+                  AND wr.started_at >= %s""",
+            (OUTPUT_TAIL_BYTES, cid, since),
         )
         runs = cur.fetchall()
         cur.execute(
             """SELECT count(*) AS n FROM tasks
                 WHERE container_id = %s AND status = 'completed'
-                  AND completed_at >= now() - make_interval(days => %s)""",
-            (cid, days),
+                  AND completed_at >= %s""",
+            (cid, since),
         )
         tasks_completed = int(cur.fetchone()["n"])
         cur.execute(
@@ -178,8 +180,8 @@ def container_metrics(
                 WHERE container_id = %s AND entity_type = 'task'
                   AND event_type = 'verified'
                   AND COALESCE(detail->>'approved', 'true') = 'true'
-                  AND created_at >= now() - make_interval(days => %s)""",
-            (cid, days),
+                  AND created_at >= %s""",
+            (cid, since),
         )
         tasks_verified = int(cur.fetchone()["n"])
         cur.execute("SELECT now() AS db_now")

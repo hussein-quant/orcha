@@ -18,6 +18,7 @@ from typing import Optional
 
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
@@ -31,17 +32,18 @@ MEASURED_USAGE = (
     "OR wr.total_cost_usd IS NOT NULL)"
 )
 
-WINDOW_INTERVALS = {"5h": "5 hours", "7d": "7 days", "30d": "30 days"}
+WINDOW_SECS = {"5h": 5 * 3600, "7d": 7 * 86400, "30d": 30 * 86400}
 
 # Insight rules need enough runs that a ratio isn't just sampling noise.
 MIN_RUNS_FOR_RULE = 5
 
 
-def _window_clause(window: str) -> str:
-    """SQL boolean literal (or a real predicate) gating rows into a window."""
+def _window_clause(window: str) -> tuple[str, tuple]:
+    """SQL boolean literal (or a real predicate) gating rows into a window, and its params
+    (append them after the query's other params: the clause is always the last predicate)."""
     if window == "all":
-        return "TRUE"
-    return f"wr.ended_at >= now() - interval '{WINDOW_INTERVALS[window]}'"
+        return "TRUE", ()
+    return "wr.ended_at >= %s", (sql.ago(WINDOW_SECS[window]),)
 
 
 def _totals_row(row) -> dict:
@@ -103,7 +105,7 @@ def agent_spend(
         if not agent_row:
             raise HTTPException(404, f"agent {aid} not found in container {cid}")
 
-        win_clause = _window_clause(window)
+        win_clause, win_params = _window_clause(window)
         cur.execute(
             f"""SELECT
                     count(*) AS runs,
@@ -116,7 +118,7 @@ def agent_spend(
                 FROM worker_runs wr
                WHERE wr.agent_id=%s AND wr.ended_at IS NOT NULL AND {MEASURED_USAGE}
                  AND {win_clause}""",
-            (aid,),
+            (aid, *win_params),
         )
         totals = _totals_row(cur.fetchone())
 
@@ -140,7 +142,7 @@ def agent_spend(
                            + COALESCE(sum(COALESCE(wr.output_tokens,0)),0)
                            + COALESCE(sum(COALESCE(wr.cache_read_input_tokens,0)),0)
                            + COALESCE(sum(COALESCE(wr.cache_creation_input_tokens,0)),0)) DESC""",
-            (aid,),
+            (aid, *win_params),
         )
         tasks = []
         for row in cur.fetchall():
@@ -217,7 +219,7 @@ def metrics_insights(
     with db_cursor() as (_, cur):
         require_container(cur, cid)
         require_member_read(cur, request, cid)
-        win_clause = _window_clause(window)
+        win_clause, win_params = _window_clause(window)
         cur.execute(
             f"""SELECT wr.run_id, wr.agent_id, wr.task_id, a.alias, a.model,
                        COALESCE(wr.input_tokens,0) AS it,
@@ -231,7 +233,7 @@ def metrics_insights(
                   LEFT JOIN tasks t ON t.id = wr.task_id
                  WHERE a.container_id=%s AND wr.ended_at IS NOT NULL AND {MEASURED_USAGE}
                    AND {win_clause}""",
-            (cid,),
+            (cid, *win_params),
         )
         rows = cur.fetchall()
 

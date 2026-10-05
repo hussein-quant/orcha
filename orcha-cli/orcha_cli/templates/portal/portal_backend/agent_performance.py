@@ -40,6 +40,8 @@ import math
 import statistics
 from typing import Iterable, Optional
 
+from portal_backend import sql
+
 MIN_SAMPLE = 3
 RANGES = ("7d", "30d", "90d", "all")
 _RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90}
@@ -246,13 +248,13 @@ def load_facts(cur, cid: str, since: Optional[_dt.datetime]) -> dict:
 
     # Human verifications (approved) in range — one per task (latest), root excluded.
     cur.execute(
-        """SELECT DISTINCT ON (e.entity_id)
+        f"""SELECT DISTINCT ON (e.entity_id)
                   e.entity_id AS task_id, e.created_at AS verified_at,
                   COALESCE(t.started_at, t.created_at) AS started_at
              FROM events e JOIN tasks t ON t.id = e.entity_id
             WHERE e.container_id=%s AND e.entity_type='task' AND e.event_type='verified'
               AND e.detail->>'approved' = 'true' AND NOT t.is_root
-              AND (%s::timestamptz IS NULL OR e.created_at >= %s::timestamptz)
+              AND ({sql.ts_param()} IS NULL OR e.created_at >= {sql.ts_param()})
             ORDER BY e.entity_id, e.created_at DESC""",
         (cid, since, since),
     )
@@ -285,10 +287,10 @@ def load_facts(cur, cid: str, since: Optional[_dt.datetime]) -> dict:
 
     # Plan decisions in range.
     cur.execute(
-        """SELECT d.subject_id, d.decision, d.target_agent_id, d.created_at AS at
+        f"""SELECT d.subject_id, d.decision, d.target_agent_id, d.created_at AS at
              FROM decisions d
             WHERE d.container_id=%s AND d.subject_type='plan_approval'
-              AND (%s::timestamptz IS NULL OR d.created_at >= %s::timestamptz)""",
+              AND ({sql.ts_param()} IS NULL OR d.created_at >= {sql.ts_param()})""",
         (cid, since, since),
     )
     plans = []
@@ -299,10 +301,10 @@ def load_facts(cur, cid: str, since: Optional[_dt.datetime]) -> dict:
 
     # Escalations in range (attributed to the request's requester).
     cur.execute(
-        """SELECT e.created_at AS at, r.requester_id
+        f"""SELECT e.created_at AS at, r.requester_id
              FROM events e JOIN requests r ON r.id = e.entity_id
             WHERE e.container_id=%s AND e.entity_type='request' AND e.event_type='escalated'
-              AND (%s::timestamptz IS NULL OR e.created_at >= %s::timestamptz)""",
+              AND ({sql.ts_param()} IS NULL OR e.created_at >= {sql.ts_param()})""",
         (cid, since, since),
     )
     escalations = [
@@ -315,14 +317,14 @@ def load_facts(cur, cid: str, since: Optional[_dt.datetime]) -> dict:
     run_costs: dict[tuple[str, str], dict] = {}
     if task_ids:
         cur.execute(
-            """SELECT wr.task_id, wr.agent_id, count(*) AS runs,
+            f"""SELECT wr.task_id, wr.agent_id, count(*) AS runs,
                       count(*) FILTER (WHERE wr.total_cost_usd > 0) AS priced,
                       COALESCE(sum(wr.total_cost_usd) FILTER (WHERE wr.total_cost_usd > 0), 0)
                           AS cost
                  FROM worker_runs wr
-                WHERE wr.task_id = ANY(%s::uuid[]) AND wr.ended_at IS NOT NULL
+                WHERE {sql.in_list('wr.task_id')} AND wr.ended_at IS NOT NULL
                 GROUP BY wr.task_id, wr.agent_id""",
-            (task_ids,),
+            (sql.list_param(task_ids),),
         )
         for r in cur.fetchall():
             run_costs[(str(r["task_id"]), str(r["agent_id"]))] = {

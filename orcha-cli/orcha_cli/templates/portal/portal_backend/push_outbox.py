@@ -33,6 +33,7 @@ are pruned on every enqueue and every claim, so a dormant box ages out.
 """
 
 from portal_backend import notification_prefs as _np
+from portal_backend import sql
 from portal_backend.database import db_cursor
 
 # Notification titles mirror the iOS local-notification sweep verbatim, so a
@@ -50,8 +51,8 @@ PRUNE_HOURS = 48
 def _prune(cur) -> None:
     """Age out stale rows unconditionally — delivered, failed, or never claimed."""
     cur.execute(
-        "DELETE FROM push_outbox WHERE created_at < now() - %s * interval '1 hour'",
-        (PRUNE_HOURS,),
+        "DELETE FROM push_outbox WHERE created_at < %s",
+        (sql.ago(PRUNE_HOURS * 3600),),
     )
 
 
@@ -91,8 +92,9 @@ def _audience_wants(cur, container_id, kind, ref_id) -> bool:
     if not logins:
         return False
     cur.execute(
-        "SELECT 1 FROM push_devices WHERE revoked_at IS NULL AND github_login = ANY(%s) LIMIT 1",
-        (list(logins),),
+        "SELECT 1 FROM push_devices WHERE revoked_at IS NULL"
+        f" AND {sql.in_list('github_login')} LIMIT 1",
+        (sql.list_param(logins),),
     )
     return cur.fetchone() is not None
 
@@ -168,7 +170,7 @@ def push_plan_approval(container_id, task_id, message_id) -> None:
                                     ORDER BY m.created_at ASC, m.id ASC LIMIT 1)
                      AND NOT EXISTS (SELECT 1 FROM decisions d
                                       WHERE d.subject_type='plan_approval'
-                                        AND d.subject_id=t.id::text)""",
+                                        AND d.subject_id=CAST(t.id AS TEXT))""",
                 {"tid": task_id, "cid": container_id, "mid": message_id},
             )
             row = cur.fetchone()

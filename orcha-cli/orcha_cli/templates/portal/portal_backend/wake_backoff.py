@@ -28,6 +28,7 @@ the trigger made progress).
 import os
 from typing import Optional
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.events import publish_event
 from portal_backend.guards import find_actionable_human
@@ -109,12 +110,12 @@ def recent_same_trigger_run(cur, agent_id: str, wake_key: str):
     'Completed' = status != 'running' (exited | killed | rate_limited | failed) with
     ended_at set — a still-running run can't yet be judged to have changed nothing."""
     cur.execute(
-        f"""SELECT run_id, ended_at FROM worker_runs
+        """SELECT run_id, ended_at FROM worker_runs
              WHERE agent_id=%s AND wake_event=%s AND status <> 'running'
                AND ended_at IS NOT NULL
-               AND ended_at >= now() - interval '{RECENT_RUN_WINDOW_SECS} seconds'
+               AND ended_at >= %s
              ORDER BY ended_at DESC LIMIT 1""",
-        (agent_id, wake_key),
+        (agent_id, wake_key, sql.ago(RECENT_RUN_WINDOW_SECS)),
     )
     return cur.fetchone()
 
@@ -141,10 +142,10 @@ def record_strike(cur, container_id: str, agent_id: str, wake_key: str) -> dict:
     backoff = backoff_secs_for_strikes(strikes)
     if backoff > 0:
         cur.execute(
-            """UPDATE wake_backoff SET suppressed_until = now() + (%s || ' seconds')::interval
+            """UPDATE wake_backoff SET suppressed_until = %s
                  WHERE agent_id=%s AND wake_key=%s
                  RETURNING strikes, suppressed_until, notified_at, first_strike_at, last_strike_at""",
-            (backoff, agent_id, wake_key),
+            (sql.from_now(backoff), agent_id, wake_key),
         )
     else:
         cur.execute(
@@ -211,9 +212,9 @@ def notify_human_of_breaker(cur, container_id: str, agent_id: str, alias: str, w
         """INSERT INTO requests
                 (container_id, type, requester_id, target_id, priority, status,
                  payload, expires_at, chain_depth)
-           VALUES (%s, 'info', %s, %s, 100, 'open', %s, now() + interval '7 days', 0)
+           VALUES (%s, 'info', %s, %s, 100, 'open', %s, %s, 0)
            RETURNING id""",
-        (container_id, agent_id, human_id, payload),
+        (container_id, agent_id, human_id, payload, sql.from_now(7 * 86400)),
     )
     rid = str(cur.fetchone()["id"])
     stamp_routing(cur, rid, org_routing)

@@ -2,6 +2,8 @@
 
 from typing import Optional
 
+from portal_backend import sql
+
 try:
     import secret_box
 except ImportError:
@@ -50,8 +52,8 @@ def agent_keys_enc(cur, container_id: str) -> dict:
     out = {runtime: None for runtime in AGENT_KEY_RUNTIME.values()}
     cur.execute(
         "SELECT provider, key_enc FROM container_provider_keys "
-        "WHERE container_id=%s AND use_for_agents AND provider = ANY(%s)",
-        (container_id, list(AGENT_KEY_RUNTIME)),
+        f"WHERE container_id=%s AND use_for_agents AND {sql.in_list('provider')}",
+        (container_id, sql.list_param(AGENT_KEY_RUNTIME)),
     )
     for row in cur.fetchall():
         if row["key_enc"]:

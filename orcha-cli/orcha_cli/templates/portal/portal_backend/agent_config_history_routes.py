@@ -35,9 +35,9 @@ from contextlib import contextmanager
 from typing import Optional
 
 from fastapi import HTTPException, Query, Request
-from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_kind, valid_uuid
@@ -159,9 +159,9 @@ def _ensure_initial(cur, aid, row) -> None:
         """INSERT INTO agent_config_revisions
              (agent_id, container_id, revision_no, kind, source, snapshot, changes,
               redacted_fields)
-           VALUES (%s, %s, 1, 'initial', 'backfill', %s, '[]'::jsonb, %s)
+           VALUES (%s, %s, 1, 'initial', 'backfill', %s, '[]', %s)
            ON CONFLICT (agent_id, revision_no) DO NOTHING""",
-        (aid, row["container_id"], Jsonb(snap), Jsonb(redacted)),
+        (aid, row["container_id"], sql.json_param(snap), sql.json_param(redacted)),
     )
 
 
@@ -214,14 +214,14 @@ def record_config_change(cur, aid, before, *, source, actor_agent_id=None) -> Op
             revision_no,
             "restore" if ctx else "change",
             source,
-            Jsonb(after_snap),
-            Jsonb(changes),
+            sql.json_param(after_snap),
+            sql.json_param(changes),
             str(actor["id"]) if actor else None,
             actor["kind"] if actor else None,
             actor["alias"] if actor else None,
             ctx["restored_from"] if ctx else None,
             ctx["reason"] if ctx else None,
-            Jsonb(redacted),
+            sql.json_param(redacted),
         ),
     )
     return revision_no
@@ -295,8 +295,8 @@ def list_config_revisions(
         conn.commit()
         where, params = ["agent_id=%s"], [aid]
         if field is not None:
-            where.append("changes @> %s")
-            params.append(Jsonb([{"field": field}]))
+            where.append(f"changes @> {sql.json_cast()}")
+            params.append(sql.json_param([{"field": field}]))
         if actor_kind == "none":
             where.append("actor_agent_id IS NULL")
         elif actor_kind is not None:

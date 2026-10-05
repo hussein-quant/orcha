@@ -71,7 +71,7 @@ def publish_event(
         cur.execute(
             """INSERT INTO agent_events
                  (container_id, target_id, event_key, event_name, ts, payload)
-               VALUES (%s, %s, %s, %s, %s, %s::jsonb)""",
+               VALUES (%s, %s, %s, %s, %s, %s)""",
             (container_id, target, event_key, event_name, timestamp, body),
         )
 

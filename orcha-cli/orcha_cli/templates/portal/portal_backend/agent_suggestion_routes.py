@@ -110,10 +110,10 @@ def decide_suggestion(rid: str, body: SuggestionDecision, request: Request):
             # suggestion (the request itself stays open for the new agent to accept).
             cur.execute(
                 """UPDATE requests SET target_id=%s, status='open',
-                          detail = COALESCE(detail, '{}'::jsonb) || jsonb_build_object(
+                          detail = COALESCE(detail, '{}') || jsonb_build_object(
                               'suggestion_decided', jsonb_build_object(
-                                  'kind', 'create', 'at', now(), 'actor', %s::text,
-                                  'new_agent_id', %s::text))
+                                  'kind', 'create', 'at', now(), 'actor', CAST(%s AS TEXT),
+                                  'new_agent_id', CAST(%s AS TEXT)))
                    WHERE id=%s""",
                 (new_aid, body.actor_agent_id, new_aid, rid),
             )
@@ -187,10 +187,10 @@ def decide_suggestion(rid: str, body: SuggestionDecision, request: Request):
             )
             cur.execute(
                 """UPDATE requests SET target_id=%s, status='open',
-                          detail = COALESCE(detail, '{}'::jsonb) || jsonb_build_object(
+                          detail = COALESCE(detail, '{}') || jsonb_build_object(
                               'suggestion_decided', jsonb_build_object(
-                                  'kind', 'reassign', 'at', now(), 'actor', %s::text,
-                                  'target_alias', %s::text))
+                                  'kind', 'reassign', 'at', now(), 'actor', CAST(%s AS TEXT),
+                                  'target_alias', CAST(%s AS TEXT)))
                    WHERE id=%s""",
                 (new_target_id, body.actor_agent_id, body.target_alias, rid),
             )

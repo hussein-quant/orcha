@@ -25,8 +25,7 @@ plus a depth cap), mirroring Paperclip's getChainOfCommand
 
 from typing import Optional
 
-from psycopg.types.json import Jsonb
-
+from portal_backend import sql
 from portal_backend.identity_routes import has_grant
 
 MAX_CHAIN = 50  # depth cap (a team is never this deep; guards a corrupted row)
@@ -147,14 +146,14 @@ def stamp_routing(cur, request_id, routing: Optional[dict]) -> None:
     None — drop a stale record left by an earlier routing of the same request."""
     keys = list(ROUTING_KEYS)
     if routing:
+        cleared = sql.json_remove_keys("COALESCE(detail, '{}')", keys)
         cur.execute(
-            "UPDATE requests SET detail = (COALESCE(detail, '{}'::jsonb) - %s::text[]) || %s "
-            "WHERE id=%s",
-            (keys, Jsonb(routing), request_id),
+            f"UPDATE requests SET detail = {sql.json_merge(cleared, sql.json_cast())} WHERE id=%s",
+            (sql.json_param(routing), request_id),
         )
     else:
         cur.execute(
-            "UPDATE requests SET detail = detail - %s::text[] "
-            "WHERE id=%s AND detail IS NOT NULL AND detail ?| %s::text[]",
-            (keys, request_id, keys),
+            f"UPDATE requests SET detail = {sql.json_remove_keys('detail', keys)} "
+            f"WHERE id=%s AND detail IS NOT NULL AND {sql.json_has_any_key('detail', keys)}",
+            (request_id,),
         )

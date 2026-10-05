@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.autonomy import effective_autonomy
 from portal_backend.database import db_cursor
@@ -64,7 +65,7 @@ def get_container(
         # (trust off / no header, and the unmapped bootstrap state, unchanged).
         _require_member_read(cur, request, cid)
         cur.execute(
-            """SELECT id, name, description, status, root_task_id,
+            f"""SELECT id, name, description, status, root_task_id,
                       max_auto_agents, max_tasks, execution_mode, wakes_enabled,
                       -- mig 056 agent limit: the live AI agents created from suggestions,
                       -- i.e. what max_auto_agents is checked against (Settings → Execution)
@@ -84,11 +85,11 @@ def get_container(
                       -- window, on the DB clock — no browser clock skew) so the header, the
                       -- roster, the board and the sidebar all read ONE fact.
                       (last_wake_scan_at IS NOT NULL
-                       AND last_wake_scan_at > now() - make_interval(secs => %s)) AS runtime_served,
-                      EXTRACT(EPOCH FROM (now() - last_wake_scan_at)) AS wake_scan_age_secs,
+                       AND last_wake_scan_at > %s) AS runtime_served,
+                      {sql.age_secs("last_wake_scan_at")} AS wake_scan_age_secs,
                       created_at, completed_at
                FROM containers WHERE id=%s""",
-            (RUNTIME_SERVED_WINDOW_SECS, cid),
+            (sql.ago(RUNTIME_SERVED_WINDOW_SECS), cid),
         )
         c = cur.fetchone()
         if not c:
@@ -99,14 +100,14 @@ def get_container(
         # current_task (the actively-worked task) and last_active (latest of heartbeat /
         # worker-run start) so the redesign can render agent cards without extra calls.
         cur.execute(
-            """SELECT a.id, a.alias, a.role, a.kind, a.turns_used, a.turn_budget,
+            f"""SELECT a.id, a.alias, a.role, a.kind, a.turns_used, a.turn_budget,
                       a.last_heartbeat_at, a.is_auto_created, a.created_at, a.terminated_at,
                       a.model, a.reasoning_effort,
                       -- Collab v1: GitHub identity + project role so the portal renders
                       -- member chips/avatars and owner-only affordances off the same poll.
                       a.github_login, a.member_role,
                       -- mig 052 (org chart): who this agent reports to (NULL = root). Humans
-                      -- set it via PUT /api/agents/{aid}/reports-to; escalations walk it.
+                      -- set it via PUT /api/agents/{{aid}}/reports-to; escalations walk it.
                       a.reports_to_agent_id AS reports_to,
                       -- mig 043: this agent's per-agent autonomy override (NULL = inherit the
                       -- container level). The roster card renders a small badge when non-NULL;
@@ -116,12 +117,12 @@ def get_container(
                       -- portal can render/edit it on the agent card without a second call.
                       a.auto_wake_interval_secs,
                       -- A short glanceable prompt preview for the agent view; the FULL
-                      -- system_prompt stays on GET /api/agents/{aid}/persona (lazy-loaded
+                      -- system_prompt stays on GET /api/agents/{{aid}}/persona (lazy-loaded
                       -- on expand) so we don't ride 8KB x N prompts on every roster poll.
                       LEFT(a.system_prompt, 160) AS prompt_preview,
                       COALESCE(r.wake_enabled, true) AS wake_enabled,
                       -- Additive (agent-status parity): the newest worker_run whose row says
-                      -- 'running' — the SAME predicate GET /api/agents/{aid}/runs reports as
+                      -- 'running' — the SAME predicate GET /api/agents/{{aid}}/runs reports as
                       -- running (so the roster/board can agree with the workspace header,
                       -- which reads that list) — REGARDLESS of lease. `lease_live` says
                       -- whether the agent's lane lease is still live; a false value marks a
@@ -242,8 +243,8 @@ def get_container(
                       -- ISS-16/#89: RAW heartbeat freshness (seconds since the last keep-alive ping;
                       -- NULL if the agent never beat). No threshold — humans/clients decide what
                       -- 'stale' means; a 'stalled' badge that needs a threshold rides ISS-31 (Q2).
-                      EXTRACT(EPOCH FROM (now() - a.last_heartbeat_at)) AS heartbeat_age_secs,
-                      COALESCE(w.waiting_on, '[]'::json) AS waiting_on
+                      {sql.age_secs("a.last_heartbeat_at")} AS heartbeat_age_secs,
+                      COALESCE(w.waiting_on, '[]') AS waiting_on
                FROM agents a
                LEFT JOIN agent_reachability r ON r.agent_id = a.id
                LEFT JOIN agent_wake_state ws ON ws.agent_id = a.id

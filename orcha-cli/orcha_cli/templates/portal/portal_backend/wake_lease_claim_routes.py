@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.budget_routes import agent_budget_block
@@ -86,13 +87,14 @@ def wake_claim(aid: str, body: WakeClaim, request: Request):
                     "budget_paused": True,
                     "lane": lane,
                 }
+        lease_until = sql.from_now(body.lease_ttl)
         if lane == "conversation":
             cur.execute(
                 """INSERT INTO agent_wake_state
                      (agent_id, conv_lease_until, conv_last_woken_at, conv_lease_kind)
-                   VALUES (%s, now() + make_interval(secs => %s), now(), %s)
+                   VALUES (%s, %s, now(), %s)
                    ON CONFLICT (agent_id) DO UPDATE SET
-                     conv_lease_until = now() + make_interval(secs => %s),
+                     conv_lease_until = %s,
                      conv_last_woken_at = now(),
                      conv_lease_kind = EXCLUDED.conv_lease_kind,
                      conv_preempt_requested_at = NULL,
@@ -105,15 +107,15 @@ def wake_claim(aid: str, body: WakeClaim, request: Request):
                          AND wr.status = 'running' AND wr.lane = 'conversation')
                    RETURNING conv_lease_until AS wake_lease_until,
                              conv_lease_kind AS lease_kind""",
-                (aid, body.lease_ttl, body.lease_kind, body.lease_ttl),
+                (aid, lease_until, body.lease_kind, lease_until),
             )
         else:
             cur.execute(
                 """INSERT INTO agent_wake_state
                      (agent_id, wake_lease_until, last_woken_at, lease_kind)
-                   VALUES (%s, now() + make_interval(secs => %s), now(), %s)
+                   VALUES (%s, %s, now(), %s)
                    ON CONFLICT (agent_id) DO UPDATE SET
-                     wake_lease_until = now() + make_interval(secs => %s),
+                     wake_lease_until = %s,
                      last_woken_at = now(),
                      lease_kind = EXCLUDED.lease_kind,
                      preempt_requested_at = NULL,
@@ -125,7 +127,7 @@ def wake_claim(aid: str, body: WakeClaim, request: Request):
                        WHERE wr.agent_id = agent_wake_state.agent_id
                          AND wr.status = 'running' AND wr.lane = 'work')
                    RETURNING wake_lease_until, lease_kind""",
-                (aid, body.lease_ttl, body.lease_kind, body.lease_ttl),
+                (aid, lease_until, body.lease_kind, lease_until),
             )
         row = cur.fetchone()
         if row is None:

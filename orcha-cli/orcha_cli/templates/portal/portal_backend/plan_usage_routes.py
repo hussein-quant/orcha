@@ -124,7 +124,7 @@ def put_plan_usage(request: Request, body: PlanUsageSnapshotIn):
         _gate(cur, request, write=True)
         cur.execute(
             """INSERT INTO plan_usage_snapshots (host, payload, captured_at, updated_at)
-               VALUES (%s, %s::jsonb, %s, now())
+               VALUES (%s, %s, %s, now())
                ON CONFLICT (host) DO UPDATE
                  SET payload=EXCLUDED.payload, captured_at=EXCLUDED.captured_at, updated_at=now()
                RETURNING host, payload, captured_at, updated_at""",

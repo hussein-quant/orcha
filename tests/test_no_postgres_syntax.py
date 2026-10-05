@@ -21,6 +21,10 @@ Matching strategy (why not a plain grep):
 - Driver tokens (`psycopg`, `Jsonb(`) are Python-level, so they match NAME tokens in code:
   imports, `psycopg.errors.UniqueViolation`, `Jsonb(x)`. Comments/docstrings don't count.
 - One hit per (file, physical line, token); the line is where the match starts.
+- `ANY(`/`ALL(` must follow a comparison operator (`= ANY(`, `<> ALL(`), so English in an
+  OpenAPI description ("if any (...)") is not a hit. `ALL(` and `::uuid` are not in the plan's
+  S1 list either: quorate-v2 added `x <> ALL(%s)` and `%s::uuid` sites (sql.not_in_list() /
+  sql.uuid_param() are their ports).
 - `RIGHT(` is not in the plan's S1 token list; it was added because
   container_metrics_routes.py uses `right(wr.output, %s)`, which SQLite does not have
   (sql.right() is its port).
@@ -48,7 +52,9 @@ SQL_TOKENS = {
     "::int": r"::\s*int(?:eger|[248])?\b",
     "::timestamptz": r"::\s*timestamptz\b",
     "::interval": r"::\s*interval\b",
-    "ANY(": r"\bany\s*\(",
+    "::uuid": r"::\s*uuid\b",
+    "ANY(": r"[=<>]\s*any\s*\(",
+    "ALL(": r"[=<>]\s*all\s*\(",
     "unnest(": r"\bunnest\s*\(",
     "LATERAL": r"\blateral\b",
     "DISTINCT ON": r"\bdistinct\s+on\b",
@@ -190,8 +196,10 @@ def test_scanner_matches_sql_strings_only():
         "f = f\"\"\"SELECT {x}\n  FROM t WHERE id = any(%s) FOR   UPDATE\"\"\"\n"
         "c = 'x::jsonb'\n"
         "p = Jsonb(v)\n"
+        "d = 'Created from this task, if any (none here)'\n"
+        "n = 'WHERE e.name <> ALL(%s) AND id = %s::uuid'\n"
     )
     assert _scan_source(src) == {
         (2, "psycopg"), (5, "interval '"), (7, "ANY("), (7, "FOR UPDATE"),
-        (8, "::jsonb"), (9, "Jsonb("),
+        (8, "::jsonb"), (9, "Jsonb("), (11, "ALL("), (11, "::uuid"),
     }

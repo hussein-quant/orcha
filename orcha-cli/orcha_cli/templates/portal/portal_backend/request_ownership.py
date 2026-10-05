@@ -33,7 +33,7 @@ REQUEST_ESCALATION_COLUMNS = """
     esc.esc_detail->>'from_target_id' AS escalated_from_id,
     CASE WHEN esc.esc_at IS NOT NULL THEN COALESCE(
         (SELECT fa.alias FROM agents fa
-          WHERE fa.id = (esc.esc_detail->>'from_target_id')::uuid),
+          WHERE CAST(fa.id AS TEXT) = esc.esc_detail->>'from_target_id'),
         esc.esc_detail->>'from_target_alias',
         (SELECT ce.detail->>'target_alias' FROM events ce
           WHERE ce.entity_type = 'request' AND ce.entity_id = requests.id
@@ -58,7 +58,7 @@ REQUEST_CLOSE_COLUMNS = """
       LIMIT 1) AS closed_by_alias,
     (SELECT json_build_object('reason', d.reason, 'actor', da.alias, 'at', d.created_at)
        FROM decisions d LEFT JOIN agents da ON da.id = d.actor_agent_id
-      WHERE d.subject_type = 'request_close' AND d.subject_id = requests.id::text
+      WHERE d.subject_type = 'request_close' AND d.subject_id = CAST(requests.id AS TEXT)
       ORDER BY d.created_at DESC
       LIMIT 1) AS close_decision"""
 

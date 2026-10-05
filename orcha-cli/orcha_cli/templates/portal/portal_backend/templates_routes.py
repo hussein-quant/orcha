@@ -37,9 +37,9 @@ from typing import Literal, Optional
 
 from fastapi import HTTPException, Request, Response
 from pydantic import BaseModel, Field
-from psycopg.types.json import Jsonb
 
 from portal_backend import routine_schedule as sched
+from portal_backend import sql
 from portal_backend.agent_registration_routes import register_agent
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
@@ -543,7 +543,7 @@ def apply_template(cid: str, key: str, body: TemplateApply, request: Request, re
                 """INSERT INTO project_template_applications
                      (container_id, template_key, template_version, applied_by_agent_id, plan, result)
                    VALUES (%s,%s,%s,%s,%s,%s) RETURNING id, created_at""",
-                (cid, t["key"], t["version"], actor, Jsonb(public_plan), Jsonb(result)),
+                (cid, t["key"], t["version"], actor, sql.json_param(public_plan), sql.json_param(result)),
             )
             app_row = cur.fetchone()
             log_event(cur, cid, "human", actor, "container", cid, "template_applied", {

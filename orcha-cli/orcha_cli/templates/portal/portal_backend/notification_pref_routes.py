@@ -249,7 +249,7 @@ def put_notification_prefs(cid: str, body: ProjectPrefsBody, request: Request):
             changed["muted"] = doc["muted"]
         cur.execute(
             """INSERT INTO notification_prefs (member_agent_id, container_id, prefs, updated_at)
-               VALUES (%s, %s, %s::jsonb, now())
+               VALUES (%s, %s, %s, now())
                ON CONFLICT (member_agent_id)
                DO UPDATE SET prefs=EXCLUDED.prefs, updated_at=now()""",
             (str(member["id"]), cid, _json(doc)),
@@ -304,7 +304,7 @@ def put_notification_pref_defaults(cid: str, body: DefaultPrefsBody, request: Re
             _422(e)
         cur.execute(
             """INSERT INTO notification_pref_defaults (identity_key, prefs, updated_at)
-               VALUES (%s, %s::jsonb, now())
+               VALUES (%s, %s, now())
                ON CONFLICT (identity_key)
                DO UPDATE SET prefs=EXCLUDED.prefs, updated_at=now()""",
             (np.identity_key(member), _json(doc)),

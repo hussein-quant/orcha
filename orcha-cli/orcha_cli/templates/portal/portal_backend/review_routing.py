@@ -47,8 +47,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
-from psycopg.types.json import Jsonb
-
+from portal_backend import sql
 from portal_backend.agent_status import log_event, recompute_agent_status
 from portal_backend.events import publish_event
 from portal_backend.org_chart import manager_chain
@@ -135,7 +134,7 @@ def _close_prereview_request(cur, container_id, request_id, reason, response=Non
     cur.execute(
         """UPDATE requests SET status='closed', closed_at=now(),
                   response=COALESCE(%s, response),
-                  responded_at=CASE WHEN %s::text IS NULL THEN responded_at ELSE now() END
+                  responded_at=CASE WHEN CAST(%s AS TEXT) IS NULL THEN responded_at ELSE now() END
             WHERE id=%s AND status IN ('open','accepted')
         RETURNING requester_id, target_id""",
         (response, response, request_id),
@@ -223,7 +222,7 @@ def supersede_pending_prereview(cur, container_id, task_id, *, reason, actor_id=
     if not mr or mr.get("status") != "pending":
         return False
     mr = {**mr, "status": new_status, "decided_at": _now_iso(), "superseded_reason": reason}
-    cur.execute("UPDATE tasks SET manager_review=%s WHERE id=%s", (Jsonb(mr), task_id))
+    cur.execute("UPDATE tasks SET manager_review=%s WHERE id=%s", (sql.json_param(mr), task_id))
     _close_prereview_request(cur, container_id, mr.get("request_id"), reason)
     log_event(cur, container_id, "human" if actor_id else "system", actor_id, "task",
               str(task_id), "manager_review_superseded",
@@ -299,7 +298,7 @@ def route_finished_work(cur, container_id, task_id, finisher_id, result_text) ->
     cur.execute(
         "UPDATE tasks SET reviewer_agent_id=%s, review_routing=%s, manager_review=NULL "
         "WHERE id=%s",
-        (reviewer_id, Jsonb(routing) if routing is not None else None, tid),
+        (reviewer_id, sql.json_param(routing) if routing is not None else None, tid),
     )
     reviewer_alias = _alias(cur, reviewer_id)
     routed_via = (routing or {}).get("routed_via")
@@ -349,10 +348,10 @@ def _request_prereview(cur, cid, task, finisher_id, finisher_alias, ai_mgr, revi
              (container_id, type, requester_id, target_id, priority, status, payload,
               expires_at, chain_depth, detail, originating_task_id)
            VALUES (%s, 'info', %s, %s, 100, 'open', %s,
-                   now() + (%s || ' minutes')::interval, 0, %s::jsonb, %s)
+                   %s, 0, %s, %s)
            RETURNING id""",
-        (cid, finisher_id, str(ai_mgr["id"]), payload, str(PREREVIEW_EXPIRES_MINUTES),
-         json.dumps(detail), tid),
+        (cid, finisher_id, str(ai_mgr["id"]), payload,
+         sql.from_now(PREREVIEW_EXPIRES_MINUTES * 60), json.dumps(detail), tid),
     )
     rid = str(cur.fetchone()["id"])
     mr = {
@@ -365,7 +364,7 @@ def _request_prereview(cur, cid, task, finisher_id, finisher_alias, ai_mgr, revi
         "requested_at": _now_iso(),
         "decided_at": None,
     }
-    cur.execute("UPDATE tasks SET manager_review=%s WHERE id=%s", (Jsonb(mr), tid))
+    cur.execute("UPDATE tasks SET manager_review=%s WHERE id=%s", (sql.json_param(mr), tid))
     recompute_agent_status(cur, finisher_id)
     log_event(cur, cid, "system", None, "request", rid, "created", {
         "type": "info", "target_alias": ai_mgr["alias"], "priority": 100,
@@ -440,7 +439,7 @@ def apply_manager_review(cur, task_row, manager_id, decision, reasons) -> dict:
         "reasons": reasons or None,
         "decided_at": _now_iso(),
     })
-    cur.execute("UPDATE tasks SET manager_review=%s WHERE id=%s", (Jsonb(mr), tid))
+    cur.execute("UPDATE tasks SET manager_review=%s WHERE id=%s", (sql.json_param(mr), tid))
     label = {
         "approve": f"[manager pre-review] {alias} recommends approval",
         "send_back": f"[manager feedback] {alias} sent this back",

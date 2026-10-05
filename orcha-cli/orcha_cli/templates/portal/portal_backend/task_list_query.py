@@ -1,5 +1,7 @@
 """Build the shared compact task-list query used by portal snapshots."""
 
+from portal_backend import sql
+
 
 # An agent-authored post on task `t` made after decision `d` (the revised plan).
 _REVISED_AFTER_D = (
@@ -13,17 +15,17 @@ _REVISED_AFTER_D = (
 # with attention_counts so the Needs-you count and the gate agree.
 PLAN_CUTOFF_SQL = (
     "COALESCE((SELECT max(pd.created_at) FROM decisions pd "
-    "WHERE pd.subject_type = 'plan_approval' AND pd.subject_id = t.id::text "
+    "WHERE pd.subject_type = 'plan_approval' AND pd.subject_id = CAST(t.id AS TEXT) "
     "AND pd.decision = 'reject' AND EXISTS (SELECT 1 FROM task_messages pm "
     "JOIN agents pa ON pa.id = pm.author_id WHERE pm.task_id = t.id "
-    "AND pa.kind <> 'human' AND pm.created_at > pd.created_at)), '-infinity'::timestamptz)"
+    f"AND pa.kind <> 'human' AND pm.created_at > pd.created_at)), {sql.ts_neg_infinity()})"
 )
 
 # TG-13b: order agent posts inside the current plan round (`pc.c` = PLAN_CUTOFF_SQL):
 # the opening round's plan is the EARLIEST agent post; a post-reject round's plan is the
 # LATEST (an ack like "revising now" usually precedes the real revision).
 PLAN_ROUND_ORDER_SQL = (
-    "CASE WHEN pc.c = '-infinity'::timestamptz THEN m.created_at END ASC, "
+    f"CASE WHEN pc.c = {sql.ts_neg_infinity()} THEN m.created_at END ASC, "
     "m.created_at DESC"
 )
 
@@ -31,9 +33,9 @@ PLAN_ROUND_ORDER_SQL = (
 # latest one is a reject the agent has answered with a revised post.
 PLAN_GATE_OPEN_SQL = (
     "(NOT EXISTS (SELECT 1 FROM decisions gd WHERE gd.subject_type = 'plan_approval' "
-    "AND gd.subject_id = t.id::text) OR EXISTS (SELECT 1 FROM (SELECT gd.decision, "
+    "AND gd.subject_id = CAST(t.id AS TEXT)) OR EXISTS (SELECT 1 FROM (SELECT gd.decision, "
     "gd.created_at FROM decisions gd WHERE gd.subject_type = 'plan_approval' "
-    "AND gd.subject_id = t.id::text ORDER BY gd.created_at DESC LIMIT 1) lg "
+    "AND gd.subject_id = CAST(t.id AS TEXT) ORDER BY gd.created_at DESC LIMIT 1) lg "
     "WHERE lg.decision = 'reject' AND EXISTS (SELECT 1 FROM task_messages gm "
     "JOIN agents ga ON ga.id = gm.author_id WHERE gm.task_id = t.id "
     "AND ga.kind <> 'human' AND gm.created_at > lg.created_at)))"
@@ -64,7 +66,7 @@ def _task_list_sql(where: str, order: str) -> str:
                       t.created_at, t.started_at, t.completed_at,
                       COALESCE((SELECT json_agg(a.alias ORDER BY a.alias)
                                 FROM agent_tasks at JOIN agents a ON a.id = at.agent_id
-                                WHERE at.task_id = t.id), '[]'::json) AS assignees,
+                                WHERE at.task_id = t.id), '[]') AS assignees,
                       json_build_object(
                           'count', (SELECT count(*) FROM task_messages m WHERE m.task_id = t.id),
                           'last', (SELECT json_build_object(
@@ -83,13 +85,13 @@ def _task_list_sql(where: str, order: str) -> str:
                                    ELSE json_build_object('decision', d.decision, 'reason', d.reason,
                                           'actor', da.alias, 'at', d.created_at) END
                          FROM decisions d LEFT JOIN agents da ON da.id = d.actor_agent_id
-                        WHERE d.subject_type = 'plan_approval' AND d.subject_id = t.id::text
+                        WHERE d.subject_type = 'plan_approval' AND d.subject_id = CAST(t.id AS TEXT)
                         ORDER BY d.created_at DESC LIMIT 1) AS plan_decision,
                       (SELECT CASE WHEN {_REVISED_AFTER_D}
                                    THEN json_build_object('decision', d.decision, 'reason', d.reason,
                                           'actor', da.alias, 'at', d.created_at) END
                          FROM decisions d LEFT JOIN agents da ON da.id = d.actor_agent_id
-                        WHERE d.subject_type = 'plan_approval' AND d.subject_id = t.id::text
+                        WHERE d.subject_type = 'plan_approval' AND d.subject_id = CAST(t.id AS TEXT)
                         ORDER BY d.created_at DESC LIMIT 1) AS previous_plan_decision,
                       -- the agent's OPENING plan = the EARLIEST agent-authored post (ASC), matching
                       -- the established "opening non-human message" plan semantics (B10 + the portal

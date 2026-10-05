@@ -1,5 +1,6 @@
 """Persist per-event acknowledgements and advance contiguous delivery cursors."""
 
+from portal_backend import sql
 from portal_backend.event_policy import _WORK_NON_WAKING_EVENTS
 from portal_backend.guards import valid_uuid as _valid_uuid
 
@@ -22,11 +23,11 @@ def _recompute_delivered_floor(cur, aid: str) -> float:
     row = cur.fetchone()
     delivered = (row["d"] if row else 0.0) or 0.0
     cur.execute(
-        """SELECT min(e.ts) AS m FROM agent_events e
-           WHERE e.event_key=%s AND e.ts > %s AND e.event_name <> ALL(%s)
+        f"""SELECT min(e.ts) AS m FROM agent_events e
+           WHERE e.event_key=%s AND e.ts > %s AND {sql.not_in_list('e.event_name')}
              AND NOT EXISTS (SELECT 1 FROM agent_event_acks a
                               WHERE a.agent_id=%s AND a.event_id=e.id)""",
-        (aid, delivered, list(_WORK_NON_WAKING_EVENTS), aid),
+        (aid, delivered, sql.list_param(_WORK_NON_WAKING_EVENTS), aid),
     )
     min_unhandled = cur.fetchone()["m"]
     if min_unhandled is None:

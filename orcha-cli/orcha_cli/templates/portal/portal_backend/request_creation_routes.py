@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import bump_agent, log_event, recompute_agent_status
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -225,13 +226,14 @@ def create_request(cid: str, body: RequestCreate, request: Request):
         elif effective_task is not None:
             raise HTTPException(400, "`task` field is only valid with type='task'")
 
+        expires_at = sql.from_now(body.expires_minutes * 60)
         cur.execute(
             """INSERT INTO requests
                  (container_id, type, requester_id, target_id, priority, status,
                   payload, expires_at, parent_request_id, chain_depth, detail,
                   originating_task_id, agent_payload)
                VALUES (%s, %s, %s, %s, %s, 'open', %s,
-                       now() + (%s || ' minutes')::interval, %s, %s, %s::jsonb, %s, %s)
+                       %s, %s, %s, %s, %s, %s)
                RETURNING id, expires_at""",
             (
                 cid,
@@ -240,7 +242,7 @@ def create_request(cid: str, body: RequestCreate, request: Request):
                 target_id,
                 body.priority,
                 body.payload,
-                str(body.expires_minutes),
+                expires_at,
                 parent_request_id,
                 chain_depth,
                 json.dumps(detail) if detail is not None else None,

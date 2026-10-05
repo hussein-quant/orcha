@@ -27,6 +27,7 @@ import re
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import valid_uuid
@@ -218,7 +219,7 @@ def claim_push_outbox(request: Request, body: OutboxClaim):
     _forbid_browser_identity(request)
     with db_cursor() as (conn, cur):
         cur.execute(
-            "DELETE FROM push_outbox WHERE created_at < now() - interval '48 hours'"
+            "DELETE FROM push_outbox WHERE created_at < %s", (sql.ago(48 * 3600),)
         )
         cur.execute(
             """SELECT id, container_id, kind, ref_id, title, body, created_at
@@ -273,14 +274,14 @@ def claim_push_outbox(request: Request, body: OutboxClaim):
         if empty_ids:
             cur.execute(
                 "UPDATE push_outbox SET failed='no live devices at claim' "
-                "WHERE id = ANY(%s)",
-                (empty_ids,),
+                f"WHERE {sql.in_list('id')}",
+                (sql.list_param(empty_ids),),
             )
         if muted_ids:
             cur.execute(
                 "UPDATE push_outbox SET failed='muted by notification settings' "
-                "WHERE id = ANY(%s)",
-                (muted_ids,),
+                f"WHERE {sql.in_list('id')}",
+                (sql.list_param(muted_ids),),
             )
         conn.commit()
     return {"events": events}
@@ -298,8 +299,8 @@ def mark_push_outbox(request: Request, body: OutboxMark):
         if delivered_ids:
             cur.execute(
                 "UPDATE push_outbox SET delivered_at=now() "
-                "WHERE id = ANY(%s) AND delivered_at IS NULL",
-                (delivered_ids,),
+                f"WHERE {sql.in_list('id')} AND delivered_at IS NULL",
+                (sql.list_param(delivered_ids),),
             )
             delivered = cur.rowcount
         for oid, reason in failed_items.items():
@@ -325,8 +326,8 @@ def revoke_unregistered_devices(request: Request, body: RevokeUnregistered):
     with db_cursor() as (conn, cur):
         cur.execute(
             "UPDATE push_devices SET revoked_at=now() "
-            "WHERE apns_token = ANY(%s) AND revoked_at IS NULL",
-            (tokens,),
+            f"WHERE {sql.in_list('apns_token')} AND revoked_at IS NULL",
+            (sql.list_param(tokens),),
         )
         revoked = cur.rowcount
         conn.commit()

@@ -39,6 +39,7 @@ from typing import Literal, Optional
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.container_metrics_routes import OUTPUT_TAIL_BYTES, parse_output_tail
@@ -63,14 +64,15 @@ _BUDGET_COLS = (
 # --------------------------------------------------------------------------- #
 
 def current_period(cur) -> dict:
-    """The budget month (UTC calendar month) as {'period','starts_at','resets_at'}."""
-    cur.execute(
-        """SELECT to_char(date_trunc('month', now() AT TIME ZONE 'UTC'), 'YYYY-MM') AS period,
-                  date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS starts_at,
-                  (date_trunc('month', now() AT TIME ZONE 'UTC') + interval '1 month')
-                      AT TIME ZONE 'UTC' AS resets_at"""
-    )
-    return dict(cur.fetchone())
+    """The budget month (UTC calendar month) as {'period','starts_at','resets_at'}.
+    Computed in Python (GH #258: no date_trunc / AT TIME ZONE / interval on SQLite); `cur`
+    stays in the signature for the callers."""
+    starts_at = sql.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if starts_at.month == 12:
+        resets_at = starts_at.replace(year=starts_at.year + 1, month=1)
+    else:
+        resets_at = starts_at.replace(month=starts_at.month + 1)
+    return {"period": starts_at.strftime("%Y-%m"), "starts_at": starts_at, "resets_at": resets_at}
 
 
 def _empty_usage() -> dict:
@@ -363,9 +365,9 @@ def _notice(cur, container_id: str, requester_id: str, payload: str, reason: str
         """INSERT INTO requests
                 (container_id, type, requester_id, target_id, priority, status,
                  payload, expires_at, chain_depth)
-           VALUES (%s, 'info', %s, %s, 100, 'open', %s, now() + interval '7 days', 0)
+           VALUES (%s, 'info', %s, %s, 100, 'open', %s, %s, 0)
            RETURNING id""",
-        (container_id, requester_id, human_id, payload),
+        (container_id, requester_id, human_id, payload, sql.from_now(7 * 86400)),
     )
     rid = str(cur.fetchone()["id"])
     log_event(
@@ -393,16 +395,16 @@ def resolve_stale_notices(cur, container_id: str, *, period: str, reasons,
     Returns the closed request ids."""
     scope_sql = ("e.detail->>'agent_id' = %s" if agent_id is not None
                  else "e.detail->>'scope' = 'project'")
-    params = [container_id, list(reasons), period]
+    params = [container_id, sql.list_param(reasons), period]
     if agent_id is not None:
         params.append(str(agent_id))
     cur.execute(
         f"""SELECT r.id, r.requester_id, r.target_id
               FROM requests r
               JOIN events e ON e.entity_type = 'request' AND e.event_type = 'created'
-                           AND e.entity_id::text = r.id::text
+                           AND CAST(e.entity_id AS TEXT) = CAST(r.id AS TEXT)
              WHERE r.container_id = %s AND r.status IN ('open', 'escalated')
-               AND e.detail->>'reason' = ANY(%s)
+               AND {sql.in_list("e.detail->>'reason'")}
                AND e.detail->>'period' = %s
                AND {scope_sql}
              FOR UPDATE OF r""",

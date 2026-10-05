@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_agent as _require_agent
@@ -42,7 +43,7 @@ def agent_inbox(aid: str, request: Request, since: Optional[str] = None):
         agent = _require_agent(cur, aid)
         # PS-08: project isolation — a trusted non-member cannot read another project's asks.
         require_member_read(cur, request, str(agent["container_id"]))
-        since_clause = "AND r.created_at > %s::timestamptz" if since else ""
+        since_clause = f"AND r.created_at > {sql.ts_param()}" if since else ""
         params = (aid, since) if since else (aid,)
         cur.execute(
             f"""SELECT {_REQUEST_COLUMNS},

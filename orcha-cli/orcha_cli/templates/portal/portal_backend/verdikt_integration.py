@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from portal_backend import evidence_parse as ep
+from portal_backend import sql
 from portal_backend import verdikt_preview as vp
 from portal_backend.verdikt_client import (VerdiktClient, VerdiktError, artifact_path_from_url,
                                            safe_artifact_path)
@@ -201,8 +202,8 @@ def latest_completed_run(cur, tid: str, since=None) -> dict | None:
     """The newest run of the task that Verdikt answered with a verdict (optionally only runs
     handed off at/after `since`, the current verification round's start)."""
     cur.execute(
-        """SELECT * FROM verdikt_runs WHERE task_id=%s AND status='completed'
-             AND (%s::timestamptz IS NULL OR created_at >= %s::timestamptz)
+        f"""SELECT * FROM verdikt_runs WHERE task_id=%s AND status='completed'
+             AND ({sql.ts_param()} IS NULL OR created_at >= {sql.ts_param()})
            ORDER BY created_at DESC LIMIT 1""",
         (tid, since, since),
     )
@@ -309,7 +310,7 @@ def _update(cur, rid: str, **fields):
     cols, vals = [], []
     for k, v in fields.items():
         if k in ("handoff", "criteria", "screenshots"):
-            cols.append(f"{k}=%s::jsonb")
+            cols.append(f"{k}=%s")
             vals.append(json.dumps(v, default=str))
         else:
             cols.append(f"{k}=%s")
@@ -349,7 +350,7 @@ def create_run(cur, task: dict, settings: dict, pack: dict, *, trigger: str, act
     cur.execute(
         """INSERT INTO verdikt_runs (task_id, container_id, trigger, triggered_by, status, base_url,
                                      target_kind, locator, handoff)
-           VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s, %s::jsonb) RETURNING *""",
+           VALUES (%s, %s, %s, %s, 'queued', %s, %s, %s, %s) RETURNING *""",
         (tid, str(task["container_id"]), trigger, actor_id, settings["base_url"], kind, locator,
          json.dumps(handoff, default=str)),
     )
@@ -656,8 +657,8 @@ def maybe_auto_trigger(tid: str, pack: dict, *, background: bool = False) -> dic
                     return None
                 start = pack.get("round_started_at")
                 cur.execute(
-                    """SELECT 1 FROM verdikt_runs WHERE task_id=%s AND trigger='auto'
-                         AND (%s::timestamptz IS NULL OR created_at >= %s::timestamptz) LIMIT 1""",
+                    f"""SELECT 1 FROM verdikt_runs WHERE task_id=%s AND trigger='auto'
+                         AND ({sql.ts_param()} IS NULL OR created_at >= {sql.ts_param()}) LIMIT 1""",
                     (tid, start, start),
                 )
                 if cur.fetchone():

@@ -62,6 +62,27 @@ def from_now(seconds: float) -> _dt.datetime:
     return utcnow() + _dt.timedelta(seconds=seconds)
 
 
+def ts_param(placeholder: str = "%s") -> str:
+    """A bound timestamp whose type Postgres cannot infer from context (`%s IS NULL OR ...`):
+    `%s::timestamptz` on Postgres, the bare placeholder on SQLite. Never spell
+    `CAST(%s AS timestamptz)` inline: on SQLite that is NUMERIC affinity and turns
+    '2026-10-05T...' into the integer 2026."""
+    return f"{placeholder}::timestamptz" if _pg() else placeholder
+
+
+def uuid_param(placeholder: str = "%s") -> str:
+    """A bound id whose type Postgres cannot infer (`%s IS NULL OR id <> %s`): `%s::uuid` on
+    Postgres, the bare placeholder on SQLite (ids are TEXT there)."""
+    return f"{placeholder}::uuid" if _pg() else placeholder
+
+
+def ts_neg_infinity() -> str:
+    """A timestamp that sorts before every stored one (`COALESCE(max(x), <this>)` sentinels).
+    Postgres: '-infinity'::timestamptz. SQLite: the canonical text of 0001-01-01 UTC, which
+    sorts before every canonical ts() value and still parses back as a datetime."""
+    return "'-infinity'::timestamptz" if _pg() else "'0001-01-01T00:00:00.000000+00:00'"
+
+
 def age_secs(col: str) -> str:
     """Seconds elapsed since the timestamp expression `col` (NULL when `col` is NULL)."""
     if _pg():
@@ -84,6 +105,15 @@ def in_list(col: str) -> str:
     if _pg():
         return f"{col} = ANY(%s)"
     return f"{col} IN (SELECT value FROM json_each(%s))"
+
+
+def not_in_list(col: str) -> str:
+    """Negated membership on one bound list (`x <> ALL(%s)`); bind sql.list_param(values).
+    Both engines agree on NULLs: a NULL `col` is excluded by a non-empty list, and an empty
+    list matches every row, NULL included (vacuous truth)."""
+    if _pg():
+        return f"{col} <> ALL(%s)"
+    return f"{col} NOT IN (SELECT value FROM json_each(%s))"
 
 
 def list_param(values) -> object:
@@ -140,6 +170,53 @@ def json_bool_is_true(col: str, key: str, *, default: bool = True) -> str:
     if _pg():
         return f"COALESCE({col}->>'{key}', '{'true' if default else 'false'}') = 'true'"
     return f"COALESCE(json_extract({col}, '$.{key}'), {1 if default else 0}) = 1"
+
+
+def _json_keys(keys) -> list:
+    keys = list(keys)
+    if not keys:
+        raise ValueError("need at least one JSON key")
+    for k in keys:
+        if not _JSON_KEY.match(k):
+            raise ValueError(f"JSON key must be a plain identifier, got {k!r}")
+    return keys
+
+
+def json_remove_keys(col: str, keys) -> str:
+    """The JSON object `col` without the top-level `keys` (constants, inlined):
+    Postgres `(col - '{a,b}'::text[])`, SQLite `json_remove(col, '$.a', '$.b')`."""
+    keys = _json_keys(keys)
+    if _pg():
+        return f"({col} - '{{{','.join(keys)}}}'::text[])"
+    paths = ", ".join("'$." + k + "'" for k in keys)
+    return f"json_remove({col}, {paths})"
+
+
+def json_has_any_key(col: str, keys) -> str:
+    """Predicate: the JSON object `col` has at least one of the top-level `keys` (a key whose
+    value is JSON null counts, as with Postgres `?|`)."""
+    keys = _json_keys(keys)
+    if _pg():
+        return f"({col} ?| '{{{','.join(keys)}}}'::text[])"
+    return "(" + " OR ".join(f"json_type({col}, '$.{k}') IS NOT NULL" for k in keys) + ")"
+
+
+def json_array_has(col: str, placeholder: str = "%s") -> str:
+    """Predicate: the JSON array of strings `col` contains the bound string.
+    Postgres `col ? %s::text`, SQLite an EXISTS over json_each(col)."""
+    if _pg():
+        return f"({col} ? {placeholder}::text)"
+    return f"EXISTS (SELECT 1 FROM json_each({col}) WHERE json_each.value = {placeholder})"
+
+
+def json_merge(left_obj: str, right_obj: str) -> str:
+    """Shallow merge of two JSON objects, right wins: Postgres `left || right`, SQLite
+    json_patch(left, right). CAVEAT: json_patch is RFC 7396, so a JSON null in `right`
+    DELETES that key (Postgres keeps it as null) and nested objects merge recursively;
+    callers must not rely on either (clear the keys first, never send nulls)."""
+    if _pg():
+        return f"({left_obj} || {right_obj})"
+    return f"json_patch({left_obj}, {right_obj})"
 
 
 # --- strings / misc ---

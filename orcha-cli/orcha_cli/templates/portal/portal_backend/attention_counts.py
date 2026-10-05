@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
+from portal_backend import sql
 from portal_backend.task_list_query import PLAN_CUTOFF_SQL, PLAN_GATE_OPEN_SQL, PLAN_ROUND_ORDER_SQL
 from portal_backend.autonomy import effective_autonomy
 
@@ -82,10 +83,10 @@ def needs_you_by_container(
 
     # LIVE agents only — the snapshot the portal resolves aliases against.
     cur.execute(
-        """SELECT id, container_id, alias, kind, autonomy_override
+        f"""SELECT id, container_id, alias, kind, autonomy_override
              FROM agents
-            WHERE container_id = ANY(%s::uuid[]) AND terminated_at IS NULL""",
-        (cids,),
+            WHERE {sql.in_list('container_id')} AND terminated_at IS NULL""",
+        (sql.list_param(cids),),
     )
     live_by_alias: Dict[str, Dict[str, Mapping[str, Any]]] = {}
     live_by_id: Dict[str, Mapping[str, Any]] = {}
@@ -107,19 +108,19 @@ def needs_you_by_container(
                   (SELECT a.alias FROM agent_tasks at JOIN agents a ON a.id = at.agent_id
                     WHERE at.task_id = t.id ORDER BY a.alias LIMIT 1) AS first_assignee
              FROM tasks t
-            WHERE t.container_id = ANY(%s::uuid[])
+            WHERE """ + sql.in_list("t.container_id") + """
               AND (t.status = 'needs_verification'
                    OR (t.status = 'in_progress'
                        AND """ + PLAN_GATE_OPEN_SQL + """))""",
-        (cids,),
+        (sql.list_param(cids),),
     )
     tasks = cur.fetchall()
 
     cur.execute(
-        """SELECT id, container_id, status, target_id
+        f"""SELECT id, container_id, status, target_id
              FROM requests
-            WHERE container_id = ANY(%s::uuid[]) AND status IN ('open', 'escalated')""",
-        (cids,),
+            WHERE {sql.in_list('container_id')} AND status IN ('open', 'escalated')""",
+        (sql.list_param(cids),),
     )
     reqs = cur.fetchall()
 

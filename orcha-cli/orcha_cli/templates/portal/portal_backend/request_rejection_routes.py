@@ -159,7 +159,7 @@ def suggest_agent(rid: str, body: AgentSuggestion):
             existing.update(org_routing)
         cur.execute(
             """UPDATE requests
-                 SET target_id=%s, status='open', detail=%s::jsonb
+                 SET target_id=%s, status='open', detail=%s
                  WHERE id=%s""",
             (human_id, json.dumps(existing), rid),
         )

@@ -49,7 +49,7 @@ def has_parent_column(cur) -> bool:
 
 
 def _task_row(cur, tid: str, with_parent: bool) -> Optional[dict]:
-    parent_col = "parent_task_id" if with_parent else "NULL::uuid AS parent_task_id"
+    parent_col = "parent_task_id" if with_parent else "NULL AS parent_task_id"
     cur.execute(
         f"""SELECT id, container_id, title, status, is_root, {parent_col}
               FROM tasks WHERE id = %s""",

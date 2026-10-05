@@ -26,6 +26,7 @@ Stranded rows become ``orphaned`` (the same terminal status the wake-ack release
 uses), their embodiment tokens are revoked, and an audit event is logged.
 """
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 
 # Same threshold and reasoning as the heartbeat reaper (ISS-60B): longer than the
@@ -77,7 +78,7 @@ def reconcile_stranded_runs(cur, cid: str, orphan_secs: float, lane: str) -> lis
     cur.execute(
         f"""WITH stranded AS (
                SELECT wr.run_id, wr.agent_id, a.alias, wr.wake_kind,
-                      EXTRACT(EPOCH FROM (now() - {activity})) AS idle_seconds
+                      {sql.age_secs(activity)} AS idle_seconds
                FROM worker_runs wr
                JOIN agents a ON a.id = wr.agent_id
                LEFT JOIN agent_wake_state w ON w.agent_id = wr.agent_id
@@ -86,9 +87,8 @@ def reconcile_stranded_runs(cur, cid: str, orphan_secs: float, lane: str) -> lis
                  AND wr.status = 'running'
                  AND wr.lane = %s
                  AND {lease_lapsed_expr(lane)}
-                 AND {activity} < now() - make_interval(secs => (
-                       %s + CASE WHEN wr.sandbox_container_id IS NULL THEN 0
-                                 ELSE %s END))
+                 AND {activity} < CASE WHEN wr.sandbox_container_id IS NULL THEN %s
+                                       ELSE %s END
            ), orphaned AS (
                UPDATE worker_runs r
                SET status = 'orphaned', ended_at = now()
@@ -98,15 +98,15 @@ def reconcile_stranded_runs(cur, cid: str, orphan_secs: float, lane: str) -> lis
            )
            SELECT s.run_id, s.agent_id, s.alias, s.wake_kind, s.idle_seconds
            FROM stranded s JOIN orphaned o ON o.run_id = s.run_id""",
-        (cid, lane, orphan_secs, SANDBOX_STRANDED_EXTRA_SECS),
+        (cid, lane, sql.ago(orphan_secs), sql.ago(orphan_secs + SANDBOX_STRANDED_EXTRA_SECS)),
     )
     rows = cur.fetchall()
     run_ids = [str(row["run_id"]) for row in rows]
     if run_ids:
         cur.execute(
-            """UPDATE embodiment_tokens SET revoked_at=now()
-               WHERE run_id = ANY(%s) AND revoked_at IS NULL""",
-            (run_ids,),
+            f"""UPDATE embodiment_tokens SET revoked_at=now()
+               WHERE {sql.in_list('run_id')} AND revoked_at IS NULL""",
+            (sql.list_param(run_ids),),
         )
     for row in rows:
         log_event(

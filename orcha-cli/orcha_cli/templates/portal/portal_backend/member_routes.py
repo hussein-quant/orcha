@@ -5,8 +5,8 @@ from typing import Optional
 
 import psycopg
 from fastapi import HTTPException, Request
-from psycopg.types.json import Jsonb
 
+from portal_backend import sql
 from portal_backend.agent_profile_routes import retire_agent_record
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
@@ -169,7 +169,7 @@ def invite_member(cid: str, body: MemberCreate, request: Request):
             cur.execute(
                 f"""UPDATE agents
                        SET terminated_at=NULL, status='idle', member_role=%s,
-                           grants='[]'::jsonb, last_heartbeat_at=NULL
+                           grants={sql.json_cast("'[]'")}, last_heartbeat_at=NULL
                      WHERE id=%s
                  RETURNING {_MEMBER_FIELDS}""",
                 (body.role, retired["id"]),
@@ -248,7 +248,7 @@ def update_member_role(cid: str, aid: str, body: MemberRoleUpdate, request: Requ
             _require_owner_actor(actor, "changing permissions")
             deduped = sorted(set(body.grants))
             sets.append("grants=%s")
-            params.append(Jsonb(deduped))
+            params.append(sql.json_param(deduped))
             detail["grants"] = deduped
         if not sets:
             return member  # no-op (e.g. re-asserting the current role)

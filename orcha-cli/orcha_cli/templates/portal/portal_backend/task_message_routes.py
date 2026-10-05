@@ -194,7 +194,7 @@ def get_task_messages(
         "(m.author_id IS NOT NULL AND ma.kind = 'human') AS is_human, m.body, "
         # #301: COALESCE so pre-migration rows surface [] (their column existed only
         # after mig 025; the DEFAULT covers new rows but be explicit for the read path).
-        "COALESCE(m.attachments, '[]'::jsonb) AS attachments, m.created_at"
+        "COALESCE(m.attachments, '[]') AS attachments, m.created_at"
     )
     with db_cursor() as (_, cur):
         t = _require_task(cur, tid)
