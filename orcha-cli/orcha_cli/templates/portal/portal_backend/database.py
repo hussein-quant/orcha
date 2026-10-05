@@ -227,10 +227,11 @@ def _assert_readonly() -> bool:
 class _Scope:
     """One outermost transaction; nested db_cursor() calls in the same context join it."""
 
-    __slots__ = ("raw", "depth", "readonly")
+    __slots__ = ("raw", "depth", "readonly", "ends")
 
     def __init__(self, raw, readonly):
         self.raw, self.depth, self.readonly = raw, 0, readonly
+        self.ends = 0  # explicit commit()/rollback() calls: each one drops every open savepoint
 
     def begin(self) -> None:
         self.raw.execute("BEGIN" if self.readonly else "BEGIN IMMEDIATE")
@@ -305,10 +306,12 @@ class Conn:
     def commit(self):
         if self._scope.raw.in_transaction:
             self._scope.raw.execute("COMMIT")
+            self._scope.ends += 1
 
     def rollback(self):
         if self._scope.raw.in_transaction:
             self._scope.raw.execute("ROLLBACK")
+            self._scope.ends += 1
 
     def execute(self, query, params=None):
         return Cursor(self._scope).execute(query, params)
@@ -321,11 +324,26 @@ class Conn:
 def _sqlite_cursor(readonly: bool):
     scope = _scope.get()
     if scope is not None and scope.depth > 0:
+        # Nested: join the outer transaction (a second writer would wait on our own lock),
+        # inside a SAVEPOINT so an exception undoes only this scope's writes, as a separate
+        # psycopg transaction did. An explicit commit()/rollback() in between ends it early.
         if scope.readonly and not readonly and _assert_readonly():
             raise AssertionError("a write db_cursor scope nested inside a readonly one")
         scope.depth += 1
+        name, ends = f"orcha_sp{scope.depth}", scope.ends
+        if not scope.raw.in_transaction:
+            scope.begin()
+        scope.raw.execute(f"SAVEPOINT {name}")
         try:
             yield Conn(scope), Cursor(scope)
+        except BaseException:
+            if scope.ends == ends and scope.raw.in_transaction:
+                scope.raw.execute(f"ROLLBACK TO {name}")
+                scope.raw.execute(f"RELEASE {name}")
+            raise
+        else:
+            if scope.ends == ends and scope.raw.in_transaction:
+                scope.raw.execute(f"RELEASE {name}")
         finally:
             scope.depth -= 1
         return

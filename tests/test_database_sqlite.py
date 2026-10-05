@@ -45,6 +45,18 @@ def test_nested_scope_joins_the_outer_transaction(db, scratch):
     assert _count(db) == 0  # the inner insert was part of the outer transaction
 
 
+def test_failed_inner_scope_undoes_only_its_own_writes(db, scratch):
+    with database.db_cursor() as (_c, cur):
+        cur.execute("INSERT INTO t_scratch(v) VALUES (%s)", ("outer",))
+        with pytest.raises(LookupError):
+            with database.db_cursor() as (_c2, cur2):
+                cur2.execute("INSERT INTO t_scratch(v) VALUES (%s)", ("inner",))
+                raise LookupError
+        with database.db_cursor() as (_c3, cur3):
+            cur3.execute("INSERT INTO t_scratch(v) VALUES (%s)", ("sibling",))
+    assert sorted(r["v"] for r in db.execute("SELECT v FROM t_scratch")) == ["outer", "sibling"]
+
+
 def test_inner_scope_sees_outer_uncommitted_write(scratch):
     with database.db_cursor() as (_c, cur):
         cur.execute("INSERT INTO t_scratch(v) VALUES (%s)", ("x",))
