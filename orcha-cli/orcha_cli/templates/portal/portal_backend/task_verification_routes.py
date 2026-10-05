@@ -66,7 +66,7 @@ def verify_task(tid: str, body: TaskVerify, request: Request):
             )
         if overriding_send_back:
             cur.execute(
-                f"UPDATE tasks SET manager_review = manager_review || {sql.json_cast()} WHERE id=%s",
+                f"UPDATE tasks SET manager_review = {sql.json_merge('manager_review', sql.json_cast())} WHERE id=%s",
                 (json.dumps({"status": "overridden", "overridden_by": body.actor_agent_id}), tid),
             )
             cur.execute(

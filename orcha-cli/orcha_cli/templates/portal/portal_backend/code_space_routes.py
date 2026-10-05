@@ -339,6 +339,9 @@ def code_thread_link(path: str, thread_id: str) -> str:
     return f"/code?path={urllib.parse.quote(path)}&thread={thread_id}"
 
 
+_DETAIL_OR_EMPTY = "COALESCE(detail, '{}')"
+
+
 def code_thread_request_detail(thread_id: str, anchor: dict, kind: str, question: str) -> dict:
     return {
         "display_title": code_thread_title(
@@ -475,7 +478,7 @@ def create_code_thread(cid: str, body: CodeThreadCreate, request: Request):
                 (request_id, thread_id),
             )
             cur.execute(
-                f"UPDATE requests SET detail = COALESCE(detail, '{{}}') || {sql.json_cast()} WHERE id=%s",
+                f"UPDATE requests SET detail = {sql.json_merge(_DETAIL_OR_EMPTY, sql.json_cast())} WHERE id=%s",
                 (
                     sql.json_param(
                         code_thread_request_detail(thread_id, anchor, body.kind, body.body)
@@ -777,7 +780,7 @@ def _settle_thread_request(cur, rid: str, actor_id: str, reply: str, *, human_re
     reason = AUTO_RESOLVED_RESOLVED if human_resolved else AUTO_RESOLVED_ANSWERED
     cur.execute(
         f"""UPDATE requests SET status='closed', closed_at=now(),
-                  detail = COALESCE(detail, '{{}}') || {sql.json_cast()}
+                  detail = {sql.json_merge(_DETAIL_OR_EMPTY, sql.json_cast())}
             WHERE id=%s""",
         (sql.json_param({"auto_resolved": reason}), rid),
     )
