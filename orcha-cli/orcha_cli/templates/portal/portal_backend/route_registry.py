@@ -90,6 +90,7 @@ from portal_backend import (
     templates_routes,  # project mode (Code | General) + industry templates
     terminal_config_routes,
     user_pref_routes,
+    version_routes,  # GH #258 PR 9: GET /api/version
     voice_routes,  # dictation: streaming STT proxy + clean-up
     verdikt_routes,  # Verdikt QA handoff (mig 058)
     wake_acknowledgement_routes,
@@ -188,6 +189,7 @@ ROUTE_MODULES = (
     terminal_config_routes,
     user_pref_routes,
     verdikt_routes,  # Verdikt QA handoff (mig 058)
+    version_routes,
     wake_acknowledgement_routes,
     wake_backoff_routes,
     wake_lease_claim_routes,
