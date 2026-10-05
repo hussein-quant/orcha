@@ -1,0 +1,462 @@
+# Allow-list for tests/test_no_postgres_syntax.py: Postgres-only constructs in portal_backend
+# that are not ported through portal_backend/sql.py yet (GH #258, plan Part 4 S0-S3).
+# Format: <path under portal_backend>:<line>:<token>. This list may only SHRINK: the lint fails
+# on an unlisted hit AND on an entry that no longer matches, so a PR that ports (or moves) a
+# site must delete (or re-point) its entry. Seeded from plan Appendix A (143 entries on main
+# @ b647cab), then re-generated on hussein/feat/quorate-v2 @ d584f4dd: 294 entries (87 line
+# moves, 151 new sites the V2 branch added). Hits in comments/docstrings are not counted (see
+# the lint's docstring).
+
+# active_conversation_routes.py
+active_conversation_routes.py:96:EXTRACT(EPOCH
+active_conversation_routes.py:109:EXTRACT(EPOCH
+active_conversation_routes.py:114:::text
+active_conversation_routes.py:125:::text
+active_conversation_routes.py:132:::text
+active_conversation_routes.py:141:LATERAL
+
+# agent_config_history_routes.py
+agent_config_history_routes.py:38:psycopg
+agent_config_history_routes.py:126:FOR UPDATE
+agent_config_history_routes.py:162:::jsonb
+agent_config_history_routes.py:164:Jsonb(
+agent_config_history_routes.py:217:Jsonb(
+agent_config_history_routes.py:218:Jsonb(
+agent_config_history_routes.py:224:Jsonb(
+agent_config_history_routes.py:293:FOR UPDATE
+agent_config_history_routes.py:299:Jsonb(
+
+# agent_digest_routes.py
+agent_digest_routes.py:62:::jsonb
+agent_digest_routes.py:154:LEFT(
+agent_digest_routes.py:164:LEFT(
+agent_digest_routes.py:165:LEFT(
+
+# agent_notification_routes.py
+agent_notification_routes.py:102:ANY(
+agent_notification_routes.py:231:GREATEST(
+
+# agent_performance.py
+agent_performance.py:249:DISTINCT ON
+agent_performance.py:255:::timestamptz
+agent_performance.py:291:::timestamptz
+agent_performance.py:305:::timestamptz
+agent_performance.py:323:ANY(
+
+# agent_profile_routes.py
+agent_profile_routes.py:3:psycopg
+agent_profile_routes.py:190:psycopg
+
+# agent_registration_routes.py
+agent_registration_routes.py:3:psycopg
+agent_registration_routes.py:33:FOR UPDATE
+agent_registration_routes.py:126:psycopg
+
+# agent_request_box_routes.py
+agent_request_box_routes.py:45:::timestamptz
+
+# agent_spend_routes.py
+agent_spend_routes.py:44:interval '
+
+# agent_status.py
+agent_status.py:22:::jsonb
+
+# agent_suggestion_routes.py
+agent_suggestion_routes.py:3:psycopg
+agent_suggestion_routes.py:102:psycopg
+agent_suggestion_routes.py:113:::jsonb
+agent_suggestion_routes.py:113:json_build_object
+agent_suggestion_routes.py:114:json_build_object
+agent_suggestion_routes.py:115:::text
+agent_suggestion_routes.py:116:::text
+agent_suggestion_routes.py:190:::jsonb
+agent_suggestion_routes.py:190:json_build_object
+agent_suggestion_routes.py:191:json_build_object
+agent_suggestion_routes.py:192:::text
+agent_suggestion_routes.py:193:::text
+
+# agent_task_claim_routes.py
+agent_task_claim_routes.py:60:FOR UPDATE
+agent_task_claim_routes.py:60:SKIP LOCKED
+
+# agent_worktree_routes.py
+agent_worktree_routes.py:28:psycopg
+agent_worktree_routes.py:255:Jsonb(
+agent_worktree_routes.py:312:FOR UPDATE
+agent_worktree_routes.py:312:SKIP LOCKED
+agent_worktree_routes.py:328:FOR UPDATE
+agent_worktree_routes.py:339:Jsonb(
+agent_worktree_routes.py:365:Jsonb(
+agent_worktree_routes.py:382:DISTINCT ON
+agent_worktree_routes.py:388:ANY(
+agent_worktree_routes.py:405:::text
+
+# application_lifecycle.py
+application_lifecycle.py:6:psycopg
+application_lifecycle.py:107:psycopg
+
+# attention_counts.py
+attention_counts.py:87:ANY(
+attention_counts.py:110:ANY(
+attention_counts.py:121:ANY(
+
+# budget_routes.py
+budget_routes.py:70:interval '
+budget_routes.py:144:RIGHT(
+budget_routes.py:366:interval '
+budget_routes.py:403:::text
+budget_routes.py:405:ANY(
+budget_routes.py:408:FOR UPDATE
+budget_routes.py:533:to_regclass
+budget_routes.py:636:FOR UPDATE
+
+# code_space_routes.py
+code_space_routes.py:89:psycopg
+code_space_routes.py:479:::jsonb
+code_space_routes.py:481:Jsonb(
+code_space_routes.py:559:DISTINCT ON
+code_space_routes.py:561:ANY(
+code_space_routes.py:600:DISTINCT ON
+code_space_routes.py:602:ANY(
+code_space_routes.py:725:FOR UPDATE
+code_space_routes.py:771:::jsonb
+code_space_routes.py:773:Jsonb(
+code_space_routes.py:793:FOR UPDATE
+
+# container_control_routes.py
+container_control_routes.py:4:psycopg
+container_control_routes.py:201:Jsonb(
+container_control_routes.py:330:FOR UPDATE
+
+# container_lifecycle_routes.py
+container_lifecycle_routes.py:5:psycopg
+container_lifecycle_routes.py:70:psycopg
+container_lifecycle_routes.py:372:GREATEST(
+container_lifecycle_routes.py:381:LATERAL
+container_lifecycle_routes.py:392:ANY(
+
+# container_metrics_routes.py
+container_metrics_routes.py:161:RIGHT(
+container_metrics_routes.py:165:make_interval
+container_metrics_routes.py:172:make_interval
+container_metrics_routes.py:181:make_interval
+
+# container_request_list_routes.py
+container_request_list_routes.py:100:json_build_object
+
+# container_snapshot_routes.py
+container_snapshot_routes.py:87:make_interval
+container_snapshot_routes.py:88:EXTRACT(EPOCH
+container_snapshot_routes.py:121:LEFT(
+container_snapshot_routes.py:130:json_build_object
+container_snapshot_routes.py:150:GREATEST(
+container_snapshot_routes.py:154:json_build_object
+container_snapshot_routes.py:173:json_build_object
+container_snapshot_routes.py:245:EXTRACT(EPOCH
+container_snapshot_routes.py:246:::json
+container_snapshot_routes.py:252:json_agg
+container_snapshot_routes.py:252:json_build_object
+container_snapshot_routes.py:255:LEFT(
+container_snapshot_routes.py:339:json_build_object
+
+# container_token_usage_routes.py
+container_token_usage_routes.py:88:interval '
+container_token_usage_routes.py:89:interval '
+container_token_usage_routes.py:90:interval '
+container_token_usage_routes.py:91:interval '
+container_token_usage_routes.py:92:interval '
+container_token_usage_routes.py:93:interval '
+container_token_usage_routes.py:97:interval '
+container_token_usage_routes.py:98:interval '
+container_token_usage_routes.py:99:interval '
+container_token_usage_routes.py:100:interval '
+container_token_usage_routes.py:101:interval '
+container_token_usage_routes.py:102:interval '
+
+# conversation_write_routes.py
+conversation_write_routes.py:64:FOR UPDATE
+
+# database.py
+database.py:8:psycopg
+database.py:9:psycopg
+database.py:19:psycopg
+database.py:29:psycopg
+database.py:30:pg_advisory
+database.py:44:to_regclass
+database.py:68:pg_advisory
+
+# deliverables_routes.py
+deliverables_routes.py:364:FOR UPDATE
+
+# device_token_routes.py
+device_token_routes.py:123:interval '
+device_token_routes.py:140:ANY(
+
+# event_acknowledgement.py
+event_acknowledgement.py:53:GREATEST(
+
+# events.py
+events.py:74:::jsonb
+
+# evidence_pack.py
+evidence_pack.py:85:::timestamptz
+evidence_pack.py:266:::jsonb
+
+# goal_ancestry_routes.py
+goal_ancestry_routes.py:128:FOR UPDATE
+
+# guards.py
+guards.py:139:::text
+guards.py:216:FOR UPDATE
+guards.py:240:::jsonb
+guards.py:241:::text
+guards.py:241:json_build_object
+
+# member_routes.py
+member_routes.py:6:psycopg
+member_routes.py:8:psycopg
+member_routes.py:172:::jsonb
+member_routes.py:186:psycopg
+member_routes.py:251:Jsonb(
+
+# notification_pref_routes.py
+notification_pref_routes.py:252:::jsonb
+notification_pref_routes.py:307:::jsonb
+
+# notification_prefs.py
+notification_prefs.py:538:to_regclass
+notification_prefs.py:539:to_regclass
+
+# org_chart.py
+org_chart.py:28:psycopg
+org_chart.py:151:::jsonb
+org_chart.py:151:::text
+org_chart.py:153:Jsonb(
+org_chart.py:157:::text
+org_chart.py:158:::text
+
+# org_chart_routes.py
+org_chart_routes.py:106:pg_advisory
+
+# orphan_lease_routes.py
+orphan_lease_routes.py:28:GREATEST(
+orphan_lease_routes.py:36:EXTRACT(EPOCH
+orphan_lease_routes.py:44:make_interval
+orphan_lease_routes.py:61:::text
+orphan_lease_routes.py:61:ANY(
+orphan_lease_routes.py:73:ANY(
+orphan_lease_routes.py:183:interval '
+
+# plan_usage_routes.py
+plan_usage_routes.py:127:::jsonb
+
+# project_export_library_routes.py
+project_export_library_routes.py:24:psycopg
+project_export_library_routes.py:178:psycopg
+project_export_library_routes.py:190:FOR UPDATE
+project_export_library_routes.py:214:psycopg
+
+# project_export_routes.py
+project_export_routes.py:31:psycopg
+project_export_routes.py:320:FOR UPDATE
+project_export_routes.py:321:pg_advisory
+project_export_routes.py:336:psycopg
+
+# provider_keys.py
+provider_keys.py:53:ANY(
+
+# push_outbox.py
+push_outbox.py:53:interval '
+push_outbox.py:94:ANY(
+push_outbox.py:171:::text
+
+# push_routes.py
+push_routes.py:221:interval '
+push_routes.py:276:ANY(
+push_routes.py:282:ANY(
+push_routes.py:301:ANY(
+push_routes.py:328:ANY(
+
+# request_acceptance_routes.py
+request_acceptance_routes.py:136:::jsonb
+
+# request_backstop.py
+request_backstop.py:22:FOR UPDATE
+
+# request_creation_routes.py
+request_creation_routes.py:234:::interval
+request_creation_routes.py:234:::jsonb
+
+# request_lookup.py
+request_lookup.py:19:FOR UPDATE
+
+# request_ownership.py
+request_ownership.py:21:LATERAL
+request_ownership.py:59:json_build_object
+request_ownership.py:61:::text
+
+# request_rejection_routes.py
+request_rejection_routes.py:162:::jsonb
+
+# review_routing.py
+review_routing.py:50:psycopg
+review_routing.py:138:::text
+review_routing.py:226:Jsonb(
+review_routing.py:302:Jsonb(
+review_routing.py:352:::interval
+review_routing.py:352:::jsonb
+review_routing.py:368:Jsonb(
+review_routing.py:415:FOR UPDATE
+review_routing.py:443:Jsonb(
+
+# review_routing_routes.py
+review_routing_routes.py:120:FOR UPDATE
+
+# roster_analysis_routes.py
+roster_analysis_routes.py:78:::jsonb
+
+# roster_suggest_routes.py
+roster_suggest_routes.py:199:ANY(
+
+# routine_routes.py
+routine_routes.py:100:ANY(
+routine_routes.py:207:LATERAL
+routine_routes.py:281:FOR UPDATE
+routine_routes.py:606:FOR UPDATE
+routine_routes.py:606:SKIP LOCKED
+
+# stranded_runs.py
+stranded_runs.py:62:GREATEST(
+stranded_runs.py:80:EXTRACT(EPOCH
+stranded_runs.py:89:make_interval
+stranded_runs.py:108:ANY(
+
+# task_completion_support.py
+task_completion_support.py:72:::jsonb
+
+# task_creation_routes.py
+task_creation_routes.py:47:ANY(
+task_creation_routes.py:98:::jsonb
+
+# task_done_routes.py
+task_done_routes.py:135:::jsonb
+task_done_routes.py:163:::jsonb
+
+# task_list_query.py
+task_list_query.py:16:::text
+task_list_query.py:19:::timestamptz
+task_list_query.py:26:::timestamptz
+task_list_query.py:34:::text
+task_list_query.py:36:::text
+task_list_query.py:58:json_build_object
+task_list_query.py:65:json_agg
+task_list_query.py:67:::json
+task_list_query.py:68:json_build_object
+task_list_query.py:70:json_build_object
+task_list_query.py:71:LEFT(
+task_list_query.py:83:json_build_object
+task_list_query.py:86:::text
+task_list_query.py:89:json_build_object
+task_list_query.py:92:::text
+task_list_query.py:102:json_build_object
+task_list_query.py:112:json_build_object
+task_list_query.py:114:json_build_object
+
+# task_message_routes.py
+task_message_routes.py:197:::jsonb
+
+# task_protocol_routes.py
+task_protocol_routes.py:65:::jsonb
+
+# task_reviewer_routes.py
+task_reviewer_routes.py:4:psycopg
+task_reviewer_routes.py:69:Jsonb(
+
+# task_start_core.py
+task_start_core.py:239:::int
+task_start_core.py:239:unnest(
+task_start_core.py:240:LATERAL
+task_start_core.py:243:ANY(
+task_start_core.py:244:::text
+task_start_core.py:341:ILIKE
+
+# task_verification_routes.py
+task_verification_routes.py:68:::jsonb
+
+# templates_routes.py
+templates_routes.py:40:psycopg
+templates_routes.py:323:FOR UPDATE
+templates_routes.py:433:pg_advisory
+templates_routes.py:546:Jsonb(
+templates_routes.py:557:pg_advisory
+
+# user_pref_routes.py
+user_pref_routes.py:153:::jsonb
+
+# verdikt_autofix.py
+verdikt_autofix.py:155:::timestamptz
+verdikt_autofix.py:217:ANY(
+verdikt_autofix.py:360:ANY(
+verdikt_autofix.py:384:ANY(
+verdikt_autofix.py:440:FOR UPDATE
+verdikt_autofix.py:482:::jsonb
+verdikt_autofix.py:541:pg_advisory
+
+# verdikt_autofix_routes.py
+verdikt_autofix_routes.py:92:pg_advisory
+
+# verdikt_integration.py
+verdikt_integration.py:205:::timestamptz
+verdikt_integration.py:312:::jsonb
+verdikt_integration.py:330:pg_advisory
+verdikt_integration.py:352:::jsonb
+verdikt_integration.py:660:::timestamptz
+
+# verdikt_preview_routes.py
+verdikt_preview_routes.py:112:FOR UPDATE
+verdikt_preview_routes.py:146:FOR UPDATE
+verdikt_preview_routes.py:146:SKIP LOCKED
+
+# wake_acknowledgement_routes.py
+wake_acknowledgement_routes.py:24:GREATEST(
+wake_acknowledgement_routes.py:66:GREATEST(
+wake_acknowledgement_routes.py:137:ANY(
+wake_acknowledgement_routes.py:202:ANY(
+
+# wake_backoff.py
+wake_backoff.py:115:interval '
+wake_backoff.py:144:::interval
+wake_backoff.py:214:interval '
+
+# wake_event_queries.py
+wake_event_queries.py:12:::text
+wake_event_queries.py:15:::text
+
+# wake_lease_claim_routes.py
+wake_lease_claim_routes.py:93:make_interval
+wake_lease_claim_routes.py:95:make_interval
+wake_lease_claim_routes.py:114:make_interval
+wake_lease_claim_routes.py:116:make_interval
+
+# wake_lease_renewal_routes.py
+wake_lease_renewal_routes.py:31:make_interval
+wake_lease_renewal_routes.py:43:make_interval
+wake_lease_renewal_routes.py:66:::text
+
+# wake_manifest.py
+wake_manifest.py:54:ANY(
+wake_manifest.py:114:ANY(
+wake_manifest.py:121:ANY(
+
+# wake_scan_queries.py
+wake_scan_queries.py:16:EXTRACT(EPOCH
+wake_scan_queries.py:18:EXTRACT(EPOCH
+wake_scan_queries.py:19:EXTRACT(EPOCH
+wake_scan_queries.py:21:EXTRACT(EPOCH
+wake_scan_queries.py:38:EXTRACT(EPOCH
+
+# wake_scan_routes.py
+wake_scan_routes.py:72:interval '
+
+# worker_run_support.py
+worker_run_support.py:67:ANY(
