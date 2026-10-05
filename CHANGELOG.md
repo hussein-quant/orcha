@@ -23,6 +23,14 @@ missing.
   `packaging/homebrew/resources.json` (`render_formula.py lock` refreshes it).
 
 ### Changed
+- **Orcha runs without Docker or Postgres** (GH #258). A project's portal,
+  wake daemon and terminal bridge run as ordinary background processes under
+  `orcha serve`, kept alive by a login service (launchd on macOS, systemd on
+  Linux), and all of its data lives in one SQLite file,
+  `<project>/.orcha/orcha.db`. The recommended install is now the Mac app or
+  `uv tool install orcha-cli`; Homebrew still works. Docker-era instructions
+  moved to `docs/legacy-docker-runtime.md`.
+  <!-- TODO(#258): command names (serve/service/logs/doctor/backup/migrate-runtime) pending confirmation from the orcha serve work (plan PR 6/10). -->
 - The product is now called **Embodent** (formerly Quorate). The portal's
   title, sidebar, pairing dialog, device page and every user-facing message
   say Embodent, and the portal carries the new Embodent mark (a figure split
@@ -40,6 +48,12 @@ missing.
   forced-tool request shape they accept (`tool_choice: auto` plus a
   system-prompt instruction) instead of the forced `tool_choice` they reject
   with a 400.
+
+### Deprecated
+- The Docker-local runtime. Existing Docker projects keep running untouched;
+  move each one with `orcha migrate-runtime` (your old Docker data is kept
+  until you run `orcha migrate-runtime --purge-docker`). Docker support and
+  `docs/legacy-docker-runtime.md` are removed one release later.
 
 ### Fixed
 - Workers stopped waking on task-thread and conversation posts once a run's
