@@ -7,7 +7,7 @@ import pathlib
 import sys
 from typing import Any
 
-from orcha_cli import cli_runtime_mode
+from orcha_cli import cli_native_lifecycle, cli_runtime_mode
 
 
 def status_command(_: Any, services: Any) -> None:
@@ -20,12 +20,16 @@ def status_command(_: Any, services: Any) -> None:
     config = json.loads(config_path.read_text())
     print(f"project:              {config.get('project_name', '?')}")
     print(f"api base URL:         {config.get('api_base_url', '?')}")
-    print(f"db port:              {config.get('db_port', '?')}")
+    native = cli_runtime_mode.is_native_project(cwd, config)
+    if not native:
+        print(f"db port:              {config.get('db_port', '?')}")
     print(
         "current container_id: "
         f"{config.get('current_container_id', '(none — run /orcha-container)')}"
     )
     print()
+    if native:
+        cli_native_lifecycle.status(cwd, config)
     if cli_runtime_mode.is_docker_project(cwd, config):
         services._compose(orcha_dir, "ps")
         print()

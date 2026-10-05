@@ -99,6 +99,10 @@ def register_project_commands(
         "-v", "--volumes", action="store_true", help="also drop the DB volume"
     )
     down.add_argument(
+        "--yes", action="store_true",
+        help="native runtime: confirm `-v` (delete the database file) without a prompt",
+    )
+    down.add_argument(
         "--project",
         default=None,
         help="target a specific project by name (sans 'orcha-' prefix); works from any directory",

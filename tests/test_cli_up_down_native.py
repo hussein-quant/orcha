@@ -1,0 +1,190 @@
+"""GH #258 PR 6 (plan R2): `orcha up/down/status` for a native-runtime project.
+
+The compose wrapper is a tripwire here: a native project must never reach it.
+"""
+from __future__ import annotations
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import types
+
+import pytest
+
+from orcha_cli import (
+    cli_bridge,
+    cli_native_lifecycle,
+    cli_project_commands,
+    cli_serve_support,
+    cli_stacks_registry,
+    cli_status,
+)
+
+
+class _Tripwire:
+    def _compose(self, *_a, **_k):
+        raise AssertionError("compose must never run for a native project")
+
+    def stop_daemon(self, *_a, **_k):
+        raise AssertionError("serve owns the notifier under native")
+
+    def ensure_daemon(self, *_a, **_k):
+        raise AssertionError("serve owns the notifier under native")
+
+    def _install_project_preferences(self, _cwd):
+        return None
+
+
+@pytest.fixture
+def native(tmp_path, monkeypatch):
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+    root = tmp_path / "proj"
+    (root / ".claude").mkdir(parents=True)
+    (root / ".claude" / "orcha.json").write_text(json.dumps(
+        {"project_name": "proj", "runtime": "native", "api_port": 8123, "bridge_port": 8770,
+         "api_base_url": "http://localhost:8123"}))
+    monkeypatch.chdir(root)
+    return root
+
+
+def _sleeper():
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+
+def _state(root, pid, **children):
+    cli_serve_support.write_state(root, {"status": "running", "serve_pid": pid,
+                                         "children": children})
+
+
+def test_up_spawns_detached_serve(native):
+    spawned = []
+
+    def fake_popen(argv, **kw):
+        spawned.append((argv, kw))
+        return types.SimpleNamespace(pid=4242)
+
+    cli_native_lifecycle.up(native, popen=fake_popen, http_ok=lambda _u: True)
+    (argv, kw), = spawned
+    assert argv[1:] == ["-m", "orcha_cli", "serve", "--project-dir", str(native)]
+    assert kw["start_new_session"] is True and kw["cwd"] == str(native)
+    assert (native / ".orcha" / "logs" / "serve.log").exists()
+
+
+def test_cmd_up_dispatches_native(native, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli_native_lifecycle, "up", lambda root: calls.append(root))
+    cli_project_commands.cmd_up(types.SimpleNamespace(project=None), _Tripwire())
+    assert calls == [native]
+
+
+def test_up_is_a_no_op_when_serve_and_portal_answer(native, capsys):
+    proc = _sleeper()
+    try:
+        _state(native, proc.pid)
+        cli_native_lifecycle.up(native, popen=lambda *a, **k: pytest.fail("respawned"),
+                                http_ok=lambda _u: True)
+    finally:
+        proc.kill()
+    assert f"already running (orcha serve pid {proc.pid})" in capsys.readouterr().out
+
+
+def test_up_warns_when_portal_never_answers(native, capsys):
+    cli_native_lifecycle.up(native, popen=lambda *a, **k: types.SimpleNamespace(pid=1),
+                            http_ok=lambda _u: False, wait_secs=0)
+    assert "portal did not answer" in capsys.readouterr().out
+
+
+def test_down_sigterms_serve_and_unregisters(native, capsys):
+    cli_stacks_registry.register("proj", path=native, api_port=8123, bridge_port=8770,
+                                 cli_version="t")
+    proc = _sleeper()
+    _state(native, proc.pid)
+    sent = []
+
+    def kill(pid, sig):
+        sent.append(sig)
+        os.kill(pid, sig)
+
+    cli_project_commands.cmd_down(types.SimpleNamespace(project=None, volumes=False), _Tripwire())
+    proc.wait(timeout=5)
+    assert proc.returncode == -signal.SIGTERM
+    assert "proj" not in cli_stacks_registry.read_registry()
+    cli_native_lifecycle.down(native, kill=kill)  # second call: nothing running, still clean
+    assert sent == [] and "not running" in capsys.readouterr().out
+
+
+def test_down_escalates_to_sigkill(native):
+    proc = subprocess.Popen([sys.executable, "-c",
+                             "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN);"
+                             "print('ready', flush=True); time.sleep(60)"],
+                            stdout=subprocess.PIPE)
+    proc.stdout.readline()
+    _state(native, proc.pid)
+    cli_native_lifecycle.down(native, stop_secs=0.5)
+    proc.wait(timeout=5)
+    assert proc.returncode == -signal.SIGKILL
+
+
+def _make_db(root):
+    db = root / ".orcha" / "orcha.db"
+    db.parent.mkdir(exist_ok=True)
+    for suffix in ("", "-wal", "-shm"):
+        db.with_name(db.name + suffix).write_text("x")
+    return db
+
+
+def test_down_v_needs_yes_off_a_terminal_and_deletes_nothing(native, monkeypatch):
+    db = _make_db(native)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    with pytest.raises(SystemExit, match="pass --yes"):
+        cli_project_commands.cmd_down(
+            types.SimpleNamespace(project=None, volumes=True, yes=False), _Tripwire())
+    assert db.exists()
+
+
+def test_down_v_yes_deletes_db_wal_shm(native):
+    db = _make_db(native)
+    cli_project_commands.cmd_down(
+        types.SimpleNamespace(project=None, volumes=True, yes=True), _Tripwire())
+    assert not any(db.with_name(db.name + s).exists() for s in ("", "-wal", "-shm"))
+
+
+@pytest.mark.parametrize("answer,kept", [("n", True), ("y", False)])
+def test_down_v_prompt(native, monkeypatch, answer, kept):
+    db = _make_db(native)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _p: answer)
+    try:
+        cli_native_lifecycle.down(native, volumes=True)
+    except SystemExit:
+        pass
+    assert db.exists() is kept
+
+
+def test_status_native_block(native, capsys):
+    _make_db(native)
+    proc = _sleeper()
+    try:
+        _state(native, proc.pid, portal={"pid": 11, "status": "running", "restarts": 2})
+        cli_status.status_command(None, _Tripwire())
+    finally:
+        proc.kill()
+    out = capsys.readouterr().out
+    assert "runtime:              native" in out and "db port" not in out
+    assert f"running (pid {proc.pid})" in out and "portal" in out and "restarts 2" in out
+    assert str(native / ".orcha" / "orcha.db") in out and "orcha logs -f" in out
+
+
+def test_foreground_bridge_writes_its_own_pidfile(native, monkeypatch):
+    from orcha_cli import terminal_bridge
+
+    async def fake_serve(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(terminal_bridge, "serve_bridge", fake_serve)
+    cli_bridge.terminal_bridge_command(types.SimpleNamespace(
+        ensure=False, api_base=None, host=None, port=None, quiet=True))
+    pidfile = native / ".claude" / ".orcha-terminal-bridge.pid"
+    assert pidfile.read_text() == str(os.getpid())

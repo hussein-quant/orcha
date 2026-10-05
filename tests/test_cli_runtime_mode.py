@@ -127,6 +127,10 @@ def test_up_down_refuse_a_folder_that_owns_no_stack(tmp_path, monkeypatch, bridg
 @pytest.mark.parametrize("verb", ["cmd_up", "cmd_down", "cmd_upgrade"])
 def test_native_project_never_reaches_compose(tmp_path, monkeypatch, bridge_noop, verb):
     monkeypatch.chdir(_folder(tmp_path, {"runtime": "native", "api_port": 8123}, compose=True))
+    from orcha_cli import cli_native_lifecycle
+
+    monkeypatch.setattr(cli_native_lifecycle, "up", lambda *a, **k: None)
+    monkeypatch.setattr(cli_native_lifecycle, "down", lambda *a, **k: None)
     svc = _Services()
     args = types.SimpleNamespace(project=None, volumes=False, allow_downgrade=False)
     try:

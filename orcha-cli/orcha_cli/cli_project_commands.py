@@ -6,11 +6,11 @@ import json
 import pathlib
 import sys
 
-from orcha_cli import cli_runtime_mode
+from orcha_cli import cli_native_lifecycle, cli_runtime_mode
 
 
 def _native_pending(verb: str) -> None:
-    # GH #258 PR 6 work in progress: the native branch of each verb lands with `orcha serve`.
+    # GH #258: native `upgrade` (DB-tip guard via GET /api/admin/migrations) is not built yet.
     sys.exit(f"error: `orcha {verb}` for a native-runtime project is not built yet (GH #258).")
 
 
@@ -29,8 +29,8 @@ def cmd_up(args: argparse.Namespace, services) -> None:
         "error: no .orcha/docker-compose.yml here — run `orcha init` first, "
         "or pass `--project <name>` to target a specific stack from anywhere.",
     )
-    if runtime == cli_runtime_mode.NATIVE:
-        return _native_pending("up")
+    if runtime == cli_runtime_mode.NATIVE:  # serve owns the notifier + bridge children
+        return cli_native_lifecycle.up(pathlib.Path.cwd())
     services._compose(orcha_dir, "up", "-d")
     # #298: backfill the project-preferences file if a pre-#298 project is missing it.
     prefs_path = services._install_project_preferences(pathlib.Path.cwd())
@@ -50,6 +50,11 @@ def cmd_up(args: argparse.Namespace, services) -> None:
 
 def cmd_down(args: argparse.Namespace, services) -> None:
     extra = ["-v"] if args.volumes else []
+    if not args.project and cli_runtime_mode.is_native_project(pathlib.Path.cwd()):
+        # serve fans SIGTERM out to its own notifier + bridge; stopping them here first
+        # would only make serve restart them mid-shutdown.
+        return cli_native_lifecycle.down(pathlib.Path.cwd(), volumes=args.volumes,
+                                         yes=getattr(args, "yes", False))
     # Epic A: the wake daemon dies with the stack — otherwise a daemon would keep
     # polling a DB that's going away (and, with -v, a wiped one). Best-effort, local
     # cwd only (a --project down from elsewhere can't locate that project's pidfile).
@@ -72,13 +77,11 @@ def cmd_down(args: argparse.Namespace, services) -> None:
         services._by_project(args.project, "down", *extra)
         return
     orcha_dir = pathlib.Path.cwd() / ".orcha"
-    runtime = cli_runtime_mode.require_project(
+    cli_runtime_mode.require_project(
         pathlib.Path.cwd(),
         "error: no .orcha/docker-compose.yml here — nothing to bring down. "
         "Pass `--project <name>` to target a specific stack from anywhere.",
     )
-    if runtime == cli_runtime_mode.NATIVE:
-        return _native_pending("down")
     services._compose(orcha_dir, "down", *extra)
 
 
