@@ -6,6 +6,7 @@ from fastapi import Header, HTTPException, Request
 
 from portal_backend.agent_status import bump_agent, log_event, recompute_agent_status
 from portal_backend.application import app
+from portal_backend import sql
 from portal_backend.autonomy import effective_autonomy
 from portal_backend.budget_routes import agent_budget_block
 from portal_backend.database import db_cursor
@@ -51,14 +52,13 @@ def agent_next(
                     "budget_paused": True,
                 }
         cur.execute(
-            """SELECT t.id, t.title, t.description, t.definition_of_done, t.priority, t.protocol
+            f"""SELECT t.id, t.title, t.description, t.definition_of_done, t.priority, t.protocol
                FROM tasks t
                JOIN agent_tasks at ON at.task_id = t.id AND at.agent_id = %s
                  AND at.assignment_status IN ('assigned','accepted','working')
                WHERE t.container_id=%s AND t.status='ready' AND t.is_root = false
                ORDER BY t.priority, t.created_at
-               FOR UPDATE SKIP LOCKED
-               LIMIT 1""",
+               LIMIT 1{sql.for_update(skip_locked=True)}""",
             (aid, cid),
         )
         task = cur.fetchone()
