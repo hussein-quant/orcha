@@ -170,6 +170,9 @@ async def _seed(client, db, container, make_agent, make_task):
     """A project exercising every branch of the rule. Returns ids."""
     cid = container["id"]
     root = await make_agent("root", "operator", kind="human")
+    # root must be the FIRST human: back-date it, since two registrations can share a
+    # created_at (SQLite's column default is millisecond-precise)
+    db.execute("UPDATE agents SET created_at=%s WHERE id=%s", (db.ago(60), root["agent_id"]))
     other_h = await make_agent("zed", "operator", kind="human")
     dev = await make_agent("dev")            # inherits the container level (plan)
     fast = await make_agent("fast")          # per-agent override → pr

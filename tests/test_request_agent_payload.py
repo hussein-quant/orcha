@@ -15,7 +15,7 @@ import main  # noqa: F401  (conftest binds the app before import)
 from orcha_cli import notifier  # noqa: E402
 from portal_backend import code_space_routes as cs
 from portal_backend import github_repo_browse_routes as browse
-from conftest import ts_from_now
+from conftest import BACKEND, ts_from_now
 
 MIGRATION_065 = (
     pathlib.Path(__file__).resolve().parents[1]
@@ -188,6 +188,8 @@ async def test_openapi_documents_agent_payload(client):
 
 # ------------------------------------------------------------ old rows ---
 
+@pytest.mark.skipif(BACKEND != "postgres", reason="re-applies Postgres migration 065; the SQLite "
+                    "leg starts from its 001 baseline, which has no pre-065 rows to backfill")
 async def test_migration_065_backfills_legacy_combined_rows(client, db, container, make_agent, gh):
     cid = container["id"]
     human = await make_agent("Kedar", kind="human")

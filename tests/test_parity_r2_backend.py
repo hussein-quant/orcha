@@ -384,7 +384,7 @@ def test_sigterm_with_open_sse_exits_promptly():
     import conftest
 
     port = _free_port()
-    env = dict(os.environ, DATABASE_URL=os.environ["DATABASE_URL"])
+    env = dict(os.environ)  # carries the leg's DB (ORCHA_DB_PATH on SQLite, DATABASE_URL on Postgres)
     code = (
         "import sys; sys.path.insert(0, %r); import uvicorn, main; "
         "uvicorn.run(main.app, host='127.0.0.1', port=%d, log_level='warning')"

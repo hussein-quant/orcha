@@ -154,7 +154,7 @@ async def test_auto_wake_suppressed_by_live_lease(client, container, make_agent,
         "VALUES (%s, %s, 'ephemeral') "
         "ON CONFLICT (agent_id) DO UPDATE SET wake_lease_until=EXCLUDED.wake_lease_until, "
         "lease_kind=EXCLUDED.lease_kind",
-        (aid,),
+        (aid, db.from_now(300)),
     )
     _, cand = await _scan(client, container["id"], aid)
     assert cand["auto_wake_due"] is True           # the clock IS due …

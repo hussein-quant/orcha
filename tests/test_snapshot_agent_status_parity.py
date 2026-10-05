@@ -43,7 +43,8 @@ async def test_runtime_served_is_server_computed(client, db, container):
     assert c["runtime_served"] is True and 25 <= float(c["wake_scan_age_secs"]) < 120
     db.execute(f"UPDATE containers SET last_wake_scan_at = {ts_ago(300)} WHERE id=%s", (cid,))
     c = (await _snap(client, cid))["container"]
-    assert c["runtime_served"] is False and float(c["wake_scan_age_secs"]) >= 300
+    # (>= 299.99: SQLite's julianday() date math is millisecond-precise)
+    assert c["runtime_served"] is False and float(c["wake_scan_age_secs"]) >= 299.99
 
 
 async def test_running_run_matches_the_runs_list(client, db, container, make_agent):
