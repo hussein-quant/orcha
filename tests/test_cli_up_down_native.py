@@ -188,3 +188,69 @@ def test_foreground_bridge_writes_its_own_pidfile(native, monkeypatch):
         ensure=False, api_base=None, host=None, port=None, quiet=True))
     pidfile = native / ".claude" / ".orcha-terminal-bridge.pid"
     assert pidfile.read_text() == str(os.getpid())
+
+
+# --- `orcha init --runtime native|docker` ----------------------------------------------
+
+
+def _init_ns(**over):
+    ns = dict(name="demo", api_port=None, db_port=None, bridge_port=None, force=False,
+              reset_data=False, no_container=False, objective="x", as_user="tester",
+              no_github=True, runtime="docker")
+    ns.update(over)
+    return types.SimpleNamespace(**ns)
+
+
+@pytest.fixture
+def init_stubs(tmp_path, monkeypatch):
+    from orcha_cli import __main__ as cli
+    from orcha_cli import terminal_bridge as tb
+
+    calls = {"compose": [], "copy": [], "daemon": [], "bridge": [], "native_up": []}
+    monkeypatch.setattr(cli, "_compose", lambda *a, **k: calls["compose"].append(a[1:]))
+    monkeypatch.setattr(cli, "_copy_tree", lambda *a, **k: calls["copy"].append(a))
+    monkeypatch.setattr(cli, "ensure_daemon", lambda *a, **k: calls["daemon"].append(a))
+    monkeypatch.setattr(tb, "ensure_bridge", lambda *a, **k: calls["bridge"].append(a))
+    monkeypatch.setattr(cli, "_wait_for_portal", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_find_free_port", lambda start, span=100: start)
+    monkeypatch.setattr(cli, "_post_json", lambda url, body: (
+        {"container_id": "cid-1"} if url.endswith("/api/containers") else {"agent_id": "a-1"}))
+    monkeypatch.setattr(cli, "_put_json", lambda url, body: dict(body))
+    monkeypatch.setattr(cli_native_lifecycle, "up", lambda root: calls["native_up"].append(root))
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
+    root = tmp_path / "fresh"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    return cli, calls, root
+
+
+def test_init_native_writes_runtime_and_never_touches_docker(init_stubs, capsys):
+    cli, calls, root = init_stubs
+    cli.cmd_init(_init_ns(runtime="native"))
+    cfg = json.loads((root / ".claude" / "orcha.json").read_text())
+    assert cfg["runtime"] == "native" and cfg["db_path"] == ".orcha/orcha.db"
+    assert cfg["bind"] == "loopback" and "db_port" not in cfg
+    assert not (root / ".orcha" / "docker-compose.yml").exists()
+    assert calls["compose"] == [] and calls["copy"] == []
+    assert calls["daemon"] == [] and calls["bridge"] == []  # serve owns them
+    assert calls["native_up"] == [root]
+    assert f"db:       {root / '.orcha' / 'orcha.db'}" in capsys.readouterr().out
+
+
+def test_init_default_is_still_docker(init_stubs):
+    cli, calls, root = init_stubs
+    cli.cmd_init(_init_ns())
+    cfg = json.loads((root / ".claude" / "orcha.json").read_text())
+    assert "runtime" not in cfg and cfg["db_port"] == 5432
+    assert (root / ".orcha" / "docker-compose.yml").exists()
+    assert ("up", "-d", "--build") in calls["compose"] and calls["native_up"] == []
+
+
+def test_init_parser_runtime_flag_defaults_to_docker():
+    from orcha_cli import __main__ as cli
+
+    parser = cli.build_parser()
+    assert parser.parse_args(["init"]).runtime == "docker"
+    assert parser.parse_args(["init", "--runtime", "native"]).runtime == "native"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["init", "--runtime", "podman"])
