@@ -100,6 +100,26 @@ def test_concurrent_writers_are_serialised_not_lost(db, scratch):
     assert _count(db) == 120
 
 
+def test_half_read_cursor_does_not_pin_a_stale_snapshot(db, scratch):
+    # A cursor left mid-SELECT (here kept alive the way a retained traceback keeps one) must
+    # not hand its pooled connection a stale read snapshot: after another connection writes,
+    # the next scope on that connection could never BEGIN IMMEDIATE ("database is locked").
+    for v in ("a", "b", "c"):
+        db.execute("INSERT INTO t_scratch(v) VALUES (%s)", (v,))
+    with database.db_cursor() as (_c, cur):
+        cur.execute("SELECT v FROM t_scratch ORDER BY id")
+        assert cur.fetchone()["v"] == "a"
+        kept = cur  # noqa: F841 — still referenced after the scope ends
+    other = sqlite3.connect(database.DB, isolation_level=None, timeout=1)
+    try:
+        other.execute("INSERT INTO t_scratch(v) VALUES ('from-another-connection')")
+    finally:
+        other.close()
+    with database.db_cursor() as (_c, cur):
+        cur.execute("INSERT INTO t_scratch(v) VALUES (%s)", ("after",))
+    assert _count(db) == 5
+
+
 def test_readonly_scope_rejects_writes(monkeypatch, scratch):
     monkeypatch.setenv("ORCHA_DB_ASSERT_READONLY", "1")
     with pytest.raises(AssertionError, match="readonly"):

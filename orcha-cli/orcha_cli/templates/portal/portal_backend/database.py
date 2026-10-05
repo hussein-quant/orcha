@@ -15,6 +15,7 @@ import os
 import pathlib
 import re
 import sqlite3
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -230,11 +231,17 @@ def _assert_readonly() -> bool:
 class _Scope:
     """One outermost transaction; nested db_cursor() calls in the same context join it."""
 
-    __slots__ = ("raw", "depth", "readonly", "ends")
+    __slots__ = ("raw", "depth", "readonly", "ends", "cursors")
 
     def __init__(self, raw, readonly):
         self.raw, self.depth, self.readonly = raw, 0, readonly
         self.ends = 0  # explicit commit()/rollback() calls: each one drops every open savepoint
+        # Closed when the scope ends: a half-read SELECT (fetchone() on many rows, or a
+        # converter that raised mid-row) keeps its read snapshot open after COMMIT/ROLLBACK,
+        # and a pooled connection with a stale snapshot can't BEGIN IMMEDIATE (SQLITE_BUSY,
+        # no busy-wait) once another connection has written. A retained traceback keeps the
+        # cursor alive, so garbage collection can't be relied on to reset it.
+        self.cursors: list = []
 
     def begin(self) -> None:
         self.raw.execute("BEGIN" if self.readonly else "BEGIN IMMEDIATE")
@@ -251,6 +258,7 @@ class Cursor:
     def __init__(self, scope: _Scope):
         self._scope = scope
         self._cur = scope.raw.cursor()
+        scope.cursors.append(self._cur)
 
     def _ready(self, text: str) -> None:
         scope = self._scope
@@ -323,6 +331,23 @@ class Conn:
         return Cursor(self._scope)
 
 
+def _caller() -> str:
+    """file:line of the code that opened the scope (first frame outside this module/contextlib)."""
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_code.co_filename.endswith(("database.py", "contextlib.py")):
+        frame = frame.f_back
+    if frame is None:
+        return "?"
+    return f"{pathlib.Path(frame.f_code.co_filename).name}:{frame.f_lineno}"
+
+
+def report_slow_transaction(held: float, readonly: bool, where: str) -> None:
+    """Plan risk R2: a scope held past SLOW_TX_SECS blocks every other writer. tests/conftest.py
+    wraps this to list them in the run summary."""
+    print(f"[db] slow transaction {held * 1000:.0f} ms at {where}"
+          f"{' (readonly)' if readonly else ''}", flush=True)
+
+
 @contextmanager
 def _sqlite_cursor(readonly: bool):
     scope = _scope.get()
@@ -366,11 +391,12 @@ def _sqlite_cursor(readonly: bool):
     finally:
         scope.depth = 0
         _scope.set(previous)
+        for raw_cur in scope.cursors:
+            raw_cur.close()
         _release(scope.raw)
         held = time.monotonic() - t0
         if held > SLOW_TX_SECS:
-            print(f"[db] slow transaction {held * 1000:.0f} ms"
-                  f"{' (readonly)' if readonly else ''}", flush=True)
+            report_slow_transaction(held, readonly, _caller())
 
 
 @contextmanager

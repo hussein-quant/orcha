@@ -116,6 +116,20 @@ def _sqlite_app_tables() -> list:
 
 SQLITE_TABLES = _sqlite_app_tables() if BACKEND == "sqlite" else []
 
+# Plan PR 7b acceptance / risk R2: every scope held past the 250 ms threshold during the run,
+# listed in the terminal summary (the app's own log line is swallowed by output capture).
+SLOW_TRANSACTIONS: list = []
+_report_slow_transaction = database.report_slow_transaction
+
+
+def _record_slow_transaction(held, readonly, where):
+    test = os.environ.get("PYTEST_CURRENT_TEST", "?").split(" (")[0]
+    SLOW_TRANSACTIONS.append((held, readonly, where, test))
+    _report_slow_transaction(held, readonly, where)
+
+
+database.report_slow_transaction = _record_slow_transaction
+
 
 @pytest.fixture(autouse=True)
 def _clean_db():
@@ -353,3 +367,13 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "smoke: end-to-end real-seam gate (real HTTP server + real PTY exec)"
     )
+
+
+def pytest_terminal_summary(terminalreporter):
+    if BACKEND != "sqlite":
+        return
+    terminalreporter.write_line(
+        f"[db] slow transactions (> {database.SLOW_TX_SECS * 1000:.0f} ms): {len(SLOW_TRANSACTIONS)}")
+    for held, readonly, where, test in sorted(SLOW_TRANSACTIONS, reverse=True):
+        terminalreporter.write_line(
+            f"[db]   {held * 1000:.0f} ms at {where}{' (readonly)' if readonly else ''} in {test}")
