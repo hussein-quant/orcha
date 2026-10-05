@@ -9,8 +9,6 @@ All paths are repo-relative. Run everything from the repo root.
 
 ## 1. Prereqs — none for the default suite
 
-<!-- TODO(#258): confirm the conftest switch name (`ORCHA_TEST_BACKEND`) once the SQLite cutover (plan PR 7b) lands; this section describes that end state. -->
-
 A bare `pytest` needs **no Postgres and no Docker**: `tests/conftest.py` creates a
 temporary SQLite file per session, points the app at it *before* importing `main`, and
 deletes it afterwards. It never touches a project's `.orcha/orcha.db`.
