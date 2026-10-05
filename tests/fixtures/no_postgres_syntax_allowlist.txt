@@ -179,11 +179,11 @@ conversation_write_routes.py:64:FOR UPDATE
 # database.py
 database.py:8:psycopg
 database.py:9:psycopg
-database.py:19:psycopg
-database.py:29:psycopg
-database.py:30:pg_advisory
-database.py:44:to_regclass
-database.py:68:pg_advisory
+database.py:24:psycopg
+database.py:34:psycopg
+database.py:35:pg_advisory
+database.py:49:to_regclass
+database.py:73:pg_advisory
 
 # deliverables_routes.py
 deliverables_routes.py:364:FOR UPDATE
