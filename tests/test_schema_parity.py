@@ -252,6 +252,31 @@ def test_foreign_keys_match(pg, lite):
         assert got == want, table
 
 
+def test_foreign_key_parents_are_unique(lite):
+    """SQLite only reports a parent key that is not a PK / full UNIQUE index ("foreign key
+    mismatch") when a row is written, not when the schema loads — so check every FK here."""
+    def keys(table):
+        pk = tuple(r[1] for r in sorted(lite.execute(f"PRAGMA table_info({table})"),
+                                        key=lambda r: r[5]) if r[5])
+        out = {pk} if pk else set()
+        for r in lite.execute(f"PRAGMA index_list({table})"):
+            cols = tuple(x[2] for x in lite.execute(f"PRAGMA index_info({r[1]})"))
+            if r[2] and not r[4] and None not in cols:
+                out.add(cols)
+        return out
+    bad = []
+    for table in sorted(lite_tables(lite)):
+        by_id = {}
+        for r in lite.execute(f"PRAGMA foreign_key_list({table})"):
+            by_id.setdefault(r[0], []).append(r)
+        for rows in by_id.values():
+            rows.sort(key=lambda x: x[1])
+            parent, cols = rows[0][2], tuple(x[4] for x in rows)
+            if cols not in keys(parent):
+                bad.append((table, parent, cols))
+    assert bad == []
+
+
 def test_check_constraints_match(pg, lite):
     for table in sorted(pg_tables(pg)):
         want = {r[0] for r in pg_rows(pg, f"""SELECT conname FROM pg_constraint
