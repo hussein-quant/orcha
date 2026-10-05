@@ -57,7 +57,10 @@ JSON_ALIASES = frozenset({
 
 # Boolean EXPRESSION columns (COALESCE(r.wake_enabled, true), CASE ... END) lose the declared
 # BOOLEAN type on SQLite and come back as 1/0; these aliases are turned back into bools.
-BOOL_ALIASES = frozenset({"cold_required", "is_human", "wake_enabled"})
+BOOL_ALIASES = frozenset({
+    "cold_required", "escalated", "is_human", "pending", "requester_retired", "runtime_served",
+    "target_retired", "wake_enabled",
+})
 
 
 # ---------------------------------------------------------------- Postgres (transition only)
