@@ -7,34 +7,34 @@ All paths are repo-relative. Run everything from the repo root.
 
 ---
 
-## 1. Prereqs — a Postgres for the test DB
+## 1. Prereqs — none for the default suite
 
-The suite needs a reachable Postgres. `tests/conftest.py` **drops and recreates** a
-dedicated test database at collection time, then points the app at it *before* importing
-`main` (which binds `DATABASE_URL` at import). It never touches the live `orcha` DB.
+<!-- TODO(#258): confirm the conftest switch name (`ORCHA_TEST_BACKEND`) once the SQLite cutover (plan PR 7b) lands; this section describes that end state. -->
 
-The relevant env vars and their defaults (`tests/conftest.py:35-38`):
+A bare `pytest` needs **no Postgres and no Docker**: `tests/conftest.py` creates a
+temporary SQLite file per session, points the app at it *before* importing `main`, and
+deletes it afterwards. It never touches a project's `.orcha/orcha.db`.
+
+### Optional: the Postgres leg (until the cleanup release)
+
+While `portal_backend/sql.py` still carries both dialects (removed in GH #258 plan PR 20),
+PRs that touch SQL also run the suite on Postgres. Set `ORCHA_TEST_BACKEND=postgres` plus:
 
 | Var | Default | Purpose |
 |-----|---------|---------|
 | `ORCHA_TEST_ADMIN_URL` | `postgresql://orcha:orcha@localhost:5432/postgres` | admin conn used to `DROP/CREATE` the test DB |
-| `ORCHA_TEST_DB_NAME` | `orcha_test` | name of the throwaway test DB (isolated; never `orcha`) |
+| `ORCHA_TEST_DB_NAME` | `orcha_test` | name of the throwaway test DB (isolated; never `orcha`); use a unique name per worktree |
 | `ORCHA_TEST_DATABASE_URL` | `postgresql://orcha:orcha@localhost:5432/<ORCHA_TEST_DB_NAME>` | the test DB the app runs against |
 
-The defaults assume a Postgres on **`localhost:5432`**. The live Orcha stack's Postgres is
-on **`:5436`** (`.orcha/orcha.json` → `db_port`). So pick ONE:
+Any reachable Postgres works — e.g. a legacy Docker project's Postgres
+(`db_port` in its `.claude/orcha.json`), or a throwaway one:
 
-- **Use the live stack's Postgres** (no extra container) — point the admin/test URLs at `:5436`:
-  ```bash
-  export ORCHA_TEST_ADMIN_URL="postgresql://orcha:orcha@localhost:5436/postgres"
-  export ORCHA_TEST_DATABASE_URL="postgresql://orcha:orcha@localhost:5436/orcha_test"
-  ```
-  This is safe: conftest creates/drops the separate `orcha_test` DB; it never mutates `orcha`.
-- **Or run a throwaway local Postgres on 5432** and use the defaults (no env vars needed):
-  ```bash
-  docker run --rm -d --name orcha-test-pg -p 5432:5432 \
-    -e POSTGRES_USER=orcha -e POSTGRES_PASSWORD=orcha postgres:16
-  ```
+```bash
+docker run --rm -d --name orcha-test-pg -p 5432:5432 \
+  -e POSTGRES_USER=orcha -e POSTGRES_PASSWORD=orcha postgres:16
+```
+
+conftest creates/drops only the separate test DB; it never mutates `orcha`.
 
 > Note: the self-hosted CI runner uses its own docker-run Postgres on `:55432` — that's a
 > CI-only port, not something you set locally.
@@ -50,7 +50,7 @@ pip install -r tests/requirements.txt
 ```
 
 `tests/requirements.txt` already carries the app deps the unit suite imports (`fastapi`,
-`pydantic`) plus the test tooling (`pytest`, `pytest-asyncio`, `httpx`, `psycopg[binary]`).
+`pydantic`) plus the test tooling (`pytest`, `pytest-asyncio`, `httpx`, and `psycopg[binary]` for the Postgres leg until plan PR 20).
 
 **For the smoke gate (`pytest -m smoke`), also install `uvicorn`** — the end-to-end test
 boots a real uvicorn server (`tests/test_e2e_terminal_smoke.py:62-68`) and it is **not** in
@@ -69,7 +69,8 @@ pytest
 ```
 
 `pytest.ini` sets `asyncio_mode=auto`, `testpaths=tests`, `-q`, so a bare `pytest` runs the
-whole unit suite against the test DB.
+whole unit suite against a temp SQLite file (or the Postgres test DB with
+`ORCHA_TEST_BACKEND=postgres`). PRs that touch SQL report the `N passed` count for **both** legs.
 
 ### Smoke gate — the one real-seam merge gate
 
