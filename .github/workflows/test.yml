@@ -77,7 +77,7 @@ jobs:
           (cd /tmp && orcha portal --project-dir "$RUNNER_TEMP/native-project" > "$RUNNER_TEMP/portal.log" 2>&1 &)
           curl -fsS --retry 30 --retry-connrefused --retry-delay 1 -o /dev/null http://127.0.0.1:8123/ \
             || { cat "$RUNNER_TEMP/portal.log"; exit 1; }
-          curl -fsS http://127.0.0.1:8123/ | grep -q '<title>Orcha</title>'
+          curl -fsS http://127.0.0.1:8123/ | grep -q '<div id="root"></div>'
           curl -fsS -X POST -H 'Content-Type: application/json' \
                -d '{"name":"smoke","root_objective":"smoke"}' http://127.0.0.1:8123/api/containers
           grep -q "\[migrate\] applied: \[.001_init.sql" "$RUNNER_TEMP/portal.log" || { cat "$RUNNER_TEMP/portal.log"; exit 1; }
