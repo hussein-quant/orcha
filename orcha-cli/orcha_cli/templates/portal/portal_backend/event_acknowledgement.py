@@ -48,10 +48,15 @@ def _recompute_delivered_floor(cur, aid: str) -> float:
         new_floor = cur.fetchone()["m"]
     if new_floor is None or new_floor <= delivered:
         return delivered
+    # new_floor is non-NULL here; a NULL stored cursor falls back to it (Postgres GREATEST
+    # ignores the NULL, SQLite max() would return NULL).
+    advanced = sql.greatest(
+        "COALESCE(agent_wake_state.delivered_ts, EXCLUDED.delivered_ts)", "EXCLUDED.delivered_ts"
+    )
     cur.execute(
-        """INSERT INTO agent_wake_state (agent_id, delivered_ts) VALUES (%s, %s)
+        f"""INSERT INTO agent_wake_state (agent_id, delivered_ts) VALUES (%s, %s)
            ON CONFLICT (agent_id) DO UPDATE SET
-             delivered_ts = GREATEST(agent_wake_state.delivered_ts, EXCLUDED.delivered_ts)""",
+             delivered_ts = {advanced}""",
         (aid, new_floor),
     )
     return new_floor

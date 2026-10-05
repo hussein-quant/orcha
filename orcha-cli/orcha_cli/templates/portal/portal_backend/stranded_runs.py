@@ -55,14 +55,18 @@ _LANES = {
 def last_activity_expr(lane: str, run_alias: str = "wr") -> str:
     """SQL for the newest sign of life of one running row and its lane.
 
-    Needs ``agents a`` and ``LEFT JOIN agent_wake_state w`` in scope. GREATEST
-    ignores NULLs, and ``started_at`` is never NULL, so the result is never NULL.
+    Needs ``agents a`` and ``LEFT JOIN agent_wake_state w`` in scope. ``started_at`` is
+    never NULL, so every nullable operand falls back to it: the NULL is ignored exactly as
+    Postgres GREATEST ignores it (SQLite max() would return NULL), and the result is never NULL.
     """
     spec = _LANES[lane]
-    return (
-        f"GREATEST({run_alias}.started_at, "
-        f"(SELECT max(l.ts) FROM worker_run_lines l WHERE l.run_id = {run_alias}.run_id), "
-        f"{spec['heartbeat_expr']}, {spec['claim_floor_expr']})"
+    started = f"{run_alias}.started_at"
+    return sql.greatest(
+        started,
+        f"COALESCE((SELECT max(l.ts) FROM worker_run_lines l WHERE l.run_id = {run_alias}.run_id), "
+        f"{started})",
+        f"COALESCE({spec['heartbeat_expr']}, {started})",
+        f"COALESCE({spec['claim_floor_expr']}, {started})",
     )
 
 

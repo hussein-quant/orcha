@@ -14,18 +14,22 @@ from portal_backend.schemas.wakes import EventsAckHandled, WakeAck
 
 
 def _acknowledge_lane(cur, aid, body, lane):
+    # The cursor only moves forward. Every nullable GREATEST operand falls back to a non-NULL
+    # sibling so a NULL is ignored exactly as Postgres GREATEST ignores it (SQLite max()
+    # would return NULL).
     if lane == "conversation":
+        conv_advance = sql.greatest(
+            "COALESCE(agent_wake_state.conv_delivered_ts, 0)",
+            "COALESCE(EXCLUDED.conv_delivered_ts, agent_wake_state.conv_delivered_ts, 0)",
+        )
         cur.execute(
-            """INSERT INTO agent_wake_state
+            f"""INSERT INTO agent_wake_state
                  (agent_id, conv_delivered_ts, conv_last_woken_at,
                   last_wake_kind, last_wake_event, conv_lease_until)
                VALUES (%s, COALESCE(%s, 0), CASE WHEN %s THEN now() ELSE NULL END,
                        %s, %s, NULL)
                ON CONFLICT (agent_id) DO UPDATE SET
-                 conv_delivered_ts=GREATEST(
-                   COALESCE(agent_wake_state.conv_delivered_ts, 0),
-                   COALESCE(EXCLUDED.conv_delivered_ts,
-                            agent_wake_state.conv_delivered_ts)),
+                 conv_delivered_ts={conv_advance},
                  conv_last_woken_at=CASE WHEN %s THEN now()
                    ELSE agent_wake_state.conv_last_woken_at END,
                  last_wake_kind=EXCLUDED.last_wake_kind,
@@ -57,17 +61,18 @@ def _acknowledge_lane(cur, aid, body, lane):
             ),
         )
     else:
+        work_advance = sql.greatest(
+            "COALESCE(agent_wake_state.delivered_ts, EXCLUDED.delivered_ts)",
+            "COALESCE(EXCLUDED.delivered_ts, agent_wake_state.delivered_ts)",
+        )
         cur.execute(
-            """INSERT INTO agent_wake_state
+            f"""INSERT INTO agent_wake_state
                  (agent_id, delivered_ts, last_woken_at, last_wake_kind,
                   last_wake_event, wake_lease_until)
                VALUES (%s, COALESCE(%s, 0), CASE WHEN %s THEN now() ELSE NULL END,
                        %s, %s, NULL)
                ON CONFLICT (agent_id) DO UPDATE SET
-                 delivered_ts=GREATEST(
-                   agent_wake_state.delivered_ts,
-                   COALESCE(EXCLUDED.delivered_ts,
-                            agent_wake_state.delivered_ts)),
+                 delivered_ts={work_advance},
                  last_woken_at=CASE WHEN %s THEN now()
                    ELSE agent_wake_state.last_woken_at END,
                  last_wake_kind=EXCLUDED.last_wake_kind,

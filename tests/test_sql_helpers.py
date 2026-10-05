@@ -305,3 +305,29 @@ def test_is_unique_violation(eng):
     assert sql.is_unique_violation(dup.value) is True
     assert sql.is_unique_violation(not_null.value) is False
     assert sql.is_unique_violation(ValueError("UNIQUE constraint failed")) is False
+
+
+def test_json_bool_decodes_as_bool_inside_json_object(eng):
+    expr = sql.json_object("'t'", sql.json_bool("1 = 1"), "'f'", sql.json_bool("1 = 2"),
+                           "'n'", sql.json_bool("NULL = 1"))
+    assert _decoded(eng.one(f"SELECT {expr}")) == {"t": True, "f": False, "n": None}
+    if eng.pg:
+        assert sql.json_bool("a AND b") == "(a AND b)"
+
+
+def test_int_rows(eng):
+    got = eng.rows(f"SELECT v.number FROM {sql.int_rows('number')} v ORDER BY v.number",
+                   (sql.list_param([3, 1, 2]),))
+    assert [r[0] for r in got] == [1, 2, 3]
+    with pytest.raises(ValueError):
+        sql.int_rows("x) y")
+
+
+def test_json_array_has_match(eng):
+    eng.table("revs", "changes jsonb", "changes TEXT")
+    for v in ([{"field": "model"}, {"field": "role"}], [{"field": "name"}], [], [{"field": 5}]):
+        eng.rows("INSERT INTO revs VALUES (%s)", (json.dumps(v),))
+    q = f"SELECT count(*) FROM revs WHERE {sql.json_array_has_match('changes', 'field')}"
+    assert [eng.one(q, (f,)) for f in ("role", "name", "nope", "5")] == [1, 1, 0, 0]
+    with pytest.raises(ValueError):
+        sql.json_array_has_match("changes", "a' OR '1")

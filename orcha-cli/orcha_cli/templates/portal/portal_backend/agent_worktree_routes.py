@@ -379,14 +379,21 @@ def agent_worktree_context(cid: str, body: WorktreeContextBody, request: Request
         items: dict[str, dict] = {}
         if body.paths:
             cur.execute(
-                f"""SELECT DISTINCT ON (wr.worktree) wr.worktree, wr.run_id, wr.task_id, a.alias,
-                          t.status AS task_status, t.title AS task_title, t.completed_at,
-                          EXISTS (SELECT 1 FROM worker_runs r2 WHERE r2.worktree = wr.worktree
+                f"""SELECT d.worktree, d.run_id, d.task_id, d.alias,
+                          d.task_status, d.task_title, d.completed_at,
+                          EXISTS (SELECT 1 FROM worker_runs r2 WHERE r2.worktree = d.worktree
                                      AND r2.status = 'running') AS running
-                     FROM worker_runs wr JOIN agents a ON a.id = wr.agent_id
-                     LEFT JOIN tasks t ON t.id = wr.task_id
-                    WHERE a.container_id=%s AND {sql.in_list('wr.worktree')}
-                    ORDER BY wr.worktree, (wr.task_id IS NULL), wr.started_at DESC""",
+                     FROM (
+                       SELECT wr.worktree, wr.run_id, wr.task_id, a.alias,
+                              t.status AS task_status, t.title AS task_title, t.completed_at,
+                              ROW_NUMBER() OVER (PARTITION BY wr.worktree
+                                                 ORDER BY (wr.task_id IS NULL), wr.started_at DESC) AS rn
+                         FROM worker_runs wr JOIN agents a ON a.id = wr.agent_id
+                         LEFT JOIN tasks t ON t.id = wr.task_id
+                        WHERE a.container_id=%s AND {sql.in_list('wr.worktree')}
+                     ) d
+                    WHERE d.rn = 1
+                    ORDER BY d.worktree""",
                 (cid, sql.list_param(body.paths)))
             for r in cur.fetchall():
                 items[r["worktree"]] = {

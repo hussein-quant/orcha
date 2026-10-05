@@ -248,14 +248,18 @@ def load_facts(cur, cid: str, since: Optional[_dt.datetime]) -> dict:
 
     # Human verifications (approved) in range — one per task (latest), root excluded.
     cur.execute(
-        f"""SELECT DISTINCT ON (e.entity_id)
-                  e.entity_id AS task_id, e.created_at AS verified_at,
-                  COALESCE(t.started_at, t.created_at) AS started_at
-             FROM events e JOIN tasks t ON t.id = e.entity_id
-            WHERE e.container_id=%s AND e.entity_type='task' AND e.event_type='verified'
-              AND e.detail->>'approved' = 'true' AND NOT t.is_root
-              AND ({sql.ts_param()} IS NULL OR e.created_at >= {sql.ts_param()})
-            ORDER BY e.entity_id, e.created_at DESC""",
+        f"""SELECT task_id, verified_at, started_at FROM (
+               SELECT e.entity_id AS task_id, e.created_at AS verified_at,
+                      COALESCE(t.started_at, t.created_at) AS started_at,
+                      ROW_NUMBER() OVER (PARTITION BY e.entity_id
+                                         ORDER BY e.created_at DESC) AS rn
+                 FROM events e JOIN tasks t ON t.id = e.entity_id
+                WHERE e.container_id=%s AND e.entity_type='task' AND e.event_type='verified'
+                  AND e.detail->>'approved' = 'true' AND NOT t.is_root
+                  AND ({sql.ts_param()} IS NULL OR e.created_at >= {sql.ts_param()})
+             ) d
+            WHERE rn = 1
+            ORDER BY task_id""",
         (cid, since, since),
     )
     verified = [

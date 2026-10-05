@@ -295,8 +295,8 @@ def list_config_revisions(
         conn.commit()
         where, params = ["agent_id=%s"], [aid]
         if field is not None:
-            where.append(f"changes @> {sql.json_cast()}")
-            params.append(sql.json_param([{"field": field}]))
+            where.append(sql.json_array_has_match("changes", "field"))
+            params.append(field)
         if actor_kind == "none":
             where.append("actor_agent_id IS NULL")
         elif actor_kind is not None:

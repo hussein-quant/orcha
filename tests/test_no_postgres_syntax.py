@@ -55,6 +55,7 @@ SQL_TOKENS = {
     "::uuid": r"::\s*uuid\b",
     "ANY(": r"[=<>]\s*any\s*\(",
     "ALL(": r"[=<>]\s*all\s*\(",
+    "@>": r"@>",
     "unnest(": r"\bunnest\s*\(",
     "LATERAL": r"\blateral\b",
     "DISTINCT ON": r"\bdistinct\s+on\b",
@@ -198,8 +199,10 @@ def test_scanner_matches_sql_strings_only():
         "p = Jsonb(v)\n"
         "d = 'Created from this task, if any (none here)'\n"
         "n = 'WHERE e.name <> ALL(%s) AND id = %s::uuid'\n"
+        "j = 'WHERE changes @> %s'\n"
     )
     assert _scan_source(src) == {
         (2, "psycopg"), (5, "interval '"), (7, "ANY("), (7, "FOR UPDATE"),
         (8, "::jsonb"), (9, "Jsonb("), (11, "ALL("), (11, "::uuid"),
+        (12, "@>"),
     }

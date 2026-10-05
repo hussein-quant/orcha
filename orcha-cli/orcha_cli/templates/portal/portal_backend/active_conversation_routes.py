@@ -109,7 +109,13 @@ def active_conversations(cid: str, request: Request):
                               WHERE d.agent_id = cv.agent_id)
                             > {sql.epoch("cv.session_pinned_at")}, false)
                       END AS cold_required,
-                      t.seq AS last_turn_seq, t.role AS last_turn_role,
+                      -- GH #258 S2b: two correlated scalar subqueries (SQLite-portable).
+                      (SELECT ct.seq FROM conversation_turns ct
+                        WHERE ct.conversation_id = cv.id
+                        ORDER BY ct.seq DESC LIMIT 1) AS last_turn_seq,
+                      (SELECT ct.role FROM conversation_turns ct
+                        WHERE ct.conversation_id = cv.id
+                        ORDER BY ct.seq DESC LIMIT 1) AS last_turn_role,
                       COALESCE(ws.delivered_ts, 0) AS _delivered_ts,
                       (SELECT max(ev.ts) FROM agent_events ev
                          WHERE ev.event_key = CAST(cv.agent_id AS TEXT)
@@ -139,10 +145,6 @@ def active_conversations(cid: str, request: Request):
                FROM conversations cv
                JOIN agents a ON a.id = cv.agent_id
                LEFT JOIN agent_wake_state ws ON ws.agent_id = cv.agent_id
-               LEFT JOIN LATERAL (
-                   SELECT seq, role FROM conversation_turns
-                   WHERE conversation_id = cv.id ORDER BY seq DESC LIMIT 1
-               ) t ON true
                WHERE cv.container_id = %s AND cv.status = 'active'
                ORDER BY cv.last_turn_at ASC NULLS FIRST""",
             (excl, excl, cid),

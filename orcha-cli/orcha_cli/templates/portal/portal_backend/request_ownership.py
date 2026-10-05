@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+from portal_backend import sql
+
 # Parity r1 (escalations): escalation keeps status='open' and only re-targets the request
 # at a human (Orcha#30), so the status alone can never say "this was escalated". The audit
 # log can: /escalate and the expires_at sweep both write an events row with
@@ -15,17 +17,22 @@ from datetime import datetime, timezone
 #                          `created` event — the target it was born with, the only target an
 #                          escalation can move it away from. NULL when neither is recorded.
 # Uses idx_events_request_entity (mig 051). Consumers join REQUEST_ESCALATION_JOIN after
-# `FROM requests` and add REQUEST_ESCALATION_COLUMNS to the select list; the lateral's
+# `FROM requests` and add REQUEST_ESCALATION_COLUMNS to the select list; the join's
 # columns are prefixed esc_* so unqualified requests columns stay unambiguous.
+# GH #258 S2b: no LATERAL (SQLite has none) -- join the events row whose PK is the id of the
+# latest escalation (a correlated scalar subquery), exposing the same esc.esc_at / esc.esc_detail.
 REQUEST_ESCALATION_JOIN = """
-    LEFT JOIN LATERAL (
-        SELECT e.created_at AS esc_at, e.detail AS esc_detail
+    LEFT JOIN (
+        SELECT ev.id AS esc_id, ev.created_at AS esc_at, ev.detail AS esc_detail
+          FROM events ev
+    ) esc ON esc.esc_id = (
+        SELECT e.id
           FROM events e
          WHERE e.entity_type = 'request' AND e.entity_id = requests.id
            AND e.event_type = 'escalated'
          ORDER BY e.created_at DESC, e.id DESC
          LIMIT 1
-    ) esc ON true"""
+    )"""
 
 REQUEST_ESCALATION_COLUMNS = """
     (esc.esc_at IS NOT NULL) AS escalated,
@@ -50,13 +57,13 @@ REQUEST_ESCALATION_COLUMNS = """
 #   closed_by_alias — alias of the actor on the latest `closed` event (NULL for a
 #                     system/triage close or a pre-audit row)
 #   close_decision  — {reason, actor, at} of the latest request_close decision, else NULL
-REQUEST_CLOSE_COLUMNS = """
+REQUEST_CLOSE_COLUMNS = f"""
     (SELECT ca.alias FROM events ce JOIN agents ca ON ca.id = ce.actor_id
       WHERE ce.entity_type = 'request' AND ce.entity_id = requests.id
         AND ce.event_type = 'closed'
       ORDER BY ce.created_at DESC, ce.id DESC
       LIMIT 1) AS closed_by_alias,
-    (SELECT json_build_object('reason', d.reason, 'actor', da.alias, 'at', d.created_at)
+    (SELECT {sql.json_object("'reason'", "d.reason", "'actor'", "da.alias", "'at'", "d.created_at")}
        FROM decisions d LEFT JOIN agents da ON da.id = d.actor_agent_id
       WHERE d.subject_type = 'request_close' AND d.subject_id = CAST(requests.id AS TEXT)
       ORDER BY d.created_at DESC

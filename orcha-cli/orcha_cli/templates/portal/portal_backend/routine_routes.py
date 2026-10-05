@@ -204,9 +204,10 @@ _ROUTINE_SELECT = """
       LEFT JOIN agents asg ON asg.id = r.assignee_agent_id
       LEFT JOIN agents cb  ON cb.id  = r.created_by_agent_id
       LEFT JOIN agents ub  ON ub.id  = r.updated_by_agent_id
-      LEFT JOIN LATERAL (
-            SELECT * FROM routine_runs rr WHERE rr.routine_id = r.id
-             ORDER BY rr.created_at DESC LIMIT 1) lr ON true
+      -- GH #258 S2b: SQLite-portable -- join the latest run by its PK.
+      LEFT JOIN routine_runs lr ON lr.id = (
+            SELECT rr.id FROM routine_runs rr WHERE rr.routine_id = r.id
+             ORDER BY rr.created_at DESC LIMIT 1)
       LEFT JOIN tasks lt ON lt.id = lr.task_id
       LEFT JOIN tasks ot ON ot.id = r.origin_task_id
 """

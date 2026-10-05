@@ -156,16 +156,18 @@ def container_metrics(
         # Access model: reads are project-isolated (trusted non-member 403).
         require_member_read(cur, request, cid)
         since = sql.ago(days * 86400)  # the window start, bound once for all three queries
+        tail_expr = sql.right("wr.output", OUTPUT_TAIL_BYTES)
+        verified_approved = sql.json_bool_is_true("detail", "approved")
         cur.execute(
-            """SELECT wr.run_id, wr.agent_id, wr.wake_kind, wr.status, wr.exit_code,
+            f"""SELECT wr.run_id, wr.agent_id, wr.wake_kind, wr.status, wr.exit_code,
                       wr.started_at, wr.ended_at,
                       wr.input_tokens, wr.output_tokens, wr.total_cost_usd,
-                      right(wr.output, %s) AS output_tail,
+                      {tail_expr} AS output_tail,
                       a.alias, a.model
                  FROM worker_runs wr JOIN agents a ON a.id = wr.agent_id
                 WHERE a.container_id = %s
                   AND wr.started_at >= %s""",
-            (OUTPUT_TAIL_BYTES, cid, since),
+            (cid, since),
         )
         runs = cur.fetchall()
         cur.execute(
@@ -176,10 +178,10 @@ def container_metrics(
         )
         tasks_completed = int(cur.fetchone()["n"])
         cur.execute(
-            """SELECT count(*) AS n FROM events
+            f"""SELECT count(*) AS n FROM events
                 WHERE container_id = %s AND entity_type = 'task'
                   AND event_type = 'verified'
-                  AND COALESCE(detail->>'approved', 'true') = 'true'
+                  AND {verified_approved}
                   AND created_at >= %s""",
             (cid, since),
         )

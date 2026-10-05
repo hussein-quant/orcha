@@ -357,45 +357,57 @@ def _live_agents_by_container(cur, cids):
     agents.status (it sticks at 'working' after a worker exits)."""
     if not cids:
         return {}
+    # GREATEST(last_heartbeat_at, latest run start) ignoring NULLs, NULL only when both are
+    # NULL: COALESCE each to the -infinity sentinel, then NULLIF it back (the sentinel never
+    # equals a stored timestamp).
+    neg_inf = sql.ts_neg_infinity()
+    last_active = (
+        "NULLIF(" + sql.greatest(
+            f"COALESCE(a.last_heartbeat_at, {neg_inf})",
+            "COALESCE((SELECT max(wr.started_at) FROM worker_runs wr"
+            f" WHERE wr.agent_id = a.id), {neg_inf})",
+        ) + f", {neg_inf})"
+    )
     cur.execute(
-        f"""SELECT a.container_id, a.alias,
-                  run.task_title AS run_task_title, run.started_at,
-                  COALESCE(run.present, false) AS has_run,
-                  (SELECT t2.title FROM agent_tasks at2 JOIN tasks t2 ON t2.id = at2.task_id
-                    WHERE at2.agent_id = a.id AND at2.assignment_status = 'working'
-                    ORDER BY at2.assigned_at DESC LIMIT 1) AS current_task_title,
-                  EXISTS (SELECT 1 FROM requests rq
-                           WHERE rq.requester_id = a.id AND rq.status = 'open') AS awaiting,
-                  EXISTS (SELECT 1 FROM agent_tasks at3
-                           WHERE at3.agent_id = a.id
-                             AND at3.assignment_status IN ('assigned','accepted','working'))
-                    AS owns_task,
-                  GREATEST(a.last_heartbeat_at,
-                           (SELECT max(wr.started_at) FROM worker_runs wr
-                             WHERE wr.agent_id = a.id)) AS last_active
-             FROM agents a
-             LEFT JOIN agent_wake_state ws ON ws.agent_id = a.id
-             -- VD-09: any 'running' worker_run counts, lease or not — the SAME rule as
-             -- the snapshot's running_run that the roster/board/selected sidebar read
-             -- (a lapsed lease is a probable orphan, but it still reads Working there).
-             -- The run on the lane the lease holds is preferred when there is one.
-             LEFT JOIN LATERAL (
-                 SELECT t3.title AS task_title, wr.started_at, true AS present
-                   FROM worker_runs wr LEFT JOIN tasks t3 ON t3.id = wr.task_id
-                  WHERE wr.agent_id = a.id AND wr.status = 'running'
-                  ORDER BY ((ws.wake_lease_until > now() AND wr.lane = 'work')
-                            OR (NOT COALESCE(ws.wake_lease_until > now(), false)
-                                AND ws.conv_lease_until > now()
-                                AND wr.lane = 'conversation')) IS TRUE DESC,
-                           wr.started_at DESC
-                  LIMIT 1
-             ) run ON true
-            WHERE {sql.in_list('a.container_id')}
-              AND a.terminated_at IS NULL
-              AND COALESCE(a.kind, 'ai') <> 'human'
-              AND (COALESCE(ws.wake_lease_until > now(), false)
-                   OR COALESCE(ws.conv_lease_until > now(), false)
-                   OR run.present IS TRUE)""",
+        f"""SELECT x.container_id, x.alias,
+                  t3.title AS run_task_title, run.started_at,
+                  (x.run_pick IS NOT NULL) AS has_run,
+                  x.current_task_title, x.awaiting, x.owns_task, x.last_active
+             FROM (
+               SELECT a.container_id, a.alias,
+                      (SELECT t2.title FROM agent_tasks at2 JOIN tasks t2 ON t2.id = at2.task_id
+                        WHERE at2.agent_id = a.id AND at2.assignment_status = 'working'
+                        ORDER BY at2.assigned_at DESC LIMIT 1) AS current_task_title,
+                      EXISTS (SELECT 1 FROM requests rq
+                               WHERE rq.requester_id = a.id AND rq.status = 'open') AS awaiting,
+                      EXISTS (SELECT 1 FROM agent_tasks at3
+                               WHERE at3.agent_id = a.id
+                                 AND at3.assignment_status IN ('assigned','accepted','working'))
+                        AS owns_task,
+                      {last_active} AS last_active,
+                      COALESCE(ws.wake_lease_until > now(), false) AS wake_live,
+                      COALESCE(ws.conv_lease_until > now(), false) AS conv_live,
+                      -- VD-09: any 'running' worker_run counts, lease or not — the SAME rule as
+                      -- the snapshot's running_run that the roster/board/selected sidebar read
+                      -- (a lapsed lease is a probable orphan, but it still reads Working there).
+                      -- The run on the lane the lease holds is preferred when there is one.
+                      (SELECT wr.run_id FROM worker_runs wr
+                        WHERE wr.agent_id = a.id AND wr.status = 'running'
+                        ORDER BY ((ws.wake_lease_until > now() AND wr.lane = 'work')
+                                  OR (NOT COALESCE(ws.wake_lease_until > now(), false)
+                                      AND ws.conv_lease_until > now()
+                                      AND wr.lane = 'conversation')) IS TRUE DESC,
+                                 wr.started_at DESC
+                        LIMIT 1) AS run_pick
+                 FROM agents a
+                 LEFT JOIN agent_wake_state ws ON ws.agent_id = a.id
+                WHERE {sql.in_list('a.container_id')}
+                  AND a.terminated_at IS NULL
+                  AND COALESCE(a.kind, 'ai') <> 'human'
+             ) x
+             LEFT JOIN worker_runs run ON run.run_id = x.run_pick
+             LEFT JOIN tasks t3 ON t3.id = run.task_id
+            WHERE x.wake_live OR x.conv_live OR x.run_pick IS NOT NULL""",
         (sql.list_param(cids),),
     )
     out: dict = {}

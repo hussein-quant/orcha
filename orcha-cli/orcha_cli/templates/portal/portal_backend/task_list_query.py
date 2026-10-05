@@ -46,6 +46,36 @@ def _task_list_sql(where: str, order: str) -> str:
     # Same card-facing fields as the snapshot's tasks[], MINUS the heavy `messages` json_agg:
     # a `message_summary` {count, last} replaces the thread, and `plan_message` carries the
     # latest agent-authored note so the approval card renders the plan WITHOUT the thread.
+    # GH #258 S2b: the JSON objects/aggregates go through the dialect helpers (built here,
+    # at call time, because sql.DIALECT is read per call).
+    reviewer_obj = sql.json_object(
+        "'agent_id'", "ra.id", "'alias'", "ra.alias", "'github_login'", "ra.github_login")
+    assignees_agg = sql.json_array_agg("s.alias")
+    last_message_obj = sql.json_object(
+        "'body'", sql.left("m.body", 140),
+        "'created_at'", "m.created_at",
+        "'is_human'", sql.json_bool("m.author_id IS NOT NULL AND ma.kind = 'human'"),
+        "'author_alias'", "ma.alias")
+    message_summary_obj = sql.json_object(
+        "'count'", "(SELECT count(*) FROM task_messages m WHERE m.task_id = t.id)",
+        "'last'", f"""(SELECT {last_message_obj}
+                                   FROM task_messages m LEFT JOIN agents ma ON ma.id = m.author_id
+                                   WHERE m.task_id = t.id ORDER BY m.created_at DESC LIMIT 1)""")
+    decision_obj = sql.json_object(
+        "'decision'", "d.decision", "'reason'", "d.reason",
+        "'actor'", "da.alias", "'at'", "d.created_at")
+    plan_message_obj = sql.json_object(
+        "'body'", "m.body", "'author_alias'", "ma.alias", "'at'", "m.created_at")
+    latest_run_obj = sql.json_object(
+        "'status'", "l.status", "'exit_code'", "l.exit_code",
+        "'started_at'", "l.started_at", "'ended_at'", "l.ended_at")
+    runs_obj = sql.json_object(
+        "'count'", "(SELECT count(*) FROM worker_run_tasks wrt WHERE wrt.task_id = t.id)",
+        "'latest'", f"""(SELECT {latest_run_obj}
+                                     FROM worker_runs l
+                                     JOIN worker_run_tasks wrt ON wrt.run_id = l.run_id
+                                     WHERE wrt.task_id = t.id
+                                     ORDER BY l.started_at DESC LIMIT 1)""")
     return f"""SELECT t.id, t.title, t.description, t.definition_of_done, t.status, t.priority,
                       t.is_root, t.created_by_agent_id, t.result,
                       -- SPEC-4: per-task working agreement {{review_chain,handoff_to,autonomy,notes}}
@@ -57,39 +87,28 @@ def _task_list_sql(where: str, order: str) -> str:
                       -- the reviewer without a lookup. Rides the shared task-list builder →
                       -- surfaces on the snapshot poll AND GET /containers/{{cid}}/tasks.
                       t.reviewer_agent_id,
-                      (SELECT json_build_object('agent_id', ra.id, 'alias', ra.alias,
-                                                'github_login', ra.github_login)
+                      (SELECT {reviewer_obj}
                          FROM agents ra WHERE ra.id = t.reviewer_agent_id) AS reviewer,
                       -- Mig 057: how the reviewer was chosen ({{routed_via:'reports_to'|
                       -- 'owner'|'fallback'|'manual', ...}}) + the AI manager pre-review record.
                       t.review_routing, t.manager_review,
                       t.created_at, t.started_at, t.completed_at,
-                      COALESCE((SELECT json_agg(a.alias ORDER BY a.alias)
-                                FROM agent_tasks at JOIN agents a ON a.id = at.agent_id
-                                WHERE at.task_id = t.id), '[]') AS assignees,
-                      json_build_object(
-                          'count', (SELECT count(*) FROM task_messages m WHERE m.task_id = t.id),
-                          'last', (SELECT json_build_object(
-                                       'body', LEFT(m.body, 140),
-                                       'created_at', m.created_at,
-                                       'is_human', (m.author_id IS NOT NULL AND ma.kind = 'human'),
-                                       'author_alias', ma.alias)
-                                   FROM task_messages m LEFT JOIN agents ma ON ma.id = m.author_id
-                                   WHERE m.task_id = t.id ORDER BY m.created_at DESC LIMIT 1)
-                      ) AS message_summary,
+                      COALESCE((SELECT {assignees_agg}
+                                FROM (SELECT a.alias
+                                      FROM agent_tasks at JOIN agents a ON a.id = at.agent_id
+                                      WHERE at.task_id = t.id ORDER BY a.alias) s), '[]') AS assignees,
+                      {message_summary_obj} AS message_summary,
                       -- TG-13: reject -> revise -> approve loop. The latest plan decision is
                       -- CURRENT unless it is a reject that the agent has since answered with a
                       -- new post (the revised plan): then the gate reopens (plan_decision NULL)
                       -- and the reject rides along as previous_plan_decision for context.
                       (SELECT CASE WHEN {_REVISED_AFTER_D} THEN NULL
-                                   ELSE json_build_object('decision', d.decision, 'reason', d.reason,
-                                          'actor', da.alias, 'at', d.created_at) END
+                                   ELSE {decision_obj} END
                          FROM decisions d LEFT JOIN agents da ON da.id = d.actor_agent_id
                         WHERE d.subject_type = 'plan_approval' AND d.subject_id = CAST(t.id AS TEXT)
                         ORDER BY d.created_at DESC LIMIT 1) AS plan_decision,
                       (SELECT CASE WHEN {_REVISED_AFTER_D}
-                                   THEN json_build_object('decision', d.decision, 'reason', d.reason,
-                                          'actor', da.alias, 'at', d.created_at) END
+                                   THEN {decision_obj} END
                          FROM decisions d LEFT JOIN agents da ON da.id = d.actor_agent_id
                         WHERE d.subject_type = 'plan_approval' AND d.subject_id = CAST(t.id AS TEXT)
                         ORDER BY d.created_at DESC LIMIT 1) AS previous_plan_decision,
@@ -101,7 +120,7 @@ def _task_list_sql(where: str, order: str) -> str:
                       -- TG-13b: in a post-reject round the agent often acks first ("revising
                       -- now") and posts the actual revision after, so that round takes the
                       -- LATEST agent post; the opening round keeps the earliest (ASC).
-                      (SELECT json_build_object('body', m.body, 'author_alias', ma.alias, 'at', m.created_at)
+                      (SELECT {plan_message_obj}
                          FROM (SELECT {PLAN_CUTOFF_SQL} AS c) pc
                          CROSS JOIN task_messages m LEFT JOIN agents ma ON ma.id = m.author_id
                         WHERE m.task_id = t.id AND m.author_id IS NOT NULL AND ma.kind <> 'human'
@@ -111,13 +130,5 @@ def _task_list_sql(where: str, order: str) -> str:
                       -- (worker_run_tasks — every task a run touched), not the single
                       -- worker_runs.task_id pin, so a run from a multi-task session is counted
                       -- under every task it spanned.
-                      json_build_object(
-                          'count', (SELECT count(*) FROM worker_run_tasks wrt WHERE wrt.task_id = t.id),
-                          'latest', (SELECT json_build_object('status', l.status, 'exit_code', l.exit_code,
-                                         'started_at', l.started_at, 'ended_at', l.ended_at)
-                                     FROM worker_runs l
-                                     JOIN worker_run_tasks wrt ON wrt.run_id = l.run_id
-                                     WHERE wrt.task_id = t.id
-                                     ORDER BY l.started_at DESC LIMIT 1)
-                      ) AS runs
+                      {runs_obj} AS runs
                FROM tasks t WHERE {where} {order} LIMIT %s OFFSET %s"""

@@ -236,11 +236,12 @@ def reroute_open_requests(cur, container_id, from_id):
         if to is None:
             unrouted.append(rid)
             continue
+        rerouted_obj = sql.json_cast(
+            sql.json_object("'rerouted_from_alias'", "CAST(%s AS TEXT)"))
         cur.execute(
-            """UPDATE requests
+            f"""UPDATE requests
                   SET target_id=%s,
-                      detail = COALESCE(detail, '{}')
-                               || jsonb_build_object('rerouted_from_alias', CAST(%s AS TEXT))
+                      detail = {sql.json_merge("COALESCE(detail, '{}')", rerouted_obj)}
                 WHERE id=%s""",
             (to, from_alias, rid),
         )

@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, Query, Request
 
+from portal_backend import sql
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.guards import require_container, valid_uuid
@@ -92,12 +93,14 @@ def list_container_requests(
             id_col="id",
             default=default_order,
         )
+        task_link_obj = sql.json_object(
+            "'task_id'", "st.id", "'title'", "st.title", "'status'", "st.status")
         cur.execute(
             f"""SELECT id, type, status, priority, requester_id, target_id,
                        payload, agent_payload, response, rejection_reason, spawned_task_id,
                        expires_at, created_at, responded_at, closed_at,
                        parent_request_id, chain_depth, detail,
-                       (SELECT json_build_object('task_id', st.id, 'title', st.title, 'status', st.status)
+                       (SELECT {task_link_obj}
                           FROM tasks st WHERE st.id = requests.spawned_task_id) AS task_link,
                        (SELECT a.alias FROM agents a
                           WHERE a.id = CASE requests.status WHEN 'open' THEN requests.target_id

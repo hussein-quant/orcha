@@ -26,7 +26,11 @@ def _reap_lane(
     run_lane,
 ):
     """Release one lane's stale leases and reconcile its stranded runs."""
-    floored_expr = f"GREATEST(({heartbeat_expr}), ({claim_floor_expr}))"
+    # The claim floor is nullable: fall back to the heartbeat so it is ignored exactly as
+    # Postgres GREATEST ignores a NULL (rows with a NULL heartbeat are filtered out below).
+    floored_expr = sql.greatest(
+        f"({heartbeat_expr})", f"COALESCE(({claim_floor_expr}), ({heartbeat_expr}))"
+    )
     set_release = ", ".join(
         [f"{lease_col} = NULL", f"{kind_col} = NULL"]
         + [f"{column} = NULL" for column in preempt_cols]

@@ -225,12 +225,17 @@ def agent_notifications_read(aid: str, body: NotificationsRead, request: Request
                 (aid,),
             )
             target = cur.fetchone()["mx"]
+        # Each nullable operand falls back to the other, so a NULL is ignored exactly as
+        # Postgres GREATEST ignores it (SQLite max() would return NULL).
+        advance_expr = sql.greatest(
+            "COALESCE(agent_notification_state.read_through_ts, EXCLUDED.read_through_ts)",
+            "COALESCE(EXCLUDED.read_through_ts, agent_notification_state.read_through_ts)",
+        )
         cur.execute(
-            """INSERT INTO agent_notification_state (agent_id, read_through_ts, updated_at)
+            f"""INSERT INTO agent_notification_state (agent_id, read_through_ts, updated_at)
                VALUES (%s, %s, now())
                ON CONFLICT (agent_id) DO UPDATE
-                 SET read_through_ts = GREATEST(agent_notification_state.read_through_ts,
-                                                EXCLUDED.read_through_ts),
+                 SET read_through_ts = {advance_expr},
                      updated_at = now()
                RETURNING read_through_ts""",
             (aid, target),

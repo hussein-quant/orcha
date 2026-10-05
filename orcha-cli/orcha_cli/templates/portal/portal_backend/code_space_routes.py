@@ -550,17 +550,21 @@ def list_code_threads(
             recent_threads = [_thread_row_to_dict(r) for r in recent_rows]
 
             # First-message snippet per thread (Code Space's Recent quick-jump row) —
-            # one query for the whole page rather than N+1: DISTINCT ON picks each
+            # one query for the whole page rather than N+1: ROW_NUMBER picks each
             # thread's earliest message by created_at, matching "the opening note"
             # every thread is created with (see create_code_thread's own first
             # INSERT into code_thread_messages).
             if recent_threads:
                 ids = [t["id"] for t in recent_threads]
                 cur.execute(
-                    f"""SELECT DISTINCT ON (thread_id) thread_id, body
-                         FROM code_thread_messages
-                        WHERE {sql.in_list('thread_id')}
-                        ORDER BY thread_id, created_at ASC""",
+                    f"""SELECT thread_id, body FROM (
+                           SELECT thread_id, body,
+                                  ROW_NUMBER() OVER (PARTITION BY thread_id
+                                                     ORDER BY created_at ASC) AS rn
+                             FROM code_thread_messages
+                            WHERE {sql.in_list('thread_id')}
+                         ) d
+                        WHERE rn = 1""",
                     (sql.list_param(ids),),
                 )
                 first_body_by_thread = {str(r["thread_id"]): r["body"] for r in cur.fetchall()}
@@ -594,14 +598,18 @@ def list_code_threads(
         cur.execute(query, params)
         thread_rows = cur.fetchall()
         # C14b: the file's thread rows say what each thread is about — the same
-        # first-message snippet the recent= branch returns (one DISTINCT ON query).
+        # first-message snippet the recent= branch returns (one ROW_NUMBER query).
         first_body_by_thread: dict = {}
         if thread_rows:
             cur.execute(
-                f"""SELECT DISTINCT ON (thread_id) thread_id, body
-                     FROM code_thread_messages
-                    WHERE {sql.in_list('thread_id')}
-                    ORDER BY thread_id, created_at ASC""",
+                f"""SELECT thread_id, body FROM (
+                       SELECT thread_id, body,
+                              ROW_NUMBER() OVER (PARTITION BY thread_id
+                                                 ORDER BY created_at ASC) AS rn
+                         FROM code_thread_messages
+                        WHERE {sql.in_list('thread_id')}
+                     ) d
+                    WHERE rn = 1""",
                 (sql.list_param([r["id"] for r in thread_rows]),),
             )
             first_body_by_thread = {str(r["thread_id"]): r["body"] for r in cur.fetchall()}

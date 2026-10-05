@@ -3,6 +3,7 @@
 import psycopg
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event, recompute_agent_status
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -108,12 +109,13 @@ def decide_suggestion(rid: str, body: SuggestionDecision, request: Request):
             # Now target the request at the new agent so they can /accept-task it.
             # UO-11b: stamp the decision so read-models stop offering it as a pending
             # suggestion (the request itself stays open for the new agent to accept).
+            decided = sql.json_object(
+                "'suggestion_decided'", sql.json_object(
+                    "'kind'", "'create'", "'at'", "now()", "'actor'", "CAST(%s AS TEXT)",
+                    "'new_agent_id'", "CAST(%s AS TEXT)"))
             cur.execute(
-                """UPDATE requests SET target_id=%s, status='open',
-                          detail = COALESCE(detail, '{}') || jsonb_build_object(
-                              'suggestion_decided', jsonb_build_object(
-                                  'kind', 'create', 'at', now(), 'actor', CAST(%s AS TEXT),
-                                  'new_agent_id', CAST(%s AS TEXT)))
+                f"""UPDATE requests SET target_id=%s, status='open',
+                          detail = {sql.json_merge("COALESCE(detail, '{}')", sql.json_cast(decided))}
                    WHERE id=%s""",
                 (new_aid, body.actor_agent_id, new_aid, rid),
             )
@@ -185,12 +187,13 @@ def decide_suggestion(rid: str, body: SuggestionDecision, request: Request):
             new_target_id = _resolve_alias(
                 cur, str(r["container_id"]), body.target_alias
             )
+            decided = sql.json_object(
+                "'suggestion_decided'", sql.json_object(
+                    "'kind'", "'reassign'", "'at'", "now()", "'actor'", "CAST(%s AS TEXT)",
+                    "'target_alias'", "CAST(%s AS TEXT)"))
             cur.execute(
-                """UPDATE requests SET target_id=%s, status='open',
-                          detail = COALESCE(detail, '{}') || jsonb_build_object(
-                              'suggestion_decided', jsonb_build_object(
-                                  'kind', 'reassign', 'at', now(), 'actor', CAST(%s AS TEXT),
-                                  'target_alias', CAST(%s AS TEXT)))
+                f"""UPDATE requests SET target_id=%s, status='open',
+                          detail = {sql.json_merge("COALESCE(detail, '{}')", sql.json_cast(decided))}
                    WHERE id=%s""",
                 (new_target_id, body.actor_agent_id, body.target_alias, rid),
             )

@@ -43,6 +43,7 @@ import json
 import urllib.error
 import urllib.request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event, recompute_agent_status
 from portal_backend.events import publish_event
 
@@ -226,26 +227,29 @@ def find_open_gh_tasks(cur, container_id, numbers) -> dict:
     tracked, or vice versa).
 
     Matches each number's `GH #<number>: ` title prefix (the exact string
-    build_task_fields writes) via a single unnest()+LATERAL join — a LIKE-per-number
-    loop would be N queries; this is one, regardless of how many numbers are asked
+    build_task_fields writes) via a single query (a bound int-list row source plus a
+    correlated first-match subquery) — a LIKE-per-number loop would be N queries; this is one, regardless of how many numbers are asked
     about. Only non-terminal statuses count (mirrors find_open_gh_task). Numbers list
     may be empty (returns {} without a query).
     """
     numbers = [int(n) for n in (numbers or [])]
     if not numbers:
         return {}
+    # Placeholders in text order: the correlated subquery's three, then int_rows' list.
     cur.execute(
-        """SELECT v.number AS number, t.id AS task_id
-             FROM (SELECT unnest(%s::int[]) AS number) v
-             JOIN LATERAL (
-               SELECT id FROM tasks
-                WHERE container_id=%s
-                  AND status = ANY(%s)
-                  AND title LIKE %s || v.number::text || ': %%'
-                ORDER BY created_at ASC, id ASC
-                LIMIT 1
-             ) t ON true""",
-        (numbers, container_id, list(_OPEN_STATUSES), GH_TITLE_PREFIX),
+        f"""SELECT m.number, m.task_id FROM (
+               SELECT v.number AS number,
+                      (SELECT id FROM tasks
+                        WHERE container_id=%s
+                          AND {sql.in_list('status')}
+                          AND title LIKE %s || CAST(v.number AS TEXT) || ': %%'
+                        ORDER BY created_at ASC, id ASC
+                        LIMIT 1) AS task_id
+                 FROM {sql.int_rows('number')} v
+             ) m
+            WHERE m.task_id IS NOT NULL""",
+        (container_id, sql.list_param(_OPEN_STATUSES), GH_TITLE_PREFIX,
+         sql.list_param(numbers)),
     )
     return {int(row["number"]): str(row["task_id"]) for row in cur.fetchall()}
 
@@ -335,10 +339,11 @@ def find_orchestrator_agent(cur, container_id):
     container with no orchestrator persona at all) — callers must treat it as a
     graceful no-op, never an error.
     """
+    like_op = sql.ilike()  # case-insensitive LIKE (hoisted: the SQL lint reads f-string fields)
     cur.execute(
-        """SELECT id FROM agents
+        f"""SELECT id FROM agents
             WHERE container_id=%s AND kind='ai' AND terminated_at IS NULL
-              AND role ILIKE %s
+              AND role {like_op} %s
             ORDER BY created_at ASC, id ASC
             LIMIT 1""",
         (container_id, "%orchestrat%"),

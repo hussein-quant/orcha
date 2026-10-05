@@ -124,6 +124,17 @@ def list_param(values) -> object:
     return json.dumps([v if isinstance(v, (str, int, float)) else str(v) for v in values])
 
 
+def int_rows(alias: str = "value") -> str:
+    """A derived table with one row per element of a bound int list, column `alias`:
+    f"FROM {sql.int_rows('number')} v" + sql.list_param(numbers).
+    Postgres `unnest(%s::int[])`, SQLite json_each(%s)."""
+    if not _JSON_KEY.match(alias):
+        raise ValueError(f"int_rows: alias must be a plain identifier, got {alias!r}")
+    if _pg():
+        return f"(SELECT unnest(%s::int[]) AS {alias})"
+    return f"(SELECT value AS {alias} FROM json_each(%s))"
+
+
 # --- JSON ---
 
 def json_param(obj) -> str:
@@ -156,6 +167,17 @@ def json_array_agg(expr: str, order_by: str | None = None) -> str:
     if order_by:
         raise ValueError("json_array_agg(order_by=...) is Postgres-only: order in a subquery")
     return f"json_group_array({expr})"
+
+
+def json_bool(expr: str) -> str:
+    """A boolean SQL expression as a JSON value inside json_object()/json_array_agg().
+
+    SQLite has no boolean type, so a bare predicate lands in the JSON as 1/0; wrapping it in
+    json('true')/json('false') makes it decode as a bool (plan Appendix B probe g). A NULL
+    predicate stays JSON null on both engines."""
+    if _pg():
+        return f"({expr})"
+    return f"CASE WHEN ({expr}) THEN json('true') WHEN NOT ({expr}) THEN json('false') END"
 
 
 def json_bool_is_true(col: str, key: str, *, default: bool = True) -> str:
@@ -207,6 +229,17 @@ def json_array_has(col: str, placeholder: str = "%s") -> str:
     if _pg():
         return f"({col} ? {placeholder}::text)"
     return f"EXISTS (SELECT 1 FROM json_each({col}) WHERE json_each.value = {placeholder})"
+
+
+def json_array_has_match(col: str, key: str, placeholder: str = "%s") -> str:
+    """Predicate: the JSON array of objects `col` has an element whose `key` equals the bound
+    string. Postgres `col @> '[{"key": value}]'` (containment), SQLite an EXISTS over json_each."""
+    if not _JSON_KEY.match(key):
+        raise ValueError(f"json_array_has_match: key must be a plain identifier, got {key!r}")
+    if _pg():
+        return f"({col} @> jsonb_build_array(jsonb_build_object('{key}', {placeholder}::text)))"
+    return (f"EXISTS (SELECT 1 FROM json_each({col}) "
+            f"WHERE json_extract(json_each.value, '$.{key}') = {placeholder})")
 
 
 def json_merge(left_obj: str, right_obj: str) -> str:

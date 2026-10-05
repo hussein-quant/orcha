@@ -16,6 +16,13 @@ MIGRATIONS_DIR = pathlib.Path(
     or pathlib.Path(__file__).resolve().parents[2] / "migrations"
 )
 _MIGRATION_LOCK_KEY = 4242421
+# GH #258 S2b: result columns built by sql.json_object()/sql.json_array_agg(). Postgres returns
+# json that psycopg decodes; SQLite returns TEXT, so the S3 row adapter decodes these by name.
+JSON_ALIASES = frozenset({
+    "active_run", "assignees", "close_decision", "current_task", "message_summary",
+    "plan_decision", "plan_message", "previous_plan_decision", "reviewer", "running_run", "runs",
+    "task_link", "waiting_on",
+})
 
 
 @contextmanager

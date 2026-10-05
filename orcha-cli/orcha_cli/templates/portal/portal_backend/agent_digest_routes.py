@@ -5,6 +5,7 @@ import time
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import log_event
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -147,11 +148,15 @@ def rehydrate(aid: str, request: Request):
             (aid,),
         )
         tasks = cur.fetchall()
+        # Dialect-portable truncation (LEFT on Postgres, substr on SQLite).
+        payload_240 = sql.left("COALESCE(r.agent_payload, r.payload)", 240)
+        payload_160 = sql.left("COALESCE(r.agent_payload, r.payload)", 160)
+        response_240 = sql.left("r.response", 240)
         cur.execute(
             # Mig 065: the brief is agent-only — it shows the text addressed to the agent
             # (agent_payload, e.g. a code thread's reply instructions) when there is one.
-            """SELECT r.id, r.type, r.priority,
-                      LEFT(COALESCE(r.agent_payload, r.payload), 240) AS payload,
+            f"""SELECT r.id, r.type, r.priority,
+                      {payload_240} AS payload,
                       r.agent_payload,
                       req.alias AS requester_alias
                FROM requests r JOIN agents req ON req.id = r.requester_id
@@ -161,8 +166,8 @@ def rehydrate(aid: str, request: Request):
         )
         inbox = cur.fetchall()
         cur.execute(
-            """SELECT r.id, r.type, LEFT(COALESCE(r.agent_payload, r.payload), 160) AS payload,
-                      LEFT(r.response, 240) AS response,
+            f"""SELECT r.id, r.type, {payload_160} AS payload,
+                      {response_240} AS response,
                       COALESCE(tgt.alias, '(human)') AS target_alias
                FROM requests r LEFT JOIN agents tgt ON tgt.id = r.target_id
                WHERE r.requester_id = %s AND r.status = 'answered'

@@ -142,15 +142,16 @@ def month_usage(cur, container_id: str, starts_at) -> dict:
     # NULL may still carry its terminal result record in the captured output. Parse only
     # those rows' 4KB tails; a run that reports a cost there moves from unmetered to
     # metered. Nothing found → it stays "not metered", never $0.
+    tail_expr = sql.right("wr.output", OUTPUT_TAIL_BYTES)
     cur.execute(
-        """SELECT wr.agent_id, right(wr.output, %s) AS output_tail
+        f"""SELECT wr.agent_id, {tail_expr} AS output_tail
              FROM worker_runs wr JOIN agents a ON a.id = wr.agent_id
             WHERE a.container_id = %s AND wr.started_at >= %s AND wr.ended_at IS NOT NULL
               AND wr.output IS NOT NULL
               AND wr.input_tokens IS NULL AND wr.output_tokens IS NULL
               AND wr.cache_read_input_tokens IS NULL AND wr.cache_creation_input_tokens IS NULL
               AND wr.total_cost_usd IS NULL""",
-        (OUTPUT_TAIL_BYTES, container_id, starts_at),
+        (container_id, starts_at),
     )
     for row in cur.fetchall():
         parsed = parse_output_tail(row["output_tail"])

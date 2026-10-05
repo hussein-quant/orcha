@@ -99,6 +99,17 @@ def get_container(
         # D7: additionally surface model (D7), wake_enabled (reachability join),
         # current_task (the actively-worked task) and last_active (latest of heartbeat /
         # worker-run start) so the redesign can render agent cards without extra calls.
+        # GH #258 S2b: dialect spellings built once, outside the SQL text.
+        neg_inf = sql.ts_neg_infinity()
+        prompt_preview_expr = sql.left("a.system_prompt", 160)
+        # Postgres GREATEST ignores NULLs, SQLite max() does not: COALESCE each operand to
+        # -infinity, and NULLIF restores the all-NULL -> NULL result (never beat, never ran).
+        last_active_expr = "NULLIF(" + sql.greatest(
+            f"COALESCE(a.last_heartbeat_at, {neg_inf})",
+            "COALESCE((SELECT max(wr.started_at) FROM worker_runs wr"
+            f" WHERE wr.agent_id = a.id), {neg_inf})",
+        ) + f", {neg_inf})"
+        payload_preview_expr = sql.left("r.payload", 120)
         cur.execute(
             f"""SELECT a.id, a.alias, a.role, a.kind, a.turns_used, a.turn_budget,
                       a.last_heartbeat_at, a.is_auto_created, a.created_at, a.terminated_at,
@@ -119,7 +130,7 @@ def get_container(
                       -- A short glanceable prompt preview for the agent view; the FULL
                       -- system_prompt stays on GET /api/agents/{{aid}}/persona (lazy-loaded
                       -- on expand) so we don't ride 8KB x N prompts on every roster poll.
-                      LEFT(a.system_prompt, 160) AS prompt_preview,
+                      {prompt_preview_expr} AS prompt_preview,
                       COALESCE(r.wake_enabled, true) AS wake_enabled,
                       -- Additive (agent-status parity): the newest worker_run whose row says
                       -- 'running' — the SAME predicate GET /api/agents/{{aid}}/runs reports as
@@ -128,31 +139,30 @@ def get_container(
                       -- whether the agent's lane lease is still live; a false value marks a
                       -- probable orphan the host reaper has not reconciled yet (active_run,
                       -- below, stays lease-gated and unchanged).
-                      (SELECT json_build_object(
-                                  'run_id', rr.run_id,
-                                  'lane', rr.lane,
-                                  'wake_kind', rr.wake_kind,
-                                  'runtime', rr.runtime,
-                                  'task_id', rr.task_id,
-                                  'task_title', rt.title,
-                                  'started_at', rr.started_at,
-                                  -- L13b: the board gates "Live changes" on a readable
-                                  -- checkout, like the workspace's hasCheckout().
-                                  'worktree', rr.worktree,
-                                  'base_cwd', rr.base_cwd,
-                                  'lease_live',
-                                    CASE WHEN rr.lane = 'conversation'
-                                         THEN COALESCE(ws.conv_lease_until > now(), false)
-                                         ELSE COALESCE(ws.wake_lease_until > now(), false) END)
+                      -- L13b: worktree/base_cwd ride along -- the board gates "Live changes"
+                      -- on a readable checkout, like the workspace's hasCheckout().
+                      (SELECT {sql.json_object(
+                                  "'run_id'", "rr.run_id",
+                                  "'lane'", "rr.lane",
+                                  "'wake_kind'", "rr.wake_kind",
+                                  "'runtime'", "rr.runtime",
+                                  "'task_id'", "rr.task_id",
+                                  "'task_title'", "rt.title",
+                                  "'started_at'", "rr.started_at",
+                                  "'worktree'", "rr.worktree",
+                                  "'base_cwd'", "rr.base_cwd",
+                                  "'lease_live'",
+                                  sql.json_bool(
+                                      "CASE WHEN rr.lane = 'conversation'"
+                                      " THEN COALESCE(ws.conv_lease_until > now(), false)"
+                                      " ELSE COALESCE(ws.wake_lease_until > now(), false) END"
+                                  ))}
                          FROM worker_runs rr
                          LEFT JOIN tasks rt ON rt.id = rr.task_id
                         WHERE rr.agent_id = a.id AND rr.status = 'running'
                         ORDER BY rr.started_at DESC LIMIT 1) AS running_run,
-                      GREATEST(
-                          a.last_heartbeat_at,
-                          (SELECT max(wr.started_at) FROM worker_runs wr WHERE wr.agent_id = a.id)
-                      ) AS last_active,
-                      (SELECT json_build_object('task_id', t2.id, 'title', t2.title)
+                      {last_active_expr} AS last_active,
+                      (SELECT {sql.json_object("'task_id'", "t2.id", "'title'", "t2.title")}
                          FROM agent_tasks at2 JOIN tasks t2 ON t2.id = at2.task_id
                         WHERE at2.agent_id = a.id AND at2.assignment_status = 'working'
                         ORDER BY at2.assigned_at DESC LIMIT 1) AS current_task,
@@ -171,15 +181,15 @@ def get_container(
                       -- it correctly reads idle, consistent with the live-recomputed `status`. When
                       -- the live run IS a task, task_id + task_title are carried so the card shows the
                       -- worked task directly (no dependence on current_task matching).
-                      (SELECT json_build_object(
-                                  'run_id', wr.run_id,
-                                  'wake_event', wr.wake_event,
-                                  'wake_kind', wr.wake_kind,
-                                  'runtime', wr.runtime,
-                                  'task_id', wr.task_id,
-                                  'task_title', t3.title,
-                                  'has_conversation', wr.conversation_id IS NOT NULL,
-                                  'started_at', wr.started_at)
+                      (SELECT {sql.json_object(
+                                  "'run_id'", "wr.run_id",
+                                  "'wake_event'", "wr.wake_event",
+                                  "'wake_kind'", "wr.wake_kind",
+                                  "'runtime'", "wr.runtime",
+                                  "'task_id'", "wr.task_id",
+                                  "'task_title'", "t3.title",
+                                  "'has_conversation'", sql.json_bool("wr.conversation_id IS NOT NULL"),
+                                  "'started_at'", "wr.started_at")}
                          FROM worker_runs wr
                          LEFT JOIN tasks t3 ON t3.id = wr.task_id
                         WHERE wr.agent_id = a.id AND wr.status = 'running'
@@ -248,23 +258,31 @@ def get_container(
                FROM agents a
                LEFT JOIN agent_reachability r ON r.agent_id = a.id
                LEFT JOIN agent_wake_state ws ON ws.agent_id = a.id
+               -- GH #258 S2b: no ORDER BY inside the aggregate (SQLite < 3.44). One row per
+               -- requester with open requests; its list is aggregated from a per-requester
+               -- subquery that orders by created_at, so the GROUP BY never reorders it.
                LEFT JOIN (
-                   SELECT r.requester_id,
-                          json_agg(json_build_object(
-                              'request_id', r.id,
-                              'target_alias', COALESCE(t.alias, '(escalated to human)'),
-                              'payload_preview', LEFT(r.payload, 120),
-                              'chain_depth', r.chain_depth,
-                              'created_at', r.created_at,
-                              'expires_at', r.expires_at
-                          ) ORDER BY r.created_at) AS waiting_on
-                   FROM requests r LEFT JOIN agents t ON t.id = r.target_id
-                   WHERE r.status='open' AND r.container_id=%s
-                   GROUP BY r.requester_id
+                   SELECT q.requester_id,
+                          (SELECT {sql.json_array_agg("s.x")} FROM (
+                               SELECT {sql.json_object(
+                                   "'request_id'", "r.id",
+                                   "'target_alias'", "COALESCE(t.alias, '(escalated to human)')",
+                                   "'payload_preview'", payload_preview_expr,
+                                   "'chain_depth'", "r.chain_depth",
+                                   "'created_at'", "r.created_at",
+                                   "'expires_at'", "r.expires_at",
+                               )} AS x
+                                 FROM requests r LEFT JOIN agents t ON t.id = r.target_id
+                                WHERE r.status='open' AND r.container_id=%s
+                                  AND r.requester_id = q.requester_id
+                                ORDER BY r.created_at) s) AS waiting_on
+                   FROM requests q
+                   WHERE q.status='open' AND q.container_id=%s
+                   GROUP BY q.requester_id
                ) w ON w.requester_id = a.id
                WHERE a.container_id=%s AND a.terminated_at IS NULL
                ORDER BY a.created_at""",
-            (cid, cid),
+            (cid, cid, cid),
         )
         agents = cur.fetchall()
 
@@ -330,14 +348,14 @@ def get_container(
         request_total = _request_counts["n"]
         request_open_total = _request_counts["open_n"]
         cur.execute(
-            """SELECT id, type, status, priority, requester_id, target_id,
+            f"""SELECT id, type, status, priority, requester_id, target_id,
                       payload, response, rejection_reason, spawned_task_id,
                       expires_at, created_at, responded_at, closed_at,
                       parent_request_id, chain_depth, detail,
                       -- D7: resolve the spawned task into a light link so the portal can
                       -- navigate request → task without a second call. (Shape pending Tim;
                       -- default = the spawned task.) NULL when the request spawned none.
-                      (SELECT json_build_object('task_id', st.id, 'title', st.title, 'status', st.status)
+                      (SELECT {sql.json_object("'task_id'", "st.id", "'title'", "st.title", "'status'", "st.status")}
                          FROM tasks st WHERE st.id = requests.spawned_task_id) AS task_link,
                       -- ISS-47: alias of the agent who owns the next action (open→target,
                       -- answered→requester) so the mixed all-request view is unambiguous.
