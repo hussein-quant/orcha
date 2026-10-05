@@ -19,7 +19,7 @@ from portal_backend.worker_run_support import run_row
 
 def fetch_run_lines(run_id, after_seq, limit=500):
     """Fetch one ordered batch of persisted worker output."""
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):
         cur.execute(
             """SELECT seq, line FROM worker_run_lines
                WHERE run_id=%s AND seq>%s ORDER BY seq LIMIT %s""",
@@ -42,7 +42,7 @@ def list_agent_runs(
     up here even if its pin settled on another task."""
     if not valid_uuid(aid):
         raise HTTPException(400, "agent_id is not a valid UUID")
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):
         agent = require_agent(cur, aid)
         # project isolation (V2 A.md): trusted non-members of the agent's project get 403;
         # trust off / no proxy header is unchanged (self-host, in-stack callers).
@@ -76,7 +76,7 @@ def list_task_runs(tid: str, request: Request, limit: int = Query(default=20, ge
     here too — not only under whichever task ended up as its pin."""
     if not valid_uuid(tid):
         raise HTTPException(400, "task_id is not a valid UUID")
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):
         task = require_task(cur, tid)
         require_member_read(cur, request, str(task["container_id"]))
         cur.execute(
@@ -92,7 +92,7 @@ def list_task_runs(tid: str, request: Request, limit: int = Query(default=20, ge
 
 def worker_run_status(run_id):
     """Return a run's current status, or None when it no longer exists."""
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):
         cur.execute("SELECT status FROM worker_runs WHERE run_id=%s", (run_id,))
         row = cur.fetchone()
         return row["status"] if row else None
@@ -153,7 +153,7 @@ async def stream_worker_run(
     """
     if not valid_uuid(aid) or not valid_uuid(run_id):
         raise HTTPException(400, "agent_id / run_id must be valid UUIDs")
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):
         agent = require_agent(cur, aid)
         require_member_read(cur, request, str(agent["container_id"]))
         cur.execute(

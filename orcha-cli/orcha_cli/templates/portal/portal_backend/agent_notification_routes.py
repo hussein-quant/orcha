@@ -53,7 +53,7 @@ def agent_notifications(
         raise HTTPException(400, "zone must be 'needs_you' or 'earlier'")
     limit = max(1, min(limit, 200))
     fetch_cap = limit * 4
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):
         agent = require_agent(cur, aid)
         require_member_read(cur, request, str(agent["container_id"]))  # PS-08
         # mig 063: a HUMAN's bell honours their notification settings (should_notify on
