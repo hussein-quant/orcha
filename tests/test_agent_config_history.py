@@ -6,10 +6,11 @@ no-op and failed writes record nothing; lazy 'initial' backfill; filters + pagin
 restore semantics (new 'restore' revisions through the same routes, history untouched);
 authority (human actor, grants, viewer read-only); secret exclusion; row immutability.
 """
+import sqlite3
+
 import psycopg
 import pytest
 
-from conftest import TEST_URL
 
 OCTO = {"X-Auth-Request-User": "octocat"}
 HUBOT = {"X-Auth-Request-User": "hubot"}
@@ -254,12 +255,13 @@ async def test_secrets_are_redacted_and_never_restored(client, boss_and_bot, db)
     assert (await client.get(f"/api/agents/{aid}/persona")).json()["system_prompt"] == "clean"
 
 
-async def test_revisions_are_immutable(client, boss_and_bot):
+async def test_revisions_are_immutable(client, boss_and_bot, db):
     _, aid = boss_and_bot
     await _history(client, aid)
-    with psycopg.connect(TEST_URL) as conn:
-        with pytest.raises(psycopg.errors.RaiseException):
-            conn.execute("UPDATE agent_config_revisions SET reason='x' WHERE agent_id=%s", (aid,))
+    # the immutability trigger RAISEs: plpgsql RAISE on Postgres, RAISE(ABORT) on SQLite
+    err = psycopg.errors.RaiseException if db.backend == "postgres" else sqlite3.IntegrityError
+    with pytest.raises(err):
+        db.execute("UPDATE agent_config_revisions SET reason='x' WHERE agent_id=%s", (aid,))
 
 
 # ---------------------------------------------------------------- trusted-proxy authority

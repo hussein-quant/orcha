@@ -66,11 +66,9 @@ def no_trust_proxy(monkeypatch):
 
 def test_migration_creates_tables_and_is_idempotent(db):
     cols = {
-        (r["table_name"], r["column_name"])
-        for r in db.execute(
-            """SELECT table_name, column_name FROM information_schema.columns
-               WHERE table_name IN ('notification_prefs','notification_pref_defaults')"""
-        )
+        (t, r["column_name"])
+        for t in ("notification_prefs", "notification_pref_defaults")
+        for r in db.columns(t)
     }
     assert {
         ("notification_prefs", "member_agent_id"),
@@ -81,12 +79,18 @@ def test_migration_creates_tables_and_is_idempotent(db):
         ("notification_pref_defaults", "prefs"),
     } <= cols
     # ADD-only + tolerant re-apply: running it again is a no-op, not an error
-    with psycopg.connect(TEST_URL, autocommit=True) as conn:
-        conn.execute(MIGRATION.read_text())
-    idx = db.execute(
-        "SELECT indexname FROM pg_indexes WHERE tablename='notification_prefs'"
-    )
-    assert "notification_prefs_container_idx" in {r["indexname"] for r in idx}
+    # (Postgres leg only: the SQLite leg starts from its 001 baseline, not migration files)
+    if db.backend == "postgres":
+        with psycopg.connect(TEST_URL, autocommit=True) as conn:
+            conn.execute(MIGRATION.read_text())
+        idx = db.execute(
+            "SELECT indexname AS name FROM pg_indexes WHERE tablename='notification_prefs'"
+        )
+    else:
+        idx = db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='notification_prefs'"
+        )
+    assert "notification_prefs_container_idx" in {r["name"] for r in idx}
 
 
 async def test_member_row_delete_cascades_override(client, container, make_agent, db):

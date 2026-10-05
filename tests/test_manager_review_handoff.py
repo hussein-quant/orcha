@@ -74,19 +74,16 @@ def _prereview_requests(db, tid):
 
 
 async def test_migration_columns_and_defaults(db, container):
-    cols = {r["column_name"]: r for r in db.execute(
-        """SELECT table_name||'.'||column_name AS column_name, column_default, is_nullable
-             FROM information_schema.columns
-            WHERE (table_name='containers' AND column_name IN ('review_route','ai_manager_prereview'))
-               OR (table_name='tasks' AND column_name IN ('review_routing','manager_review'))""")}
-    assert set(cols) == {"containers.review_route", "containers.ai_manager_prereview",
+    cols = {f"{t}.{c['column_name']}" for t in ("containers", "tasks") for c in db.columns(t)}
+    assert cols >= {"containers.review_route", "containers.ai_manager_prereview",
                          "tasks.review_routing", "tasks.manager_review"}
     c = db.execute("SELECT review_route, ai_manager_prereview FROM containers WHERE id=%s",
                    (container["id"],))[0]
     assert c["review_route"] == "manager_chain" and c["ai_manager_prereview"] is True
     sql = (pathlib.Path(__file__).resolve().parents[1] / "orcha-cli" / "orcha_cli" / "templates"
            / "migrations" / "057_manager_review_handoff.sql").read_text()
-    db.execute(sql)  # additive + idempotent
+    if db.backend == "postgres":  # the SQLite leg starts from its 001 baseline, not mig files
+        db.execute(sql)  # additive + idempotent
 
 
 # ---- AI → human manager -----------------------------------------------------------------

@@ -222,6 +222,43 @@ class Db:
         """A bound timestamp `seconds` in the future: replaces `now() + make_interval(...)`."""
         return _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(seconds=seconds)
 
+    def columns(self, table):
+        """`table`'s columns as information_schema-shaped dict rows (column_name, data_type,
+        is_nullable, column_default) on either backend: PRAGMA table_info on SQLite, whose
+        declared types (BOOLEAN, UUID, ...) lower-case to the Postgres names; boolean
+        defaults 0/1 read back as 'false'/'true' like Postgres prints them."""
+        if BACKEND == "postgres":
+            return self.execute(
+                "SELECT column_name, data_type, is_nullable, column_default"
+                " FROM information_schema.columns WHERE table_name=%s ORDER BY ordinal_position",
+                (table,),
+            )
+        out = []
+        for r in self.execute(f"PRAGMA table_info({table})"):
+            dtype = (r["type"] or "").lower()
+            default = r["dflt_value"]
+            if dtype == "boolean" and default in ("0", "1"):
+                default = "true" if default == "1" else "false"
+            out.append({"column_name": r["name"], "data_type": dtype,
+                        "is_nullable": "NO" if r["notnull"] or r["pk"] else "YES",
+                        "column_default": default})
+        return out
+
+    def column(self, table, column):
+        """One column's info row from `columns()`, or None when the column is absent."""
+        return next((c for c in self.columns(table) if c["column_name"] == column), None)
+
+    @staticmethod
+    def check_violation():
+        """The exception a CHECK-constraint breach raises on this backend."""
+        if BACKEND == "postgres":
+            import psycopg
+
+            return psycopg.errors.CheckViolation
+        import sqlite3
+
+        return sqlite3.IntegrityError
+
     def event_rows(self, event_key):
         """All agent_events rows for a delivery key, in insertion order."""
         return self.execute(

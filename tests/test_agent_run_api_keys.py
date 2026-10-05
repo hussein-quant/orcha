@@ -16,6 +16,7 @@ import pathlib
 import sys
 
 import pytest
+from conftest import BACKEND
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "orcha-cli"))
 from orcha_cli import notifier, notifier_agent_keys, notifier_headless, sandbox, secret_box  # noqa: E402
@@ -45,16 +46,14 @@ def _by_provider(payload):
 # =============================================================================================
 
 def test_migration_adds_use_for_agents_default_false(db):
-    cols = db.execute(
-        "SELECT data_type, is_nullable, column_default FROM information_schema.columns "
-        "WHERE table_name='container_provider_keys' AND column_name='use_for_agents'"
-    )
-    assert cols, "migration 071 must add container_provider_keys.use_for_agents"
-    assert cols[0]["data_type"] == "boolean"
-    assert cols[0]["is_nullable"] == "NO"
-    assert cols[0]["column_default"] == "false"
+    col = db.column("container_provider_keys", "use_for_agents")
+    assert col, "migration 071 must add container_provider_keys.use_for_agents"
+    assert col["data_type"] == "boolean"
+    assert col["is_nullable"] == "NO"
+    assert col["column_default"] == "false"
 
 
+@pytest.mark.skipif(BACKEND != "postgres", reason="re-applies a Postgres migration file; the SQLite leg starts from its 001 baseline")
 def test_migration_is_idempotent(db):
     sql = (pathlib.Path(__file__).resolve().parent.parent / "orcha-cli" / "orcha_cli" / "templates"
            / "migrations" / "071_provider_key_agent_use.sql").read_text()

@@ -1,14 +1,14 @@
 """GH #258 PR 6 (plan R-D1): GET /api/admin/migrations, the read-only input to the native
 `orcha upgrade` DB-tip guard."""
-import psycopg
 import pytest
 
 import main
+from portal_backend import database
 
 
-def _sql(q, params=None):
-    with psycopg.connect(main.DB, autocommit=True) as c:
-        c.execute(q, params)
+def _sql(q, params=()):
+    with database.db_cursor() as (_c, cur):
+        cur.execute(q, params)
 
 
 @pytest.fixture(autouse=True)
@@ -27,8 +27,7 @@ async def test_never_migrated_database_reports_empty(client):
 
 @pytest.mark.asyncio
 async def test_lists_recorded_versions_and_tip(client):
-    _sql("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, "
-         "applied_at TIMESTAMPTZ NOT NULL DEFAULT now())")
+    _sql("CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ)")
     for v in ("071_provider_key_agent_use.sql", "001_init.sql", "009_x.sql"):
         _sql("INSERT INTO schema_migrations(version) VALUES (%s)", (v,))
     r = await client.get("/api/admin/migrations")

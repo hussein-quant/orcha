@@ -307,8 +307,7 @@ async def test_test_route_requires_human(client, container, make_agent):
 # ---- migration 020 shape + install copy ----
 
 def test_migration_020_added_columns(db):
-    cols = {row["column_name"] for row in db.execute(
-        "SELECT column_name FROM information_schema.columns WHERE table_name='containers'")}
+    cols = {row["column_name"] for row in db.columns("containers")}
     assert {"llm_api_key_enc", "llm_api_key_hint", "llm_api_key_set_at"} <= cols
 
 

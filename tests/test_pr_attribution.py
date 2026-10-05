@@ -56,11 +56,8 @@ def test_migration_042_exists_and_is_next_sequential():
 
 
 def test_agents_git_email_column_applied(db):
-    rows = db.execute(
-        "SELECT column_name FROM information_schema.columns "
-        "WHERE table_name='agents' AND column_name IN ('git_email','github_login')"
-    )
-    assert {r["column_name"] for r in rows} == {"git_email", "github_login"}
+    names = {r["column_name"] for r in db.columns("agents")}
+    assert {"git_email", "github_login"} <= names
 
 
 # ---------- register-human captures the handle ----------

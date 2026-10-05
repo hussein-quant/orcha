@@ -61,11 +61,8 @@ def _detail(db, rid):
 
 
 async def test_migration_adds_nullable_column_default_null(db, make_agent, no_trust_proxy):
-    col = db.execute(
-        """SELECT is_nullable, data_type FROM information_schema.columns
-            WHERE table_name='agents' AND column_name='reports_to_agent_id'"""
-    )
-    assert col and col[0]["is_nullable"] == "YES" and col[0]["data_type"] == "uuid"
+    col = db.column("agents", "reports_to_agent_id")
+    assert col and col["is_nullable"] == "YES" and col["data_type"] == "uuid"
     a = await make_agent("dev")
     assert db.execute("SELECT reports_to_agent_id FROM agents WHERE id=%s", (a["agent_id"],))[0][
         "reports_to_agent_id"
@@ -76,11 +73,15 @@ async def test_migration_adds_nullable_column_default_null(db, make_agent, no_tr
            / "migrations" / "052_agent_reports_to.sql").read_text()
     boss = await make_agent("boss", kind="human")
     _set(db, a["agent_id"], boss["agent_id"])
-    db.execute(sql)
+    if db.backend == "postgres":  # the SQLite leg starts from its 001 baseline, not mig files
+        db.execute(sql)
     assert str(db.execute("SELECT reports_to_agent_id FROM agents WHERE id=%s", (a["agent_id"],))[0][
         "reports_to_agent_id"
     ]) == boss["agent_id"]
-    assert db.execute("SELECT 1 FROM pg_indexes WHERE indexname='agents_reports_to_idx'")
+    if db.backend == "postgres":
+        assert db.execute("SELECT 1 FROM pg_indexes WHERE indexname='agents_reports_to_idx'")
+    else:
+        assert db.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='agents_reports_to_idx'")
 
 
 # ---- API: set / read / clear -------------------------------------------------------------

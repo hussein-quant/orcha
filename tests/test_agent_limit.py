@@ -62,10 +62,7 @@ def test_migration_only_changes_the_default():
 async def test_new_project_defaults_to_12(client, container, no_trust_proxy, db):
     row = db.execute("SELECT max_auto_agents FROM containers WHERE id=%s", (container["id"],))[0]
     assert row["max_auto_agents"] == 12
-    col = db.execute(
-        "SELECT column_default FROM information_schema.columns "
-        "WHERE table_name='containers' AND column_name='max_auto_agents'"
-    )[0]
+    col = db.column("containers", "max_auto_agents")
     assert col["column_default"] == "12"
 
 
