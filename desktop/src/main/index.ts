@@ -1198,7 +1198,7 @@ app.whenReady().then(() => {
             return null
           }
         }
-      })
+      }, stack.runtime)
     })
   )
 
