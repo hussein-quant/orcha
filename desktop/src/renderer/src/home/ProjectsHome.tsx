@@ -25,6 +25,8 @@ export interface ProjectsHomeProps {
   dockerDown: boolean
   /** Docker's CLI timed out rather than refused: "isn't responding", not "isn't running". */
   dockerUnresponsive?: boolean
+  /** GH #258: Docker is down but native projects are listed; Docker ones are hidden. */
+  dockerHidden?: boolean
   busy: Record<string, boolean>
   errors: Record<string, StackActionError | null | undefined>
   onCreate(): void
@@ -321,6 +323,11 @@ export default function ProjectsHome(props: ProjectsHomeProps) {
           <div className="pt-3">
             <DockerDownBanner onRetry={props.onRefresh} onStartDocker={props.onStartDocker} unresponsive={props.dockerUnresponsive} />
           </div>
+        )}
+        {!dockerDown && loaded && props.dockerHidden && (
+          <p className="pt-3 text-[12px] text-text-3" data-testid="docker-hidden-note">
+            Docker isn’t running, so any Docker projects are hidden.
+          </p>
         )}
         {!dockerDown && loaded && <HelperMissingBanner />}
       </div>

@@ -275,6 +275,13 @@ describe('ProjectsHome (Linear table in the inset panel)', () => {
     expect(screen.queryByText(/isn’t running/i)).toBeNull()
   })
 
+  it('GH #258: Docker down with native projects listed = a small note, not the blocking notice', () => {
+    render(<ProjectsHome {...props({ dockerHidden: true })} />)
+    expect(screen.getByTestId('docker-hidden-note')).toHaveTextContent('any Docker projects are hidden')
+    expect(screen.queryByText('Docker isn’t running.')).toBeNull()
+    expect(screen.queryByRole('button', { name: /open docker/i })).toBeNull()
+  })
+
   it('loading shows a skeleton, empty shows a calm empty state', () => {
     const { rerender } = render(<ProjectsHome {...props({ loaded: false })} />)
     expect(screen.getByLabelText('Loading projects')).toBeInTheDocument()

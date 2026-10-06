@@ -1,4 +1,4 @@
-import type { Stack } from '../shared/types'
+import type { Stack, StackDiscovery } from '../shared/types'
 import { dockerExecWithTimeout, type Exec, type ExecResult } from './dockerExec'
 import { listNativeStacks, readKnownFolders, rememberNativeFolder } from './nativeStacks'
 
@@ -101,14 +101,9 @@ export async function listDockerStacks(exec: Exec = defaultExec): Promise<Stack[
  *  file reads and are fresh on every call. */
 export const DOCKER_CACHE_MS = 15_000
 
-export interface Discovery {
-  stacks: Stack[]
-  /** False when `docker` is missing or its daemon is down — Docker projects (if any) are
-   *  hidden, which the home screen shows as a small note instead of a blocking banner. */
-  dockerAvailable: boolean
-  /** The docker CLI hung past the probe timeout (vs. not installed / daemon stopped). */
-  dockerUnresponsive?: boolean
-}
+/** `dockerAvailable: false` = `docker` is missing or its daemon is down — Docker projects (if
+ *  any) are hidden, which the home screen shows as a small note instead of a blocking banner. */
+export type Discovery = StackDiscovery
 
 export interface DiscoveryDeps {
   exec?: Exec

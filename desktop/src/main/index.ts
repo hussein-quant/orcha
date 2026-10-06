@@ -8,7 +8,7 @@ import { accessSync, chmodSync, constants as fsConstants, cpSync, existsSync, mk
 import { randomBytes } from 'node:crypto'
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import { parseDeepLink } from './deepLink'
-import { configureNativeDiscovery, listStacks } from './discovery'
+import { configureNativeDiscovery, discoverStacks, listStacks } from './discovery'
 import { startStack, stopStack } from './lifecycle'
 import { fetchStackAttention } from './attention'
 import { AttentionPoller } from './attentionPoller'
@@ -1189,6 +1189,7 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', () => keepManagerOnScreen())
 
   ipcMain.handle('orcha:listStacks', () => asResult(() => listStacks()))
+  ipcMain.handle('orcha:listStacksDetailed', () => asResult(() => discoverStacks()))
 
   ipcMain.handle('orcha:startStack', (_event, project: string) =>
     asResult(async () => {

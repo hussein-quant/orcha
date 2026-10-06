@@ -696,6 +696,7 @@ function AppShell() {
       loaded={host.loaded}
       dockerDown={host.dockerDown}
       dockerUnresponsive={host.dockerUnresponsive}
+      dockerHidden={host.dockerHidden}
       busy={busy}
       errors={legacy ? surfaces.dialogFree : surfaces.table}
       onCreate={startAddProject}

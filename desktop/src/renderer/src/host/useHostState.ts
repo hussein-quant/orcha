@@ -22,6 +22,8 @@ export interface HostState {
   dockerDown: boolean
   /** Docker's CLI timed out (wedged) rather than refused — only meaningful with dockerDown. */
   dockerUnresponsive: boolean
+  /** GH #258: Docker is down but native projects are listed — Docker ones are hidden. */
+  dockerHidden: boolean
   stacks: Stack[]
   cards: ProjectCardData[]
   attention: AttentionSnapshot | null
@@ -39,6 +41,7 @@ export function useHostState(): HostState {
   const [loaded, setLoaded] = useState(false)
   const [dockerDown, setDockerDown] = useState(false)
   const [dockerUnresponsive, setDockerUnresponsive] = useState(false)
+  const [dockerHidden, setDockerHidden] = useState(false)
   const [stacks, setStacks] = useState<Stack[]>([])
   const [cards, setCards] = useState<ProjectCardData[]>([])
   const [attention, setAttention] = useState<AttentionSnapshot | null>(null)
@@ -51,7 +54,19 @@ export function useHostState(): HostState {
     const mine = ++seq.current
     const api = window.orchaDesktop
     try {
-      const s = await api.listStacks()
+      let s: Stack[]
+      let hidden = false
+      if (api.listStacksDetailed) {
+        const d = await api.listStacksDetailed()
+        // A Docker-only machine with Docker down keeps the "Docker isn't running" banner.
+        if (!d.dockerAvailable && d.stacks.length === 0) {
+          throw { code: 'DOCKER_UNAVAILABLE', unresponsive: d.dockerUnresponsive === true }
+        }
+        s = d.stacks
+        hidden = !d.dockerAvailable
+      } else {
+        s = await api.listStacks()
+      }
       const [c, a] = await Promise.all([
         loadProjectCards(s, api.portalGet),
         api.listAttentionStatus ? api.listAttentionStatus().catch(() => null) : Promise.resolve(null)
@@ -62,6 +77,7 @@ export function useHostState(): HostState {
       setAttention(a)
       setDockerDown(false)
       setDockerUnresponsive(false)
+      setDockerHidden(hidden)
     } catch (err) {
       if (mine !== seq.current) return
       setStacks([])
@@ -126,5 +142,5 @@ export function useHostState(): HostState {
     })
   }, [])
 
-  return { loaded, dockerDown, dockerUnresponsive, stacks, cards, attention, activeProject, embed, portal, refresh }
+  return { loaded, dockerDown, dockerUnresponsive, dockerHidden, stacks, cards, attention, activeProject, embed, portal, refresh }
 }

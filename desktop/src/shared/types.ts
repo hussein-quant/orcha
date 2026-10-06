@@ -51,6 +51,14 @@ export interface Stack {
 }
 
 export type StackRuntime = 'native' | 'docker'
+
+/** `orcha:listStacksDetailed` result (main/discovery.ts `discoverStacks`). */
+export interface StackDiscovery {
+  stacks: Stack[]
+  /** False when Docker is missing or down; any Docker projects are hidden from the list. */
+  dockerAvailable: boolean
+  dockerUnresponsive?: boolean
+}
 export type StackHealth = 'ok' | 'starting' | 'crashlooping' | 'stopped'
 
 // ---- Remove project / Storage -------------------------------------------------------------
@@ -431,6 +439,9 @@ export interface CloneAndProvisionOptions {
  *  Rejections are BridgeError objects (the preload re-throws ok:false results). */
 export interface OrchaDesktopApi {
   listStacks(): Promise<Stack[]>
+  /** GH #258: the same list plus whether Docker answered. Optional so an older main (or a
+   *  test mock) without it falls back to listStacks(). */
+  listStacksDetailed?(): Promise<StackDiscovery>
   startStack(project: string): Promise<void>
   stopStack(project: string): Promise<void>
   /** Switch the main window's embedded portal view to this stack (creating it on first

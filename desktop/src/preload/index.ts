@@ -92,6 +92,7 @@ import type {
   RemovePlan,
   RemoveResult,
   Stack,
+  StackDiscovery,
   StorageReport,
   ProjectWorktrees,
   AgentWorktreeCleanResult,
@@ -110,6 +111,7 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 
 const api: OrchaDesktopApi = {
   listStacks: () => invoke<Stack[]>('orcha:listStacks'),
+  listStacksDetailed: () => invoke<StackDiscovery>('orcha:listStacksDetailed'),
   startStack: (project) => invoke<void>('orcha:startStack', project),
   stopStack: (project) => invoke<void>('orcha:stopStack', project),
   portalShow: (project, path) => invoke<void>('orcha:portalShow', project, path),
