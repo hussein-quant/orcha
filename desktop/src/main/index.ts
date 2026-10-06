@@ -27,7 +27,9 @@ import { preflight } from './preflight'
 import { inspectFolder } from './folderModes'
 import { provision, type EngineDeps } from './initEngine'
 import { ensureOrchaLink, nodeOrchaLinkDeps } from './orchaLink'
-import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv, streamOrcha, orchaBin } from './hostWorker'
+import { fileVersionStore, restartNativeAfterUpdate } from './appUpdate'
+import { readRegistry } from './nativeStacks'
+import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv, streamOrcha, orchaBin, runOrcha } from './hostWorker'
 import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } from './analyzeProject'
 import { resetStack } from './resetEngine'
 import { planRemoval, removeProject, type RemoveDeps } from './removeEngine'
@@ -1095,6 +1097,18 @@ app.whenReady().then(() => {
     if (res === 'created' || res === 'refreshed') console.log(`[orcha-desktop] ~/.local/bin/orcha ${res}`)
   } catch (err) {
     console.warn('[orcha-desktop] could not link ~/.local/bin/orcha:', err)
+  }
+  // GH #258 D3: first launch of a new app version → running native projects restart on the
+  // new bundled runtime (`orcha upgrade`). Packaged only; in the background, never blocking.
+  if (app.isPackaged) {
+    void restartNativeAfterUpdate(app.getVersion(), {
+      ...fileVersionStore(app.getPath('userData')),
+      registry: () => readRegistry(),
+      upgrade: (folder) => runOrcha(folder, ['upgrade']),
+      warn: (msg) => console.warn(`[orcha-desktop] ${msg}`)
+    }).then((done) => {
+      if (done.length) console.log(`[orcha-desktop] restarted ${done.length} project(s) on the new runtime`)
+    })
   }
   // Appearance first: every window below is created with the right canvas.
   const userDataDir = app.getPath('userData')
