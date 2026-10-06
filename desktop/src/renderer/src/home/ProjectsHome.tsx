@@ -8,6 +8,7 @@ import { IconPicker } from '../icons/IconPicker'
 import { iconEditability, projectIconKey, type ProjectIcon as ProjectIconValue } from '../host/projectIcons'
 import { cn } from '../ui/cn'
 import DockerDownBanner from '../components/DockerDownBanner'
+import MigrateOffDockerCard from './MigrateOffDockerCard'
 import HelperMissingBanner from '../components/HelperMissingBanner'
 import ConfirmResetModal from '../components/ConfirmResetModal'
 import ErrorNotice from '../components/ErrorNotice'
@@ -330,6 +331,12 @@ export default function ProjectsHome(props: ProjectsHomeProps) {
           </p>
         )}
         {!dockerDown && loaded && <HelperMissingBanner />}
+        {!dockerDown && loaded && (
+          <MigrateOffDockerCard
+            stacks={rows.filter((r, i, a) => a.findIndex((o) => o.stack.project === r.stack.project) === i).map((r) => r.stack)}
+            onDone={props.onRefresh}
+          />
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pb-6">
