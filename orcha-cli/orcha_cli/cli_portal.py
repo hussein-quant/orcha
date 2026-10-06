@@ -82,6 +82,9 @@ def build_portal_env(project_root: pathlib.Path, cfg: dict, base_env=None) -> di
         )
     if cfg.get("runtime") == NATIVE:  # the SQLite file, read by database.py after PR 7b
         env.setdefault("ORCHA_DB_PATH", str(db_path(project_root, cfg)))
+        # ...with the SQLite migrations (baseline + later files). The Postgres dir set below
+        # would make a fresh native portal halt on 001_init.sql's CREATE EXTENSION.
+        env.setdefault("MIGRATIONS_DIR", str(templates_dir() / "migrations" / "sqlite"))
     env.setdefault("MIGRATIONS_DIR", str(templates_dir() / "migrations"))
     env.setdefault("ORCHA_TERMINAL_WS_URL", f"ws://127.0.0.1:{cfg['bridge_port']}")
     # These replace the compose bind mounts, so a stray value in .env must not win.

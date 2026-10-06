@@ -134,38 +134,38 @@ def _yn(flag) -> str:
 
 def render(report: dict) -> str:
     lines = [f"Orcha doctor — {report['project_dir']}",
-             f"  orcha:     {report['cli_version']} (python {report['python_version']}, {report['os']})",
-             f"  runtime:   {report['runtime'] or 'no project here'}"]
+             f"  orcha:       {report['cli_version']} (python {report['python_version']}, {report['os']})",
+             f"  runtime:     {report['runtime'] or 'no project here'}"]
     for name, info in (report.get("ports") or {}).items():
         extra = f", answers {_yn(info['answers'])}" if "answers" in info else ""
-        lines.append(f"  {name + ' port:':<11}{info['port'] or '-'} (listening {_yn(info['listening'])}{extra})")
+        lines.append(f"  {name + ' port:':<13}{info['port'] or '-'} (listening {_yn(info['listening'])}{extra})")
     svc = report.get("service")
     if svc is not None:
         if not svc["supported"]:
-            lines.append("  service:   not available on this OS")
+            lines.append("  service:     not available on this OS")
         elif not svc["installed"]:
-            lines.append("  service:   not installed")
+            lines.append("  service:     not installed")
         else:
             pid = f", pid {svc['pid']}" if svc.get("pid") else ""
-            lines.append(f"  service:   {svc.get('state') or ('not loaded' if not svc['loaded'] else '?')}{pid} ({svc['label']})")
+            lines.append(f"  service:     {svc.get('state') or ('not loaded' if not svc['loaded'] else '?')}{pid} ({svc['label']})")
     if report.get("serve") is not None:
-        lines.append(f"  serve:     {'pid ' + str(report['serve']['pid']) if report['serve']['pid'] else 'stopped'}")
+        lines.append(f"  serve:       {'pid ' + str(report['serve']['pid']) if report['serve']['pid'] else 'stopped'}")
         for child, info in report["serve"]["children"].items():
             lines.append(f"    {child:<9}{info.get('status', '?')} (restarts {info.get('restarts', 0)})")
     if report.get("database"):
         db = report["database"]
         size = f"{db['size_bytes'] / 2**20:.1f} MB" if db["exists"] else "missing"
-        lines.append(f"  database:  {db['path']} ({size})")
+        lines.append(f"  database:    {db['path']} ({size})")
     lines.append(f"  tools (PATH from {report['path_source']}):")
     for tool, where in report["tools"].items():
         lines.append(f"    {tool:<9}{where or 'NOT FOUND'}")
-    lines.append(f"  sqlite:    {report['sqlite']['version']}{'' if report['sqlite']['ok'] else ' (too old)'}")
-    lines.append(f"  disk free: {report['disk']['free_bytes'] / 2**30:.1f} GB")
+    lines.append(f"  sqlite:      {report['sqlite']['version']}{'' if report['sqlite']['ok'] else ' (too old)'}")
+    lines.append(f"  disk free:   {report['disk']['free_bytes'] / 2**30:.1f} GB")
     for name, tail in (report.get("logs") or {}).items():
         lines.append(f"  --- {name}.log (last {len(tail)} lines) ---")
         lines.extend(f"    {line}" for line in tail)
     if report.get("logs_hint"):
-        lines.append(f"  logs:      {report['logs_hint']}")
+        lines.append(f"  logs:        {report['logs_hint']}")
     if report["problems"]:
         lines.append("Problems:")
         lines.extend(f"  - {p}" for p in report["problems"])

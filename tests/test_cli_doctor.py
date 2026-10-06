@@ -136,7 +136,8 @@ def test_cmd_doctor_json_and_text(native, capsys):
     cli_doctor.cmd_doctor(types.SimpleNamespace(project_dir=str(native.root), json=False))
     text = capsys.readouterr().out
     assert text.startswith("Orcha doctor") and "No problems found." in text
-    assert "api port:  8123 (listening yes, answers yes)" in text
+    assert "api port:    8123 (listening yes, answers yes)" in text
+    assert "bridge port: 8770 (listening yes)" in text
 
 
 def test_doctor_never_writes(native):

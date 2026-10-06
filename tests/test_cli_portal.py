@@ -55,6 +55,20 @@ def test_env_has_every_native_key_with_host_paths(tmp_path):
     assert "ORCHA_WAKES_DIR" not in env   # set by compose, read by nobody
 
 
+def test_native_project_gets_the_sqlite_migrations(tmp_path):
+    """A native portal runs on SQLite, so it must apply migrations/sqlite (the baseline),
+    never the Postgres files (001_init.sql halts SQLite on CREATE EXTENSION)."""
+    cfg = {"project_name": "demo", "api_port": 8123, "bridge_port": 8799, "runtime": "native",
+           "db_path": ".orcha/orcha.db"}
+    root = _project(tmp_path, cfg)
+    env = cli_portal.build_portal_env(root, cfg, base_env={})
+    migrations = pathlib.Path(env["MIGRATIONS_DIR"])
+    assert (migrations / "001_baseline.sql").is_file()
+    assert not (migrations / "001_init.sql").exists()
+    assert env["ORCHA_DB_PATH"] == str(root / ".orcha" / "orcha.db")
+    assert "DATABASE_URL" not in env
+
+
 def test_precedence_shell_over_env_file_over_derived(tmp_path):
     root = _project(
         tmp_path,
