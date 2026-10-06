@@ -14,6 +14,7 @@ from .cli_env import _append_env_file, _read_env_file_value, _tighten_env_file
 from .cli_hook_facade import *
 from .cli_http import _get_json, _post_json, _put_json, _wait_for_portal
 from .cli_logs import cmd_logs
+from .cli_migrate_runtime import cmd_migrate_runtime
 from .cli_portal import cmd_portal
 from .cli_serve import cmd_serve
 from .cli_worktrees import cmd_worktrees
@@ -69,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
         "up": cmd_up,
         "down": cmd_down,
         "migrate": cmd_migrate,
+        "migrate-runtime": cmd_migrate_runtime,
         "upgrade": cmd_upgrade,
         "update": cmd_update,
         "status": cmd_status,

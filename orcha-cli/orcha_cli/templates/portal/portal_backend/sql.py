@@ -83,6 +83,13 @@ def ts_neg_infinity() -> str:
     return "'-infinity'::timestamptz" if _pg() else "'0001-01-01T00:00:00.000000+00:00'"
 
 
+def now_text_default() -> str:
+    """A column DEFAULT giving the current instant as canonical text (sql.ts() shape). SQLite
+    only: Postgres columns use DEFAULT now(). Same expression as the SQLite baseline's
+    TIMESTAMPTZ defaults."""
+    return "(strftime('%Y-%m-%dT%H:%M:%f','now') || '000+00:00')"
+
+
 def age_secs(col: str) -> str:
     """Seconds elapsed since the timestamp expression `col` (NULL when `col` is NULL)."""
     if _pg():

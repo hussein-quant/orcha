@@ -122,6 +122,29 @@ def register_project_commands(
     )
     migrate.set_defaults(func=handlers["migrate"])
 
+    mig_rt = sub.add_parser(
+        "migrate-runtime",
+        help="move this Docker/Postgres project to the native runtime (SQLite, no Docker); "
+        "the Docker copy is kept until --purge-docker",
+    )
+    mig_rt.add_argument("--pg-url", default=None,
+                        help="source Postgres URL (default: localhost:<db_port> from orcha.json)")
+    mig_rt.add_argument("--keep-docker-running", action="store_true",
+                        help="leave the Docker database container running after the copy")
+    mig_rt.add_argument("--no-service", action="store_true",
+                        help="do not install the background service")
+    mig_rt.add_argument("--rollback", action="store_true",
+                        help="go back to the Docker stack (the SQLite file is renamed, not deleted)")
+    mig_rt.add_argument("--purge-docker", action="store_true",
+                        help="delete the old Docker containers, image and Postgres volume "
+                        "(asks first; only once the native portal answers)")
+    mig_rt.add_argument("--yes", action="store_true", help="answer yes to --purge-docker's question")
+    mig_rt.add_argument("--json", action="store_true",
+                        help="machine-readable output: one JSON object per line")
+    mig_rt.add_argument("--project-dir", default=None,
+                        help="project root (default: the current directory)")
+    mig_rt.set_defaults(func=handlers["migrate-runtime"])
+
     upgrade = sub.add_parser(
         "upgrade",
         help="upgrade an existing project to the installed CLI's templates (re-render compose, "

@@ -186,3 +186,6 @@ def update_command(
         "[orcha] ✓ update complete — portal rebuilt, hooks current, "
         "daemon + bridge restarted."
     )
+    from orcha_cli.cli_migrate_runtime import docker_nudge
+
+    print(docker_nudge())

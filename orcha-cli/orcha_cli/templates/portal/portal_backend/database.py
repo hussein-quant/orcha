@@ -497,9 +497,8 @@ def _sqlite_run_migrations(mdir: pathlib.Path) -> list[str]:
             # names without applied_at, and without this DEFAULT the NOT NULL makes SQLite
             # skip those rows silently (history = 001_baseline only, migration tip 1).
             raw.execute(
-                "CREATE TABLE IF NOT EXISTS schema_migrations "
-                "(version TEXT PRIMARY KEY NOT NULL, applied_at TIMESTAMPTZ NOT NULL "
-                "DEFAULT (strftime('%Y-%m-%dT%H:%M:%f','now') || '000+00:00'))"
+                "CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY "
+                f"NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT {sql.now_text_default()})"
             )
             done = {r["version"] for r in raw.execute("SELECT version FROM schema_migrations")}
             for migration in files:

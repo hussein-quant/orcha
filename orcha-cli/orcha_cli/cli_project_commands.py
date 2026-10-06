@@ -6,7 +6,7 @@ import json
 import pathlib
 import sys
 
-from orcha_cli import cli_native_lifecycle, cli_runtime_mode
+from orcha_cli import cli_migrate_runtime, cli_native_lifecycle, cli_runtime_mode
 
 
 def cmd_up(args: argparse.Namespace, services) -> None:
@@ -27,6 +27,7 @@ def cmd_up(args: argparse.Namespace, services) -> None:
     if runtime == cli_runtime_mode.NATIVE:  # serve owns the notifier + bridge children
         return cli_native_lifecycle.up(pathlib.Path.cwd())
     services._compose(orcha_dir, "up", "-d")
+    print(cli_migrate_runtime.docker_nudge())
     # #298: backfill the project-preferences file if a pre-#298 project is missing it.
     prefs_path = services._install_project_preferences(pathlib.Path.cwd())
     if prefs_path:
