@@ -49,7 +49,11 @@ exec "$HERE/bin/python3" -m orcha_cli "$@"
 // dylibs, which would only add Mach-O files to sign.
 const STDLIB_STRIP = ['test', 'tkinter', 'idlelib', 'ensurepip', 'turtledemo', 'turtle.py']
 // Console scripts for the stripped modules.
-const BIN_STRIP = ['idle3', `idle${PYTHON_VERSION}`]
+const BIN_STRIP = ['idle3', `idle${PYTHON_VERSION}`, 'pip', 'pip3', `pip${PYTHON_VERSION}`]
+// pip (~12 MB) only installs the CLI at build time; nothing in the app runs it, and the
+// bundled `orcha update` defers to an app update. psycopg_binary stays: `orcha
+// migrate-runtime` (Move this project off Docker) reads the old Postgres with it.
+const SITE_STRIP = /^pip(-.*\.dist-info)?$/
 
 function parseArgs(argv) {
   const args = { arch: 'arm64', dryRun: false, clean: false }
@@ -153,6 +157,10 @@ async function build(plan) {
     const binDir = path.join(root, 'bin')
     removeBuildPathScripts(binDir, staging)
     for (const name of BIN_STRIP) await rm(path.join(binDir, name), { force: true })
+    const site = path.join(stdlib, 'site-packages')
+    for (const name of readdirSync(site)) {
+      if (SITE_STRIP.test(name)) await rm(path.join(site, name), { recursive: true, force: true })
+    }
     const launcher = path.join(binDir, 'orcha')
     await writeFile(launcher, plan.launcher)
     await chmod(launcher, 0o755)
