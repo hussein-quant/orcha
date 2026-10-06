@@ -22,6 +22,7 @@ import pathlib
 import sqlite3
 import sys
 import tempfile
+import time
 
 import pytest
 import pytest_asyncio
@@ -137,8 +138,19 @@ def _clean_db():
     if BACKEND == "postgres":
         import psycopg
 
-        with psycopg.connect(TEST_URL, autocommit=True) as conn:
-            conn.execute("TRUNCATE " + ", ".join(APP_TABLES) + " RESTART IDENTITY CASCADE")
+        # A background thread left over from the previous test, still finishing a
+        # read, can hold a share lock on one table while
+        # TRUNCATE holds another; Postgres then picks the TRUNCATE as the deadlock
+        # victim. The other side finishes on its own, so retry rather than error.
+        for attempt in range(5):
+            try:
+                with psycopg.connect(TEST_URL, autocommit=True) as conn:
+                    conn.execute("TRUNCATE " + ", ".join(APP_TABLES) + " RESTART IDENTITY CASCADE")
+                break
+            except psycopg.errors.DeadlockDetected:
+                if attempt == 4:
+                    raise
+                time.sleep(0.2)
     else:
         conn = sqlite3.connect(TEST_DB_PATH, isolation_level=None, timeout=10)
         try:

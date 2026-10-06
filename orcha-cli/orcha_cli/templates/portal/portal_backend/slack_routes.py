@@ -1090,65 +1090,64 @@ def _run_issue_only_pipeline(prepared: dict, bot_token: str) -> None:
     files = prepared["files"]
     files_seen = prepared["files_seen"]
     title, body = prepared["title"], prepared["body"]
+    member = prepared["member"]
 
-    # GH #258 S3 note 4: this path only reads (the issue and the image commits live on
-    # GitHub), so the scope takes no write lock across the Slack/GitHub calls below.
-    with db_cursor(readonly=True) as (conn, cur):
-        member = prepared["member"]
-
-        # Resolve the repo/token ONCE up front — reused both for issue creation and
-        # for committing any images (avoids re-resolving the same token twice).
+    # GH #258 S3 note 4: this path only reads Orcha's DB (the issue and the image
+    # commits live on GitHub), so a short read-only scope resolves the repo/token ONCE
+    # up front — reused for both the image commits and the issue — and closes before
+    # any Slack/GitHub call below.
+    with db_cursor(readonly=True) as (_conn, cur):
         cur.execute("SELECT github_repo FROM containers WHERE id=%s", (cid,))
         crow = cur.fetchone()
         repo = crow["github_repo"] if crow else None
         token = _hub._resolve_repo_token(repo, cid) if repo else None  # C01
 
-        images = _fetch_and_land_images(
-            cur, cid, repo, token, files, _issue_slug(title, None), bot_token,
-        )
-        body_with_images = _embed_images_markdown(body, images["landed"])
+    images = _fetch_and_land_images(
+        None, cid, repo, token, files, _issue_slug(title, None), bot_token,
+    )
+    body_with_images = _embed_images_markdown(body, images["landed"])
 
-        try:
-            issue = create_github_issue(cur, cid, title, body_with_images, member,
-                                        repo=repo, token=token)
-        except ValueError:
-            conn.rollback()
-            if slack_user_id:
-                _dm_or_ephemeral(
-                    bot_token, slack_user_id, blocks_github_permission_error(),
-                    "No GitHub repo (or installation token) is connected to this project.",
-                )
-            return
-        except GithubPermissionError:
-            conn.rollback()
-            if slack_user_id:
-                _dm_or_ephemeral(
-                    bot_token, slack_user_id, blocks_github_permission_error(),
-                    "The GitHub App needs the Issues write permission.",
-                )
-            return
-        except RuntimeError:
-            conn.rollback()
-            if slack_user_id:
-                _dm_or_ephemeral(
-                    bot_token, slack_user_id, blocks_github_unreachable_error(),
-                    "Couldn't reach GitHub — try again in a moment.",
-                )
-            return
-
-        shot_note = _screenshot_status_note(images["selected"], len(images["landed"]), files_seen)
-        if images["scope_missing"]:
-            shot_note = (shot_note + " · " if shot_note else "") + \
-                "some screenshots skipped — add the files:read scope and reinstall the App"
-
-        conn.commit()
+    try:
+        if not repo:
+            raise ValueError("no_repo")
+        if not token:
+            raise ValueError("no_token")
+        issue = create_github_issue(None, cid, title, body_with_images, member,
+                                    repo=repo, token=token)
+    except ValueError:
         if slack_user_id:
             _dm_or_ephemeral(
-                bot_token, slack_user_id,
-                blocks_issue_filed(issue["number"], issue["html_url"], issue["title"], None,
-                                   screenshot_note=shot_note or None),
-                f"Filed GitHub issue #{issue['number']}: {issue['title']}",
+                bot_token, slack_user_id, blocks_github_permission_error(),
+                "No GitHub repo (or installation token) is connected to this project.",
             )
+        return
+    except GithubPermissionError:
+        if slack_user_id:
+            _dm_or_ephemeral(
+                bot_token, slack_user_id, blocks_github_permission_error(),
+                "The GitHub App needs the Issues write permission.",
+            )
+        return
+    except RuntimeError:
+        if slack_user_id:
+            _dm_or_ephemeral(
+                bot_token, slack_user_id, blocks_github_unreachable_error(),
+                "Couldn't reach GitHub — try again in a moment.",
+            )
+        return
+
+    shot_note = _screenshot_status_note(images["selected"], len(images["landed"]), files_seen)
+    if images["scope_missing"]:
+        shot_note = (shot_note + " · " if shot_note else "") + \
+            "some screenshots skipped — add the files:read scope and reinstall the App"
+
+    if slack_user_id:
+        _dm_or_ephemeral(
+            bot_token, slack_user_id,
+            blocks_issue_filed(issue["number"], issue["html_url"], issue["title"], None,
+                               screenshot_note=shot_note or None),
+            f"Filed GitHub issue #{issue['number']}: {issue['title']}",
+        )
 
 
 def _run_task_first_pipeline(prepared: dict, bot_token: str) -> None:
