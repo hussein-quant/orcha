@@ -262,3 +262,25 @@ def test_failed_migration_leaves_schema_migrations_untouched(fresh_db):
         raw.close()
     assert versions == ["001_ok.sql"]
     assert "ok_t" in tables and "half_t" not in tables  # the failed file left nothing behind
+
+
+def test_baseline_stamps_every_folded_postgres_migration(fresh_db):
+    """The baseline's own INSERT OR IGNORE names every Postgres file it folds in (so a fresh
+    SQLite DB and one converted from Postgres report the same history and migration tip).
+    The runner creates schema_migrations first; without the applied_at DEFAULT the NOT NULL
+    made SQLite skip those rows silently, leaving only 001_baseline (tip 1)."""
+    import pathlib
+
+    from orcha_cli import cli_project_setup
+
+    database.run_migrations()  # the shipped templates/migrations/sqlite
+    raw = sqlite3.connect(database.DB)
+    try:
+        rows = raw.execute("SELECT version, applied_at FROM schema_migrations").fetchall()
+    finally:
+        raw.close()
+    versions = {v for v, _ in rows}
+    pg_dir = pathlib.Path(database.__file__).resolve().parents[2] / "migrations"
+    assert versions == {p.name for p in pg_dir.glob("*.sql")} | {"001_baseline.sql"}
+    assert all(re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}\+00:00", a) for _, a in rows)
+    assert cli_project_setup.migration_tip_of(versions) == cli_project_setup.migration_tip(pg_dir)
