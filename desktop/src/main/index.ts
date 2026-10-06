@@ -184,17 +184,18 @@ function whichHostTool(cmd: string): Promise<string | null> {
   })
 }
 
+/** GH #258: projects run natively, so setup no longer looks for Homebrew or Docker (both
+ *  report false; the Setup step doesn't show them). Docker matters only to "Move this
+ *  project off Docker", which checks it itself. */
 async function probePrereqs(): Promise<PrereqProbe> {
-  const [brew, docker, orcha, claude, codex] = await Promise.all([
-    whichHostTool('brew'),
-    whichHostTool('docker'),
+  const [orcha, claude, codex] = await Promise.all([
     whichHostTool('orcha'),
     whichHostTool('claude'),
     whichHostTool('codex')
   ])
   return {
-    homebrew: !!brew,
-    dockerEngine: !!docker,
+    homebrew: false,
+    dockerEngine: false,
     orcha: !!orcha,
     claude: !!claude,
     codex: !!codex

@@ -340,7 +340,7 @@ export default function OnboardingWizard({
     issues.length > 0 && ['source', 'folder', 'github', 'details'].includes(phase) ? (
       <SetupCheckNotice
         issues={issues}
-        checking={background.checking && !background.slow}
+        checking={background.checking}
         onRecheck={background.check}
         onOpenSetup={() => openSetup(phase)}
       />

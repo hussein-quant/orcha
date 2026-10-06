@@ -450,9 +450,10 @@ describe('OnboardingWizard — walker: welcome / agents / finish / cancel', () =
     expect(screen.queryByText(/check your mac/i)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /get started/i })).not.toBeInTheDocument()
     // Let the silent background check settle — it must not surface anything when all is well.
-    await waitFor(() => expect(window.orchaDesktop.preflight).toHaveBeenCalled())
     await waitFor(() => expect(window.orchaDesktop.probePrereqs).toHaveBeenCalled())
     expect(screen.queryByTestId('setup-notice')).not.toBeInTheDocument()
+    // GH #258: Docker is no longer part of the setup check.
+    expect(window.orchaDesktop.preflight).not.toHaveBeenCalled()
   })
 
   it('add-project Cancel asks the right question, Keep going is the primary, Escape closes it', async () => {
@@ -587,20 +588,21 @@ describe('OnboardingWizard — variants: steps, indicator and Back', () => {
 })
 
 describe('OnboardingWizard — add-project background setup check', () => {
-  it('surfaces Docker not running on Source with the fix, and Check again clears it', async () => {
-    mock(window.orchaDesktop.preflight)
-      .mockResolvedValueOnce({ docker: 'daemon-down', autoStarted: false, hint: 'Open Docker Desktop, then re-check.' })
-      .mockResolvedValue({ docker: 'ok', autoStarted: false, hint: null })
+  it('surfaces a missing AI coding agent on Source with the fix, and Check again clears it', async () => {
+    const ok = await window.orchaDesktop.probePrereqs()
+    mock(window.orchaDesktop.probePrereqs)
+      .mockResolvedValueOnce({ homebrew: false, dockerEngine: false, orcha: true, claude: false, codex: false })
+      .mockResolvedValue(ok)
     const user = userEvent.setup()
     render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
     const notice = await screen.findByTestId('setup-notice')
-    expect(notice).toHaveTextContent(/docker isn.t running/i)
-    expect(notice).toHaveTextContent(/open docker desktop/i)
+    expect(notice).toHaveTextContent(/no ai coding agent found/i)
+    expect(notice).toHaveTextContent(/install claude code or codex/i)
     // Still on Source — nothing blocks choosing a source meanwhile.
     expect(screen.getByRole('button', { name: /local folder/i })).toBeEnabled()
     await user.click(within(notice).getByRole('button', { name: /check again/i }))
     await waitFor(() => expect(screen.queryByTestId('setup-notice')).not.toBeInTheDocument())
-    expect(window.orchaDesktop.preflight).toHaveBeenCalledTimes(2)
+    expect(window.orchaDesktop.probePrereqs).toHaveBeenCalledTimes(3)
   })
 
   it('names the missing helper as the "Embodent command-line helper", never "Orcha helper"', async () => {
@@ -618,14 +620,14 @@ describe('OnboardingWizard — add-project background setup check', () => {
   })
 
   it('Open setup routes to the Setup step with the reason; Back returns to Source', async () => {
-    mock(window.orchaDesktop.preflight).mockResolvedValue({ docker: 'not-installed', autoStarted: false, hint: null })
+    mock(window.orchaDesktop.probePrereqs).mockResolvedValue({ homebrew: false, dockerEngine: false, orcha: true, claude: false, codex: false })
     const user = userEvent.setup()
     render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
     const notice = await screen.findByTestId('setup-notice')
     await user.click(within(notice).getByRole('button', { name: /open setup/i }))
     expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
     expect(screen.getByText(/embodent needs something on this mac first/i)).toBeInTheDocument()
-    expect(screen.getByText(/docker isn.t installed\./i)).toBeInTheDocument()
+    expect(screen.getByText(/no ai coding agent found\./i)).toBeInTheDocument()
     // The detour is not one of Add a project's steps — no indicator there.
     expect(screen.queryByRole('list', { name: /step \d of/i })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /^back$/i }))
@@ -633,11 +635,7 @@ describe('OnboardingWizard — add-project background setup check', () => {
   })
 
   it('never starts a create the check knows will fail: routes to Setup with the reason instead', async () => {
-    mock(window.orchaDesktop.preflight).mockResolvedValue({
-      docker: 'daemon-down',
-      autoStarted: false,
-      hint: 'Open Docker Desktop, then re-check.'
-    })
+    mock(window.orchaDesktop.probePrereqs).mockResolvedValue({ homebrew: false, dockerEngine: false, orcha: true, claude: false, codex: false })
     const user = userEvent.setup()
     render(<OnboardingWizard onDone={vi.fn()} variant="add-project" onCancel={vi.fn()} />)
     await screen.findByTestId('setup-notice')
@@ -647,7 +645,7 @@ describe('OnboardingWizard — add-project background setup check', () => {
     await user.click(screen.getByRole('button', { name: /create project/i }))
     expect(window.orchaDesktop.provision).not.toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: /check your mac/i })).toBeInTheDocument()
-    expect(screen.getByText(/docker isn.t running\./i)).toBeInTheDocument()
+    expect(screen.getByText(/no ai coding agent found\./i)).toBeInTheDocument()
     // Back returns to Details with the name still filled in.
     await user.click(screen.getByRole('button', { name: /^back$/i }))
     expect(screen.getByLabelText(/project name/i)).toHaveValue('demo')
