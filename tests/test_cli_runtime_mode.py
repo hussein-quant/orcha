@@ -23,18 +23,13 @@ def _folder(tmp_path: pathlib.Path, cfg=None, compose=False) -> pathlib.Path:
     return tmp_path
 
 
-# (orcha.json, compose file present) -> (detect_runtime, is_project)
+# (orcha.json, compose file present) -> (detect_runtime, is_project). The cases live in a
+# fixture shared with the Mac app's folderModes.test.ts (GH #258 D2) so the two rules can't drift.
+_CASES = json.loads(
+    (pathlib.Path(__file__).parent / "fixtures" / "runtime_mode_cases.json").read_text())["cases"]
 TRUTH_TABLE = [
-    (None, False, rm.NATIVE, False),                                   # empty folder
-    (None, True, rm.DOCKER, True),                                     # compose, no orcha.json (pre-#258 gate)
-    ({"project_name": "demo"}, True, rm.DOCKER, True),                 # every pre-#258 stack
-    ({"project_name": "demo"}, False, rm.NATIVE, False),               # half-initialised: no key, no compose
-    ({"runtime": "docker"}, True, rm.DOCKER, True),
-    ({"runtime": "docker"}, False, rm.DOCKER, False),                  # says docker, compose deleted
-    ({"runtime": "native"}, False, rm.NATIVE, True),
-    ({"runtime": "native"}, True, rm.NATIVE, True),                    # explicit key outranks the file
-    ({"connected": True, "api_port": 8004}, False, rm.NATIVE, False),  # `orcha connect` client folder
-    ({"runtime": "native", "connected": True}, False, rm.NATIVE, False),
+    pytest.param(c["orcha_json"], c["compose"], c["runtime"], c["is_project"], id=c["name"])
+    for c in _CASES if c["runtime"] != "error"
 ]
 
 
@@ -43,6 +38,14 @@ def test_detect_runtime_and_is_project_truth_table(tmp_path, cfg, compose, runti
     root = _folder(tmp_path, cfg, compose)
     assert rm.detect_runtime(root) == runtime
     assert rm.is_project(root) is project
+
+
+@pytest.mark.parametrize("case", [c for c in _CASES if c["runtime"] == "error"], ids=lambda c: c["name"])
+def test_shared_error_cases_raise_and_are_not_projects(tmp_path, case):
+    root = _folder(tmp_path, case["orcha_json"], case["compose"])
+    with pytest.raises(ValueError):
+        rm.detect_runtime(root)
+    assert rm.is_project(root) is case["is_project"]
 
 
 def test_unknown_runtime_is_an_error_not_a_silent_default(tmp_path):
