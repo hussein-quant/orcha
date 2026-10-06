@@ -139,3 +139,18 @@ and let a human verify.
 of the slider; the `gh pr create` / `gh pr merge` rules are loosely-hardened agent behaviors keyed
 off `autonomy_level` (see `docs/orcha-project-preferences.md`). So "an agent cannot self-certify"
 holds at `plan`/`pr` — at `full` the human has explicitly delegated completion via the slider.
+
+## 8. Back up and restore a native project's database (GH #258 S7)
+
+A native project (no Docker) keeps everything in one SQLite file, `.orcha/orcha.db`.
+
+- `orcha backup` copies it to `.orcha/backups/orcha-<UTC time>.db` while Orcha keeps
+  running (SQLite `VACUUM INTO`: one consistent snapshot, integrity-checked) and keeps
+  the newest 10 (`--keep N`). `--out PATH` writes a single copy anywhere instead.
+- `orcha restore <file>` needs Orcha stopped (`orcha down`), checks the backup, keeps
+  the database it replaces as `.orcha/orcha.db.before-restore-<UTC time>`, then puts
+  the backup in place; `orcha up` starts Orcha on it.
+- Both take `--json` (one JSON object) for the desktop app.
+
+Docker projects keep using `pg_dump`/`pg_restore` until they move with
+`orcha migrate-runtime`.
