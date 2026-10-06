@@ -35,7 +35,13 @@ fi
 set -a; source "$ENV_FILE"; set +a
 
 # Sanity-check that the credential files actually exist before a long build.
-for var in CSC_LINK APPLE_API_KEY; do
+# CSC_LINK is optional: leave it (and CSC_KEY_PASSWORD) unset to sign with the
+# Developer ID identity already in the login keychain — electron-builder finds it
+# itself. On recent macOS its temporary-keychain import of a .p12 can fail with
+# "SecKeychainUnlock: The user name or passphrase you entered is not correct."
+required=(APPLE_API_KEY)
+[[ -n "${CSC_LINK:-}" ]] && required+=(CSC_LINK)
+for var in "${required[@]}"; do
   path="${!var:-}"
   if [[ -z "$path" || ! -f "$path" ]]; then
     echo "error: $var points to a missing file: '${path:-<unset>}'" >&2
