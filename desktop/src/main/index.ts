@@ -26,7 +26,7 @@ import { dockerPublishedPorts, pickFreePort } from './portPicker'
 import { preflight } from './preflight'
 import { inspectFolder } from './folderModes'
 import { provision, type EngineDeps } from './initEngine'
-import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv, streamOrcha } from './hostWorker'
+import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv, streamOrcha, orchaBin } from './hostWorker'
 import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } from './analyzeProject'
 import { resetStack } from './resetEngine'
 import { planRemoval, removeProject, type RemoveDeps } from './removeEngine'
@@ -188,8 +188,10 @@ function whichHostTool(cmd: string): Promise<string | null> {
  *  report false; the Setup step doesn't show them). Docker matters only to "Move this
  *  project off Docker", which checks it itself. */
 async function probePrereqs(): Promise<PrereqProbe> {
+  const bin = orchaBin()
   const [orcha, claude, codex] = await Promise.all([
-    whichHostTool('orcha'),
+    // bundled runtime or ~/.local/bin link (GH #258 D3) counts without a PATH lookup
+    bin === 'orcha' ? whichHostTool('orcha') : Promise.resolve(bin),
     whichHostTool('claude'),
     whichHostTool('codex')
   ])
@@ -1179,7 +1181,7 @@ app.whenReady().then(() => {
         rmFile: (p) => rmSync(p, { force: true }),
         execHost: (cmd, args, opts) =>
           new Promise((resolve, reject) => {
-            execFile(cmd, args, { cwd: opts.cwd, env: opts.env, encoding: 'utf8' }, (err, stdout, stderr) =>
+            execFile(cmd === 'orcha' ? orchaBin() : cmd, args, { cwd: opts.cwd, env: opts.env, encoding: 'utf8' }, (err, stdout, stderr) =>
               err ? reject(Object.assign(err, { stderr })) : resolve({ stdout })
             )
           }),
