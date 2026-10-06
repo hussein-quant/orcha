@@ -1080,7 +1080,9 @@ def _run_issue_only_pipeline(prepared: dict, bot_token: str) -> None:
     files_seen = prepared["files_seen"]
     title, body = prepared["title"], prepared["body"]
 
-    with db_cursor() as (conn, cur):
+    # GH #258 S3 note 4: this path only reads (the issue and the image commits live on
+    # GitHub), so the scope takes no write lock across the Slack/GitHub calls below.
+    with db_cursor(readonly=True) as (conn, cur):
         member = prepared["member"]
 
         # Resolve the repo/token ONCE up front — reused both for issue creation and
@@ -1159,12 +1161,14 @@ def _run_task_first_pipeline(prepared: dict, bot_token: str) -> None:
     files_seen = prepared["files_seen"]
     title, body = prepared["title"], prepared["body"]
 
+    # GH #258 S3 note 4: the Slack downloads run before the write scope opens.
+    fetch_result = {"images": [], "skipped": 0, "scope_missing": False}
+    if files:
+        fetch_result = fetch_selected_images(files, bot_token)
+
     with db_cursor() as (conn, cur):
         member = prepared["member"]
 
-        fetch_result = {"images": [], "skipped": 0, "scope_missing": False}
-        if files:
-            fetch_result = fetch_selected_images(files, bot_token)
         images = fetch_result["images"]
         selected = len(images) + fetch_result["skipped"]
 

@@ -94,7 +94,7 @@ def _read_pat(cid: Optional[str] = None) -> Optional[str]:
     if cid is None:
         env_override = (os.environ.get("ORCHA_GITHUB_PAT") or "").strip()
         return env_override or None
-    with db_cursor() as (_, cur):
+    with db_cursor(readonly=True) as (_, cur):
         return pat_for_container(cur, cid)
 
 
@@ -314,6 +314,9 @@ def put_container_github(cid: str, body: ContainerGithubBinding, request: Reques
     """
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
+    # GH #258 S3 note 4: the local-tree probe runs `git --version`, so it runs before the
+    # write scope opens; the 400 is still raised only after the caller is authorized.
+    local_ok = body.repo != "local" or local_git.available()
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
         # Per-project identity + access model: binding a repo is owner-or-manage_repo
@@ -322,7 +325,7 @@ def put_container_github(cid: str, body: ContainerGithubBinding, request: Reques
         # honest 403, never a 400 about the local tree that implies they could bind it.
         enforce_grant(cur, request, cid, "manage_repo")
         trusted_actor(cur, request, cid, None)
-        if body.repo == "local" and not local_git.available():
+        if not local_ok:
             raise HTTPException(
                 400,
                 "local repository source is not available here — "
