@@ -51,14 +51,21 @@ def agent_next(
                     "message": "budget: " + budget_reason,
                     "budget_paused": True,
                 }
+        # GH #258 S4: the claim is ONE statement, so picking the task and flipping it to
+        # in_progress can never interleave with another claimer. On SQLite the scope's
+        # BEGIN IMMEDIATE serialises writers; on Postgres the sub-select's row lock (SKIP
+        # LOCKED) sends a concurrent claimer on to the next ready task instead of the same one.
+        # `status='ready'` is re-checked on the outer row as a belt-and-braces guard.
         cur.execute(
-            f"""SELECT t.id, t.title, t.description, t.definition_of_done, t.priority, t.protocol
-               FROM tasks t
-               JOIN agent_tasks at ON at.task_id = t.id AND at.agent_id = %s
-                 AND at.assignment_status IN ('assigned','accepted','working')
-               WHERE t.container_id=%s AND t.status='ready' AND t.is_root = false
-               ORDER BY t.priority, t.created_at
-               LIMIT 1{sql.for_update(skip_locked=True)}""",
+            f"""UPDATE tasks SET status='in_progress', started_at = COALESCE(started_at, now())
+                WHERE status='ready' AND id = (
+                  SELECT t.id FROM tasks t
+                  JOIN agent_tasks at ON at.task_id = t.id AND at.agent_id = %s
+                   AND at.assignment_status IN ('assigned','accepted','working')
+                  WHERE t.container_id=%s AND t.status='ready' AND t.is_root = false
+                  ORDER BY t.priority, t.created_at
+                  LIMIT 1{sql.for_update(skip_locked=True)})
+                RETURNING id, title, description, definition_of_done, priority, protocol""",
             (aid, cid),
         )
         task = cur.fetchone()
@@ -66,11 +73,6 @@ def agent_next(
             conn.commit()
             return {"task": None, "message": "no ready tasks available"}
         tid = str(task["id"])
-        cur.execute(
-            "UPDATE tasks SET status='in_progress', started_at = COALESCE(started_at, now()) "
-            "WHERE id=%s",
-            (tid,),
-        )
         cur.execute(
             """INSERT INTO agent_tasks (agent_id, task_id, assignment_status)
                VALUES (%s, %s, 'working')
