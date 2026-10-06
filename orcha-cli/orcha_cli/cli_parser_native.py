@@ -1,4 +1,5 @@
-"""Parser entries for the native runtime (GH #258 PR 6): `orcha serve` and `orcha logs`."""
+"""Parser entries for the native runtime (GH #258 PR 6): `orcha serve` and `orcha logs`;
+PR 11: `orcha backup` and `orcha restore`."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -21,3 +22,24 @@ def register_native_commands(sub, handlers: dict[str, Callable]) -> None:
     logs.add_argument("-n", "--lines", type=int, default=50, help="lines of history to print (default 50)")
     logs.add_argument("--project-dir", default=None, help="project root (default: the current directory)")
     logs.set_defaults(func=handlers["logs"])
+
+    bak = sub.add_parser(
+        "backup",
+        help="copy a native project's database to .orcha/backups/ (safe while Orcha runs; "
+        "keeps the newest 10)",
+    )
+    bak.add_argument("--out", default=None, help="write the backup to this file instead (no pruning)")
+    bak.add_argument("--keep", type=int, default=10, help="backups to keep in .orcha/backups (default 10)")
+    bak.add_argument("--json", action="store_true", help="machine-readable output (one JSON object)")
+    bak.add_argument("--project-dir", default=None, help="project root (default: the current directory)")
+    bak.set_defaults(func=handlers["backup"])
+
+    res = sub.add_parser(
+        "restore",
+        help="replace a native project's database with a backup (Orcha must be stopped; "
+        "the replaced database is kept next to it)",
+    )
+    res.add_argument("file", help="the backup file to restore")
+    res.add_argument("--json", action="store_true", help="machine-readable output (one JSON object)")
+    res.add_argument("--project-dir", default=None, help="project root (default: the current directory)")
+    res.set_defaults(func=handlers["restore"])

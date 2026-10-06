@@ -13,6 +13,7 @@ from importlib.metadata import version as _pkg_version
 from .cli_env import _append_env_file, _read_env_file_value, _tighten_env_file
 from .cli_hook_facade import *
 from .cli_http import _get_json, _post_json, _put_json, _wait_for_portal
+from .cli_backup import cmd_backup, cmd_restore
 from .cli_logs import cmd_logs
 from .cli_migrate_runtime import cmd_migrate_runtime
 from .cli_portal import cmd_portal
@@ -93,6 +94,8 @@ def build_parser() -> argparse.ArgumentParser:
         "portal": cmd_portal,
         "serve": cmd_serve,
         "logs": cmd_logs,
+        "backup": cmd_backup,
+        "restore": cmd_restore,
         "sandbox": cmd_sandbox,
         "pause": cmd_pause,
         "resume": cmd_resume,
