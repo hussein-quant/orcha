@@ -26,6 +26,7 @@ import { dockerPublishedPorts, pickFreePort } from './portPicker'
 import { preflight } from './preflight'
 import { inspectFolder } from './folderModes'
 import { provision, type EngineDeps } from './initEngine'
+import { ensureOrchaLink, nodeOrchaLinkDeps } from './orchaLink'
 import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv, streamOrcha, orchaBin } from './hostWorker'
 import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } from './analyzeProject'
 import { resetStack } from './resetEngine'
@@ -1080,6 +1081,21 @@ async function portalRequest(
 app.whenReady().then(() => {
   // GH #258: native projects stopped from the app stay listed (main/nativeStacks.ts).
   configureNativeDiscovery(app.getPath('userData'))
+  // GH #258 D3: `orcha` in Terminal → the runtime bundled in this app (best effort; packaged only).
+  try {
+    const res = ensureOrchaLink(
+      nodeOrchaLinkDeps(app.isPackaged ? process.resourcesPath : null, () => {
+        try {
+          return execFileSync('/usr/bin/which', ['orcha'], { env: { ...process.env, PATH: hostToolPath() }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null
+        } catch {
+          return null
+        }
+      })
+    )
+    if (res === 'created' || res === 'refreshed') console.log(`[orcha-desktop] ~/.local/bin/orcha ${res}`)
+  } catch (err) {
+    console.warn('[orcha-desktop] could not link ~/.local/bin/orcha:', err)
+  }
   // Appearance first: every window below is created with the right canvas.
   const userDataDir = app.getPath('userData')
   theme = createThemeController({
