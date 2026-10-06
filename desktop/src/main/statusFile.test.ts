@@ -10,7 +10,9 @@ const stack: Stack = {
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
   running: true,
-  folder: null
+  folder: null,
+  runtime: 'docker',
+  health: 'ok'
 }
 const item: AttentionItem = {
   project: 'orcha-acme-ehr',

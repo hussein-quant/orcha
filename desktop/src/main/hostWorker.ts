@@ -154,16 +154,27 @@ export const nodeHostWorkerDeps: HostWorkerDeps = {
         resolve(err ? null : stdout.trim() || null)
       )
     }),
-  orchaUp: (folder, pathEnv) =>
-    new Promise((resolve, reject) => {
-      // scrubWorkerEnv: this daemon freezes its env for every agent worker it later spawns
-      // (see hostToolPath's doc comment) — an inherited ANTHROPIC_API_KEY here breaks every
-      // subsequent run for the lifetime of the daemon, not just this one `orcha up`.
-      execFile(
-        'orcha',
-        ['up'],
-        { cwd: folder, env: { ...scrubWorkerEnv(process.env), PATH: pathEnv }, encoding: 'utf8' },
-        (err, _stdout, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve())
-      )
-    })
+  orchaUp: (folder, pathEnv) => execOrcha(folder, ['up'], pathEnv)
 }
+
+// scrubWorkerEnv: the daemon `orcha up` starts freezes its env for every agent worker it later
+// spawns (see hostToolPath's doc comment) — an inherited ANTHROPIC_API_KEY here breaks every
+// subsequent run for the lifetime of the daemon, not just this one `orcha up`.
+function execOrcha(folder: string, args: string[], pathEnv: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'orcha',
+      args,
+      { cwd: folder, env: { ...scrubWorkerEnv(process.env), PATH: pathEnv }, encoding: 'utf8' },
+      (err, _stdout, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve())
+    )
+  })
+}
+
+/** Run `orcha <args>` in a project folder; rejects with {stderr} on a non-zero exit. */
+export type OrchaRun = (folder: string, args: string[]) => Promise<void>
+
+/** Production OrchaRun (native start/stop, GH #258 D1), with the same PATH + scrubbed env as
+ *  the worker start. The PATH is resolved per call (one login-shell read, ≤ 4 s) — start/stop
+ *  are user clicks, not a poll. */
+export const runOrcha: OrchaRun = (folder, args) => execOrcha(folder, args, nodeHostWorkerDeps.pathEnv ?? hostToolPath())

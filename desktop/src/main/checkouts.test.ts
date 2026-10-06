@@ -121,7 +121,9 @@ describe('fetchStackAttention carries checkouts on the existing poll', () => {
       dbPort: 5432,
       portalStatus: 'Up',
       running: true,
-      folder: '/Users/me/acme'
+      folder: '/Users/me/acme',
+      runtime: 'docker',
+      health: 'ok'
     }
     const fetchJson = vi.fn(async (url: string) => {
       if (url.endsWith('/api/containers')) return { containers: [{ id: 'c1', name: 'Acme' }] }

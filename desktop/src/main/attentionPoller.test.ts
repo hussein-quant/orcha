@@ -10,7 +10,9 @@ const stackUp: Stack = {
   dbPort: 5433,
   portalStatus: 'Up 1 hour',
   running: true,
-  folder: null
+  folder: null,
+  runtime: 'docker',
+  health: 'ok'
 }
 const stackDown: Stack = { ...stackUp, running: false, apiPort: null, portalStatus: 'Exited (0)' }
 

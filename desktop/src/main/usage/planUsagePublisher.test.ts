@@ -127,7 +127,7 @@ describe('buildPlanUsagePayload', () => {
 })
 
 function stack(port: number | null, running = true): Stack {
-  return { project: `orcha-${port}`, projectShort: String(port), apiPort: port, dbPort: null, portalStatus: 'Up', running, folder: null }
+  return { project: `orcha-${port}`, projectShort: String(port), apiPort: port, dbPort: null, portalStatus: 'Up', running, folder: null , runtime: 'docker', health: 'ok'}
 }
 
 describe('createPlanUsagePublisher', () => {

@@ -13,7 +13,9 @@ const stack = (port: number, short: string, running = true): Stack => ({
   dbPort: null,
   portalStatus: running ? 'Up 1 hour' : 'Exited (0)',
   running,
-  folder: null
+  folder: null,
+  runtime: 'docker',
+  health: 'ok'
 })
 
 interface Row {

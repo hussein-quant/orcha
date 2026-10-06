@@ -6,7 +6,7 @@ import type { Stack } from '../../shared/types'
 const NOW = Date.parse('2026-10-03T12:00:00.000Z')
 
 function stack(port: number | null, running = true): Stack {
-  return { project: `orcha-${port}`, projectShort: String(port), apiPort: port, dbPort: null, portalStatus: 'Up', running, folder: null }
+  return { project: `orcha-${port}`, projectShort: String(port), apiPort: port, dbPort: null, portalStatus: 'Up', running, folder: null , runtime: 'docker', health: 'ok'}
 }
 
 const d = (show: boolean, providers: PlanUsageDisplay['providers'], updatedAt: string | null): PlanUsageDisplay => ({ show, providers, updatedAt })

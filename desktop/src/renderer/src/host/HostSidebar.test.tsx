@@ -14,7 +14,9 @@ const stack: Stack = {
   dbPort: 5432,
   portalStatus: 'Up',
   running: true,
-  folder: null
+  folder: null,
+  runtime: 'docker',
+  health: 'ok'
 }
 const container = (id: string, name: string): ProjectContainer => ({
   id,

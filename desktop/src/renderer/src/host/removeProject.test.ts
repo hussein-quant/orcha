@@ -22,7 +22,9 @@ const stack = (project: string, running = true): Stack => ({
   dbPort: null,
   portalStatus: running ? 'Up' : 'Exited',
   running,
-  folder: null
+  folder: null,
+  runtime: 'docker',
+  health: 'ok'
 })
 const row = (project: string, cid: string | null, running = true): ProjectRow =>
   ({ key: cid ? `${project}:${cid}` : project, stack: stack(project, running), container: cid ? { id: cid } : null, name: cid ?? project }) as unknown as ProjectRow

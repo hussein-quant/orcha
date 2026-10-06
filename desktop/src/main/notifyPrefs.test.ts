@@ -11,7 +11,9 @@ const stack: Stack = {
   dbPort: 5433,
   portalStatus: 'Up 1 hour',
   running: true,
-  folder: null
+  folder: null,
+  runtime: 'docker',
+  health: 'ok'
 }
 const CID = '11111111-1111-1111-1111-111111111111'
 const item = (id: string, kind: AttentionItem['kind'] = 'task_verify', cid: string | undefined = CID): AttentionItem => ({

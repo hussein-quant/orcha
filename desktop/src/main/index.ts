@@ -8,7 +8,7 @@ import { accessSync, chmodSync, constants as fsConstants, cpSync, existsSync, mk
 import { randomBytes } from 'node:crypto'
 import { execFile, execFileSync, spawn } from 'node:child_process'
 import { parseDeepLink } from './deepLink'
-import { listStacks } from './discovery'
+import { configureNativeDiscovery, listStacks } from './discovery'
 import { startStack, stopStack } from './lifecycle'
 import { fetchStackAttention } from './attention'
 import { AttentionPoller } from './attentionPoller'
@@ -1112,6 +1112,8 @@ async function portalRequest(
 }
 
 app.whenReady().then(() => {
+  // GH #258: native projects stopped from the app stay listed (main/nativeStacks.ts).
+  configureNativeDiscovery(app.getPath('userData'))
   // Appearance first: every window below is created with the right canvas.
   const userDataDir = app.getPath('userData')
   theme = createThemeController({
@@ -1191,14 +1193,14 @@ app.whenReady().then(() => {
   ipcMain.handle('orcha:startStack', (_event, project: string) =>
     asResult(async () => {
       const stack = await requireKnownStack(project)
-      await startStack(stack.project)
+      await startStack(stack)
     })
   )
 
   ipcMain.handle('orcha:stopStack', (_event, project: string) =>
     asResult(async () => {
       const stack = await requireKnownStack(project)
-      await stopStack(stack.project)
+      await stopStack(stack)
     })
   )
 

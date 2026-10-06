@@ -10,7 +10,9 @@ const stack: Stack = {
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
   running: true,
-  folder: null
+  folder: null,
+  runtime: 'docker',
+  health: 'ok'
 }
 
 // Shapes captured from the live portal API.

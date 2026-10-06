@@ -9,7 +9,7 @@ import { groupSessions } from '../terminal/sessions'
 import { newTab, type TermTab } from '../terminal/termTabs'
 import type { AttentionSnapshot, HostCheckout, ProjectContainer, Stack } from '../../../shared/types'
 
-const stack: Stack = { project: 'orcha-fleet', projectShort: 'fleet', apiPort: 8001, dbPort: 5432, portalStatus: 'Up', running: true, folder: '/f' }
+const stack: Stack = { project: 'orcha-fleet', projectShort: 'fleet', apiPort: 8001, dbPort: 5432, portalStatus: 'Up', running: true, folder: '/f' , runtime: 'docker', health: 'ok'}
 const container = (id: string, name: string): ProjectContainer => ({
   id, name, description: null, status: 'active', github_repo: null, agents: 1, tasks: 0, needs_you: 0, member_count: 1, icon: null
 })

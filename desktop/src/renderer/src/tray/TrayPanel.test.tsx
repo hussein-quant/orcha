@@ -12,7 +12,9 @@ const stack: Stack = {
   dbPort: 5435,
   portalStatus: 'Up 4 hours',
   running: true,
-  folder: null
+  folder: null,
+  runtime: 'docker',
+  health: 'ok'
 }
 const items: AttentionItem[] = [
   { project: 'orcha-acme-ehr', projectShort: 'acme-ehr', kind: 'task_verify', id: 't1', title: 'Verify foundation layer', path: '/tasks?task=t1' },

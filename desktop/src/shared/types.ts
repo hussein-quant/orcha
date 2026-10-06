@@ -24,7 +24,8 @@ export interface PortalActive {
  *  project-cards home screen + this bar, not a permanent side rail. */
 export const TOPBAR_HEIGHT = 40
 
-/** One orcha-* Docker compose stack (stack:db:container is 1:1:1 per orcha's model). */
+/** One Orcha project: a native project (GH #258) or an orcha-* Docker compose stack
+ *  (stack:db:container is 1:1:1 per orcha's model). */
 export interface Stack {
   /** Full compose project name, e.g. "orcha-todo-app". */
   project: string
@@ -41,7 +42,16 @@ export interface Stack {
   /** Absolute project root on disk (parent of .orcha), from the compose working_dir label;
    *  null when the label is absent. Used by Delete & reset to clean on-disk artifacts. */
   folder: string | null
+  /** How the project runs: "native" = `orcha serve` on this Mac (no Docker, GH #258), or a
+   *  Docker compose stack. */
+  runtime: StackRuntime
+  /** Native: from `.orcha/state.json` + the portal probe (main/nativeStacks.ts). Docker:
+   *  "ok" while the portal container is up, else "stopped". */
+  health: StackHealth
 }
+
+export type StackRuntime = 'native' | 'docker'
+export type StackHealth = 'ok' | 'starting' | 'crashlooping' | 'stopped'
 
 // ---- Remove project / Storage -------------------------------------------------------------
 
@@ -212,6 +222,8 @@ export type BridgeError =
    *  the connection — "isn't responding, quit and reopen", not "isn't running". */
   | { code: 'DOCKER_UNAVAILABLE'; unresponsive?: boolean }
   | { code: 'COMPOSE_FAILED'; stderr: string }
+  /** A native project's `orcha up` / `orcha down` exited non-zero (GH #258). */
+  | { code: 'ORCHA_FAILED'; stderr: string }
   | { code: 'UNKNOWN_STACK' }
   /** Terminal: the requested branch is not a checkout of the project's repo (any more). */
   | { code: 'UNKNOWN_BRANCH' }

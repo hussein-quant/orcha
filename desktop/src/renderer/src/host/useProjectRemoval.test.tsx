@@ -16,7 +16,9 @@ const stack = (project: string, running = true): Stack => ({
   dbPort: null,
   portalStatus: running ? 'Up' : 'Exited',
   running,
-  folder: '/Users/me/x'
+  folder: '/Users/me/x',
+  runtime: 'docker',
+  health: 'ok'
 })
 const row = (project: string, cid: string, running = true): ProjectRow =>
   ({ key: `${project}:${cid}`, stack: stack(project, running), container: { id: cid }, name: project.replace(/^orcha-/, '') }) as unknown as ProjectRow
