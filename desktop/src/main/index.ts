@@ -1575,13 +1575,10 @@ app.whenReady().then(() => {
   ipcMain.handle('orcha:installPrereqs', () =>
     asResult(async (): Promise<InstallResult> => {
       const probe = await probePrereqs()
-      // The desktop app installs ONE thing for the user: the Orcha CLI helper. Homebrew,
-      // Docker, and an AI coding agent (Claude Code / Codex) are hard requirements the user
-      // installs themselves — the onboarding step shows them and gates Continue on them.
-      const steps = planInstall(probe, {
-        arch: os.arch(),
-        user: os.userInfo().username || 'operator'
-      }).filter((s) => s.id === 'orcha')
+      // A packaged app brings the Orcha helper with it (bundled runtime, GH #258 D3), so the
+      // probe finds it and this is a no-op. Only a dev build without `orcha` installs it here.
+      // An AI coding agent (Claude Code / Codex) stays a requirement the user installs.
+      const steps = planInstall(probe).filter((s) => s.id === 'orcha')
       if (steps.length === 0) return { ok: true, completed: [] }
       return runInstall(steps, {
         runUser: runUserInstall,
