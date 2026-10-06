@@ -479,24 +479,23 @@ def _needs_attention_summary(cur, container_id) -> dict:
             "open_requests": open_requests}
 
 
-def _handle_command(cur, member, text: str) -> dict:
-    """Route a verified, linked member's command text to its handler. Returns the Slack
-    ephemeral response dict. The caller commits (task creation writes)."""
+def _slack_start(member, m) -> dict:
+    """`/orcha start issue|pr <n>`: fetch the real title, then start (or find) the task."""
     cid = str(member["container_id"])
-    text = (text or "").strip()
-
-    m = _START_RE.match(text)
-    if m:
-        kind_word, number = m.group(1).lower(), int(m.group(2))
-        kind = "pull" if kind_word == "pr" else "issue"
-        # The title-bug fix: fetch the REAL issue/PR title before composing the task,
-        # exactly like the hub does (there, the frontend already has it in hand from
-        # the list it just rendered and passes it straight through). Slack only gives
-        # us a bare number, so this is the one extra live fetch the hub gets for free.
+    kind_word, number = m.group(1).lower(), int(m.group(2))
+    kind = "pull" if kind_word == "pr" else "issue"
+    # The title-bug fix: fetch the REAL issue/PR title before composing the task,
+    # exactly like the hub does (there, the frontend already has it in hand from
+    # the list it just rendered and passes it straight through). Slack only gives
+    # us a bare number, so this is the one extra live fetch the hub gets for free.
+    # GH #258 S3 note 4: the fetch reads in a readonly scope; only the start takes the
+    # write lock (start_task_from_github re-checks "already tracked" inside it).
+    with db_cursor(readonly=True) as (_conn, cur):
         gh_item = _fetch_gh_item(cur, cid, kind, number)
-        gh_title = (gh_item or {}).get("title") or f"#{number}"
-        html_url = (gh_item or {}).get("html_url") or ""
-        body_excerpt = (gh_item or {}).get("body_excerpt") or ""
+    gh_title = (gh_item or {}).get("title") or f"#{number}"
+    html_url = (gh_item or {}).get("html_url") or ""
+    body_excerpt = (gh_item or {}).get("body_excerpt") or ""
+    with db_cursor() as (conn, cur):
         result = start_task_from_github(
             cur,
             cid,
@@ -509,17 +508,26 @@ def _handle_command(cur, member, text: str) -> dict:
             assignee_agent_id=None,  # Slack start is unassigned — Atlas routes it
             source="slack",
         )
-        label = "PR" if kind == "pull" else "issue"
-        task_link = portal_task_link(cid, result["task_id"])
-        if result["existing"]:
-            return _ephemeral(
-                blocks_already_tracked(label, number, task_link),
-                f"Already tracked: {label} #{number} has an open Orcha task.",
-            )
+        conn.commit()
+    label = "PR" if kind == "pull" else "issue"
+    task_link = portal_task_link(cid, result["task_id"])
+    if result["existing"]:
         return _ephemeral(
-            blocks_start_success(label, number, html_url, gh_title, task_link),
-            f"Started an Orcha task for {label} #{number}: {gh_title}",
+            blocks_already_tracked(label, number, task_link),
+            f"Already tracked: {label} #{number} has an open Orcha task.",
         )
+    return _ephemeral(
+        blocks_start_success(label, number, html_url, gh_title, task_link),
+        f"Started an Orcha task for {label} #{number}: {gh_title}",
+    )
+
+
+def _handle_command(cur, member, text: str) -> dict:
+    """Route a verified, linked member's command text to its handler. Returns the Slack
+    ephemeral response dict. `/orcha start` goes to _slack_start instead (it writes); every
+    command here only reads."""
+    cid = str(member["container_id"])
+    text = (text or "").strip()
 
     m = _ISSUE_RE.match(text)
     if m:
@@ -575,7 +583,7 @@ def _dispatch_command(slack_user_id: str, text: str) -> dict:
     trip (matches this codebase's established pattern for blocking work inside an
     `async def` route — e.g. attachment_routes.py's `asyncio.to_thread(_attachment_ref, ...)`).
     """
-    with db_cursor() as (conn, cur):
+    with db_cursor(readonly=True) as (_conn, cur):
         member = _member_for_slack_user(cur, slack_user_id)
         if member is None:
             # 200 with an ephemeral body — Slack shows the text; never a 4xx (that would
@@ -584,9 +592,12 @@ def _dispatch_command(slack_user_id: str, text: str) -> dict:
                 blocks_unlinked_user(),
                 "Your Slack account isn't linked to an Orcha member yet.",
             )
-        response = _handle_command(cur, member, text)
-        conn.commit()
-    return response
+        start = _START_RE.match((text or "").strip())
+        if not start:
+            # GH #258 S3 note 4: these commands only read (an issue is filed on GitHub), so
+            # this scope is readonly and holds no write lock across their GitHub calls.
+            return _handle_command(cur, member, text)
+    return _slack_start(member, start)
 
 
 @app.post("/api/slack/commands")
