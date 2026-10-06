@@ -1,5 +1,5 @@
 import { BrowserWindow, Menu, Tray, nativeImage } from 'electron'
-import { resourceFile } from './templates'
+import { resourceFile } from './resources'
 import { PRODUCT_NAME } from '../shared/brand'
 
 /** extraResources file names of the menu-bar face (the @2x sibling is picked up by nativeImage). */

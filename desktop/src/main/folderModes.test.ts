@@ -2,12 +2,20 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { detectRuntime, inspectFolder, isProject } from './folderModes'
+import { detectRuntime, inspectFolder, isProject, sanitizeName } from './folderModes'
 import { readFileSync } from 'node:fs'
 
 function tmp(): string {
   return mkdtempSync(path.join(tmpdir(), 'orcha-fm-'))
 }
+
+describe('sanitizeName', () => {
+  it('mirrors the CLI rule', () => {
+    expect(sanitizeName('My App!')).toBe('my-app')
+    expect(sanitizeName('  ')).toBe('orcha')
+    expect(sanitizeName('keep_under-score')).toBe('keep_under-score')
+  })
+})
 
 describe('inspectFolder', () => {
   it('reports an uninitialized writable folder with a sanitized suggested name', () => {

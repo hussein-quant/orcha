@@ -30,14 +30,7 @@ npmRebuild: false
 asarUnpack:
   - node_modules/node-pty/**
 
-# The onboarding flow lays down a project's Orcha stack from these templates
-# (compose, migrations, portal, skills, prefs) WITHOUT the orcha CLI installed.
-# They are copied from the CLI at build time (scripts/copy-orcha-templates.mjs,
-# run by the predist hooks) and shipped here so templatesRoot() resolves them at
-# Contents/Resources/orcha-templates (= process.resourcesPath) in the packaged app.
 extraResources:
-  - from: resources/orcha-templates
-    to: orcha-templates
   # GH #258 sidecar: Python + the orcha CLI at Contents/Resources/orcha-runtime, built by
   # scripts/build-orcha-runtime.mjs (predist:mac:arm64 only). The universal build's
   # predist clears it, so a missing folder is skipped (electron-builder only warns).

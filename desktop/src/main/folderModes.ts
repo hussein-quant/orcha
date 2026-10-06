@@ -1,7 +1,15 @@
 import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { FolderState } from '../shared/types'
-import { sanitizeName } from './templates'
+
+/** Mirror of the CLI's _sanitize_name. */
+export function sanitizeName(s: string): string {
+  const lowered = s.toLowerCase()
+  let out = ''
+  for (const c of lowered) out += /[a-z0-9\-_]/.test(c) ? c : '-'
+  out = out.replace(/^-+|-+$/g, '')
+  return out || 'orcha'
+}
 
 export type Runtime = 'docker' | 'native'
 
