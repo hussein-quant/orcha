@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.resources as pkg_res
+import os
 import pathlib
 import shutil
 import subprocess
@@ -97,6 +98,14 @@ def _self_update(
     brew_upgrade: Callable[[str], bool],
 ) -> None:
     """Refresh a source or Homebrew installation, then re-enter when successful."""
+    if os.environ.get("ORCHA_SIDECAR") == "1":
+        # GH #258 D3: the CLI bundled inside the desktop app is replaced only by an app
+        # update — never by uv/brew/pip, which would split the app from its runtime.
+        print(
+            "[orcha] this command line comes with the Embodent app — update the app to "
+            "update it. Skipping CLI self-update."
+        )
+        return
     source = source_root()
     keg = None if source else brew_keg()
     if source is not None:
