@@ -1,5 +1,7 @@
 import { execFile, execFileSync, spawn } from 'node:child_process'
+import fs from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 import { dockerPath } from './dockerExec'
 
 /** What actually runs an agent is a host-side `claude -p` process spawned by the orcha
@@ -116,6 +118,42 @@ export function workerStartResult(probe: WorkerProbe): { started: boolean; reaso
   return { started: true }
 }
 
+/** Where the app looks for the `orcha` CLI (GH #258 plan D3), first hit wins:
+ *  1. the runtime bundled in the app (`<resources>/orcha-runtime/bin/orcha`), so the app and
+ *     the CLI it drives can never be different versions;
+ *  2. `~/.local/bin/orcha` (the link the app creates for Terminal use, or a developer's own);
+ *  3. plain `orcha`, found on the host-tool PATH at spawn time (Homebrew / pipx installs).
+ *  Pure over `exists`; `resourcesPath` is null outside a packaged app (dev, tests). */
+export function resolveOrcha(opts: {
+  resourcesPath: string | null
+  home: string
+  exists: (p: string) => boolean
+}): string {
+  const candidates = [
+    opts.resourcesPath ? path.join(opts.resourcesPath, 'orcha-runtime', 'bin', 'orcha') : null,
+    path.join(opts.home, '.local', 'bin', 'orcha')
+  ]
+  for (const c of candidates) if (c && opts.exists(c)) return c
+  return 'orcha'
+}
+
+/** Production resolveOrcha: the packaged app's resources dir and the real home folder. */
+export function orchaBin(): string {
+  const resourcesPath = (process as { resourcesPath?: string }).resourcesPath ?? null
+  return resolveOrcha({
+    resourcesPath,
+    home: os.homedir(),
+    exists: (p) => {
+      try {
+        fs.accessSync(p, fs.constants.X_OK)
+        return true
+      } catch {
+        return false
+      }
+    }
+  })
+}
+
 /** Injectable surface for testing startHostWorker without touching the real machine. */
 export interface HostWorkerDeps {
   /** Resolve a command to an absolute path, or null if not on PATH (like `which`). */
@@ -123,12 +161,15 @@ export interface HostWorkerDeps {
   /** Run `orcha up` in `folder`; resolve on success, reject with {stderr} on failure. */
   orchaUp: (folder: string, pathEnv: string) => Promise<void>
   pathEnv?: string
+  /** resolveOrcha's answer; defaults to orchaBin(). */
+  orchaBin?: () => string
 }
 
 /** Start the host agent worker for a freshly-provisioned project. Never throws. */
 export async function startHostWorker(folder: string, deps: HostWorkerDeps): Promise<{ started: boolean; reason?: string }> {
   const pathEnv = deps.pathEnv ?? hostToolPath()
-  const orcha = await deps.which('orcha', pathEnv).catch(() => null)
+  const bin = (deps.orchaBin ?? orchaBin)()
+  const orcha = bin === 'orcha' ? await deps.which('orcha', pathEnv).catch(() => null) : bin
   if (!orcha) return workerStartResult({ orchaFound: false, claudeFound: false })
   let upError: string | undefined
   try {
@@ -163,7 +204,7 @@ export const nodeHostWorkerDeps: HostWorkerDeps = {
 function execOrcha(folder: string, args: string[], pathEnv: string): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(
-      'orcha',
+      orchaBin(),
       args,
       { cwd: folder, env: { ...scrubWorkerEnv(process.env), PATH: pathEnv }, encoding: 'utf8' },
       (err, _stdout, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve())
@@ -185,7 +226,7 @@ export const runOrcha: OrchaRun = (folder, args) => execOrcha(folder, args, node
 export function streamOrcha(folder: string, args: string[], onLine: (line: string) => void): Promise<void> {
   const pathEnv = nodeHostWorkerDeps.pathEnv ?? hostToolPath()
   return new Promise((resolve, reject) => {
-    const child = spawn('orcha', args, { cwd: folder, env: { ...scrubWorkerEnv(process.env), PATH: pathEnv } })
+    const child = spawn(orchaBin(), args, { cwd: folder, env: { ...scrubWorkerEnv(process.env), PATH: pathEnv } })
     let buf = ''
     let tail = ''
     child.stdout.setEncoding('utf8')
