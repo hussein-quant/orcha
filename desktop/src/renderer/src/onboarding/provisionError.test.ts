@@ -5,12 +5,12 @@ describe('describeProvisionFailure', () => {
   it('names the failing step in plain words and keeps stderr as on-demand detail', () => {
     const f = describeProvisionFailure({
       code: 'PROVISION_FAILED',
-      step: 'compose-up',
+      step: 'start',
       stderr: '  boom\n'
     })
-    expect(f.message).toBe('Setup failed while starting the containers.')
+    expect(f.message).toBe('Setup failed while starting Orcha.')
     expect(f.detail).toBe('boom')
-    expect(f.step).toBe('compose-up')
+    expect(f.step).toBe('start')
   })
 
   it('maps known codes to readable sentences', () => {
@@ -26,7 +26,7 @@ describe('describeProvisionFailure', () => {
   it('turns a recognizable daemon error into a fixable headline', () => {
     const f = describeProvisionFailure({
       code: 'PROVISION_FAILED',
-      step: 'compose-up',
+      step: 'start',
       stderr:
         'Container orcha-demo-portal-1  Starting\nError response from daemon: driver failed programming external connectivity on endpoint orcha-demo-portal-1: Bind for 0.0.0.0:8101 failed: port is already allocated\n'
     })
@@ -44,10 +44,10 @@ describe('describeProvisionFailure', () => {
   it('keeps the generic step headline but surfaces the telling line as the cause', () => {
     const f = describeProvisionFailure({
       code: 'PROVISION_FAILED',
-      step: 'compose-up',
+      step: 'start',
       stderr: 'pulling portal\nError response from daemon: invalid mount config for type "bind": bind source path does not exist'
     })
-    expect(f.message).toBe('Setup failed while starting the containers.')
+    expect(f.message).toBe('Setup failed while starting Orcha.')
     expect(f.cause).toMatch(/^Invalid mount config/)
     // Known codes with their own sentence don't get a redundant cause line.
     expect(describeProvisionFailure({ code: 'DEST_NOT_EMPTY', stderr: 'x failed' }).cause).toBeNull()

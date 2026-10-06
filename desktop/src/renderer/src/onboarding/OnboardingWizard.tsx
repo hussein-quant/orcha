@@ -451,6 +451,7 @@ export default function OnboardingWizard({
                   warnings={result?.warnings ?? []}
                   gitTip={status === 'done' ? gitTip : null}
                   withClone={attempt?.kind === 'github'}
+                  mode={attempt?.kind === 'local' && attempt.state.initialized ? 'upgrade' : 'init'}
                   onContinue={() => setPhase('fleet')}
                   onRetry={() => attempt && void runAttempt(attempt, true)}
                   onBack={backFromFailure}

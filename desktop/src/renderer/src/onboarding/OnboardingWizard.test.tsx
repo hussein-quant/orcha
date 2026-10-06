@@ -254,7 +254,7 @@ describe('OnboardingWizard — local folder source', () => {
     await waitFor(() => expect(window.orchaDesktop.onProvisionProgress).toHaveBeenCalled())
     holder.cb?.({
       runId: 'stale',
-      step: 'compose-up',
+      step: 'start',
       status: 'log',
       line: 'noise'
     })
@@ -267,17 +267,17 @@ describe('OnboardingWizard — provisioning failure is recoverable', () => {
     const holder = captureProgress()
     mock(window.orchaDesktop.provision)
       .mockImplementationOnce(async () => {
-        holder.cb?.({ runId: 'r1', step: 'render-compose', status: 'ok' })
-        holder.cb?.({ runId: 'r1', step: 'compose-up', status: 'start' })
+        holder.cb?.({ runId: 'r1', step: 'config', status: 'ok' })
+        holder.cb?.({ runId: 'r1', step: 'start', status: 'start' })
         holder.cb?.({
           runId: 'r1',
-          step: 'compose-up',
+          step: 'start',
           status: 'log',
           line: 'Error response from daemon: port is already allocated'
         })
         throw {
           code: 'PROVISION_FAILED',
-          step: 'compose-up',
+          step: 'start',
           stderr: 'Error response from daemon: port is already allocated'
         }
       })
@@ -295,7 +295,7 @@ describe('OnboardingWizard — provisioning failure is recoverable', () => {
     expect(screen.getByText(/a port this project needs is already in use/i)).toBeInTheDocument()
     expect(document.body.textContent).not.toContain('[object Object]')
     // The failed step is marked, the log opens by itself.
-    expect(document.querySelector('[data-state="failed"]')).toHaveTextContent('Start containers')
+    expect(document.querySelector('[data-state="failed"]')).toHaveTextContent('Start Orcha in the background')
     expect(screen.getByLabelText('Provisioning log')).toHaveTextContent(/port is already allocated/)
 
     await user.click(screen.getByRole('button', { name: /try again/i }))
@@ -424,14 +424,14 @@ describe('OnboardingWizard — From GitHub source', () => {
     holder.cb?.({ runId: 'clone:1', step: 'clone-repo', status: 'ok' })
     holder.cb?.({
       runId: '/tmp/orcha-projects/demo:init:2',
-      step: 'render-compose',
+      step: 'config',
       status: 'ok'
     })
     await waitFor(() =>
-      expect(screen.getByText('Prepare project files').closest('[data-state]')).toHaveAttribute('data-state', 'done')
+      expect(screen.getByText('Write project settings').closest('[data-state]')).toHaveAttribute('data-state', 'done')
     )
     expect(screen.getByText('Clone the repository').closest('[data-state]')).toHaveAttribute('data-state', 'done')
-    expect(screen.getByText(/step 3 of 8/i)).toBeInTheDocument()
+    expect(screen.getByText(/step 3 of 9/i)).toBeInTheDocument()
 
     resolver.current?.({ project: 'orcha-demo', apiPort: 8001, warnings: [] })
   })

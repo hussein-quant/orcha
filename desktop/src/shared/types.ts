@@ -280,18 +280,24 @@ export type IpcResult<T> = { ok: true; data: T } | ({ ok: false } & BridgeError)
  *  Same steps, same components — only copy (and step 0's "welcome" framing) differs. */
 export type WizardVariant = 'first-run' | 'add-project'
 
-export type ProvisionMode = 'init' | 'upgrade' | 'reset'
+/** init = fresh folder (`orcha init`), upgrade = existing project (`orcha up`), migrate = a
+ *  Docker project moved onto the native runtime (`orcha migrate-runtime`) — GH #258 D2. */
+export type ProvisionMode = 'init' | 'upgrade' | 'migrate'
 
+/** App-only steps (preflight, clone-repo, start-daemons, migrate) plus the `orcha init
+ *  --progress-json` step names 1:1 (ports … register-human). */
 export type ProvisionStep =
   | 'preflight'
   | 'clone-repo'
-  | 'render-compose'
-  | 'copy-templates'
-  | 'compose-up'
+  | 'ports'
+  | 'config'
+  | 'service'
+  | 'start'
   | 'wait-portal'
   | 'create-container'
   | 'register-human'
   | 'start-daemons'
+  | 'migrate'
 
 export type ProgressEvent =
   | { runId: string; step: ProvisionStep; status: 'start' | 'ok' | 'skip' }

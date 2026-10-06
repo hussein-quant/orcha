@@ -1,4 +1,4 @@
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile, execFileSync, spawn } from 'node:child_process'
 import os from 'node:os'
 import { dockerPath } from './dockerExec'
 
@@ -178,3 +178,34 @@ export type OrchaRun = (folder: string, args: string[]) => Promise<void>
  *  the worker start. The PATH is resolved per call (one login-shell read, ≤ 4 s) — start/stop
  *  are user clicks, not a poll. */
 export const runOrcha: OrchaRun = (folder, args) => execOrcha(folder, args, nodeHostWorkerDeps.pathEnv ?? hostToolPath())
+
+/** `orcha <args>` in a project folder with each stdout line streamed to `onLine` (GH #258 D2:
+ *  `orcha init --progress-json`, `orcha migrate-runtime --json`). Same PATH + scrubbed env as
+ *  runOrcha; rejects with {stderr} (the last 4 KB) on a non-zero exit or a missing CLI. */
+export function streamOrcha(folder: string, args: string[], onLine: (line: string) => void): Promise<void> {
+  const pathEnv = nodeHostWorkerDeps.pathEnv ?? hostToolPath()
+  return new Promise((resolve, reject) => {
+    const child = spawn('orcha', args, { cwd: folder, env: { ...scrubWorkerEnv(process.env), PATH: pathEnv } })
+    let buf = ''
+    let tail = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      buf += chunk
+      let nl: number
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        onLine(buf.slice(0, nl))
+        buf = buf.slice(nl + 1)
+      }
+    })
+    child.stderr.on('data', (chunk: string) => {
+      tail = (tail + chunk).slice(-4000)
+    })
+    child.on('error', (err) => reject(Object.assign(err, { stderr: `orcha could not be started: ${err.message}` })))
+    child.on('close', (code) => {
+      if (buf) onLine(buf)
+      if (code === 0) resolve()
+      else reject(Object.assign(new Error(`orcha ${args[0]} exited ${code}`), { stderr: tail.trim() }))
+    })
+  })
+}

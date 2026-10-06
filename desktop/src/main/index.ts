@@ -25,9 +25,8 @@ import { dockerExec, killPendingProbes } from './dockerExec'
 import { dockerPublishedPorts, pickFreePort } from './portPicker'
 import { preflight } from './preflight'
 import { inspectFolder } from './folderModes'
-import { templatesRoot } from './templates'
-import { provision, type EngineDeps, type EngineFs } from './initEngine'
-import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv } from './hostWorker'
+import { provision, type EngineDeps } from './initEngine'
+import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv, streamOrcha } from './hostWorker'
 import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } from './analyzeProject'
 import { resetStack } from './resetEngine'
 import { planRemoval, removeProject, type RemoveDeps } from './removeEngine'
@@ -106,24 +105,6 @@ import type {
   Stack
 } from '../shared/types'
 
-/** Real-fs adapter for the provision engine (the engine injects this for testability). */
-const nodeEngineFs: EngineFs = {
-  readFile: (p) => readFileSync(p, 'utf8'),
-  writeFile: (p, c) => writeFileSync(p, c),
-  copyTree: (src, dst) => cpSync(src, dst, { recursive: true }),
-  mkdirp: (p) => void mkdirSync(p, { recursive: true }),
-  chmod: (p, mode) => chmodSync(p, mode),
-  exists: (p) => existsSync(p),
-  readDir: (p) => {
-    try {
-      return readdirSync(p)
-    } catch {
-      return []
-    }
-  }
-}
-
-
 /** Settings › Profile: the saved name (this Mac only) over the Mac account name. */
 function currentProfile(): ProfileState {
   return profileState(readProfileName(app.getPath('userData')), os.userInfo().username)
@@ -166,37 +147,25 @@ async function fetchJson(url: string, init?: { method?: string; body?: unknown }
   return ct.includes('application/json') ? res.json() : undefined
 }
 
-/** Build the engine deps. Ports are reserved per-run in the provision handler and
- *  injected via `findFreePort`; the default here is a harmless identity it overrides. */
+/** `.claude/orcha.json` of a project folder, or null when missing/unreadable. */
+function readProjectConfig(folder: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(readFileSync(path.join(folder, '.claude', 'orcha.json'), 'utf8')) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+/** Build the engine deps (GH #258 D2: the orcha CLI provisions; the app streams its progress). */
 function engineDeps(): EngineDeps {
   return {
-    exec: dockerExec,
-    fetchJson,
-    fs: nodeEngineFs,
-    templatesRoot,
-    findFreePort: (start: number) => start,
-    readComposeTemplate: () => {
-      const composePath = path.join(templatesRoot(), 'docker-compose.yml.j2')
-      if (!existsSync(composePath)) {
-        // The template assets are gitignored and copied in by scripts/copy-orcha-templates.mjs
-        // (run via predev/prebuild/predist). If they're missing the raw error is a bare
-        // "ENOENT"; replace it with something a non-engineer can act on.
-        throw new Error(
-          'App assets are missing (bundled Orcha templates not found). ' +
-            'In a dev checkout run `npm run build` (or `npm run copy:templates`) before launching; ' +
-            'in a packaged build this means the .app was built incorrectly.'
-        )
-      }
-      return readFileSync(composePath, 'utf8')
-    },
-    genSecret: () => randomBytes(32).toString('base64url'),
+    orcha: streamOrcha,
+    readConfig: readProjectConfig,
     // Settings › Profile name when set, else this Mac's account name.
     user: currentProfile().effective,
-    // After the portal is up, start the host-side agent worker (orcha CLI notifier) so
-    // assigned tasks actually run — without this the portal opens but nothing picks up work.
-    startWorker: (folder) => startHostWorker(folder, nodeHostWorkerDeps),
-    // gh token injection at provision (parity with `orcha up`) — see initEngine's compose-up step.
-    ghAuthToken: () => ghAuthToken(dockerExec)
+    // After the portal is up, make sure the host-side agent worker runs and surface any
+    // missing prerequisite (Claude Code, API key) as a plain-language warning.
+    startWorker: (folder) => startHostWorker(folder, nodeHostWorkerDeps)
   }
 }
 
@@ -300,22 +269,16 @@ function cloneGitRepo(url: string, dest: string, onLine: (line: string) => void)
   })
 }
 
-/** Reserve three DISTINCT free host ports the engine reads via a sync lookup keyed by the
- *  CLI's scan-start constants (5432/8000/8765), and wire them into a fresh EngineDeps. We
- *  must exclude ports Docker has already published: a host listen on 0.0.0.0:<p> can
- *  succeed while docker-proxy owns it, so the host probe alone misses the collision
- *  (#port-collision). We also feed each chosen port back into the exclusion set so
- *  db/api/bridge never pick the same port. Shared by orcha:provision and cloneAndProvision
- *  so both provisioning entry points reserve ports identically. */
+/** Reserve two DISTINCT free host ports (api, bridge) for `orcha init`. We must exclude
+ *  ports Docker has already published: a host listen on 0.0.0.0:<p> can succeed while
+ *  docker-proxy owns it, so the host probe alone misses the collision (#port-collision).
+ *  Shared by orcha:provision and cloneAndProvision so both entry points pick ports alike. */
 async function reservedEngineDeps(): Promise<EngineDeps> {
   const taken = await dockerPublishedPorts()
-  const db = await pickFreePort(5432, { dockerPorts: taken })
-  taken.add(db)
   const api = await pickFreePort(8000, { dockerPorts: taken })
   taken.add(api)
   const bridge = await pickFreePort(8765, { dockerPorts: taken })
-  const reserved: Record<number, number> = { 5432: db, 8000: api, 8765: bridge }
-  return { ...engineDeps(), findFreePort: (start: number) => reserved[start] ?? start }
+  return { ...engineDeps(), ports: { api, bridge } }
 }
 
 /** Clone opts.repoUrl into opts.dest (streaming 'clone-repo' progress on the same channel

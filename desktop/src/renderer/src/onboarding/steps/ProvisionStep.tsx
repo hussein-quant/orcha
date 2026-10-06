@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Check, ChevronDown, ChevronRight, Copy, X } from 'lucide-react'
-import type { ProgressEvent, ProvisionStep as StepId } from '../../../../shared/types'
+import type { ProgressEvent, ProvisionMode, ProvisionStep as StepId } from '../../../../shared/types'
 import type { ProvisionFailure } from '../provisionError'
 import { InlineText, Notice, ObButton, StatusGlyph, StepFooter, StepHeader, type GlyphState } from '../ui'
 import { formatElapsed, useElapsed } from '../motion'
@@ -10,25 +10,36 @@ export type ProvisionStatus = 'idle' | 'running' | 'done' | 'failed'
 const STEPS: { id: StepId; label: string }[] = [
   { id: 'clone-repo', label: 'Clone the repository' },
   { id: 'preflight', label: 'Check Docker' },
-  { id: 'render-compose', label: 'Prepare project files' },
-  { id: 'copy-templates', label: 'Copy templates' },
-  { id: 'compose-up', label: 'Start containers' },
+  { id: 'migrate', label: 'Move the project off Docker' },
+  { id: 'ports', label: 'Pick free ports' },
+  { id: 'config', label: 'Write project settings' },
+  { id: 'service', label: 'Set Orcha to start at login' },
+  { id: 'start', label: 'Start Orcha in the background' },
   { id: 'wait-portal', label: 'Wait for the portal' },
   { id: 'create-container', label: 'Create the project' },
   { id: 'register-human', label: 'Register you' },
   { id: 'start-daemons', label: 'Start the agent worker' }
 ]
 
-/** Steps every local provision walks; clone/preflight rows only appear when they apply. */
-const CORE = new Set<StepId>([
-  'render-compose',
-  'copy-templates',
-  'compose-up',
+/** Steps a fresh `orcha init` walks; clone/preflight rows only appear when they apply. */
+const CORE_INIT = new Set<StepId>([
+  'ports',
+  'config',
+  'service',
+  'start',
   'wait-portal',
   'create-container',
   'register-human',
   'start-daemons'
 ])
+
+/** Reconnecting an existing project is one `orcha up`; moving one off Docker is one
+ *  `orcha migrate-runtime` (GH #258 D2). */
+const CORE: Record<ProvisionMode, Set<StepId>> = {
+  init: CORE_INIT,
+  upgrade: new Set<StepId>(['start', 'start-daemons']),
+  migrate: new Set<StepId>(['migrate', 'start-daemons'])
+}
 
 const ASIDE: Record<GlyphState, string> = {
   todo: '',
@@ -56,6 +67,7 @@ export default function ProvisionStep({
   warnings = [],
   gitTip = null,
   withClone = false,
+  mode = 'init',
   onContinue,
   onRetry,
   onBack
@@ -67,6 +79,7 @@ export default function ProvisionStep({
   warnings?: string[]
   gitTip?: string | null
   withClone?: boolean
+  mode?: ProvisionMode
   onContinue: () => void
   onRetry: () => void
   onBack: () => void
@@ -87,7 +100,7 @@ export default function ProvisionStep({
     for (const [k, v] of stepState) if (v === 'running') stepState.set(k, 'failed')
     if (failure?.step && !stepState.has(failure.step)) stepState.set(failure.step, 'failed')
   }
-  const visible = STEPS.filter((s) => CORE.has(s.id) || stepState.has(s.id) || (s.id === 'clone-repo' && withClone))
+  const visible = STEPS.filter((s) => CORE[mode].has(s.id) || stepState.has(s.id) || (s.id === 'clone-repo' && withClone))
   const finished = visible.filter((s) => {
     const st = stepState.get(s.id)
     return st === 'done' || st === 'skipped'
