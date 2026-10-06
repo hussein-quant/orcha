@@ -1244,11 +1244,14 @@ def _run_block_action_pipeline(cid: str, slack_user_id: str, number: int, bot_to
     (`blocks_start_success` / `blocks_already_tracked`) this used to return inline
     before the ack-timing fix; only the timing moved.
     """
-    with db_cursor() as (conn, cur):
+    # GH #258 S3 note 4: the GitHub fetch only reads, so it holds no write lock; the start
+    # (which re-checks "already tracked" itself) runs in a short write scope after it.
+    with db_cursor(readonly=True) as (_conn, cur):
         gh_item = _fetch_gh_item(cur, cid, "issue", number)
-        gh_title = (gh_item or {}).get("title") or f"#{number}"
-        html_url = (gh_item or {}).get("html_url") or ""
-        body_excerpt = (gh_item or {}).get("body_excerpt") or ""
+    gh_title = (gh_item or {}).get("title") or f"#{number}"
+    html_url = (gh_item or {}).get("html_url") or ""
+    body_excerpt = (gh_item or {}).get("body_excerpt") or ""
+    with db_cursor() as (conn, cur):
         # Re-resolve the acting member from THIS background call's own fresh cursor
         # (never trusting a dict handed across from the request's already-closed
         # cursor) — mirrors _member_for_slack_user's own lookup exactly, so a member
@@ -1267,21 +1270,21 @@ def _run_block_action_pipeline(cid: str, slack_user_id: str, number: int, bot_to
             source="slack",
         )
         conn.commit()
-        task_link = portal_task_link(cid, result["task_id"])
-        if not slack_user_id:
-            return
-        if result["existing"]:
-            _dm_or_ephemeral(
-                bot_token, slack_user_id,
-                blocks_already_tracked("issue", number, task_link),
-                f"Already tracked: issue #{number} has an open Orcha task.",
-            )
-        else:
-            _dm_or_ephemeral(
-                bot_token, slack_user_id,
-                blocks_start_success("issue", number, html_url, gh_title, task_link),
-                f"Started an Orcha task for issue #{number}: {gh_title}",
-            )
+    task_link = portal_task_link(cid, result["task_id"])
+    if not slack_user_id:
+        return
+    if result["existing"]:
+        _dm_or_ephemeral(
+            bot_token, slack_user_id,
+            blocks_already_tracked("issue", number, task_link),
+            f"Already tracked: issue #{number} has an open Orcha task.",
+        )
+    else:
+        _dm_or_ephemeral(
+            bot_token, slack_user_id,
+            blocks_start_success("issue", number, html_url, gh_title, task_link),
+            f"Started an Orcha task for issue #{number}: {gh_title}",
+        )
 
 
 def _prepare_interaction(payload: dict, bot_token: str) -> tuple:

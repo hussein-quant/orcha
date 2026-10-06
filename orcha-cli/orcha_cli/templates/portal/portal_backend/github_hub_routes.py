@@ -1234,6 +1234,26 @@ def get_github_issue(cid: str, number: int, request: Request):
     return {**payload, "issue": _with_tracked_one(cid, number, payload["issue"])}
 
 
+def _start_assignee(cur, cid: str, raw):
+    """The validated assignee id for a hub start (None when unassigned): a live AI agent in
+    this container. Raises the same 400/404/409s the route always returned."""
+    if not raw:
+        return None
+    if not valid_uuid(raw):
+        raise HTTPException(400, "assignee_agent_id is not a valid UUID")
+    cur.execute("SELECT kind, container_id, terminated_at FROM agents WHERE id=%s", (raw,))
+    a = cur.fetchone()
+    if not a:
+        raise HTTPException(404, f"agent {raw} not found")
+    if str(a["container_id"]) != cid:
+        raise HTTPException(409, "assignee is not in this container")
+    if a["terminated_at"] is not None:
+        raise HTTPException(409, "assignee is retired and cannot be assigned work")
+    if a["kind"] != "ai":
+        raise HTTPException(409, "can only assign GitHub work to AI agents")
+    return raw
+
+
 @app.post("/api/containers/{cid}/github/start", status_code=201)
 def start_from_github(cid: str, body: GithubStartBody, request: Request):
     """Turn a GitHub issue/PR into an Orcha task (the [Start →] / PR [Fix →] button).
@@ -1274,35 +1294,22 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
     """
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
+    # GH #258 S3 note 4: three scopes so no write lock is held across the GitHub calls —
+    # (1) gate + validate, (2) the fetches in a readonly scope, (3) a short write scope that
+    # re-validates the assignee; start_task_from_github re-checks "already tracked" itself.
     with db_cursor() as (conn, cur):
         require_container(cur, cid)
         # Same identity/grant gate task creation requires today: the trusted login IS the
         # creator (non-member 403, viewer write-banned); trust-off passes the body actor
         # through unchanged (the self-host convention).
         created_by = trusted_actor(cur, request, cid, body.created_by_agent_id)
+        _start_assignee(cur, cid, body.assignee_agent_id)
+        already_tracked = find_open_gh_task(cur, cid, body.number)
 
-        assignee_id = None
-        if body.assignee_agent_id:
-            if not valid_uuid(body.assignee_agent_id):
-                raise HTTPException(400, "assignee_agent_id is not a valid UUID")
-            cur.execute(
-                "SELECT kind, container_id, terminated_at FROM agents WHERE id=%s",
-                (body.assignee_agent_id,),
-            )
-            a = cur.fetchone()
-            if not a:
-                raise HTTPException(404, f"agent {body.assignee_agent_id} not found")
-            if str(a["container_id"]) != cid:
-                raise HTTPException(409, "assignee is not in this container")
-            if a["terminated_at"] is not None:
-                raise HTTPException(409, "assignee is retired and cannot be assigned work")
-            if a["kind"] != "ai":
-                raise HTTPException(409, "can only assign GitHub work to AI agents")
-            assignee_id = body.assignee_agent_id
-
-        gh_title, body_excerpt, html_url = body.title or "", body.body_excerpt or "", body.html_url or ""
-        dod_override = None
-        if not find_open_gh_task(cur, cid, body.number):
+    gh_title, body_excerpt, html_url = body.title or "", body.body_excerpt or "", body.html_url or ""
+    dod_override = None
+    if not already_tracked:
+        with db_cursor(readonly=True) as (_conn, cur):
             # Authoritative title/body/url — see this function's docstring. Fetched for
             # BOTH kinds; the client-supplied body.* fields above are the fallback,
             # used only if this fetch itself fails.
@@ -1323,6 +1330,8 @@ def start_from_github(cid: str, body: GithubStartBody, request: Request):
                     except RuntimeError:
                         pass   # live re-fetch failed — degrade to the generic static DoD
 
+    with db_cursor() as (conn, cur):
+        assignee_id = _start_assignee(cur, cid, body.assignee_agent_id)
         result = start_task_from_github(
             cur,
             cid,
