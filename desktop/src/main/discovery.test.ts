@@ -126,7 +126,17 @@ describe('discoverStacks (native + docker, GH #258)', () => {
 
   it('lists native projects with no Docker and reports dockerAvailable: false', async () => {
     const d = await discoverStacks({ exec: dockerDown, listNative: async () => [native('notes', true)] })
-    expect(d).toEqual({ stacks: [native('notes', true)], dockerAvailable: false, dockerUnresponsive: false })
+    expect(d).toEqual({
+      stacks: [native('notes', true)],
+      dockerAvailable: false,
+      dockerUnresponsive: false,
+      dockerMissing: false
+    })
+  })
+  it('a Mac with no docker binary at all reports dockerMissing (Home says nothing about Docker)', async () => {
+    const noDocker = vi.fn().mockRejectedValue(Object.assign(new Error('spawn docker ENOENT'), { code: 'ENOENT' }))
+    const d = await discoverStacks({ exec: noDocker, listNative: async () => [] })
+    expect(d).toMatchObject({ stacks: [], dockerAvailable: false, dockerMissing: true })
   })
   it('listStacks does not throw DOCKER_UNAVAILABLE when native projects exist', async () => {
     await expect(listStacks({ exec: dockerDown, listNative: async () => [native('notes', false)] })).resolves.toEqual([

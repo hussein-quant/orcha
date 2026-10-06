@@ -710,14 +710,6 @@ function AppShell() {
       onDismissError={dismissError}
       onRemove={canRemove ? removal.request : undefined}
       onRefresh={host.refresh}
-      onStartDocker={async () => {
-        try {
-          await window.orchaDesktop.preflight()
-        } catch {
-          // preflight failing just means Docker is still down; the notice stays.
-        }
-        await host.refresh()
-      }}
     />
   )
 

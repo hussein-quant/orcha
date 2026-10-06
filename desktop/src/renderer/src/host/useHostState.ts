@@ -58,12 +58,11 @@ export function useHostState(): HostState {
       let hidden = false
       if (api.listStacksDetailed) {
         const d = await api.listStacksDetailed()
-        // A Docker-only machine with Docker down keeps the "Docker isn't running" banner.
-        if (!d.dockerAvailable && d.stacks.length === 0) {
-          throw { code: 'DOCKER_UNAVAILABLE', unresponsive: d.dockerUnresponsive === true }
-        }
+        // Issue 258 D4: projects run without Docker, so Docker being off never blocks Home.
+        // If Docker is installed but off, a one-line note says its projects are hidden; a Mac
+        // without Docker at all hears nothing about it.
         s = d.stacks
-        hidden = !d.dockerAvailable
+        hidden = !d.dockerAvailable && d.dockerMissing !== true
       } else {
         s = await api.listStacks()
       }

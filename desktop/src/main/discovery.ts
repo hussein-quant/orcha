@@ -92,6 +92,10 @@ export async function listDockerStacks(exec: Exec = defaultExec): Promise<Stack[
     if ((err as { timedOut?: boolean } | null)?.timedOut === true) {
       throw { code: 'DOCKER_UNAVAILABLE', unresponsive: true } as const
     }
+    // No `docker` binary at all: a Mac that never had Docker (GH #258 D4) — say nothing about it.
+    if ((err as { code?: unknown } | null)?.code === 'ENOENT') {
+      throw { code: 'DOCKER_UNAVAILABLE', missing: true } as const
+    }
     throw { code: 'DOCKER_UNAVAILABLE' } as const
   }
   return parseDockerPs(result.stdout)
@@ -127,7 +131,7 @@ async function defaultListNative(): Promise<Stack[]> {
   return stacks
 }
 
-let dockerCache: { at: number; value: Stack[] | { error: { code: 'DOCKER_UNAVAILABLE'; unresponsive?: boolean } } } | null =
+let dockerCache: { at: number; value: Stack[] | { error: { code: 'DOCKER_UNAVAILABLE'; unresponsive?: boolean; missing?: boolean } } } | null =
   null
 
 /** Test hook: forget the cached docker pass. */
@@ -145,14 +149,19 @@ export async function discoverStacks(deps: DiscoveryDeps = {}): Promise<Discover
     try {
       entry = { at: now, value: await listDockerStacks(deps.exec ?? defaultExec) }
     } catch (err) {
-      entry = { at: now, value: { error: err as { code: 'DOCKER_UNAVAILABLE'; unresponsive?: boolean } } }
+      entry = { at: now, value: { error: err as { code: 'DOCKER_UNAVAILABLE'; unresponsive?: boolean; missing?: boolean } } }
     }
     if (!deps.exec) dockerCache = entry
   }
   const native = await nativeP
   const docker = entry.value
   if (!Array.isArray(docker)) {
-    return { stacks: native, dockerAvailable: false, dockerUnresponsive: docker.error.unresponsive === true }
+    return {
+      stacks: native,
+      dockerAvailable: false,
+      dockerUnresponsive: docker.error.unresponsive === true,
+      dockerMissing: docker.error.missing === true
+    }
   }
   const seen = new Set(native.map((s) => s.projectShort))
   const stacks = [...native, ...docker.filter((s) => !seen.has(s.projectShort))].sort((a, b) =>

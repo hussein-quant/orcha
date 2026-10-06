@@ -9,7 +9,7 @@ export type ProvisionStatus = 'idle' | 'running' | 'done' | 'failed'
 
 const STEPS: { id: StepId; label: string }[] = [
   { id: 'clone-repo', label: 'Clone the repository' },
-  { id: 'preflight', label: 'Check Docker' },
+  { id: 'preflight', label: 'Check this Mac' },
   { id: 'migrate', label: 'Move the project off Docker' },
   { id: 'ports', label: 'Pick free ports' },
   { id: 'config', label: 'Write project settings' },

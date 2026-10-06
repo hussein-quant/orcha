@@ -3,8 +3,8 @@ import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
 import { useHostModal } from '../host/useHostModal'
 
-/** Destructive type-to-confirm dialog for deleting a whole Docker STACK (compose down -v +
- *  image + on-disk Orcha files). A stack can hold several projects, and every one of them
+/** Destructive type-to-confirm dialog for deleting a whole project stack (its database, its
+ *  background service or Docker containers, and its on-disk Orcha files). A stack can hold several projects, and every one of them
  *  goes with it — so the dialog names the stack AND lists each project that will be removed
  *  (desktop audit MAJOR: "Delete project…" silently took sibling projects with it).
  *  The confirm button stays disabled until the exact compose project name is typed. Stays
@@ -87,7 +87,7 @@ export default function ConfirmResetModal({
             </p>
           ) : null}
           <p>
-            Removes the stack’s containers, its database (all agents, tasks, requests and
+            Stops the project and removes its database (all agents, tasks, requests and
             conversations) and its on-disk Orcha files. Your own code in the folder is left
             untouched. <span className="font-medium text-danger">This cannot be undone.</span>
           </p>

@@ -58,6 +58,8 @@ export interface StackDiscovery {
   /** False when Docker is missing or down; any Docker projects are hidden from the list. */
   dockerAvailable: boolean
   dockerUnresponsive?: boolean
+  /** No `docker` CLI on this Mac at all (a no-Docker user): nothing about Docker is shown. */
+  dockerMissing?: boolean
 }
 export type StackHealth = 'ok' | 'starting' | 'crashlooping' | 'stopped'
 

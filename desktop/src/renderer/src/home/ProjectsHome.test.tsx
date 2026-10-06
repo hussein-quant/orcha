@@ -256,22 +256,16 @@ describe('ProjectsHome (Linear table in the inset panel)', () => {
     expect(screen.queryByRole('tab', { name: /paused/i })).toBeNull()
   })
 
-  it('Docker down: a compact notice with Open Docker / Retry — never "No projects yet"', async () => {
-    const onStartDocker = vi.fn().mockResolvedValue(undefined)
-    const p = props({ dockerDown: true, onStartDocker })
-    render(<ProjectsHome {...p} />)
+  it('Docker down (older API): one quiet line, no Open Docker button — never "No projects yet"', () => {
+    render(<ProjectsHome {...props({ dockerDown: true })} />)
     expect(screen.getByText('Docker isn’t running.')).toBeInTheDocument()
     expect(screen.queryByText(/no projects yet/i)).toBeNull()
-    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(p.onRefresh).toHaveBeenCalled()
-    await userEvent.click(screen.getByRole('button', { name: /open docker/i }))
-    expect(onStartDocker).toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /open docker/i })).toBeNull()
   })
 
-  it('Docker hung: the notice says it isn’t responding and to quit/reopen — not "isn’t running"', () => {
-    render(<ProjectsHome {...props({ dockerDown: true, dockerUnresponsive: true, onStartDocker: vi.fn() })} />)
+  it('Docker hung: the line says it isn’t responding — not "isn’t running"', () => {
+    render(<ProjectsHome {...props({ dockerDown: true, dockerUnresponsive: true })} />)
     expect(screen.getByText('Docker isn’t responding.')).toBeInTheDocument()
-    expect(screen.getByText(/quit and reopen docker desktop/i)).toBeInTheDocument()
     expect(screen.queryByText(/isn’t running/i)).toBeNull()
   })
 

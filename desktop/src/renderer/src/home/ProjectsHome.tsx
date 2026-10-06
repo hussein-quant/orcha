@@ -7,7 +7,6 @@ import { ProjectIcon } from '../ui/ProjectIcon'
 import { IconPicker } from '../icons/IconPicker'
 import { iconEditability, projectIconKey, type ProjectIcon as ProjectIconValue } from '../host/projectIcons'
 import { cn } from '../ui/cn'
-import DockerDownBanner from '../components/DockerDownBanner'
 import MigrateOffDockerCard from './MigrateOffDockerCard'
 import HelperMissingBanner from '../components/HelperMissingBanner'
 import ConfirmResetModal from '../components/ConfirmResetModal'
@@ -41,8 +40,6 @@ export interface ProjectsHomeProps {
   onRemove?(row: ProjectRow): void
   /** Re-read the host state (after a delete, or "Retry" when Docker is down). */
   onRefresh(): Promise<void> | void
-  /** Try to start Docker (preflight auto-start), then refresh. */
-  onStartDocker?(): Promise<void>
   /** D14: user project icons (same store as the host sidebar), recents, and the setter. */
   icons?: Record<string, ProjectIconValue>
   emojiRecents?: string[]
@@ -320,10 +317,12 @@ export default function ProjectsHome(props: ProjectsHomeProps) {
       )}
 
       <div className="flex shrink-0 flex-col gap-2 px-4 empty:hidden [&:not(:empty)]:pb-3">
+        {/* Issue 258 D4: the blocking Docker banner is gone — projects run without Docker. This
+            quiet line only shows on an older app API with no native discovery. */}
         {dockerDown && (
-          <div className="pt-3">
-            <DockerDownBanner onRetry={props.onRefresh} onStartDocker={props.onStartDocker} unresponsive={props.dockerUnresponsive} />
-          </div>
+          <p role="status" className="pt-3 text-[12px] text-text-3">
+            {props.dockerUnresponsive ? 'Docker isn’t responding.' : 'Docker isn’t running.'}
+          </p>
         )}
         {!dockerDown && loaded && props.dockerHidden && (
           <p className="pt-3 text-[12px] text-text-3" data-testid="docker-hidden-note">
