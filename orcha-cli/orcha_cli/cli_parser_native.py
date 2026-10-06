@@ -1,5 +1,5 @@
 """Parser entries for the native runtime (GH #258 PR 6): `orcha serve` and `orcha logs`;
-PR 11: `orcha backup` and `orcha restore`."""
+PR 11: `orcha backup` and `orcha restore`; PR 10: `orcha service` and `orcha doctor`."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -43,3 +43,22 @@ def register_native_commands(sub, handlers: dict[str, Callable]) -> None:
     res.add_argument("--json", action="store_true", help="machine-readable output (one JSON object)")
     res.add_argument("--project-dir", default=None, help="project root (default: the current directory)")
     res.set_defaults(func=handlers["restore"])
+
+    svc = sub.add_parser(
+        "service",
+        help="the macOS background service (launchd) that keeps a native project's Orcha "
+        "running, also after a reboot: install | uninstall | status",
+    )
+    svc.add_argument("action", choices=("install", "uninstall", "status"))
+    svc.add_argument("--json", action="store_true", help="machine-readable output (one JSON object)")
+    svc.add_argument("--project-dir", default=None, help="project root (default: the current directory)")
+    svc.set_defaults(func=handlers["service"])
+
+    doc = sub.add_parser(
+        "doctor",
+        help="check this machine and project (runtime, ports, service, claude/codex/git, "
+        "SQLite, disk, recent logs) — paste the output into a bug report",
+    )
+    doc.add_argument("--json", action="store_true", help="machine-readable output (one JSON object)")
+    doc.add_argument("--project-dir", default=None, help="project root (default: the current directory)")
+    doc.set_defaults(func=handlers["doctor"])

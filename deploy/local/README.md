@@ -24,7 +24,6 @@ orcha up          # idempotent; safe to re-run any time you come back
 open http://localhost:8000
 ```
 
-<!-- TODO(#258): up.sh still checks for Docker; update it with the orcha serve work (plan PR 10). -->
 Or run `sh deploy/local/up.sh` from your project directory instead of steps
 1–2 by hand — it runs `orcha init` only if `.orcha/` isn't there yet, then
 `orcha up`, and prints the portal URL.

@@ -18,6 +18,7 @@ from orcha_cli import (
     cli_native_lifecycle,
     cli_project_commands,
     cli_serve_support,
+    cli_service,
     cli_stacks_registry,
     cli_status,
 )
@@ -35,6 +36,13 @@ class _Tripwire:
 
     def _install_project_preferences(self, _cwd):
         return None
+
+
+@pytest.fixture(autouse=True)
+def _no_launchd(monkeypatch):
+    """The launchd branches have their own suite (test_cli_service.py); here the service is
+    never installed, so `up`/`down` take the plain-process path on any OS."""
+    monkeypatch.setattr(cli_service, "PLATFORM", "linux")
 
 
 @pytest.fixture
@@ -237,23 +245,113 @@ def test_init_native_writes_runtime_and_never_touches_docker(init_stubs, capsys)
     assert f"db:       {root / '.orcha' / 'orcha.db'}" in capsys.readouterr().out
 
 
-def test_init_default_is_still_docker(init_stubs):
+def test_init_runtime_docker_is_unchanged_and_says_deprecated(init_stubs, capsys):
     cli, calls, root = init_stubs
     cli.cmd_init(_init_ns())
     cfg = json.loads((root / ".claude" / "orcha.json").read_text())
     assert "runtime" not in cfg and cfg["db_port"] == 5432
     assert (root / ".orcha" / "docker-compose.yml").exists()
     assert ("up", "-d", "--build") in calls["compose"] and calls["native_up"] == []
+    assert "Docker runtime is deprecated" in capsys.readouterr().out
 
 
-def test_init_parser_runtime_flag_defaults_to_docker():
+def test_init_parser_runtime_flag_defaults_to_native():
     from orcha_cli import __main__ as cli
 
     parser = cli.build_parser()
-    assert parser.parse_args(["init"]).runtime == "docker"
-    assert parser.parse_args(["init", "--runtime", "native"]).runtime == "native"
+    ns = parser.parse_args(["init"])
+    assert ns.runtime == "native" and ns.no_service is False and ns.progress_json is False
+    assert parser.parse_args(["init", "--runtime", "docker"]).runtime == "docker"
+    assert parser.parse_args(["init", "--no-service", "--progress-json"]).no_service is True
     with pytest.raises(SystemExit):
         parser.parse_args(["init", "--runtime", "podman"])
+
+
+def _installs(monkeypatch, *, fail=False):
+    """Turn the launchd service on (as on a Mac) with `install` recorded, not run."""
+    seen = []
+
+    def install(root):
+        seen.append(root)
+        if fail:
+            raise cli_service.ServiceError("Bootstrap failed: 5: I/O error")
+        return {"plist": "/h/Library/LaunchAgents/io.openorcha.demo.plist", "changed": True}
+
+    monkeypatch.setattr(cli_service, "PLATFORM", "darwin")
+    monkeypatch.setattr(cli_service, "install", install)
+    return seen
+
+
+def test_init_native_installs_the_service_before_starting(init_stubs, monkeypatch):
+    cli, calls, root = init_stubs
+    seen = _installs(monkeypatch)
+    monkeypatch.setattr(cli_native_lifecycle, "up", lambda r: calls["native_up"].append(
+        ("up", list(seen))))
+    cli.cmd_init(_init_ns(runtime="native"))
+    assert seen == [root] and calls["native_up"] == [("up", [root])]  # install, then up
+
+
+def test_init_no_service_and_docker_never_install(init_stubs, monkeypatch):
+    cli, calls, root = init_stubs
+    seen = _installs(monkeypatch)
+    cli.cmd_init(_init_ns(runtime="native", no_service=True))
+    assert seen == [] and calls["native_up"] == [root]
+
+
+def test_init_service_failure_is_a_warning_not_a_dead_init(init_stubs, monkeypatch, capsys):
+    cli, calls, root = init_stubs
+    _installs(monkeypatch, fail=True)
+    plist = cli_service.plist_path("demo")
+    plist.parent.mkdir(parents=True)
+    plist.write_text("half-written")
+    cli.cmd_init(_init_ns(runtime="native"))
+    assert calls["native_up"] == [root] and not plist.exists()  # up falls back to a plain serve
+    assert "background service not installed" in capsys.readouterr().out
+
+
+def _lines(out):
+    return [json.loads(line) for line in out.splitlines()]
+
+
+def test_init_progress_json_only_json_on_stdout(init_stubs, monkeypatch, capsys):
+    cli, calls, root = init_stubs
+    _installs(monkeypatch)
+    cli.cmd_init(_init_ns(runtime="native", progress_json=True))
+    captured = capsys.readouterr()
+    lines = _lines(captured.out)  # every stdout line parses
+    assert [(e["step"], e["status"]) for e in lines] == [
+        ("ports", "ok"), ("config", "ok"), ("service", "start"), ("service", "ok"),
+        ("start", "start"), ("start", "ok"), ("wait-portal", "start"), ("wait-portal", "ok"),
+        ("create-container", "start"), ("create-container", "ok"),
+        ("register-human", "start"), ("register-human", "ok"), ("done", "ok")]
+    assert {e["step"] for e in lines} <= set(cli_init_steps())
+    done = lines[-1]["detail"]
+    assert done["container_id"] == "cid-1" and done["runtime"] == "native"
+    assert done["api_base_url"] == "http://localhost:8000"
+    assert done["db_path"] == str(root / ".orcha" / "orcha.db")
+    assert "[orcha] ✓ initialized" in captured.err  # the human text moved to stderr
+
+
+def cli_init_steps():
+    from orcha_cli import cli_init
+    return cli_init.STEPS
+
+
+def test_init_progress_json_reports_the_failed_step(init_stubs, monkeypatch, capsys):
+    cli, calls, root = init_stubs
+
+    def boom(url, body):
+        raise RuntimeError("HTTP 500")
+
+    monkeypatch.setattr(cli, "_post_json", boom)
+    with pytest.raises(SystemExit):
+        cli.cmd_init(_init_ns(runtime="native", no_service=True, progress_json=True))
+    lines = _lines(capsys.readouterr().out)
+    assert ("service", "skip") in [(e["step"], e["status"]) for e in lines]
+    last = lines[-1]
+    assert (last["step"], last["status"]) == ("done", "error")
+    assert last["detail"]["failed_step"] == "create-container"
+    assert "HTTP 500" in last["detail"]["error"]
 
 
 # ── native `orcha upgrade` / `orcha update` (plan R-D1 DB-tip guard) ─────────────────────

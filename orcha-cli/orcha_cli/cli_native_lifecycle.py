@@ -2,8 +2,9 @@
 
 A native project has no compose file to drive: `orcha serve` owns the portal, notifier and
 terminal bridge, so `up` starts (or finds) that one supervisor, `down` stops it, and
-`status` reads its `.orcha/state.json`. The service-unit branches (launchd/systemd) arrive
-with R3; until then `up` spawns `serve` detached the same way `ensure_daemon` does.
+`status` reads its `.orcha/state.json`. When the launchd service is installed (R3, PR 10,
+macOS only) `up` refreshes it and lets launchd start `serve`, and `down` unloads it;
+otherwise `up` spawns `serve` detached the same way `ensure_daemon` does.
 """
 from __future__ import annotations
 
@@ -21,6 +22,7 @@ from orcha_cli import (
     cli_runtime_mode,
     cli_serve,
     cli_serve_support,
+    cli_service,
     cli_stacks_registry,
 )
 
@@ -60,10 +62,27 @@ def up(root: pathlib.Path, *, popen=subprocess.Popen, http_ok=cli_serve_support.
     cfg = cli_runtime_mode.read_config(root)
     api = _api_base(cfg)
     pid = cli_serve.serve_running(root)
-    if pid and http_ok(f"{api}/"):
+    res = None
+    if cli_service.installed(root):
+        # R3: every `up` re-installs the unit so a tool installed since (new PATH) or a
+        # moved app (new python) is picked up. launchd restarts serve only when the plist
+        # changed; `kickstart` (no -k) starts it when stopped and leaves a running one be.
+        try:
+            res = cli_service.install(root)
+            cli_service.start(root)
+        except cli_service.ServiceError as exc:
+            print(f"[orcha] warn: background service: {exc}; starting orcha serve directly")
+    if res is not None:
+        if res["changed"]:
+            print(f"[orcha] refreshed the background service ({res['plist']})")
+        if pid and not res["changed"] and http_ok(f"{api}/"):
+            print(f"[orcha] already running (orcha serve pid {pid}) — {api}/")
+            return
+        print("[orcha] starting Orcha through its background service (launchd) ...")
+    elif pid and http_ok(f"{api}/"):
         print(f"[orcha] already running (orcha serve pid {pid}) — {api}/")
         return
-    if pid:
+    elif pid:
         print(f"[orcha] orcha serve is running (pid {pid}); waiting for the portal ...")
     else:
         log = cli_serve_support.log_path(root, "serve")
@@ -99,6 +118,10 @@ def down(root: pathlib.Path, *, volumes: bool = False, yes: bool = False,
     db = cli_runtime_mode.db_path(root, cfg)
     if volumes:
         _confirm_db_delete(db, yes)  # ask before stopping anything
+    if cli_service.stop(root):  # launchd stops serve; it loads again at the next login
+        print("[orcha] stopped the background service (it starts again at the next login; "
+              "`orcha service uninstall` removes it)")
+        _wait_until(lambda: not cli_serve.serve_running(root), stop_secs)
     pid = cli_serve.serve_running(root)
     if pid:
         kill(pid, signal.SIGTERM)

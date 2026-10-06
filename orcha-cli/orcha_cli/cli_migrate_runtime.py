@@ -54,11 +54,12 @@ class Deps:
     http_ok: Callable  # (url) -> bool
     get_json: Callable  # (url, timeout=...) -> dict | None
     confirm: Callable  # (question) -> bool
-    service_install: Optional[Callable] = None  # PR 10 (launchd); None until then
+    service_install: Optional[Callable] = None  # (root) -> dict | None; launchd, macOS only
+    service_uninstall: Optional[Callable] = None  # (root) -> dict; rollback removes the unit
 
 
 def default_deps(services) -> Deps:
-    from orcha_cli import cli_native_lifecycle, cli_serve_support, terminal_bridge
+    from orcha_cli import cli_native_lifecycle, cli_serve_support, cli_service, terminal_bridge
 
     def confirm(question: str) -> bool:
         if not sys.stdin.isatty():
@@ -78,6 +79,8 @@ def default_deps(services) -> Deps:
         http_ok=cli_serve_support.http_ok,
         get_json=services._get_json,
         confirm=confirm,
+        service_install=cli_service.install_if_supported,
+        service_uninstall=lambda root: cli_service.uninstall(root) if cli_service.supported() else None,
     )
 
 
@@ -224,7 +227,16 @@ def forward(root: pathlib.Path, deps: Deps, out: Output, *, pg_url: Optional[str
     deps.write_hooks(root / ".claude")
     if deps.service_install is not None and not no_service:
         out.step("service", "installing the background service")
-        deps.service_install(root)
+        try:
+            deps.service_install(root)
+        except Exception as exc:  # not fatal: `up` below starts serve directly instead
+            try:
+                if deps.service_uninstall is not None:
+                    deps.service_uninstall(root)  # no half-installed unit for `up` to trip on
+            except Exception:
+                pass
+            out.step("service", f"warning: the background service was not installed ({exc}); "
+                                "run `orcha service install` later so Orcha starts at login")
 
     out.step("start", "starting Orcha natively")
     deps.native_up(root)
@@ -259,6 +271,8 @@ def rollback(root: pathlib.Path, deps: Deps, out: Output) -> None:
                            "nothing to roll back to")
     out.step("stop-native", "stopping the native stack")
     deps.native_down(root)
+    if deps.service_uninstall is not None:
+        deps.service_uninstall(root)  # a Docker project must not start `orcha serve` at login
     db = cli_runtime_mode.db_path(root, cfg)
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     kept = db.with_name(f"{db.name}.rolled-back-{stamp}")

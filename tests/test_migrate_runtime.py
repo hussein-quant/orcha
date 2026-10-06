@@ -221,6 +221,42 @@ def test_service_is_installed_unless_no_service(project):
     assert installed == [project.resolve()]
 
 
+def test_no_service_skips_the_install(project):
+    installed = []
+    deps = Fake().deps()
+    deps.service_install = installed.append
+    assert mr.run(_args(project, no_service=True), deps,
+                  mr.Output(False, stream=io.StringIO())) == 0
+    assert installed == []
+
+
+def test_service_install_failure_still_migrates_and_clears_the_unit(project):
+    fake = Fake()
+    removed = []
+    deps = fake.deps()
+
+    def broken(root):
+        raise RuntimeError("Bootstrap failed: 5")
+
+    deps.service_install, deps.service_uninstall = broken, removed.append
+    buf = io.StringIO()
+    assert mr.run(_args(project, json=True), deps, mr.Output(True, stream=buf)) == 0
+    assert removed == [project.resolve()] and ("native_up",) in fake.calls
+    assert any("Bootstrap failed" in line for line in buf.getvalue().splitlines())
+
+
+def test_rollback_removes_the_background_service(project):
+    assert _run(project, Fake())[0] == 0
+    fake = Fake()
+    removed = []
+    deps = fake.deps()
+    deps.service_uninstall = lambda root: (removed.append(root), fake.calls.append(("uninstall",)))
+    assert mr.run(_args(project, rollback=True), deps,
+                  mr.Output(False, stream=io.StringIO())) == 0
+    assert removed == [project.resolve()]
+    assert fake.calls[:2] == [("native_down",), ("uninstall",)]  # before Docker comes back
+
+
 # ---------------------------------------------------------------- rollback
 
 def test_rollback_restores_config_byte_for_byte_and_keeps_the_sqlite_file(project):

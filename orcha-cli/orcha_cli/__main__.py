@@ -14,10 +14,12 @@ from .cli_env import _append_env_file, _read_env_file_value, _tighten_env_file
 from .cli_hook_facade import *
 from .cli_http import _get_json, _post_json, _put_json, _wait_for_portal
 from .cli_backup import cmd_backup, cmd_restore
+from .cli_doctor import cmd_doctor
 from .cli_logs import cmd_logs
 from .cli_migrate_runtime import cmd_migrate_runtime
 from .cli_portal import cmd_portal
 from .cli_serve import cmd_serve
+from .cli_service import cmd_service
 from .cli_worktrees import cmd_worktrees
 from .cli_project_facade import *
 from .cli_runtime_facade import *
@@ -96,6 +98,8 @@ def build_parser() -> argparse.ArgumentParser:
         "logs": cmd_logs,
         "backup": cmd_backup,
         "restore": cmd_restore,
+        "service": cmd_service,
+        "doctor": cmd_doctor,
         "sandbox": cmd_sandbox,
         "pause": cmd_pause,
         "resume": cmd_resume,

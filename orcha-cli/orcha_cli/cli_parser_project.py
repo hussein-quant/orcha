@@ -34,9 +34,20 @@ def register_project_commands(
         help="host port for the live-terminal bridge (default: first free 8765+)",
     )
     init.add_argument(
-        "--runtime", choices=("docker", "native"), default="docker",
-        help="docker (default): Postgres + portal in Docker. native: run the portal, notifier "
-             "and bridge on this machine under `orcha serve`, with a SQLite file (GH #258)",
+        "--runtime", choices=("docker", "native"), default="native",
+        help="native (default): run the portal, notifier and bridge on this machine under "
+             "`orcha serve`, with a SQLite file (GH #258). docker: Postgres + portal in Docker "
+             "(deprecated; kept for one release)",
+    )
+    init.add_argument(
+        "--no-service", action="store_true",
+        help="native runtime: do not install the macOS background service (launchd), so "
+             "Orcha does not start at login",
+    )
+    init.add_argument(
+        "--progress-json", action="store_true",
+        help="print one JSON line per step on stdout ({\"step\", \"status\", \"detail\"}); "
+             "the usual messages go to stderr (for the Mac app)",
     )
     init.add_argument("--force", action="store_true", help="overwrite existing .orcha/")
     init.add_argument(

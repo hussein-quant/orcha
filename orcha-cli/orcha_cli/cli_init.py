@@ -2,16 +2,51 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
 import sys
-from typing import Optional
+from typing import Callable, Optional
 
-from orcha_cli import cli_native_lifecycle, cli_runtime_mode
+from orcha_cli import cli_native_lifecycle, cli_runtime_mode, cli_service
+
+# GH #258 plan D2: the step names the Mac app's provisioning screen maps 1:1.
+STEPS = ("ports", "config", "service", "start", "wait-portal", "create-container",
+         "register-human", "done")
+
 
 def cmd_init(args: argparse.Namespace, services) -> None:
-    """Initialize a project while resolving patchable services from the CLI facade."""
+    """Initialize a project while resolving patchable services from the CLI facade.
+
+    ``--progress-json`` (GH #258 PR 10, for the Mac app): stdout carries only one JSON line
+    per step, ``{"step", "status": "start|ok|skip|error", "detail"}``; every usual message
+    goes to stderr. A failure ends with a ``done``/``error`` line naming the failed step."""
+    if not getattr(args, "progress_json", False):
+        _init(args, services, lambda *a, **k: None)
+        return
+    real_stdout = sys.stdout
+    current = {"step": None}
+
+    def step(name: str, status: str, detail=None) -> None:
+        current["step"] = name
+        real_stdout.write(json.dumps({"step": name, "status": status, "detail": detail}) + "\n")
+        real_stdout.flush()
+
+    with contextlib.redirect_stdout(sys.stderr):
+        try:
+            summary = _init(args, services, step)
+        except SystemExit as exc:
+            message = exc.code if isinstance(exc.code, str) else f"exit code {exc.code}"
+            step("done", "error", {"failed_step": current["step"], "error": message})
+            raise
+        except Exception as exc:
+            step("done", "error", {"failed_step": current["step"], "error": str(exc)})
+            raise
+    step("done", "ok", summary)
+
+
+def _init(args: argparse.Namespace, services, step: Callable) -> dict:
     PKG_TEMPLATES = services.PKG_TEMPLATES
     _sanitize_name = services._sanitize_name
     _find_free_port = services._find_free_port
@@ -56,6 +91,10 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     # at 8765 so the first project keeps the familiar port; only 2nd+ shift.
     bridge_port = args.bridge_port or _find_free_port(start=8765)
     api_base = f"http://localhost:{api_port}"
+    if not native:
+        print("[orcha] note: the Docker runtime is deprecated and will be removed in a later "
+              "release; new projects run natively (drop `--runtime docker`).")
+    step("ports", "ok", {"api": api_port, "bridge": bridge_port, "db": db_port})
 
     # Orcha#30: figure out who the first human is.
     human_alias = args.as_user or os.environ.get("USER") or "operator"
@@ -127,6 +166,7 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     # 4b. Orcha#33: register the PostToolUse poll-inbox hook so working agents
     #     notice incoming asks within ~5s. Idempotent w.r.t. existing settings.json.
     _write_hook_config(claude_config.parent)
+    step("config", "ok", str(claude_config))
 
     # 4c. --reset-data: drop this project's Postgres volume for a PRISTINE start.
     #     Without it, `init --force` REUSES the existing named volume
@@ -144,23 +184,51 @@ def cmd_init(args: argparse.Namespace, services) -> None:
               f"(DESTRUCTIVE — wiping all prior data) ...")
         _compose(orcha_dir, "down", "-v", check=False)
 
+    # 4d. GH #258 R3: the macOS background service (launchd) keeps the native stack up
+    #     across logout and reboot. Installing it starts `orcha serve` (RunAtLoad), so the
+    #     `up` below only waits for the portal. A failure falls back to a plain `up`.
+    if not native:
+        step("service", "skip", "docker runtime")
+    elif getattr(args, "no_service", False):
+        step("service", "skip", "--no-service")
+    elif not cli_service.supported():
+        step("service", "skip", "macOS only")
+    else:
+        step("service", "start")
+        try:
+            res = cli_service.install(project_root)
+            print(f"[orcha] ✓ background service installed ({res['plist']}); "
+                  "Orcha starts at login")
+            step("service", "ok", res["plist"])
+        except cli_service.ServiceError as e:
+            cli_service.plist_path(project_name).unlink(missing_ok=True)
+            print(f"[orcha] warn: background service not installed ({e}); "
+                  "Orcha will not start after a reboot until `orcha service install` works")
+            step("service", "error", str(e))
+
     # 5. docker compose up
+    step("start", "start")
     if native:
         print(f"[orcha] starting native stack '{project_name}' on api={api_port} ...")
         cli_native_lifecycle.up(project_root)
     else:
         print(f"[orcha] starting stack '{project_name}' on api={api_port}, db={db_port} ...")
         _compose(orcha_dir, "up", "-d", "--build")
+    step("start", "ok")
 
     # 6. Wait for portal readiness — the next two API calls need it up.
     if not args.no_container:
+        step("wait-portal", "start", api_base)
         _wait_for_portal(api_base)
+        step("wait-portal", "ok", api_base)
 
     # 7. Orcha#29: bootstrap the container.
     container_id: Optional[str] = None
     if args.no_container:
         print("[orcha] --no-container set; skipping container creation.")
+        step("create-container", "skip", "--no-container")
     else:
+        step("create-container", "start")
         objective = (args.objective or "").strip()
         if not objective:
             # Default to the project name as the objective; can be renamed later.
@@ -172,6 +240,7 @@ def cmd_init(args: argparse.Namespace, services) -> None:
             config["current_container_id"] = container_id
             claude_config.write_text(json.dumps(config, indent=2) + "\n")
             print(f"[orcha] ✓ container created: {container_id}  name='{objective}'")
+            step("create-container", "ok", container_id)
         except Exception as e:
             msg = str(e)
             # The stack already had a container (init --force reuses the volume by
@@ -205,7 +274,10 @@ def cmd_init(args: argparse.Namespace, services) -> None:
               "created — recorded in .claude/orcha.json only")
 
     # 8. Orcha#30: register the first human agent (kind='human').
-    if container_id is not None:
+    if container_id is None:
+        step("register-human", "skip", "no container")
+    else:
+        step("register-human", "start", human_alias)
         try:
             # PR attribution: carry the optional GitHub identity so agent-opened PRs
             # credit this human (docs/agent-prs.md). Omit keys when absent (NULL).
@@ -237,8 +309,10 @@ def cmd_init(args: argparse.Namespace, services) -> None:
                 json.dumps(binding, indent=2) + "\n"
             )
             print(f"[orcha] ✓ first human registered: {human_alias}  (agent_id {human_agent_id})")
+            step("register-human", "ok", human_alias)
         except Exception as e:
             print(f"[orcha] warn: human registration failed ({e}); register manually with /orcha-register-human")
+            step("register-human", "error", str(e))
 
     # 8a. #255: --reset-data host cleanup. The DB volume was dropped (step 4c) and a NEW
     #     container created, so anything on disk keyed to the OLD container is now stale:
@@ -292,3 +366,7 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     print( "  3. Register your first AI agent:")
     print(f"       /orcha-register-agent <Alias> --role \"...\" --prompt \"...\" [--initial-task \"...\" --task-dod \"...\"]")
     print( "  4. Inspect anytime:  /orcha-status in Claude or $orcha-status in Codex")
+    return {"project_dir": str(project_root), "api_base_url": api_base,
+            "runtime": cli_runtime_mode.NATIVE if native else cli_runtime_mode.DOCKER,
+            "db_path": str(cli_runtime_mode.db_path(project_root, config)) if native else None,
+            "container_id": container_id, "human_alias": human_alias}
