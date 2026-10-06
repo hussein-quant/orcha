@@ -45,6 +45,7 @@ import urllib.request
 
 from portal_backend import sql
 from portal_backend.agent_status import log_event, recompute_agent_status
+from portal_backend.database import after_commit
 from portal_backend.events import publish_event
 
 GITHUB_API = "https://api.github.com"
@@ -193,6 +194,10 @@ def _post_start_comment(cur, container_id, kind: str, number: int, task_id: str,
     bound repo, no installation token, or any GitHub/network failure is caught and
     swallowed — a dead comment must never break task creation. Runs from the shared
     core so every dispatch path (hub, Slack) gets it exactly once.
+
+    GH #258 S3 note 4: the token lookup and the POST run via database.after_commit, i.e.
+    once the caller's scope has committed — never under the write lock, and never for a
+    task whose insert rolled back.
     """
     try:
         cur.execute("SELECT github_repo FROM containers WHERE id=%s", (container_id,))
@@ -200,18 +205,24 @@ def _post_start_comment(cur, container_id, kind: str, number: int, task_id: str,
         repo = row["github_repo"] if row else None
         if not repo:
             return
-        token = _resolve_repo_token(repo, container_id)
-        if not token:
-            return
         assignee_alias = None
         if assignee_agent_id:
             cur.execute("SELECT alias FROM agents WHERE id=%s", (assignee_agent_id,))
             arow = cur.fetchone()
             assignee_alias = arow["alias"] if arow else None
         body = _compose_start_comment(task_id, assignee_alias)
-        _gh_post_comment(repo, number, token, body)
     except Exception:
-        pass  # best-effort by contract — a GitHub comment failure never breaks the start
+        return  # best-effort by contract — a GitHub comment failure never breaks the start
+
+    def _post() -> None:
+        try:
+            token = _resolve_repo_token(repo, container_id)
+            if token:
+                _gh_post_comment(repo, number, token, body)
+        except Exception:
+            pass  # best-effort, as above
+
+    after_commit(_post)
 
 
 def find_open_gh_tasks(cur, container_id, numbers) -> dict:

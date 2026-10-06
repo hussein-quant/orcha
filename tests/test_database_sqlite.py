@@ -85,6 +85,43 @@ def test_clean_exit_commits_and_exception_rolls_back(db, scratch):
     assert [r["v"] for r in db.execute("SELECT v FROM t_scratch")] == ["a"]
 
 
+def test_after_commit_runs_once_after_the_write_lock_is_released(db, scratch):
+    seen = []
+
+    def hook():
+        # Another thread's writer gets in at once: the outer scope has committed and released.
+        errors = []
+
+        def other():
+            try:
+                db.execute("INSERT INTO t_scratch(v) VALUES (%s)", ("other",))
+            except Exception as exc:  # pragma: no cover - only on a regression
+                errors.append(exc)
+
+        t = threading.Thread(target=other)
+        t.start()
+        t.join(timeout=2)
+        seen.append((t.is_alive(), errors, _count(db)))
+
+    with database.db_cursor() as (_c, cur):
+        cur.execute("INSERT INTO t_scratch(v) VALUES (%s)", ("a",))
+        with database.db_cursor() as (_c2, _cur2):
+            database.after_commit(hook)  # queued from a nested scope
+        assert seen == []  # never inside the transaction
+    assert seen == [(False, [], 2)]  # ran once, after commit, and the other writer was not blocked
+
+
+def test_after_commit_is_dropped_on_rollback_and_runs_now_outside_a_scope(scratch):
+    seen = []
+    with pytest.raises(ValueError):
+        with database.db_cursor():
+            database.after_commit(lambda: seen.append("rolled back"))
+            raise ValueError
+    assert seen == []
+    database.after_commit(lambda: seen.append("no scope"))
+    assert seen == ["no scope"]
+
+
 def test_concurrent_writers_are_serialised_not_lost(db, scratch):
     def work(i):
         for j in range(20):

@@ -411,17 +411,46 @@ def _sqlite_cursor(readonly: bool):
             report_slow_transaction(held, readonly, _caller())
 
 
+# Side effects queued by after_commit(): one list per outermost db_cursor scope.
+_after: contextvars.ContextVar = contextvars.ContextVar("orcha_db_after_commit", default=None)
+
+
+def after_commit(fn) -> None:
+    """Run `fn()` once the outermost db_cursor scope has exited cleanly (committed, write lock
+    released); dropped if the scope raises. Outside any scope it runs now. For slow,
+    best-effort side effects (a GitHub comment) that must not hold the SQLite write lock
+    (plan S3 note 4) or fire for a transaction that rolled back."""
+    hooks = _after.get()
+    if hooks is None:
+        fn()
+    else:
+        hooks.append(fn)
+
+
 @contextmanager
 def db_cursor(*, readonly: bool = False):
     """Yield (conn, cur). SQLite: the outermost scope opens BEGIN IMMEDIATE (BEGIN when
     readonly) and commits on a clean exit, rolls back on an exception; inner scopes join it.
-    Postgres: a fresh psycopg connection per scope, as before (`readonly` is ignored)."""
-    if BACKEND == "postgres":
-        with _pg_cursor() as pair:
-            yield pair
-        return
-    with _sqlite_cursor(readonly) as pair:
-        yield pair
+    Postgres: a fresh psycopg connection per scope, as before (`readonly` is ignored).
+    The outermost scope runs its after_commit() hooks after it has fully exited."""
+    outermost = _after.get() is None
+    hooks: list = []
+    token = _after.set(hooks) if outermost else None
+    try:
+        if BACKEND == "postgres":
+            with _pg_cursor() as pair:
+                yield pair
+        else:
+            with _sqlite_cursor(readonly) as pair:
+                yield pair
+    finally:
+        if outermost:
+            _after.reset(token)
+    for fn in hooks:  # reached only on a clean exit
+        try:
+            fn()
+        except Exception as exc:  # the transaction already committed; never fail the caller now
+            print(f"[db] after_commit hook failed: {exc!r}", flush=True)
 
 
 def ping() -> None:
