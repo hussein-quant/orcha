@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 #
-# Build a SIGNED + NOTARIZED Embodent .dmg/.zip — universal by default, or Apple
-# Silicon only with `arm64` (the only build that carries the bundled orcha runtime,
-# GH #258; see scripts/build-orcha-runtime.mjs).
+# Build a SIGNED + NOTARIZED Embodent .dmg/.zip — Apple Silicon by default (the
+# release build, carrying the bundled orcha runtime, GH #258; see
+# scripts/build-orcha-runtime.mjs), or `universal` for a future Intel build (no runtime).
 #
 # Signing and notarization credentials are read from environment variables that
 # this script loads from `.env.signing.local` (gitignored). Copy
 # `.env.signing.example` to `.env.signing.local`, fill it in, then run:
 #
-#   ./scripts/dist-mac-signed.sh          # universal
-#   ./scripts/dist-mac-signed.sh arm64    # Apple Silicon + bundled orcha runtime
+#   ./scripts/dist-mac-signed.sh             # Apple Silicon + bundled orcha runtime
+#   ./scripts/dist-mac-signed.sh universal   # Intel + Apple Silicon, no runtime
 #
 # Notarization uploads the app to Apple and waits for their malware scan, so a
 # clean run takes a few minutes and needs network access.
@@ -17,7 +17,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-ARCH="${1:-universal}"
+ARCH="${1:-arm64}"
 case "$ARCH" in
   universal) DIST_SCRIPT="dist:mac" ;;
   arm64) DIST_SCRIPT="dist:mac:arm64" ;;
