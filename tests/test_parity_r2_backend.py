@@ -385,10 +385,13 @@ def test_sigterm_with_open_sse_exits_promptly():
 
     port = _free_port()
     env = dict(os.environ)  # carries the leg's DB (ORCHA_DB_PATH on SQLite, DATABASE_URL on Postgres)
+    # The child needs orcha-cli on its path too (the portal imports orcha_cli.llm_util), the
+    # same as conftest gives this process — without it main.py fails to import and the
+    # test only ever saw "uvicorn did not start".
     code = (
-        "import sys; sys.path.insert(0, %r); import uvicorn, main; "
+        "import sys; sys.path[:0] = [%r, %r]; import uvicorn, main; "
         "uvicorn.run(main.app, host='127.0.0.1', port=%d, log_level='warning')"
-        % (str(conftest.PORTAL_DIR), port)
+        % (str(conftest.PORTAL_DIR), str(conftest.REPO / "orcha-cli"), port)
     )
     proc = subprocess.Popen([sys.executable, "-c", code], env=env,
                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
