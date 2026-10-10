@@ -7,6 +7,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 from typing import Callable, Optional
 
 from orcha_cli import cli_native_lifecycle, cli_runtime_mode, cli_service
@@ -28,9 +29,16 @@ def cmd_init(args: argparse.Namespace, services) -> None:
     real_stdout = sys.stdout
     current = {"step": None}
 
+    t0 = time.monotonic()
+
     def step(name: str, status: str, detail=None) -> None:
-        current["step"] = name
-        real_stdout.write(json.dumps({"step": name, "status": status, "detail": detail}) + "\n")
+        # `ts` (epoch s) + `elapsed` (s since init began) let the app time each stage at
+        # the source instead of by when the line reached the renderer (#295).
+        if status != "progress":
+            current["step"] = name
+        real_stdout.write(json.dumps({"step": name, "status": status, "detail": detail,
+                                      "ts": round(time.time(), 3),
+                                      "elapsed": round(time.monotonic() - t0, 3)}) + "\n")
         real_stdout.flush()
 
     with contextlib.redirect_stdout(sys.stderr):
@@ -187,6 +195,7 @@ def _init(args: argparse.Namespace, services, step: Callable) -> dict:
     # 4d. GH #258 R3: the macOS background service (launchd) keeps the native stack up
     #     across logout and reboot. Installing it starts `orcha serve` (RunAtLoad), so the
     #     `up` below only waits for the portal. A failure falls back to a plain `up`.
+    service_fresh = False  # the unit was installed just now: `up` need not re-install it
     if not native:
         step("service", "skip", "docker runtime")
     elif getattr(args, "no_service", False):
@@ -197,6 +206,7 @@ def _init(args: argparse.Namespace, services, step: Callable) -> dict:
         step("service", "start")
         try:
             res = cli_service.install(project_root)
+            service_fresh = True
             print(f"[orcha] ✓ background service installed ({res['plist']}); "
                   "Orcha starts at login")
             step("service", "ok", res["plist"])
@@ -210,7 +220,10 @@ def _init(args: argparse.Namespace, services, step: Callable) -> dict:
     step("start", "start")
     if native:
         print(f"[orcha] starting native stack '{project_name}' on api={api_port} ...")
-        cli_native_lifecycle.up(project_root)
+        cli_native_lifecycle.up(
+            project_root, service_fresh=service_fresh,
+            on_stage=lambda msg, elapsed: step("start", "progress",
+                                               {"stage": msg, "elapsed": round(elapsed, 1)}))
     else:
         print(f"[orcha] starting stack '{project_name}' on api={api_port}, db={db_port} ...")
         _compose(orcha_dir, "up", "-d", "--build")

@@ -3,8 +3,9 @@
 A native project has no compose file to drive: `orcha serve` owns the portal, notifier and
 terminal bridge, so `up` starts (or finds) that one supervisor, `down` stops it, and
 `status` reads its `.orcha/state.json`. When the launchd service is installed (R3, PR 10,
-macOS only) `up` refreshes it and lets launchd start `serve`, and `down` unloads it;
-otherwise `up` spawns `serve` detached the same way `ensure_daemon` does.
+macOS only) `up` refreshes it and lets launchd start `serve` — unless the project is
+already healthy (#295) — and `down` unloads it; otherwise `up` spawns `serve` detached the
+same way `ensure_daemon` does.
 """
 from __future__ import annotations
 
@@ -57,25 +58,79 @@ def _wait_until(pred, timeout: float, sleep=time.sleep, clock=time.monotonic) ->
     return pred()
 
 
+def _worker_line(root: pathlib.Path) -> str | None:
+    """`serve`'s children as state.json reports them ("notifier running (pid 9)"), so a
+    caller can see whether the agent worker is up, not only the portal."""
+    children = (cli_serve_support.read_state(root).get("children") or {})
+    if not children:
+        return None
+    return ", ".join(f"{name} {c.get('status', '?')}" + (f" (pid {c['pid']})" if c.get("pid") else "")
+                     for name, c in children.items())
+
+
 def up(root: pathlib.Path, *, popen=subprocess.Popen, http_ok=cli_serve_support.http_ok,
-       wait_secs: float = PORTAL_WAIT_SECS) -> None:
+       wait_secs: float = PORTAL_WAIT_SECS, refresh_service: bool = False,
+       service_fresh: bool = False, on_stage=None, clock=time.monotonic) -> None:
+    """Start (or find) this project's `orcha serve`.
+
+    Health first (#295): when serve is alive and the portal answers, nothing is refreshed
+    or restarted — re-installing the launchd unit re-runs the login shell (seconds to a
+    minute on a busy Mac) only to find the same plist. The unit IS refreshed when Orcha has
+    to be started, when it runs another interpreter (`stale_reason`), or on
+    `--refresh-service` (`refresh_service=True`) after installing a tool the agents need.
+    `service_fresh=True` (init, which installed the unit a moment ago) only kickstarts it.
+
+    Each stage is printed with its elapsed time (`[orcha] +2.1s …`) and handed to
+    `on_stage(message, elapsed_secs)` (init's --progress-json stream), so a slow start shows
+    where the time went."""
+    t0 = clock()
+
+    def stage(msg: str) -> None:
+        elapsed = clock() - t0
+        print(f"[orcha] +{elapsed:.1f}s {msg}", flush=True)
+        if on_stage is not None:
+            on_stage(msg, elapsed)
+
     cfg = cli_runtime_mode.read_config(root)
     api = _api_base(cfg)
     pid = cli_serve.serve_running(root)
+    service = cli_service.installed(root)
+    stage(f"orcha serve {'is running (pid ' + str(pid) + ')' if pid else 'is not running'}"
+          f"; background service {'installed' if service else 'not installed'}")
+    if pid and not refresh_service:
+        healthy = http_ok(f"{api}/")
+        stage(f"portal {'answers' if healthy else 'does not answer'} at {api}/")
+        stale = cli_service.stale_reason(root) if healthy and service else None
+        if healthy and stale is None:
+            print(f"[orcha] already running (orcha serve pid {pid}) — {api}/")
+            if service:
+                print("[orcha] background service left as is "
+                      "(`orcha up --refresh-service` re-reads your PATH)")
+            return
+        if stale:
+            stage(f"background service is out of date ({stale}); refreshing it")
     res = None
-    if cli_service.installed(root):
-        # R3: every `up` re-installs the unit so a tool installed since (new PATH) or a
-        # moved app (new python) is picked up. launchd restarts serve only when the plist
-        # changed; `kickstart` (no -k) starts it when stopped and leaves a running one be.
+    via_service = False
+    if service:
+        # R3: re-install the unit so a tool installed since (new PATH) or a moved app (new
+        # python) is picked up. launchd restarts serve only when the plist changed;
+        # `kickstart` (no -k) starts it when stopped and leaves a running one be.
         try:
-            res = cli_service.install(root)
+            if service_fresh:
+                stage("background service installed a moment ago; not re-installing it")
+            else:
+                stage("refreshing the background service (login-shell PATH, launchctl) ...")
+                res = cli_service.install(root)
+                stage(f"background service {'updated' if res['changed'] else 'unchanged'}")
             cli_service.start(root)
+            stage("asked launchd to start orcha serve")
+            via_service = True
         except cli_service.ServiceError as exc:
             print(f"[orcha] warn: background service: {exc}; starting orcha serve directly")
-    if res is not None:
-        if res["changed"]:
+    if via_service:
+        if res is not None and res["changed"]:
             print(f"[orcha] refreshed the background service ({res['plist']})")
-        if pid and not res["changed"] and http_ok(f"{api}/"):
+        if pid and not (res and res["changed"]) and http_ok(f"{api}/"):
             print(f"[orcha] already running (orcha serve pid {pid}) — {api}/")
             return
         print("[orcha] starting Orcha through its background service (launchd) ...")
@@ -93,12 +148,18 @@ def up(root: pathlib.Path, *, popen=subprocess.Popen, http_ok=cli_serve_support.
                 cwd=str(root), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
-        print(f"[orcha] started orcha serve (pid {proc.pid}); log: {log}")
+        stage(f"started orcha serve (pid {proc.pid}); log: {log}")
+    stage(f"waiting up to {int(wait_secs)} s for the portal ...")
     if _wait_until(lambda: http_ok(f"{api}/"), wait_secs):
+        stage(f"portal up at {api}/")
         print(f"[orcha] ✓ portal up at {api}/")
     else:
+        stage(f"portal did not answer within {int(wait_secs)} s")
         print(f"[orcha] warn: portal did not answer within {int(wait_secs)} s; "
               "check `orcha status` and `orcha logs portal`")
+    workers = _worker_line(root)
+    if workers:
+        stage(f"orcha serve children: {workers}")
 
 
 def _confirm_db_delete(db: pathlib.Path, yes: bool) -> None:
@@ -118,7 +179,12 @@ def down(root: pathlib.Path, *, volumes: bool = False, yes: bool = False,
     db = cli_runtime_mode.db_path(root, cfg)
     if volumes:
         _confirm_db_delete(db, yes)  # ask before stopping anything
-    if cli_service.stop(root):  # launchd stops serve; it loads again at the next login
+    try:
+        stopped_service = cli_service.stop(root)
+    except cli_service.ServiceError as exc:  # launchctl hung: stop serve by signal below
+        print(f"[orcha] warn: background service: {exc}")
+        stopped_service = False
+    if stopped_service:  # launchd stops serve; it loads again at the next login
         print("[orcha] stopped the background service (it starts again at the next login; "
               "`orcha service uninstall` removes it)")
         _wait_until(lambda: not cli_serve.serve_running(root), stop_secs)

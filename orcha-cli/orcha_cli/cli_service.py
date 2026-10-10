@@ -10,8 +10,15 @@ R-D2), so the Mac app's bundled Python and a ``uv tool`` venv both work.
 launchd hands agents an almost empty PATH, and the notifier must find ``claude``,
 ``codex``, ``git`` and ``gh``. ``install`` captures the login shell's PATH
 (``$SHELL -ilc``), puts ``~/.local/bin``, ``/opt/homebrew/bin`` and ``/usr/local/bin`` in
-front, and stores it in the plist. ``orcha up`` re-runs ``install`` so a tool installed
-later is picked up; the running service is only restarted when the plist changed.
+front, and stores it in the plist. ``orcha up`` re-runs ``install`` when it has to start
+Orcha (or with ``--refresh-service``) so a tool installed later is picked up; an already
+healthy project is left alone (#295: that refresh re-runs the login shell, which can take
+a minute on a busy Mac). The running service is only restarted when the plist changed, and
+a PATH capture that fails keeps the PATH already in the plist rather than restarting
+``serve`` onto a fallback one.
+
+Every ``launchctl`` call is bounded (``LAUNCHCTL_TIMEOUT_SECS``); a call that does not
+answer raises ``ServiceError`` with what to do, and ``up`` then starts ``serve`` directly.
 
 ``KeepAlive`` is ``{SuccessfulExit: false}`` rather than the plan's ``<true/>``: launchd
 restarts ``serve`` after a crash (or while another ``serve`` still owns the project, which
@@ -39,6 +46,7 @@ EXTRA_PATH = ("~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin")
 FALLBACK_PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 PATH_MARK = "__ORCHA_PATH__"
 SHELL_TIMEOUT_SECS = 15
+LAUNCHCTL_TIMEOUT_SECS = 20
 LAUNCHCTL_NOT_FOUND = 113  # `launchctl print` for a service that is not loaded
 
 
@@ -74,7 +82,15 @@ def _domain() -> str:
 
 
 def _launchctl(*args: str, check: bool = False) -> subprocess.CompletedProcess:
-    proc = subprocess.run(["launchctl", *args], capture_output=True, text=True)
+    try:
+        proc = subprocess.run(["launchctl", *args], capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=LAUNCHCTL_TIMEOUT_SECS)
+    except subprocess.TimeoutExpired:
+        raise ServiceError(
+            f"`launchctl {' '.join(args)}` did not answer within {LAUNCHCTL_TIMEOUT_SECS} s "
+            "(launchd is busy or stuck); Orcha is started directly instead. Try "
+            "`orcha service install` again later, or restart the Mac if it keeps happening"
+        ) from None
     if check and proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
         raise ServiceError(f"`launchctl {' '.join(args)}` failed ({proc.returncode}): {detail}")
@@ -84,9 +100,11 @@ def _launchctl(*args: str, check: bool = False) -> subprocess.CompletedProcess:
 # --- PATH capture ----------------------------------------------------------------------
 
 
-def capture_path(shell: Optional[str] = None) -> str:
+def capture_path(shell: Optional[str] = None, fallback: Optional[str] = None) -> str:
     """The login shell's PATH with the usual install dirs in front, de-duplicated. Markers
-    around the value keep anything an rc file prints out of it."""
+    around the value keep anything an rc file prints out of it. When the shell fails or
+    times out, ``fallback`` (the PATH already in the plist) is returned unchanged if given,
+    else this process's PATH is used."""
     shell = shell or os.environ.get("SHELL") or "/bin/zsh"
     captured = ""
     try:
@@ -99,6 +117,8 @@ def capture_path(shell: Optional[str] = None) -> str:
         captured = found.group(1) if found else ""
     except (OSError, subprocess.SubprocessError):
         captured = ""
+    if not captured and fallback:
+        return fallback  # the plist's PATH as it is: an unchanged plist restarts nothing
     captured = captured or os.environ.get("PATH") or FALLBACK_PATH
     seen, parts = set(), []
     for part in [os.path.expanduser(p) for p in EXTRA_PATH] + captured.split(":"):
@@ -176,6 +196,20 @@ def installed(root: pathlib.Path) -> bool:
     return supported() and plist_path(project_name(pathlib.Path(root).resolve())).exists()
 
 
+def stale_reason(root: pathlib.Path, *, python: Optional[str] = None) -> Optional[str]:
+    """Why the installed unit must be refreshed even though ``serve`` is healthy, checked
+    WITHOUT the slow login-shell PATH capture or launchctl: the plist is unreadable, or it
+    runs a different interpreter (the app moved or the CLI was reinstalled). None = fine."""
+    plist = read_plist(project_name(pathlib.Path(root).resolve()))
+    if not plist:
+        return "its plist is unreadable"
+    program = (plist.get("ProgramArguments") or [None])[0]
+    want = python or sys.executable
+    if program != want:
+        return f"it runs {program}, this CLI is {want}"
+    return None
+
+
 def install(root: pathlib.Path, *, python: Optional[str] = None,
             path_env: Optional[str] = None) -> dict:
     """Write the plist and load it. Idempotent: when the plist is unchanged and already
@@ -187,8 +221,9 @@ def install(root: pathlib.Path, *, python: Optional[str] = None,
         raise ServiceError(f"{root} is not a native Orcha project, so there is nothing for "
                            "the background service to run")
     name = project_name(root, cfg)
+    current = ((read_plist(name) or {}).get("EnvironmentVariables") or {}).get("PATH")
     body = render_bytes(render(root, name, python=python or sys.executable,
-                               path_env=path_env or capture_path(),
+                               path_env=path_env or capture_path(fallback=current),
                                home=str(pathlib.Path.home())))
     target = plist_path(name)
     unchanged = target.exists() and target.read_bytes() == body
