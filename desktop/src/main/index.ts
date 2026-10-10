@@ -30,7 +30,7 @@ import { provision, type EngineDeps } from './initEngine'
 import { ensureOrchaLink, nodeOrchaLinkDeps } from './orchaLink'
 import { fileVersionStore, restartNativeAfterUpdate } from './appUpdate'
 import { readRegistry } from './nativeStacks'
-import { startHostWorker, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv, streamOrcha, orchaBin, runOrcha } from './hostWorker'
+import { checkWorkerReady, nodeWorkerReadyDeps, nodeHostWorkerDeps, hostToolPath, scrubWorkerEnv, streamOrcha, orchaBin, runOrcha } from './hostWorker'
 import { analyzeProject, nodeAnalyzeProjectDeps, type AnalyzeProjectResult } from './analyzeProject'
 import { resetStack } from './resetEngine'
 import { planRemoval, removeProject, type RemoveDeps } from './removeEngine'
@@ -163,13 +163,15 @@ function readProjectConfig(folder: string): Record<string, unknown> | null {
 /** Build the engine deps (GH #258 D2: the orcha CLI provisions; the app streams its progress). */
 function engineDeps(): EngineDeps {
   return {
-    orcha: streamOrcha,
+    // `orcha init` waits on the portal itself; 15 min bounds a CLI that never returns (#295).
+    orcha: (folder, args, onLine) => streamOrcha(folder, args, onLine, args[0] === 'init' ? 15 * 60_000 : undefined),
     readConfig: readProjectConfig,
     // Settings › Profile name when set, else this Mac's account name.
     user: currentProfile().effective,
-    // After the portal is up, make sure the host-side agent worker runs and surface any
-    // missing prerequisite (Claude Code, API key) as a plain-language warning.
-    startWorker: (folder) => startHostWorker(folder, nodeHostWorkerDeps)
+    // After the portal is up, VERIFY the host-side agent worker runs (provisioning started
+    // it; #295: no second `orcha up`) and surface any missing prerequisite (Claude Code) as
+    // a plain-language warning.
+    startWorker: (folder, log) => checkWorkerReady(folder, nodeWorkerReadyDeps, log)
   }
 }
 
@@ -1620,9 +1622,17 @@ app.whenReady().then(() => {
   ipcMain.handle('orcha:provision', (_event, opts: ProvisionOptions) =>
     asResult(async () => {
       const deps = await reservedEngineDeps()
+      // #295: each stage's start/end with its time since the run began, so a slow create
+      // shows where the time went in the app's log (and the renderer gets source timestamps).
+      const t0 = Date.now()
       const res = await provision(
         opts,
-        (e: ProgressEvent) => sendToManager('orcha:provision:progress', e),
+        (e: ProgressEvent) => {
+          if (e.status !== 'log') {
+            console.log(`[orcha-desktop] provision ${opts.mode} +${((Date.now() - t0) / 1000).toFixed(1)}s ${e.step} ${e.status}`)
+          }
+          sendToManager('orcha:provision:progress', e)
+        },
         deps
       )
       // Re-added: its kept data is in use again (Settings › Storage stops listing it).

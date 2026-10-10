@@ -107,7 +107,8 @@ export default function ProvisionStep({
   }).length
   const current = visible.find((s) => stepState.get(s.id) === 'running')
 
-  // When each stage started / finished, as seen by this view (events carry no timestamps).
+  // When each stage started / finished: the event's source time (`at`, #295) when it has
+  // one, else when this view saw it.
   const [timing, setTiming] = useState<Map<StepId, { start?: number; end?: number }>>(new Map())
   useEffect(() => {
     if (events.length === 0) {
@@ -121,11 +122,12 @@ export default function ProvisionStep({
       for (const e of events) {
         if (e.status === 'log') continue
         const t = next.get(e.step) ?? {}
+        const at = typeof e.at === 'number' ? e.at : now
         if (e.status === 'start' && t.start === undefined) {
-          next.set(e.step, { ...t, start: now })
+          next.set(e.step, { ...t, start: at })
           changed = true
         } else if (e.status !== 'start' && t.end === undefined) {
-          next.set(e.step, { ...t, end: now })
+          next.set(e.step, { ...t, end: at })
           changed = true
         }
       }
