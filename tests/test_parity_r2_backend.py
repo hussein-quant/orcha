@@ -377,6 +377,10 @@ def _free_port():
     return port
 
 
+@pytest.mark.skipif(
+    __import__("conftest").BACKEND != "postgres",
+    reason="the child portal can't share the SQLite leg's test DB; runs on the Postgres leg",
+)
 def test_sigterm_with_open_sse_exits_promptly():
     """Real uvicorn process + an open container /events stream: SIGTERM must finish the
     graceful stop in well under 3 s (it previously hung until SIGKILL)."""
