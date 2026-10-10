@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { CircleCheck, CircleDashed, CircleDot, CirclePause, CircleSlash, Folder, LayoutGrid, Loader2, MoreHorizontal, Plus, Star } from 'lucide-react'
+import { CircleAlert, CircleCheck, CircleDashed, CircleDot, CirclePause, CircleSlash, Folder, LayoutGrid, Loader2, MoreHorizontal, Plus, Star } from 'lucide-react'
 import type { Stack } from '../../../shared/types'
 import { bandOf, stackBand, type ProjectBand, type ProjectRow } from '../host/projectModel'
 import { Button } from '../ui/Button'
@@ -73,6 +73,11 @@ function Health({ row, busy }: { row: ProjectRow; busy: boolean }) {
     icon = <CircleDashed className="h-3.5 w-3.5" />
     text = 'Starting…'
     tone = 'text-warning'
+  } else if (row.state === 'error') {
+    // #281: the runtime is up but its API fails — say so (with the reason), never "Stopped".
+    icon = <CircleAlert className="h-3.5 w-3.5" />
+    text = 'Error'
+    tone = 'text-danger'
   } else if (row.containerStatus) {
     icon = <CirclePause className="h-3.5 w-3.5" />
     text = row.containerStatus.charAt(0).toUpperCase() + row.containerStatus.slice(1)
@@ -91,7 +96,10 @@ function Health({ row, busy }: { row: ProjectRow; busy: boolean }) {
     tone = 'text-ok'
   }
   return (
-    <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] tabular-nums', tone)}>
+    <span
+      className={cn('inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] tabular-nums', tone)}
+      title={row.state === 'error' ? row.stack.healthDetail : undefined}
+    >
       {icon}
       {text}
     </span>
@@ -408,7 +416,7 @@ export default function ProjectsHome(props: ProjectsHomeProps) {
                           <ProjectIcon
                             icon={iconOf(row)}
                             size={20}
-                            status={row.state === 'stopped' ? 'stopped' : row.state === 'starting' ? 'starting' : row.containerStatus ? 'paused' : null}
+                            status={row.state === 'stopped' ? 'stopped' : row.state === 'starting' ? 'starting' : row.state === 'error' ? 'error' : row.containerStatus ? 'paused' : null}
                             ring="var(--color-card)"
                             dim={row.state === 'stopped'}
                           />

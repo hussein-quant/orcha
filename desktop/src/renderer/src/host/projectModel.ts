@@ -14,7 +14,18 @@ import type { AttentionItem, AttentionSnapshot, HostCheckout, HostLiveAgent, Pro
 import { isDecisionItem } from '../../../shared/types'
 import type { ProjectCardData } from '../home/loadProjectCards'
 
-export type RowState = 'running' | 'stopped' | 'starting'
+/** `error`: the runtime is UP but its project list cannot be read (a native portal that
+ *  answers with an HTTP error, or a crashlooping child) — never shown as "stopped" (#281). */
+export type RowState = 'running' | 'stopped' | 'starting' | 'error'
+
+/** The stack-level state of a stack whose containers are not loaded: stopped only when the
+ *  runtime is actually down; a live runtime is `error` when discovery says its API fails, else
+ *  still `starting`. */
+export function stackRowState(stack: Pick<Stack, 'running' | 'health'>): RowState {
+  if (!stack.running) return 'stopped'
+  if (stack.health === 'error' || stack.health === 'crashlooping') return 'error'
+  return 'starting'
+}
 
 export interface ProjectRow {
   /** Stable key: `<project>:<cid>` for a container row, `<project>` for a stack row. */
@@ -79,6 +90,10 @@ function hostAttention(
 ): Pick<ProjectRow, 'attention' | 'partial' | 'attentionSource' | 'unavailableReason'> {
   const none = { attention: null, partial: false, attentionSource: 'none' as const }
   if (!stack.running) return { ...none, unavailableReason: 'stopped' }
+  // A live runtime whose API fails: say WHY (the failing call + its error), not "not checked yet".
+  if (cid === null && stack.health === 'error' && stack.healthDetail) {
+    return { ...none, unavailableReason: `unavailable — ${stack.healthDetail}` }
+  }
   const p = status?.projects.find((x) => x.project === stack.project)
   if (!p) return { ...none, unavailableReason: 'not checked yet' }
   if (!p.ok) return { ...none, unavailableReason: 'unavailable — last check failed' }
@@ -154,7 +169,7 @@ export function buildProjectRows(input: {
         stack,
         container: null,
         name: stack.projectShort,
-        state: stack.running ? 'starting' : 'stopped',
+        state: stackRowState(stack),
         ...hostAttention(stack, null, attention),
         pinned: false,
         containerStatus: null,
@@ -181,6 +196,7 @@ export type ProjectBand = 'running' | 'starting' | 'paused' | 'stopped'
 
 export function bandOf(row: Pick<ProjectRow, 'state' | 'containerStatus'>): ProjectBand {
   if (row.state === 'stopped') return 'stopped'
+  // A live runtime whose API fails is RUNNING (Stop is offered, never Start); its row says Error.
   if (row.state === 'starting') return 'starting'
   if (row.containerStatus) return 'paused'
   return 'running'

@@ -209,3 +209,49 @@ describe('bandOf / stackBand (shared by the manager and the tray)', () => {
     expect(stackBand([{ state: 'stopped', containerStatus: null }])).toEqual({ band: 'stopped', word: 'stopped' })
   })
 })
+
+describe('#281: a live native runtime whose API fails is not "stopped"', () => {
+  const native = (over: Partial<Stack>): Stack => ({
+    ...stack('orcha-video-demos'),
+    portalStatus: 'Up (native)',
+    runtime: 'native',
+    folder: '/Users/me/video-demos',
+    ...over
+  })
+  const detail = 'The project is running, but its project list failed (GET /api/containers → HTTP 500: no such column: ws.wake_lease_until).'
+
+  it('serve alive + /api/containers 500 → an error row (running band, Stop offered), with the reason', () => {
+    const broken = native({ running: true, health: 'error', healthDetail: detail })
+    const [row] = buildProjectRows({ stacks: [broken], cards: [], attention: null, pinned: new Set(), order: [], active: noActive })
+    expect(row.state).toBe('error')
+    expect(row.state).not.toBe('stopped')
+    expect(row.stack.running).toBe(true) // HostSidebar / ProjectsHome offer "Stop stack…", not "Start stack"
+    expect(bandOf(row)).toBe('running')
+    expect(row.attention).toBeNull()
+    expect(row.unavailableReason).toBe(`unavailable — ${detail}`)
+  })
+
+  it('a crashlooping live runtime with no project list is an error row too', () => {
+    const [row] = buildProjectRows({
+      stacks: [native({ running: true, health: 'crashlooping' })], cards: [], attention: null, pinned: new Set(), order: [], active: noActive
+    })
+    expect(row.state).toBe('error')
+  })
+
+  it('serve alive, portal not answering yet → starting (not stopped)', () => {
+    const [row] = buildProjectRows({
+      stacks: [native({ running: true, health: 'starting' })], cards: [], attention: null, pinned: new Set(), order: [], active: noActive
+    })
+    expect(row.state).toBe('starting')
+  })
+
+  it('an actually stopped runtime stays stopped', () => {
+    const [row] = buildProjectRows({
+      stacks: [native({ running: false, health: 'stopped', apiPort: 8004, portalStatus: 'Down' })],
+      cards: [], attention: null, pinned: new Set(), order: [], active: noActive
+    })
+    expect(row.state).toBe('stopped')
+    expect(bandOf(row)).toBe('stopped')
+    expect(row.unavailableReason).toBe('stopped')
+  })
+})

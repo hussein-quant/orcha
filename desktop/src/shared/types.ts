@@ -37,7 +37,8 @@ export interface Stack {
   dbPort: number | null
   /** Raw docker status of the portal container, e.g. "Up 3 hours" / "Exited (0) 2 days ago". */
   portalStatus: string
-  /** True iff portalStatus starts with "Up". */
+  /** Docker: the portal container is Up. Native: `orcha serve` is alive (fresh state.json) —
+   *  even when its API is failing (then `health` is 'error'). */
   running: boolean
   /** Absolute project root on disk (parent of .orcha), from the compose working_dir label;
    *  null when the label is absent. Used by Delete & reset to clean on-disk artifacts. */
@@ -48,6 +49,9 @@ export interface Stack {
   /** Native: from `.orcha/state.json` + the portal probe (main/nativeStacks.ts). Docker:
    *  "ok" while the portal container is up, else "stopped". */
   health: StackHealth
+  /** Native: why a running project is not `ok` (the failing API call and its error, or "not
+   *  answering yet"), for the row's tooltip. Absent when ok, stopped, or Docker. */
+  healthDetail?: string
 }
 
 export type StackRuntime = 'native' | 'docker'
@@ -61,7 +65,7 @@ export interface StackDiscovery {
   /** No `docker` CLI on this Mac at all (a no-Docker user): nothing about Docker is shown. */
   dockerMissing?: boolean
 }
-export type StackHealth = 'ok' | 'starting' | 'crashlooping' | 'stopped'
+export type StackHealth = 'ok' | 'starting' | 'crashlooping' | 'error' | 'stopped'
 
 // ---- Remove project / Storage -------------------------------------------------------------
 
