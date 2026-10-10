@@ -405,7 +405,9 @@ def test_sigterm_with_open_sse_exits_promptly():
             except httpx.HTTPError:
                 time.sleep(0.2)
         else:
-            pytest.fail("uvicorn did not start")
+            proc.kill()
+            err = proc.communicate(timeout=10)[1].decode(errors="replace")[-3000:]
+            pytest.fail(f"uvicorn did not start (exit {proc.returncode}):\n{err}")
         cid = httpx.post(base + "/api/containers", json={"name": "sse-stop"},
                          timeout=5).json()["container_id"]
 
