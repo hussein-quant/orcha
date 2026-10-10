@@ -105,6 +105,12 @@ def register_project_commands(
         default=None,
         help="target a specific project by name (sans 'orcha-' prefix); works from any directory",
     )
+    up.add_argument(
+        "--refresh-service",
+        action="store_true",
+        help="native, macOS: re-install the background service (re-reads your login-shell "
+        "PATH) even when Orcha is already running — after installing a tool agents need",
+    )
     up.set_defaults(func=handlers["up"])
 
     down = sub.add_parser(

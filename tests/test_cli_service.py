@@ -31,13 +31,21 @@ class FakeLaunchctl:
         self.calls: list = []
         self.loaded = loaded
         self.fail_bootstrap = False
+        self.hang: set = set()      # verbs that never answer (raise TimeoutExpired)
+        self.hang_shell = False     # the login shell (`$SHELL -ilc`) never answers
+        self.timeouts: list = []
 
     def __call__(self, argv, **kwargs):
         argv = list(argv)
+        if self.hang_shell and argv[1:2] == ["-ilc"]:
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
         if argv[0] != "launchctl":
             raise AssertionError(f"unexpected subprocess {argv}")
         self.calls.append(argv[1:])
+        self.timeouts.append(kwargs.get("timeout"))
         verb = argv[1]
+        if verb in self.hang:
+            raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))
         if verb == "print":
             if not self.loaded:
                 return subprocess.CompletedProcess(argv, 113, "", "Could not find service")
@@ -60,7 +68,7 @@ def mac(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setattr("pathlib.Path.home", lambda: home)
     monkeypatch.setattr(cli_service, "PLATFORM", "darwin")
-    monkeypatch.setattr(cli_service, "capture_path", lambda shell=None: "/captured/bin:/usr/bin")
+    monkeypatch.setattr(cli_service, "capture_path", lambda shell=None, **_: "/captured/bin:/usr/bin")
     fake = FakeLaunchctl()
     monkeypatch.setattr(cli_service.subprocess, "run", fake)
     root = tmp_path / "demo"
@@ -140,7 +148,7 @@ def test_install_is_idempotent_and_reloads_only_on_change(mac, monkeypatch):
     mac.fake.calls.clear()
     again = cli_service.install(mac.root, python=PY)
     assert again["changed"] is False and mac.fake.verbs() == []  # nothing restarted
-    monkeypatch.setattr(cli_service, "capture_path", lambda shell=None: "/new/bin:/usr/bin")
+    monkeypatch.setattr(cli_service, "capture_path", lambda shell=None, **_: "/new/bin:/usr/bin")
     changed = cli_service.install(mac.root, python=PY)
     assert changed["changed"] is True
     assert mac.fake.calls[-2:] == [["bootout", f"{mac.domain}/io.openorcha.demo"],
@@ -245,7 +253,7 @@ def test_up_with_unit_refreshes_and_kickstarts_never_spawns(mac, monkeypatch):
         raise AssertionError("launchd owns serve; up must not spawn a second one")
 
     monkeypatch.setattr(cli_native_lifecycle.cli_serve, "serve_running", lambda root: None)
-    monkeypatch.setattr(cli_service, "capture_path", lambda shell=None: "/later/claude:/usr/bin")
+    monkeypatch.setattr(cli_service, "capture_path", lambda shell=None, **_: "/later/claude:/usr/bin")
     cli_native_lifecycle.up(mac.root, popen=popen, http_ok=lambda url: True, wait_secs=0.1)
     verbs = mac.fake.verbs()
     assert verbs == ["bootout", "bootstrap", "kickstart"]  # PATH changed -> reloaded
@@ -254,14 +262,128 @@ def test_up_with_unit_refreshes_and_kickstarts_never_spawns(mac, monkeypatch):
 
 
 def test_up_with_unit_and_healthy_serve_restarts_nothing(mac, monkeypatch, capsys):
-    monkeypatch.setattr(cli_service, "capture_path", lambda shell=None: "/captured/bin:/usr/bin")
+    """#295: a healthy project is checked FIRST — no login-shell PATH capture, no launchctl
+    at all (the refresh used to run before the health check, on every `orcha up`)."""
     monkeypatch.setattr(cli_service.sys, "executable", PY)
     cli_service.install(mac.root)
     mac.fake.calls.clear()
+
+    def no_capture(*_a, **_k):
+        raise AssertionError("a healthy project must not re-run the login shell")
+
+    monkeypatch.setattr(cli_service, "capture_path", no_capture)
     monkeypatch.setattr(cli_native_lifecycle.cli_serve, "serve_running", lambda root: 4242)
     cli_native_lifecycle.up(mac.root, popen=None, http_ok=lambda url: True, wait_secs=0.1)
+    assert mac.fake.calls == []
+    out = capsys.readouterr().out
+    assert "already running" in out and "--refresh-service" in out
+
+
+def test_up_refresh_service_reinstalls_a_healthy_project(mac, monkeypatch):
+    """The legitimate refresh is kept: `orcha up --refresh-service` re-reads the PATH and
+    reloads the unit when it changed."""
+    monkeypatch.setattr(cli_service.sys, "executable", PY)
+    cli_service.install(mac.root)
+    mac.fake.calls.clear()
+    monkeypatch.setattr(cli_service, "capture_path", lambda shell=None, **_: "/new/tool:/usr/bin")
+    monkeypatch.setattr(cli_native_lifecycle.cli_serve, "serve_running", lambda root: 4242)
+    cli_native_lifecycle.up(mac.root, popen=None, http_ok=lambda url: True, wait_secs=0.1,
+                            refresh_service=True)
+    assert mac.fake.verbs() == ["bootout", "bootstrap", "kickstart"]
+    assert "/new/tool" in _plist(mac).read_text()
+
+
+def test_up_healthy_but_unit_runs_another_python_is_refreshed(mac, monkeypatch):
+    cli_service.install(mac.root, python="/old/app/python")
+    mac.fake.calls.clear()
+    monkeypatch.setattr(cli_service.sys, "executable", PY)
+    monkeypatch.setattr(cli_native_lifecycle.cli_serve, "serve_running", lambda root: 4242)
+    cli_native_lifecycle.up(mac.root, popen=None, http_ok=lambda url: True, wait_secs=0.1)
+    assert mac.fake.verbs() == ["bootout", "bootstrap", "kickstart"]
+    assert PY in _plist(mac).read_text()
+
+
+def test_up_service_fresh_only_kickstarts(mac, monkeypatch):
+    """init installed the unit a moment ago: `up` starts it without a second install."""
+    cli_service.install(mac.root, python=PY)
+    mac.fake.calls.clear()
+
+    def no_install(*_a, **_k):
+        raise AssertionError("init just installed the unit")
+
+    monkeypatch.setattr(cli_service, "install", no_install)
+    monkeypatch.setattr(cli_native_lifecycle.cli_serve, "serve_running", lambda root: None)
+    cli_native_lifecycle.up(mac.root, popen=None, http_ok=lambda url: True, wait_secs=0.1,
+                            service_fresh=True)
     assert mac.fake.verbs() == ["kickstart"]
-    assert "already running" in capsys.readouterr().out
+
+
+# --- hung launchctl / login shell (#295) ------------------------------------------------------
+
+
+def test_every_launchctl_call_is_bounded(mac):
+    cli_service.install(mac.root, python=PY)
+    assert mac.fake.timeouts and set(mac.fake.timeouts) == {cli_service.LAUNCHCTL_TIMEOUT_SECS}
+
+
+def test_hung_launchctl_is_a_service_error_with_what_to_do(mac):
+    mac.fake.hang = {"bootstrap"}
+    with pytest.raises(cli_service.ServiceError, match="did not answer within 20 s"):
+        cli_service.install(mac.root, python=PY)
+
+
+def test_up_starts_serve_directly_when_launchctl_hangs(mac, monkeypatch, capsys):
+    cli_service.install(mac.root, python=PY)
+    mac.fake.hang = {"print", "bootstrap", "bootout", "kickstart"}
+    monkeypatch.setattr(cli_native_lifecycle.cli_serve, "serve_running", lambda root: None)
+    spawned = []
+    cli_native_lifecycle.up(mac.root, popen=lambda argv, **k: spawned.append(argv) or
+                            types.SimpleNamespace(pid=77), http_ok=lambda url: True, wait_secs=0.1)
+    assert spawned and spawned[0][-3:] == ["serve", "--project-dir", str(mac.root)]
+    out = capsys.readouterr().out
+    assert "did not answer" in out and "portal up" in out
+
+
+def test_down_survives_a_hung_launchctl(mac, monkeypatch, capsys):
+    cli_service.install(mac.root, python=PY)
+    mac.fake.hang = {"print", "bootout"}
+    monkeypatch.setattr(cli_native_lifecycle.cli_serve, "serve_running", lambda root: None)
+    cli_native_lifecycle.down(mac.root, kill=lambda *a: None, stop_secs=0.1)
+    assert "did not answer" in capsys.readouterr().out
+
+
+def test_failed_path_capture_keeps_the_plist_path_no_restart(mac, monkeypatch):
+    """A login shell that times out (a busy Mac: `zsh -ilc` measured at 11–71 s) must not
+    swap the plist onto a fallback PATH and restart serve."""
+    monkeypatch.undo()  # the real capture_path, with a shell that times out
+    monkeypatch.setattr("pathlib.Path.home", lambda: mac.home)
+    monkeypatch.setattr(cli_service, "PLATFORM", "darwin")
+    monkeypatch.setattr(cli_service.subprocess, "run", mac.fake)
+    cli_service.install(mac.root, python=PY, path_env="/captured/bin:/usr/bin")
+    before = _plist(mac).read_bytes()
+    mac.fake.calls.clear()
+    mac.fake.hang_shell = True
+    monkeypatch.setenv("PATH", "/some/other/fallback")
+    res = cli_service.install(mac.root, python=PY)
+    assert res["changed"] is False and mac.fake.verbs() == []
+    assert _plist(mac).read_bytes() == before
+
+
+def test_up_prints_timed_stages(mac, monkeypatch, capsys):
+    """#295: each stage of `up` is timestamped so a slow start shows where the time went."""
+    cli_service.install(mac.root, python=PY)
+    ticks = iter(range(100))
+    seen = []
+    monkeypatch.setattr(cli_native_lifecycle.cli_serve, "serve_running", lambda root: None)
+    cli_native_lifecycle.up(mac.root, popen=None, http_ok=lambda url: True, wait_secs=0.1,
+                            on_stage=lambda msg, t: seen.append((msg, t)),
+                            clock=lambda: float(next(ticks)))
+    msgs = [m for m, _ in seen]
+    assert any("refreshing the background service" in m for m in msgs)
+    assert any("asked launchd to start" in m for m in msgs)
+    assert any(m.startswith("portal up") for m in msgs)
+    assert [t for _, t in seen] == sorted(t for _, t in seen) and seen[-1][1] > 0
+    assert "[orcha] +" in capsys.readouterr().out
 
 
 def test_down_with_unit_boots_out(mac, monkeypatch):

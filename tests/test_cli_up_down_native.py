@@ -82,9 +82,11 @@ def test_up_spawns_detached_serve(native):
 
 def test_cmd_up_dispatches_native(native, monkeypatch):
     calls = []
-    monkeypatch.setattr(cli_native_lifecycle, "up", lambda root: calls.append(root))
+    monkeypatch.setattr(cli_native_lifecycle, "up", lambda root, **k: calls.append((root, k)))
     cli_project_commands.cmd_up(types.SimpleNamespace(project=None), _Tripwire())
-    assert calls == [native]
+    cli_project_commands.cmd_up(types.SimpleNamespace(project=None, refresh_service=True),
+                                _Tripwire())
+    assert calls == [(native, {"refresh_service": False}), (native, {"refresh_service": True})]
 
 
 def test_up_is_a_no_op_when_serve_and_portal_answer(native, capsys):
@@ -224,7 +226,8 @@ def init_stubs(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "_post_json", lambda url, body: (
         {"container_id": "cid-1"} if url.endswith("/api/containers") else {"agent_id": "a-1"}))
     monkeypatch.setattr(cli, "_put_json", lambda url, body: dict(body))
-    monkeypatch.setattr(cli_native_lifecycle, "up", lambda root: calls["native_up"].append(root))
+    monkeypatch.setattr(cli_native_lifecycle, "up",
+                        lambda root, **k: calls["native_up"].append(root))
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "home")
     root = tmp_path / "fresh"
     root.mkdir()
@@ -285,10 +288,11 @@ def _installs(monkeypatch, *, fail=False):
 def test_init_native_installs_the_service_before_starting(init_stubs, monkeypatch):
     cli, calls, root = init_stubs
     seen = _installs(monkeypatch)
-    monkeypatch.setattr(cli_native_lifecycle, "up", lambda r: calls["native_up"].append(
-        ("up", list(seen))))
+    monkeypatch.setattr(cli_native_lifecycle, "up", lambda r, **k: calls["native_up"].append(
+        ("up", list(seen), k.get("service_fresh"))))
     cli.cmd_init(_init_ns(runtime="native"))
-    assert seen == [root] and calls["native_up"] == [("up", [root])]  # install, then up
+    # install, then up — told the unit is fresh so it does not re-install it (#295)
+    assert seen == [root] and calls["native_up"] == [("up", [root], True)]
 
 
 def test_init_no_service_and_docker_never_install(init_stubs, monkeypatch):
@@ -325,11 +329,32 @@ def test_init_progress_json_only_json_on_stdout(init_stubs, monkeypatch, capsys)
         ("create-container", "start"), ("create-container", "ok"),
         ("register-human", "start"), ("register-human", "ok"), ("done", "ok")]
     assert {e["step"] for e in lines} <= set(cli_init_steps())
+    # #295: every line carries a source timestamp + elapsed seconds, non-decreasing
+    assert all(isinstance(e["ts"], float) and isinstance(e["elapsed"], float) for e in lines)
+    assert [e["elapsed"] for e in lines] == sorted(e["elapsed"] for e in lines)
     done = lines[-1]["detail"]
     assert done["container_id"] == "cid-1" and done["runtime"] == "native"
     assert done["api_base_url"] == "http://localhost:8000"
     assert done["db_path"] == str(root / ".orcha" / "orcha.db")
     assert "[orcha] ✓ initialized" in captured.err  # the human text moved to stderr
+
+
+def test_init_progress_json_streams_native_up_stages(init_stubs, monkeypatch, capsys):
+    """#295: native `up`'s timed stages reach the app as `start`/`progress` lines (the app
+    shows them in the log), without changing which step a later failure is pinned on."""
+    cli, calls, root = init_stubs
+
+    def up(r, *, on_stage=None, **k):
+        on_stage("portal answers at http://localhost:8000/", 1.25)
+
+    monkeypatch.setattr(cli_native_lifecycle, "up", up)
+    cli.cmd_init(_init_ns(runtime="native", no_service=True, progress_json=True))
+    lines = _lines(capsys.readouterr().out)
+    prog = [e for e in lines if e["status"] == "progress"]
+    assert prog and prog[0]["step"] == "start"
+    assert prog[0]["detail"] == {"stage": "portal answers at http://localhost:8000/", "elapsed": 1.2}
+    steps = [(e["step"], e["status"]) for e in lines if e["status"] != "progress"]
+    assert steps.index(("start", "start")) < lines.index(prog[0]) < steps.index(("start", "ok")) + 1
 
 
 def cli_init_steps():

@@ -25,7 +25,8 @@ def cmd_up(args: argparse.Namespace, services) -> None:
         "or pass `--project <name>` to target a specific stack from anywhere.",
     )
     if runtime == cli_runtime_mode.NATIVE:  # serve owns the notifier + bridge children
-        return cli_native_lifecycle.up(pathlib.Path.cwd())
+        return cli_native_lifecycle.up(
+            pathlib.Path.cwd(), refresh_service=getattr(args, "refresh_service", False))
     services._compose(orcha_dir, "up", "-d")
     print(cli_migrate_runtime.docker_nudge())
     # #298: backfill the project-preferences file if a pre-#298 project is missing it.
