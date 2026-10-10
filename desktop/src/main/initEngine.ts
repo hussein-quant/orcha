@@ -11,13 +11,23 @@ import type {
  *  {stderr} on a non-zero exit (GH #258 D2: the CLI owns provisioning, the app drives it). */
 export type OrchaLines = (folder: string, args: string[], onLine: (line: string) => void) => Promise<void>
 
-/** Best-effort start of the host-side agent worker (the orcha CLI's notifier daemon,
- *  which is what actually spawns `claude -p` runs). Returns started=false with a
- *  plain-language reason when a prerequisite is missing — never throws (worker startup
- *  is non-fatal to provisioning). Optional so unit tests can omit it. */
-export type StartWorker = (folder: string) => Promise<{ started: boolean; reason?: string }>
+/** Check the host-side agent worker (the orcha CLI's notifier daemon, which is what actually
+ *  spawns `claude -p` runs) is up — provisioning already started it (#295). Returns
+ *  started=false with a plain-language reason when it isn't or a prerequisite is missing;
+ *  `log` receives one line per substep. Never throws (non-fatal to provisioning). Optional
+ *  so unit tests can omit it. */
+export type StartWorker = (
+  folder: string,
+  log?: (line: string) => void
+) => Promise<{ started: boolean; reason?: string }>
+
+/** Hard cap on the whole worker step, on top of the check's own bounds: the project already
+ *  exists, so a stuck check must never hold the user on this screen (#295: it took 390 s). */
+export const WORKER_STEP_TIMEOUT_MS = 90_000
 
 export interface EngineDeps {
+  /** Clock for stage timestamps; Date.now by default. */
+  now?: () => number
   orcha: OrchaLines
   /** The project's `.claude/orcha.json`, or null when missing/unreadable. */
   readConfig: (folder: string) => Record<string, unknown> | null
@@ -78,9 +88,12 @@ export async function provision(
   onProgress: (e: ProgressEvent) => void,
   deps: EngineDeps
 ): Promise<ProvisionResult> {
-  const runId = `${opts.folder}:${opts.mode}:${Date.now()}`
+  const now = deps.now ?? Date.now
+  const runId = `${opts.folder}:${opts.mode}:${now()}`
+  // `at`: when the stage event happened (the CLI's own timestamp when it sent one), so the
+  // renderer times stages at the source rather than by when events reach it (#295).
   const emit = (step: ProvisionStep, status: ProgressEvent['status'], extra?: Partial<ProgressEvent>): void =>
-    onProgress({ runId, step, status, ...(extra as object) } as ProgressEvent)
+    onProgress({ runId, step, status, at: now(), ...(extra as object) } as ProgressEvent)
   const warnings: string[] = []
 
   let apiBase: unknown = null
@@ -94,12 +107,21 @@ export async function provision(
     (typeof cfg.api_port === 'number' ? cfg.api_port : null) ?? portOf(apiBase) ?? portOf(cfg.api_base_url)
   if (apiPort === null) fail('config', 'PROVISION_FAILED', `no api_port in ${path.join(opts.folder, '.claude', 'orcha.json')}`)
 
-  // The agent worker: on the native runtime `orcha serve` already supervises the notifier,
-  // so this is an idempotent `orcha up` whose real value is the plain-language caveats
-  // (Claude Code missing, no API key) it surfaces as warnings.
+  // The agent worker: provisioning already started it (native: `orcha serve` supervises the
+  // notifier; Docker: `orcha up`). #295: this step used to run ANOTHER `orcha up` — which
+  // re-installed the launchd unit and re-ran the login shell, unbounded — and once held a
+  // finished project on screen for 390 s. Now it only checks the worker is up, bounded.
   if (deps.startWorker) {
     emit('start-daemons', 'start')
-    const res = await deps.startWorker(opts.folder)
+    const t0 = now()
+    const log = (line: string): void =>
+      emit('start-daemons', 'log', { line: `[+${((now() - t0) / 1000).toFixed(1)}s] ${line}` })
+    const res = await withTimeout(deps.startWorker(opts.folder, log), WORKER_STEP_TIMEOUT_MS, {
+      started: false,
+      reason:
+        `Your project is ready, but checking its agent worker took longer than ${WORKER_STEP_TIMEOUT_MS / 1000} s, ` +
+        'so the app stopped waiting. If agents don’t pick up tasks, run `orcha status` in the project folder.'
+    })
     emit('start-daemons', res.started ? 'ok' : 'skip')
     if (res.reason) warnings.push(res.reason)
   } else {
@@ -110,6 +132,24 @@ export async function provision(
 }
 
 type Emit = (step: ProvisionStep, status: ProgressEvent['status'], extra?: Partial<ProgressEvent>) => void
+
+/** `p`, or `fallback` once `ms` pass (the timer never keeps the process alive). */
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms)
+    timer.unref?.()
+    p.then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      () => {
+        clearTimeout(timer)
+        resolve(fallback)
+      }
+    )
+  })
+}
 
 /** Returns the `api_base_url` from the CLI's final `done` line. */
 async function runInit(opts: ProvisionOptions, deps: EngineDeps, emit: Emit, warnings: string[]): Promise<unknown> {
@@ -144,8 +184,17 @@ async function runInit(opts: ProvisionOptions, deps: EngineDeps, emit: Emit, war
     }
     if (!CLI_STEPS.has(ev.step as ProvisionStep)) return
     const step = ev.step as ProvisionStep
+    // the CLI's own clock (epoch seconds) when the line carries it (#295)
+    const at = typeof ev.ts === 'number' ? { at: Math.round(ev.ts * 1000) } : {}
+    if (ev.status === 'progress') {
+      // a timed substep of a CLI step (native `up`: service, portal wait, children)
+      const d = (detail ?? {}) as { stage?: unknown; elapsed?: unknown }
+      const t = typeof d.elapsed === 'number' ? `[+${d.elapsed.toFixed(1)}s] ` : ''
+      emit(step, 'log', { line: `${t}${String(d.stage ?? '')}`, ...at })
+      return
+    }
     current = step
-    if (ev.status === 'start' || ev.status === 'ok' || ev.status === 'skip') emit(step, ev.status)
+    if (ev.status === 'start' || ev.status === 'ok' || ev.status === 'skip') emit(step, ev.status, at)
     else if (ev.status === 'error' && NON_FATAL.has(step)) {
       warnings.push(
         step === 'service'

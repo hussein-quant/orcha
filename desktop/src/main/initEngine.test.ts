@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it, expect, vi } from 'vitest'
-import { provision, type EngineDeps, type OrchaLines } from './initEngine'
+import { provision, WORKER_STEP_TIMEOUT_MS, type EngineDeps, type OrchaLines } from './initEngine'
 import type { ProgressEvent } from '../shared/types'
 
 const FOLDER = '/work/proj'
@@ -121,12 +121,48 @@ describe('provision init (orcha init --progress-json)', () => {
     expect(err).toMatchObject({ code: 'PROVISION_FAILED', step: 'config', stderr: 'orcha: command not found' })
   })
 
-  it('starts the agent worker after a good init and keeps its caveat as a warning', async () => {
-    const startWorker = vi.fn().mockResolvedValue({ started: true, reason: 'No API key yet' })
-    const { res, seq } = await run({}, deps({ startWorker }))
-    expect(startWorker).toHaveBeenCalledWith(FOLDER)
-    expect(seq.slice(-2)).toEqual(['start-daemons:start', 'start-daemons:ok'])
+  it('checks the agent worker after a good init and keeps its caveat as a warning', async () => {
+    const startWorker = vi.fn(async (_f: string, log?: (l: string) => void) => {
+      log?.('agent worker running (pid 7)')
+      return { started: true, reason: 'No API key yet' }
+    })
+    const { res, seq, events } = await run({}, deps({ startWorker }))
+    expect(startWorker).toHaveBeenCalledWith(FOLDER, expect.any(Function))
+    expect(seq.slice(-3)).toEqual(['start-daemons:start', 'start-daemons:log', 'start-daemons:ok'])
+    expect(events.at(-2)).toMatchObject({ line: expect.stringMatching(/^\[\+\d+\.\ds\] agent worker running \(pid 7\)$/) })
     expect(res.warnings).toEqual(['No API key yet'])
+  })
+
+  it('#295: a worker check that never answers is cut off at WORKER_STEP_TIMEOUT_MS with a warning', async () => {
+    vi.useFakeTimers()
+    try {
+      const startWorker = vi.fn(() => new Promise<never>(() => {})) // hangs forever
+      const done = vi.fn()
+      const p = run({}, deps({ startWorker })).then(done)
+      await vi.advanceTimersByTimeAsync(WORKER_STEP_TIMEOUT_MS - 1)
+      expect(done).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      await p
+      const { res, seq } = done.mock.calls[0][0]
+      expect(seq.slice(-2)).toEqual(['start-daemons:start', 'start-daemons:skip'])
+      expect(res.warnings[0]).toMatch(/longer than 90 s/)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('#295: every stage event carries a source timestamp; the CLI ts wins when sent', async () => {
+    const lines = [
+      JSON.stringify({ step: 'start', status: 'start', detail: null, ts: 1_791_662_000.5, elapsed: 1 }),
+      JSON.stringify({ step: 'start', status: 'progress', detail: { stage: 'portal up at http://localhost:8095/', elapsed: 12.34 }, ts: 1_791_662_012.8 }),
+      JSON.stringify({ step: 'start', status: 'ok', detail: null, ts: 1_791_662_013 }),
+      ...OK_LINES.slice(-1)
+    ]
+    const { events } = await run({}, deps({ orcha: replay(lines), now: () => 42 }))
+    expect(events[0]).toMatchObject({ step: 'start', status: 'start', at: 1_791_662_000_500 })
+    expect(events[1]).toMatchObject({ step: 'start', status: 'log', line: '[+12.3s] portal up at http://localhost:8095/' })
+    expect(events[2]).toMatchObject({ step: 'start', status: 'ok', at: 1_791_662_013_000 })
+    expect(events.every((e) => typeof e.at === 'number')).toBe(true)
   })
 })
 

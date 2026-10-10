@@ -305,7 +305,10 @@ export type ProvisionStep =
   | 'start-daemons'
   | 'migrate'
 
-export type ProgressEvent =
+/** `at` (epoch ms): when the event happened at its source — the CLI's own timestamp for
+ *  `orcha init` steps, else the main process's clock (#295: stage timings were measured by
+ *  when events reached the renderer). Optional for older senders. */
+export type ProgressEvent = { at?: number } & (
   | { runId: string; step: ProvisionStep; status: 'start' | 'ok' | 'skip' }
   | { runId: string; step: ProvisionStep; status: 'log'; line: string }
   | {
@@ -315,6 +318,7 @@ export type ProgressEvent =
       code: BridgeError['code']
       detail: string
     }
+)
 
 export interface ProvisionOptions {
   /** Absolute, canonical path to the project folder (folder must already exist). */
