@@ -1,14 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import {
   STATE_FRESH_MS,
+  defaultProbe,
   healthOf,
   listNativeStacks,
   readKnownFolders,
   readRegistry,
-  rememberNativeFolder
+  rememberNativeFolder,
+  summarizeErrorBody
 } from './nativeStacks'
 
 // Fixtures copy the shapes the CLI writes: stacks.json = cli_stacks_registry.register(),
@@ -65,6 +69,13 @@ describe('healthOf', () => {
     ).toBe('crashlooping')
     expect(healthOf({ state: { status: 'stopped' }, mtimeMs: now }, false, now)).toBe('stopped')
     expect(healthOf(null, false, now)).toBe('stopped')
+  })
+  it('#281: a portal that ANSWERS with an HTTP error is "error"; no answer is "starting"', () => {
+    expect(healthOf(running, { ok: false, status: 500, error: 'HTTP 500' }, now)).toBe('error')
+    expect(healthOf(running, { ok: false, status: null, error: 'no answer' }, now)).toBe('starting')
+    expect(healthOf(running, { ok: true, status: 200, error: null }, now)).toBe('ok')
+    // a dead serve is stopped whatever the probe says
+    expect(healthOf({ state: { status: 'stopped' }, mtimeMs: now }, { ok: false, status: 500, error: 'x' }, now)).toBe('stopped')
   })
   it('treats a running state older than 90 s as stopped (serve died without cleaning up)', () => {
     expect(healthOf({ ...running, mtimeMs: now - STATE_FRESH_MS }, true, now)).toBe('stopped')
@@ -137,6 +148,56 @@ describe('listNativeStacks', () => {
       now
     })
     expect(notes).toMatchObject({ projectShort: 'notes', running: false, health: 'stopped', portalStatus: 'Down' })
+  })
+})
+
+describe('#281: live serve with a failing project-list API', () => {
+  it('reads running + health "error" with the portal\'s error — not stopped', async () => {
+    const now = Date.now()
+    project('notes', { state: 'state.running.json' }, now)
+    const [notes] = await listNativeStacks({
+      registryFile: path.join(root, 'stacks.json'),
+      probe: async () => ({ ok: false, status: 500, error: 'HTTP 500: no such column: ws.wake_lease_until' }),
+      now
+    })
+    expect(notes).toMatchObject({ projectShort: 'notes', running: true, health: 'error' })
+    expect(notes.healthDetail).toContain('GET /api/containers')
+    expect(notes.healthDetail).toContain('no such column: ws.wake_lease_until')
+    expect(notes.portalStatus).toContain('HTTP 500')
+  })
+
+  it('a live serve whose portal does not answer yet is running + "starting"', async () => {
+    const now = Date.now()
+    project('notes', { state: 'state.running.json' }, now)
+    const [notes] = await listNativeStacks({ registryFile: path.join(root, 'stacks.json'), probe: async () => false, now })
+    expect(notes).toMatchObject({ running: true, health: 'starting' })
+    expect(notes.healthDetail).toContain('not answering')
+  })
+
+  it('the default probe reports the HTTP status and the portal\'s error detail', async () => {
+    let status = 500
+    const server: Server = createServer((_req, res) => {
+      res.writeHead(status, { 'content-type': status === 500 ? 'text/plain' : 'application/json' })
+      res.end(status === 500 ? 'Internal Server Error' : JSON.stringify({ containers: [] }))
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as AddressInfo).port
+    try {
+      expect(await defaultProbe(port)).toEqual({ ok: false, status: 500, error: 'HTTP 500: Internal Server Error' })
+      status = 200
+      expect(await defaultProbe(port)).toEqual({ ok: true, status: 200, error: null })
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+    // nothing listening → no HTTP status (starting, not error)
+    const r = await defaultProbe(port)
+    expect(r).toMatchObject({ ok: false, status: null })
+  })
+
+  it('summarizes FastAPI {detail} and plain bodies to one short line', () => {
+    expect(summarizeErrorBody('{"detail":"boom"}')).toBe('boom')
+    expect(summarizeErrorBody('Internal Server Error\nTraceback…')).toBe('Internal Server Error')
+    expect(summarizeErrorBody('x'.repeat(300))).toHaveLength(198)
   })
 })
 

@@ -10,7 +10,8 @@
  *    mtime is serve's liveness stamp (refreshed at least every 30 s; the CLI treats > 90 s as
  *    gone, cli_stacks_registry.STATE_FRESH_SECS).
  *  - `GET http://localhost:<api_port>/api/containers` — the same 1.5 s portal probe `orcha ls`
- *    uses to decide a stack is up.
+ *    uses; it decides HEALTH (ok / error / starting), not whether the project runs: a live
+ *    serve with a failing API reads running + `health: 'error'`, never "stopped" (#281).
  *
  *  Nothing here spawns a process, so it is cheap enough for the 5–15 s pollers. */
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
@@ -40,8 +41,41 @@ export interface ServeState {
   updated_at?: string
 }
 
-/** Portal probe: resolves true iff GET /api/containers answers 2xx within the timeout. */
-export type Probe = (apiPort: number) => Promise<boolean>
+/** What GET /api/containers said: `ok` iff 2xx; `status` is the HTTP status when the portal
+ *  answered at all (null = no answer: refused, timed out); `error` is a short reason to show
+ *  when not ok ("HTTP 500: no such column: …", "connection refused"). */
+export interface ProbeResult {
+  ok: boolean
+  status: number | null
+  error: string | null
+}
+
+/** Portal probe. A bare boolean is accepted (true = ok, false = no answer) for simple fakes. */
+export type Probe = (apiPort: number) => Promise<ProbeResult | boolean>
+
+const NOT_PROBED: ProbeResult = { ok: false, status: null, error: null }
+
+function normalizeProbe(r: ProbeResult | boolean): ProbeResult {
+  if (typeof r === 'boolean') return r ? { ok: true, status: 200, error: null } : { ...NOT_PROBED, error: 'no answer' }
+  return r
+}
+
+/** The portal's error text, shortened for a tooltip: FastAPI's `{"detail": …}` when present,
+ *  else the first line of the body. */
+export function summarizeErrorBody(body: string): string {
+  let text = body.trim()
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (parsed && typeof parsed === 'object' && 'detail' in parsed) {
+      const d = (parsed as { detail: unknown }).detail
+      text = typeof d === 'string' ? d : JSON.stringify(d)
+    }
+  } catch {
+    /* not JSON — plain text ("Internal Server Error") */
+  }
+  const line = text.split('\n')[0] ?? ''
+  return line.length > 200 ? `${line.slice(0, 197)}…` : line
+}
 
 export function registryPath(home: string = os.homedir()): string {
   return path.join(home, '.orcha', 'stacks.json')
@@ -124,28 +158,37 @@ export const defaultProbe: Probe = async (apiPort) => {
   const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS)
   try {
     const res = await fetch(`http://localhost:${apiPort}/api/containers`, { signal: ctrl.signal })
-    return res.ok
-  } catch {
-    return false
+    if (res.ok) return { ok: true, status: res.status, error: null }
+    const body = await res.text().catch(() => '')
+    const why = summarizeErrorBody(body)
+    return { ok: false, status: res.status, error: `HTTP ${res.status}${why ? `: ${why}` : ''}` }
+  } catch (e) {
+    const aborted = e instanceof Error && e.name === 'AbortError'
+    return { ok: false, status: null, error: aborted ? `no answer in ${PROBE_TIMEOUT_MS / 1000} s` : 'no answer' }
   } finally {
     clearTimeout(timer)
   }
 }
 
 /** Health from state.json + the portal probe:
- *  stopped     — no state, `status: "stopped"`, or a running state gone stale (serve died);
+ *  stopped      — no state, `status: "stopped"`, or a running state gone stale (serve died);
  *  crashlooping — serve is up but a child is marked crashlooping;
- *  starting    — serve is up, the portal does not answer yet;
- *  ok          — serve is up and the portal answers. */
+ *  error        — serve is up and the portal ANSWERS, but GET /api/containers fails (an HTTP
+ *                 error — e.g. #281's SQL error): running, not stopped, and not "starting";
+ *  starting     — serve is up, the portal does not answer yet;
+ *  ok           — serve is up and the portal answers 2xx.
+ *  `portal` is the probe result, or a boolean (true = ok, false = no answer). */
 export function healthOf(
   st: { state: ServeState; mtimeMs: number } | null,
-  portalUp: boolean,
+  portal: ProbeResult | boolean,
   now: number
 ): StackHealth {
   if (!st || st.state.status !== 'running' || now - st.mtimeMs >= STATE_FRESH_MS) return 'stopped'
   const children = Object.values(st.state.children ?? {})
   if (children.some((c) => c?.status === 'crashlooping')) return 'crashlooping'
-  return portalUp ? 'ok' : 'starting'
+  const p = normalizeProbe(portal)
+  if (p.ok) return 'ok'
+  return p.status !== null ? 'error' : 'starting'
 }
 
 export interface ListNativeOptions {
@@ -154,6 +197,13 @@ export interface ListNativeOptions {
   knownFolders?: string[]
   probe?: Probe
   now?: number
+}
+
+/** A one-line, user-facing reason for a non-ok live project (shown as the row's tooltip). */
+function healthDetail(health: StackHealth, p: ProbeResult): string {
+  if (health === 'crashlooping') return 'A background process keeps crashing — see .orcha/logs in the project folder.'
+  if (health === 'error') return `The project is running, but its project list failed (GET /api/containers → ${p.error ?? `HTTP ${p.status}`}).`
+  return `The project is running; its portal is not answering yet (${p.error ?? 'no answer'}).`
 }
 
 /** Every native project the registry or the app knows about, running or stopped, in the
@@ -175,19 +225,23 @@ export async function listNativeStacks(opts: ListNativeOptions = {}): Promise<St
     [...byFolder.entries()].map(async ([folder, { name, apiPort: regPort }]): Promise<Stack> => {
       const st = readState(folder)
       const apiPort = (typeof st?.state.api_port === 'number' ? st.state.api_port : null) ?? regPort
+      // `running` means the RUNTIME is up (serve alive, state.json fresh) — like a Docker stack
+      // whose portal container is Up — not that one API call succeeded. A live project whose
+      // project list errors (#281) must not read as "stopped" with only a Start button.
       const serveUp = healthOf(st, true, now) !== 'stopped'
-      const portalUp = serveUp && apiPort !== null ? await probe(apiPort) : false
-      const health = healthOf(st, portalUp, now)
+      const probed = serveUp && apiPort !== null ? normalizeProbe(await probe(apiPort)) : NOT_PROBED
+      const health = healthOf(st, probed, now)
       return {
         project: `orcha-${name}`,
         projectShort: name,
         apiPort,
         dbPort: null,
-        portalStatus: portalUp ? 'Up (native)' : 'Down',
-        running: portalUp,
+        portalStatus: !serveUp ? 'Down' : probed.ok ? 'Up (native)' : `Up (native) — portal ${probed.error ?? 'not answering'}`,
+        running: serveUp,
         folder,
         runtime: 'native',
-        health
+        health,
+        ...(serveUp && !probed.ok ? { healthDetail: healthDetail(health, probed) } : {})
       }
     })
   )

@@ -205,12 +205,14 @@ function attentionLabel(row: ProjectRow): string {
 function stateWord(row: ProjectRow): string {
   if (row.state === 'stopped') return 'stack stopped'
   if (row.state === 'starting') return 'stack starting'
+  if (row.state === 'error') return `running with an error${row.stack.healthDetail ? `: ${row.stack.healthDetail}` : ''}`
   return row.containerStatus ?? 'running'
 }
 
 function avatarStatus(row: ProjectRow): AvatarStatus {
   if (row.state === 'stopped') return 'stopped'
   if (row.state === 'starting') return 'starting'
+  if (row.state === 'error') return 'error'
   if (row.containerStatus) return 'paused'
   return null
 }
@@ -890,7 +892,7 @@ export default function HostSidebar(props: HostSidebarProps) {
                     }
                   }}
                   aria-label={`${row.name}, ${stateWord(row)}${row.pinned ? ', pinned' : ''}. ${attentionLabel(row)}`}
-                  title={`${row.name}${row.container ? ` · stack ${row.stack.projectShort}` : ''}`}
+                  title={`${row.name}${row.container ? ` · stack ${row.stack.projectShort}` : ''}${row.state === 'error' && row.stack.healthDetail ? `\n${row.stack.healthDetail}` : ''}`}
                   className="flex h-full min-w-0 flex-1 items-center gap-2 pl-1 text-left disabled:cursor-default"
                 >
                   <ProjectIcon
@@ -923,7 +925,7 @@ export default function HostSidebar(props: HostSidebarProps) {
                     <span className="shrink-0 text-xs text-text-3">{row.stack.running ? 'stopping…' : 'starting…'}</span>
                   ) : row.state !== 'running' || row.containerStatus ? (
                     <span className="shrink-0 text-xs text-text-3">
-                      {row.state === 'stopped' ? 'stopped' : row.state === 'starting' ? 'starting…' : row.containerStatus}
+                      {row.state === 'stopped' ? 'stopped' : row.state === 'starting' ? 'starting…' : row.state === 'error' ? 'error' : row.containerStatus}
                     </span>
                   ) : null}
                   {row.attention === null && row.state === 'running' && !row.containerStatus && row.unavailableReason?.startsWith('unavailable') ? (
