@@ -1345,12 +1345,26 @@ app.whenReady().then(() => {
   )
 
   // ---- Settings › Storage › Agent worktrees (agentWorktrees.ts → `orcha worktrees --json`) ----
+  const hasWorktreesDir = (f: string): boolean => isDirectory(path.join(f, '.orcha-worktrees'))
   const worktreeRun = () => nodeRun({ ...scrubWorkerEnv(process.env), PATH: nodeHostWorkerDeps.pathEnv ?? hostToolPath() })
-  const worktrees = worktreeOperations(listKnownProjects, worktreeRun, (f) => isDirectory(path.join(f, '.orcha-worktrees')))
+  const worktrees = worktreeOperations(listKnownProjects, worktreeRun, hasWorktreesDir)
   ipcMain.handle('orcha:storage:worktrees', (event) =>
     asResult(async () => {
       if (!fromManager(event)) throw { code: 'INVALID_WORKTREE' } as const
       return worktrees.scan()
+    })
+  )
+  // The same scan one project at a time, so the screen shows each project as it lands.
+  ipcMain.handle('orcha:storage:worktreeProjects', (event) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'INVALID_WORKTREE' } as const
+      return worktrees.projects()
+    })
+  )
+  ipcMain.handle('orcha:storage:projectWorktrees', (event, raw: unknown) =>
+    asResult(async () => {
+      if (!fromManager(event)) throw { code: 'INVALID_WORKTREE' } as const
+      return worktrees.project(raw)
     })
   )
   ipcMain.handle('orcha:storage:worktreesClean', (event, raw: unknown) =>

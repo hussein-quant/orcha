@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { singleFlight } from './singleFlight'
+import { singleFlight, singleFlightBy } from './singleFlight'
 
 describe('singleFlight (Settings › Storage scans)', () => {
   it('a repeat while a scan runs joins it; the next call after it ends starts a new one', async () => {
@@ -40,5 +40,36 @@ describe('singleFlight (Settings › Storage scans)', () => {
     expect(fn).toHaveBeenCalledTimes(2)
     finish[1]('after cleanup')
     expect(await fresh).toBe('after cleanup')
+  })
+})
+
+describe('singleFlightBy (one scan per project folder)', () => {
+  it('joins a repeat for the same key; another key runs on its own', async () => {
+    const fn = vi.fn(async (f: string) => f.toUpperCase())
+    const scan = singleFlightBy((f: string) => f, fn)
+    const [a, b, c] = [scan('/a'), scan('/a'), scan('/b')]
+    expect(fn).toHaveBeenCalledTimes(2)
+    expect(await Promise.all([a, b, c])).toEqual(['/A', '/A', '/B'])
+    await scan('/a')
+    expect(fn).toHaveBeenCalledTimes(3)
+  })
+
+  it('invalidates only the changed folder, and an older answer cannot release its replacement', async () => {
+    const finish: Array<() => void> = []
+    const fn = vi.fn(() => new Promise<void>((resolve) => { finish.push(resolve) }))
+    const scan = singleFlightBy((folder: string) => folder, fn)
+    const old = scan('/a')
+    const other = scan('/b')
+    scan.invalidate('/a')
+    const fresh = scan('/a')
+    expect(fresh).not.toBe(old)
+    expect(scan('/b')).toBe(other)
+    finish[0]()
+    await old
+    expect(scan('/a')).toBe(fresh)
+    expect(fn).toHaveBeenCalledTimes(3)
+    finish[1]()
+    finish[2]()
+    await Promise.all([other, fresh])
   })
 })

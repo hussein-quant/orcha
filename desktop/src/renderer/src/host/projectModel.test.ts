@@ -5,6 +5,7 @@ import {
   stackBand,
   firstDecision,
   sectionForPath,
+  sidebarNames,
   staleLabel,
   totalAttention,
   type ActiveContext
@@ -100,6 +101,19 @@ describe('buildProjectRows', () => {
     const active: ActiveContext = { project: 'orcha-a', cid: 'a1', portalAttention: { cid: 'a1', count: null, partial: false } }
     const rows = buildProjectRows({ stacks: [A], cards, attention, pinned: new Set(), order: [], active })
     expect(rows[0]).toMatchObject({ attention: 2, attentionSource: 'host' })
+  })
+})
+
+describe('sidebarNames (Settings › Storage names projects like the sidebar)', () => {
+  it('maps each stack to the names its sidebar rows show; a stopped one keeps its short name', () => {
+    const rows = buildProjectRows({ stacks: [A, B, S], cards, attention: null, pinned: new Set(), order: [], active: noActive })
+    expect(sidebarNames(rows)).toEqual({ 'orcha-a': 'Alpha, Alpha Two', 'orcha-b': 'Beta', 'orcha-stopped': S.projectShort })
+  })
+
+  it('lists a name once when two containers of a project share it', () => {
+    const twins = [{ stack: A, container: container('a1', 'Alpha') }, { stack: A, container: container('a2', 'Alpha') }]
+    const rows = buildProjectRows({ stacks: [A], cards: twins, attention: null, pinned: new Set(), order: [], active: noActive })
+    expect(sidebarNames(rows)).toEqual({ 'orcha-a': 'Alpha' })
   })
 })
 
