@@ -91,6 +91,9 @@ const json = (data: unknown, status = 200) =>
   ({ ok: status < 300, status, json: async () => data, text: async () => JSON.stringify(data), clone() { return this; } }) as unknown as Response;
 
 function route(url: string, method: string): Response {
+  // This fixture represents standalone tasks on a server without Workflows.
+  // A failed discovery request deliberately keeps task actions unavailable.
+  if (url === "/openapi.json") return json({ paths: {} });
   if (url === "/api/containers") return json([{ id: "c1", status: "active" }]);
   if (url.endsWith("/project-profile")) return json({ container_id: "c1", mode: MODE, dod_presets: [], template_key: null, template_name: null, last_applied_at: null });
   if (url.endsWith("/evidence-summaries")) return json({ summaries: { [TID]: SUMMARY } });
@@ -222,16 +225,17 @@ describe("General (non-code) mode", () => {
     );
   }
 
-  it("Code mode keeps the Code and GitHub tabs and 'Build to PR'", async () => {
+  it("Code mode keeps Code and GitHub with task-only authority", async () => {
     home();
     const nav = await screen.findByRole("navigation", { name: "Orcha sections" });
     await waitFor(() => expect(within(nav).queryByText("Code")).toBeTruthy());
     expect(within(nav).queryByText("GitHub")).toBeTruthy();
     fireEvent.click(await waitFor(() => document.getElementById("execBtn")!));
-    await waitFor(() => expect(document.getElementById("autTop")?.textContent).toContain("Build to PR"));
+    await screen.findByRole("switch");
+    expect(document.getElementById("autTop")).toBeNull();
   });
 
-  it("General mode drops Code and GitHub and reads 'Execute'", async () => {
+  it("General mode drops Code and GitHub with task-only authority", async () => {
     MODE = "general";
     home();
     const nav = await screen.findByRole("navigation", { name: "Orcha sections" });
@@ -239,8 +243,9 @@ describe("General (non-code) mode", () => {
     expect(within(nav).queryByText("GitHub")).toBeNull();
     expect(within(nav).queryByText("Metrics")).toBeTruthy();
     fireEvent.click(await waitFor(() => document.getElementById("execBtn")!));
-    await waitFor(() => expect(document.getElementById("autTop")?.textContent).toContain("Execute"));
-    expect(document.getElementById("autTop")?.textContent).not.toContain("Build to PR");
+    await screen.findByRole("switch");
+    expect(document.getElementById("autTop")).toBeNull();
+
   });
 });
 

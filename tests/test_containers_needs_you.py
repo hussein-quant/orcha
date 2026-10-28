@@ -6,9 +6,8 @@ selectAttention (frontend/src/state/attention.ts) over the snapshot. Linear revi
 the two disagreed (8 on the project itself, 5 everywhere else) because the server left
 out waiting plans and counted other reviewers' verifications. These tests pin:
 
-  * the explicit per-kind numbers for a seeded project (plans gated on the author's
-    EFFECTIVE autonomy, verifications gated on the container level, human-facing /
-    escalated requests), and
+  * the explicit per-kind numbers for a seeded project (plans gated on task autonomy,
+    every task awaiting human verification, human-facing / escalated requests), and
   * PARITY: server needs_you == a line-for-line Python port of selectAttention run over
     the very snapshot (GET /api/containers/{cid}) the portal consumes, for several
     acting humans and autonomy settings.
@@ -54,24 +53,11 @@ def _by_id(snap, aid):
     return next((a for a in snap["agents"] if str(a["id"]) == str(aid)), None)
 
 
-def _agent_autonomy(snap, a):
-    lvl = snap["container"].get("autonomy_level") or "plan"
-    if not a:
-        return lvl
-    if a.get("effective_autonomy"):
-        return a["effective_autonomy"]
-    if snap["container"].get("autonomy_enforced"):
-        return lvl
-    return a.get("autonomy_override") or lvl
-
-
 def _plan_awaits_human(snap, t):
     pm = t.get("plan_message")
     if not (t["status"] == "in_progress" and not t.get("plan_decision") and pm):
         return False
-    assignee = (t.get("assignees") or [None])[0]
-    who = _by_alias(snap, pm.get("author_alias")) or _by_alias(snap, assignee)
-    return _agent_autonomy(snap, who) == "plan"
+    return t.get("autonomy") != "on"
 
 
 def _review_for(t, h):
@@ -98,14 +84,13 @@ def _is_to_human(snap, r):
 def select_attention_count(snap, acting_id, read_only=False):
     if read_only:
         return 0
-    level = snap["container"].get("autonomy_level") or "plan"
     acting = _by_id(snap, acting_id)
     n = 0
     for t in snap["tasks"]:
         kind = None
         if _plan_awaits_human(snap, t):
             kind = "plan"
-        elif level != "full" and t["status"] == "needs_verification":
+        elif t["status"] == "needs_verification":
             kind = "verify"
         if not kind:
             continue
@@ -184,8 +169,9 @@ async def _seed(client, db, container, make_agent, make_task):
     # plans
     p1 = await make_task("plan by dev", "d", assignee_alias="dev")          # counts (plan)
     _set_status(db, p1["id"], "in_progress"); _plan_msg(db, p1["id"], ids["dev"])
-    p2 = await make_task("plan by fast", "d", assignee_alias="fast")        # override pr → no
+    p2 = await make_task("plan by fast", "d", assignee_alias="fast")        # task ON → no
     _set_status(db, p2["id"], "in_progress"); _plan_msg(db, p2["id"], ids["fast"])
+    db.execute("UPDATE tasks SET autonomy='on' WHERE id=%s", (p2["id"],))
     p3 = await make_task("decided plan", "d", assignee_alias="dev")         # decided → no
     _set_status(db, p3["id"], "in_progress"); _plan_msg(db, p3["id"], ids["dev"])
     _decide_plan(db, cid, p3["id"], ids["root"])
@@ -203,6 +189,7 @@ async def _seed(client, db, container, make_agent, make_task):
     v3 = await make_task("root reviews", "d", assignee_alias="dev")         # reviewer=root
     _set_status(db, v3["id"], "needs_verification")
     db.execute("UPDATE tasks SET reviewer_agent_id=%s WHERE id=%s", (ids["root"], v3["id"]))
+    ids.update(p1=p1["id"], p2=p2["id"], v1=v1["id"], v2=v2["id"], v3=v3["id"])
 
     # requests
     _request(db, cid, ids["dev"], None)                    # untargeted → counts
@@ -241,37 +228,41 @@ async def test_needs_you_matches_attention_rule_trust_off(
     assert row["needs_you"] == select_attention_count(snap, ids["root"])
 
 
-async def test_needs_you_follows_effective_autonomy(
+async def test_needs_you_follows_task_autonomy_only(
     client, db, container, make_agent, make_task, monkeypatch
 ):
     monkeypatch.delenv("ORCHA_TRUST_PROXY_USER", raising=False)
     cid = container["id"]
     ids = await _seed(client, db, container, make_agent, make_task)
 
-    # enforced container level wins over every override: fast's plan now waits too
-    db.execute("UPDATE containers SET autonomy_enforced=true WHERE id=%s", (cid,))
+    # Switching the second task OFF makes its plan wait too.
+    db.execute("UPDATE tasks SET autonomy='off' WHERE id=%s", (ids["p2"],))
     row = _row((await client.get("/api/containers")).json(), cid)
     assert row["needs_you_breakdown"]["plan"] == 2
     assert row["needs_you"] == select_attention_count(await _snapshot(client, cid), ids["root"])
 
-    # level full (enforced): no plan gates, no verification gate — only requests
-    db.execute("UPDATE containers SET autonomy_level='full' WHERE id=%s", (cid,))
+    # ON removes only plan decisions. A task still in needs_verification is, by
+    # definition, awaiting a person (for example, an admitted outside result).
+    db.execute(
+        "UPDATE tasks SET autonomy='on' WHERE id IN (%s,%s,%s,%s,%s)",
+        (ids["p1"], ids["p2"], ids["v1"], ids["v2"], ids["v3"]),
+    )
+    db.execute("UPDATE containers SET autonomy_level='full',autonomy_enforced=true WHERE id=%s", (cid,))
     row = _row((await client.get("/api/containers")).json(), cid)
-    assert row["needs_you_breakdown"] == {"plan": 0, "verify": 0, "request": 3}
+    assert row["needs_you_breakdown"] == {"plan": 0, "verify": 3, "request": 3}
     assert row["needs_you"] == select_attention_count(await _snapshot(client, cid), ids["root"])
 
-    # not enforced + dev overridden to plan while the container is full: dev's plan waits
-    db.execute("UPDATE containers SET autonomy_enforced=false WHERE id=%s", (cid,))
-    db.execute("UPDATE agents SET autonomy_override='plan' WHERE id=%s", (ids["dev"],))
+    # Switching one task back OFF restores only that task's plan decision.
+    db.execute("UPDATE tasks SET autonomy='off' WHERE id=%s", (ids["p1"],))
     row = _row((await client.get("/api/containers")).json(), cid)
     assert row["needs_you_breakdown"]["plan"] == 1
     assert row["needs_you"] == select_attention_count(await _snapshot(client, cid), ids["root"])
 
 
-async def test_needs_you_plan_author_falls_back_to_assignee(
+async def test_needs_you_waits_for_current_assignees_plan(
     client, db, container, make_agent, make_task, monkeypatch
 ):
-    """A terminated plan author is not in the snapshot: the ASSIGNEE's autonomy decides."""
+    """A previous participant's post is not the current assignee's plan."""
     monkeypatch.delenv("ORCHA_TRUST_PROXY_USER", raising=False)
     cid = container["id"]
     await make_agent("root", "operator", kind="human")
@@ -286,6 +277,9 @@ async def test_needs_you_plan_author_falls_back_to_assignee(
     row = _row((await client.get("/api/containers")).json(), cid)
     assert row["needs_you_breakdown"]["plan"] == 0  # fast runs at pr
     db.execute("UPDATE agents SET autonomy_override=NULL WHERE id=%s", (fast["agent_id"],))
+    row = _row((await client.get("/api/containers")).json(), cid)
+    assert row["needs_you_breakdown"]["plan"] == 0  # still waiting for fast's own plan
+    _plan_msg(db, t["id"], fast["agent_id"])
     row = _row((await client.get("/api/containers")).json(), cid)
     assert row["needs_you_breakdown"]["plan"] == 1
     snap = await _snapshot(client, cid)

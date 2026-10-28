@@ -175,6 +175,12 @@ export function mapSnapshot(rawIn: any): Snapshot {
     id: t.id,
     title: t.title,
     status: t.status,
+    autonomy: t.autonomy === "on" ? "on" : "off",
+    autonomy_revision: typeof t.autonomy_revision === "number" ? t.autonomy_revision : 1,
+    autonomy_changed_at: t.autonomy_changed_at ?? null,
+    autonomy_changed_by: t.autonomy_changed_by ?? null,
+    workflow_id: t.workflow_id ?? null,
+    work_revision: typeof t.work_revision === "number" ? t.work_revision : 1,
     priority: t.priority,
     reviewer_agent_id: t.reviewer_agent_id != null ? t.reviewer_agent_id : null,
     reviewer: t.reviewer != null ? t.reviewer : null,
@@ -196,7 +202,7 @@ export function mapSnapshot(rawIn: any): Snapshot {
     started_at: t.started_at || null,
     completed_at: t.completed_at || null,
     message_summary: t.message_summary || { count: 0, last: null },
-    plan_message: t.plan_message || null,
+    plan_message: t.plan_message,
     thread: mapThread(t.messages, agents),
   }));
 
@@ -233,6 +239,8 @@ export function mapSnapshot(rawIn: any): Snapshot {
     rejection_reason: r.rejection_reason != null ? r.rejection_reason : null,
     in_service_of: r.parent_request_id || null,
     chain_depth: r.chain_depth || 0,
+    originating_task_id: r.originating_task_id ?? null,
+    origin_task: r.origin_task ?? null,
     task_link: r.task_link || (r.spawned_task_id ? { task_id: r.spawned_task_id } : null),
     // Escalation (REQ-013/071/100): the legacy status, OR an additive backend
     // flag (`escalated` / `escalated_at`) — the escalate route and the expiry

@@ -21,6 +21,7 @@ from portal_backend.review_routing import (
 )
 from portal_backend.schemas.requests import RequestRespond
 from portal_backend.run_failure_backoff import failure_pause_status
+from portal_backend.result_notifications import coalesce_result_messages
 
 
 @app.get("/api/requests/{rid}")
@@ -37,12 +38,17 @@ def get_request(rid: str, request: Request):
     with db_cursor() as (_, cur):
         r = require_request(cur, rid)  # 404 if missing
         require_member_read(cur, request, str(r["container_id"]))  # PS-08
+        # GH #350 (spec §7.1): expose the origin link on the single read too, so a workflow
+        # decision list can confirm which task a question came from without a second query.
+        origin = r["originating_task_id"]
         return {
             "request_id": str(r["id"]),
             "type": r["type"],
             "status": r["status"],
             "requester_id": str(r["requester_id"]) if r["requester_id"] else None,
             "target_id": str(r["target_id"]) if r["target_id"] else None,
+            "container_id": str(r["container_id"]),
+            "originating_task_id": str(origin) if origin else None,
         }
 
 
@@ -165,6 +171,7 @@ def respond_request(rid: str, body: RequestRespond, request: Request):
         )
         # An answer never resumes a failure pause; say so instead of implying a wake.
         paused = failure_pause_status(cur, str(r["requester_id"]) if r["requester_id"] else None)
+        coalesce_result_messages(cur, r, body.response)
         conn.commit()
     result = {"request_id": rid, "status": "answered", "unblocks_parent": unblocks_parent}
     return {**result, "automatic_work": paused} if paused else result

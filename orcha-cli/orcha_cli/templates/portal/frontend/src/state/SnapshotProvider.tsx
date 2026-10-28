@@ -608,7 +608,7 @@ export function taskById(snap: Snapshot | null, id: unknown): Task | null {
   return snap.tasks.find((t) => String(t.id) === String(id)) || null;
 }
 export function humans(snap: Snapshot | null): Agent[] {
-  return (snap?.agents ?? []).filter((a) => a.kind === "human");
+  return (snap?.agents ?? []).filter((a) => a.kind === "human" && a.member_role !== "viewer");
 }
 
 // a request is "to the human" if its target resolves to a human agent, or has
@@ -664,8 +664,8 @@ function actingKey(snap: Snapshot | null): string {
  *    snapshot → THAT is the acting human (the localStorage pick is ignored);
  *  - identity present but agent_id null/unresolvable (trusted non-member,
  *    e.g. a viewer) → NULL. Never falls through to another human.
- *  - no identity (open default) → legacy: persisted per-container pick, else
- *    the first kind='human' agent.
+ *  - no identity (open default) → persisted per-container pick, else the first
+ *    current non-viewer human. A viewer is never an acting authority.
  */
 export function actingIdentityHuman(
   snap: Snapshot | null,
@@ -777,37 +777,20 @@ export function autLevel(snap: Snapshot | null): string {
 }
 
 export function planMessageOf(t: Task): { body: string; from: string | null; at?: string; is_human: boolean } | null {
-  if (t.plan_message) {
-    return { body: t.plan_message.body, from: t.plan_message.author_alias || null, at: t.plan_message.at, is_human: false };
+  if (t.plan_message !== undefined) {
+    return t.plan_message ? { body: t.plan_message.body, from: t.plan_message.author_alias || null, at: t.plan_message.at, is_human: false } : null;
   }
-  const m = (t.thread || []).filter((x) => !x.is_human);
+  const owners = t.assignees?.length ? t.assignees : t.assignee ? [t.assignee] : [];
+  const m = (t.thread || []).filter((x) => !x.is_human && x.from && (!owners.length || owners.includes(x.from)) && (t.autonomy !== "on" || /^[ \t]*plan\b/i.test(x.body)));
   return m.length ? { body: m[0].body, from: m[0].from, at: m[0].at, is_human: false } : null;
 }
 export function pendingPlan(t: Task): boolean {
   return t.status === "in_progress" && !t.plan_decision && !!planMessageOf(t);
 }
 
-/** An agent's EFFECTIVE autonomy (portal_backend/autonomy.py, the one rule):
- *  the server-computed value when present, else enforced → container level,
- *  else the agent's override, else the container level. */
-export function agentAutonomy(snap: Snapshot | null, a: Agent | null | undefined): string {
-  const lvl = autLevel(snap);
-  if (!a) return lvl;
-  if (a.effective_autonomy) return a.effective_autonomy;
-  if (snap?.container?.autonomy_enforced) return lvl;
-  return a.autonomy_override || lvl;
-}
-
-/** Is this task's plan actually gated on a human? pendingPlan (in_progress,
- *  undecided, an agent plan message) AND the plan author's — else the
- *  assignee's — effective autonomy is "plan". An agent running at pr/full
- *  (per-agent override) posts progress notes, not plans awaiting approval, so
- *  those tasks no longer over-flag as "plan waiting" (screen review). */
-export function planAwaitsHuman(snap: Snapshot | null, t: Task): boolean {
-  if (!pendingPlan(t)) return false;
-  const pm = planMessageOf(t);
-  const who = agentByAlias(snap, pm?.from) || agentByAlias(snap, t.assignee);
-  return agentAutonomy(snap, who) === "plan";
+/** Only task OFF/ON determines whether a posted plan awaits approval. */
+export function planAwaitsHuman(_snap: Snapshot | null, t: Task): boolean {
+  return pendingPlan(t) && t.autonomy !== "on";
 }
 
 export interface AttnItems {
@@ -817,11 +800,10 @@ export interface AttnItems {
   count: number;
 }
 export function attnItems(snap: Snapshot | null): AttnItems {
-  const lvl = autLevel(snap);
   const tasks = snap?.tasks ?? [];
   const reqs = snap?.requests ?? [];
   const plans = tasks.filter((t) => planAwaitsHuman(snap, t));
-  const verifs = lvl === "full" ? [] : tasks.filter((t) => t.status === "needs_verification");
+  const verifs = tasks.filter((t) => t.status === "needs_verification");
   const escs = reqs.filter((r) => r.status === "open" && isToHuman(snap, r));
   return { plans, verifs, escs, count: plans.length + verifs.length + escs.length };
 }

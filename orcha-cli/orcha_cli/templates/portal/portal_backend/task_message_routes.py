@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from fastapi import HTTPException, Request
 
+from portal_backend import sql
 from portal_backend.agent_status import bump_agent, log_event
 from portal_backend.application import app
 from portal_backend.attachment_references import (
@@ -23,6 +24,10 @@ from portal_backend.identity_routes import trusted_actor as _trusted_actor
 from portal_backend.push_outbox import push_plan_approval as _push_plan_approval
 from portal_backend.provider_keys import container_llm_key as _container_llm_key
 from portal_backend.schemas.task_operations import TaskMessage
+from portal_backend.result_notifications import answered_result_for_message, lock_result_requests
+from portal_backend.task_autonomy_service import record_approval
+from portal_backend.task_approval_policy import ApprovalPhase
+from portal_backend.task_list_query import PLAN_CUTOFF_SQL, PLAN_ROUND_ORDER_SQL, plan_candidate_sql
 
 
 @app.post("/api/tasks/{tid}/messages", status_code=201)
@@ -33,6 +38,9 @@ def post_message(tid: str, body: TaskMessage, request: Request):
         raise HTTPException(400, "author_agent_id is not a valid UUID")
     with db_cursor() as (conn, cur):
         t = _require_task(cur, tid)
+        # Serialize with cancellation and other notices before deciding delivery.
+        cur.execute("SELECT status,result FROM tasks WHERE id=%s" + sql.for_update(), (tid,))
+        t.update(cur.fetchone())
         # Per-project identity: a trusted proxy login IS the author (403 non-member) —
         # a browser-lane post is attributed to the verified member, never to a
         # client-chosen id (and never anonymously: the trusted lane always attributes).
@@ -64,10 +72,21 @@ def post_message(tid: str, body: TaskMessage, request: Request):
                     "author agent isn't a member of this task's container — cannot post",
                 )
             author_kind = arow["kind"]
+        if body.system_notice:
+            if body.author_agent_id or body.attachments:
+                raise HTTPException(403, "System status must be anonymous and have no attachments")
+            if t["status"] in ("completed", "cancelled"):
+                return {"task_id": tid, "message_id": None, "suppressed": True}
+            cur.execute("SELECT id,body FROM task_messages WHERE task_id=%s AND author_id IS NULL ORDER BY created_at DESC,id DESC LIMIT 1", (tid,))
+            previous = cur.fetchone()
+            if previous and previous["body"] == body.body:
+                return {"task_id": tid, "message_id": str(previous["id"]), "deduplicated": True}
         # #301: re-validate any staged attachment refs against disk (re-deriving size/type) so
         # the JSONB only ever holds real, this-task files — never client-fabricated paths.
         llm_key = _container_llm_key(cur, str(t["container_id"]))
         attachments = _validate_attachment_refs(tid, body.attachments, api_key=llm_key)
+        if author_kind == "ai" and not attachments:
+            lock_result_requests(cur, tid, body.author_agent_id)
         cur.execute(
             "INSERT INTO task_messages (task_id, author_id, body, attachments) "
             "VALUES (%s, %s, %s, %s) RETURNING id",
@@ -100,12 +119,31 @@ def post_message(tid: str, body: TaskMessage, request: Request):
         # Previously this emitted no agent_events, so a teammate's note silently stranded
         # until they happened to look. Publish a targeted `task_message` event to every
         # assignee except the author so the daemon/listen loop wakes them out-of-band.
-        cur.execute("SELECT agent_id FROM agent_tasks WHERE task_id=%s", (tid,))
+        cur.execute("SELECT agent_id FROM agent_tasks WHERE task_id=%s AND assignment_status <> 'done'", (tid,))
         notified = 0
-        for row in cur.fetchall():
+        recipients = cur.fetchall()
+        # Legacy /done closes the assignment before human verification. Deliver
+        # feedback to that exact submitter, not every replaced historical assignee.
+        if t["status"] == "needs_verification":
+            result = t.get("result") or {}
+            if isinstance(result, str):
+                result = json.loads(result)
+            submitter = result.get("by_agent_id") if isinstance(result, dict) else None
+            if submitter and all(str(r["agent_id"]) != str(submitter) for r in recipients):
+                cur.execute("SELECT agent_id FROM agent_tasks WHERE task_id=%s AND agent_id=%s", (tid, submitter))
+                submitted_assignment = cur.fetchone()
+                if submitted_assignment:
+                    recipients.append(submitted_assignment)
+        if body.system_notice or t["status"] in ("completed", "cancelled"):
+            recipients = []
+        for row in recipients:
             target = str(row["agent_id"])
             if target == body.author_agent_id:
                 continue  # don't wake yourself for your own message
+            if author_kind == "ai" and not attachments and answered_result_for_message(
+                cur, tid, body.author_agent_id, target, body.body
+            ):
+                continue  # request_answered already delivers this exact result to this recipient
             notified += 1
             _publish_event(
                 cur,
@@ -136,15 +174,75 @@ def post_message(tid: str, body: TaskMessage, request: Request):
                     "preview": body.body[:120],
                 },
             )
+        plan_auto_approved = False
+        if (
+            author_kind == "ai"
+            and t.get("autonomy") == "on"
+            and t["status"] == "in_progress"
+        ):
+            # Resolve the same current-round plan rendered by the portal. Only the
+            # assigned author of that exact message may use task autonomy.
+            cur.execute(
+                f"""SELECT m.id,m.body FROM tasks t
+                    CROSS JOIN (SELECT {PLAN_CUTOFF_SQL} AS c FROM tasks t WHERE t.id=%s) pc
+                    JOIN task_messages m ON m.task_id=t.id
+                    JOIN agents ma ON ma.id=m.author_id
+                    WHERE t.id=%s AND ma.kind <> 'human' AND {plan_candidate_sql('m')}
+                      AND m.created_at > pc.c
+                    ORDER BY {PLAN_ROUND_ORDER_SQL} LIMIT 1""",
+                (tid, tid),
+            )
+            current_plan = cur.fetchone()
+            if current_plan and str(current_plan["id"]) == mid:
+                record_approval(
+                    cur,
+                    t,
+                    body.author_agent_id,
+                    ApprovalPhase.PLAN,
+                    current_plan["body"],
+                    permission_source="task_autonomy",
+                )
+                cur.execute(
+                    """INSERT INTO decisions
+                         (container_id,subject_type,subject_id,decision,reason,
+                          actor_agent_id,target_agent_id)
+                       VALUES (%s,'plan_approval',%s,'approve',%s,%s,%s)""",
+                    (
+                        t["container_id"],
+                        tid,
+                        "Task autonomy was ON for this exact plan version.",
+                        body.author_agent_id,
+                        body.author_agent_id,
+                    ),
+                )
+                log_event(
+                    cur,
+                    t["container_id"],
+                    "ai",
+                    body.author_agent_id,
+                    "task",
+                    tid,
+                    "plan_self_approved",
+                    {
+                        "message_id": mid,
+                        "autonomy": "on",
+                        "autonomy_revision": t["autonomy_revision"],
+                    },
+                )
+                plan_auto_approved = True
         conn.commit()
     # Push pipeline (mig 041): an agent-authored post may be the task's OPENING
     # plan — the moment the approval gate becomes a needs-you item. AFTER the
     # commit, best-effort; the hook itself verifies "earliest agent-authored
     # message + in_progress + undecided" in its own transaction and no-ops on
     # every later post.
-    if author_kind is not None and author_kind != "human":
+    if author_kind is not None and author_kind != "human" and not plan_auto_approved:
         _push_plan_approval(str(t["container_id"]), tid, mid)
-    return {"message_id": mid, "task_id": tid}
+    return {
+        "message_id": mid,
+        "task_id": tid,
+        "plan_auto_approved": plan_auto_approved,
+    }
 
 
 @app.get("/api/tasks/{tid}/messages")

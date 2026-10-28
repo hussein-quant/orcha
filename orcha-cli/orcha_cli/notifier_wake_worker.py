@@ -6,6 +6,7 @@ import sys
 import time
 
 from .notifier_routing_handoff import carry_previous_checkout
+from . import notifier_workflow
 
 # A move between checkouts never blocks a worker start (#288). When the saved
 # files of the previous checkout cannot be carried into the destination, the
@@ -224,6 +225,17 @@ def spawn(
     run_task_id = candidate.get("context_task_id") or (
         auto_tasks[0] if auto_tasks else candidate.get("wake_task_id")
     )
+    workflow_launch = None
+    if candidate.get("workflow_id") and not dry_run:
+        if live_workers is None:
+            return None  # no reaper means no positive stop observation
+        workflow_launch = notifier_workflow.reserve_candidate(api_base, candidate)
+        if not workflow_launch:
+            services._post_json(f"{api_base}/api/agents/{candidate['agent_id']}/wake-ack",
+                                {"kind": "workflow_admission_refused", "release_lease": True, "lane": lane})
+            notifier_workflow.announce_refusal(api_base, candidate, services._post_json, quiet=quiet,
+                                               log=getattr(services, "_lifecycle_log", None))
+            return None
     resume_rendered = False
     if dry_run:
         persona = None
@@ -271,11 +283,20 @@ def spawn(
         )
     token = (
         None
-        if dry_run
+        if dry_run or workflow_launch
         else services._mint_embodiment_token(
             api_base, candidate["agent_id"], lane, "headless"
         )
     )
+    if workflow_launch:
+        # Recorded on the preallocated run at activation (the run is not POSTed here).
+        workflow_launch["run_details"] = {
+            "log_path": str(log_path) if log_path else None,
+            "worktree": worktree,
+            "branch": branch,
+            "base_cwd": headless_cwd,
+            "runtime": candidate.get("model_runtime"),
+        }
     _spawn_info: dict = {}
     sent, command, process = services.spawn_headless(
         run_cwd,
@@ -291,6 +312,7 @@ def spawn(
         run_token=token,
         conversation=False,
         spawn_info=_spawn_info,
+        **({"workflow_launch": workflow_launch} if workflow_launch else {}),
     )
     # Issue #75: the box-wide concurrency cap deferred this spawn (ground-truth count
     # ≥ budget at decision time). NOT a failure — release everything we speculatively
@@ -298,6 +320,8 @@ def spawn(
     # the SAME server-side ORDER BY created_at order (oldest agent first = fairness, no
     # starvation), and log the cap ONCE for this deferral (per tick, not per second).
     if _spawn_info.get("deferred"):
+        if workflow_launch:
+            notifier_workflow.abort_reserved(workflow_launch)
         if worktree:
             services._teardown_worktree(headless_cwd, worktree, branch)
         if not dry_run:
@@ -327,7 +351,7 @@ def spawn(
         if _spawn_info.get("sandbox_container_id"):
             _run_payload["sandbox_container_id"] = _spawn_info["sandbox_container_id"]
             _run_payload["wake_kind"] = "sandbox"
-        run = services._post_json(
+        run = workflow_launch or services._post_json(
             f"{api_base}/api/agents/{candidate['agent_id']}/runs",
             _run_payload,
         )
@@ -354,11 +378,15 @@ def spawn(
             prompt=prompt,
             sandbox_container_id=_spawn_info.get("sandbox_container_id"),
         )
+        if workflow_launch:
+            live_workers[candidate["agent_id"]].update(workflow=True, workflow_generation=workflow_launch["generation"])
     elif worktree and not sent:
         services._teardown_worktree(headless_cwd, worktree, branch)
         services._revoke_or_defer(api_base, token)
     elif not sent and not dry_run:
         services._revoke_or_defer(api_base, token)
+    if workflow_launch and not sent:
+        notifier_workflow.abort_reserved(workflow_launch)
     return {
         "sent": sent,
         "command": command,

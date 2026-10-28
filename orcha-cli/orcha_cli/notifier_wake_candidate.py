@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import notifier_wake_worker
+from . import notifier_wake_worker, notifier_workflow
 
 # B27: {agent_id: budget_reason} last logged as a budget skip, so a paused agent's skip
 # line prints once per reason instead of on every scan. Cleared when the pause lifts.
@@ -48,14 +48,10 @@ def _grade_ephemeral(api_base, candidate, event, context, quiet, services):
         )
     if tier != "act":
         return None
-    # mig 043 (per-agent autonomy overrides): the T2 cheap-act gate is keyed off THIS
-    # candidate's EFFECTIVE autonomy level (server-computed via the shared
-    # portal_backend/autonomy.py rule and carried on the wake-scan candidate), not the
-    # scan-wide container level — an agent overridden to 'full' gets cheap-acts even in a
-    # 'plan' container, and an agent narrowed to 'plan' never cheap-acts in a 'full' one.
-    # A pre-043 portal omits the field → fall back to the scan-wide container level
-    # (yesterday's behavior, unchanged).
-    effective_level = candidate.get("effective_autonomy") or context["autonomy_level"]
+    # Cheap actions are work decisions. They require an exact task context and
+    # that task's current ON permission; project and per-agent legacy settings
+    # are retained only as history and never widen this gate.
+    task_autonomy = candidate.get("task_autonomy") or "off"
     acted = (
         services._apply_wake_act(
             api_base,
@@ -66,10 +62,10 @@ def _grade_ephemeral(api_base, candidate, event, context, quiet, services):
             ack_config=context["ack_config"],
             ack_api_key=context["ack_key"],
         )
-        if effective_level == "full"
+        if task_autonomy == "on" and candidate.get("context_task_id")
         else False
     )
-    services._log_graded_wake(verdict, effective_level, acted)
+    services._log_graded_wake(verdict, task_autonomy, acted)
     if not acted:
         return None
     if not quiet:
@@ -194,6 +190,15 @@ def process_candidate(
     prompt = services.build_wake_prompt(candidate)
     kind = services.select_transport(candidate)
     event = services.derive_wake_event(candidate)
+    if candidate.get("workflow_id") and kind != "ephemeral":
+        # tmux/resident/manual workers have no inert activation boundary yet. No lease was
+        # claimed and none is released (a resident may hold one); the reason is logged
+        # once and shown on the task instead of the task silently waiting.
+        if not dry_run:
+            notifier_workflow.refuse_transport(candidate, kind)
+            notifier_workflow.announce_refusal(api_base, candidate, services._post_json, quiet=quiet,
+                                               log=getattr(services, "_lifecycle_log", None))
+        return None
     if kind == "ephemeral" and not dry_run:
         skipped = _grade_ephemeral(
             api_base, candidate, event, context, quiet, services

@@ -67,69 +67,20 @@ def set_wakes_enabled(cid: str, body: WakesToggle, request: Request):
 
 @app.post("/api/containers/{cid}/autonomy", status_code=200)
 def set_autonomy_level(cid: str, body: AutonomyUpdate, request: Request):
-    """#298: move the autonomy SLIDER for a container — the single source of truth for how much a
-    human stays in the loop.
+    """Refuse the retired project-wide autonomy write.
 
-      plan (Plan-only)   — every /done stops at needs_verification (a human verifies); the agent
-                           refuses `gh pr create` until its plan is approved on the task thread.
-      pr   (Build-to-PR) — every /done stops at needs_verification; the agent may `gh pr create`
-                           but refuses `gh pr merge`.
-      full (Full)        — a /done AUTO-COMPLETES the task (no human verify); the agent may
-                           `gh pr merge` to the configured target branch.
-
-    Only the completion gate is engine-enforced (here + mark_done); the gh/git rules are agent
-    behaviors keyed off this value, recorded in docs/orcha-project-preferences.md.
-
-    HUMAN-GATED (Orcha#30, stricter than /wakes): moving the slider can switch off the human
-    verification gate entirely, so only a kind='human' actor may do it. Audit-logged.
-
-    mig 043: optionally also flips the container-wide `autonomy_enforced` switch — when true, every
-    per-agent autonomy_override (mig 043) is IGNORED and the container level governs everyone
-    ("override for everyone"); false re-honors overrides. Omitting it leaves the switch unchanged.
-    Rides the SAME owner-or-manage_autonomy gate as the level itself.
+    Stored project and agent values remain compatibility history only. The human project owner
+    changes current authority on the individual task endpoint.
     """
     if not valid_uuid(cid):
         raise HTTPException(400, "container_id is not a valid UUID")
-    if body.level not in AUTONOMY_LEVELS:
-        raise HTTPException(400, f"level must be one of {AUTONOMY_LEVELS}")
-    with db_cursor() as (connection, cur):
-        require_container(cur, cid)
-        # Per-project identity: a trusted proxy login IS the actor (403 non-member).
-        # Access model: the wake/autonomy switches are owner-or-manage_autonomy.
-        enforce_grant(cur, request, cid, "manage_autonomy")
-        body.actor_agent_id = trusted_actor(cur, request, cid, body.actor_agent_id)
-        require_kind(cur, body.actor_agent_id, ("human",))
-        if body.autonomy_enforced is None:
-            cur.execute(
-                "UPDATE containers SET autonomy_level=%s WHERE id=%s "
-                "RETURNING autonomy_level, autonomy_enforced",
-                (body.level, cid),
-            )
-            detail = {"level": body.level}
-        else:
-            cur.execute(
-                "UPDATE containers SET autonomy_level=%s, autonomy_enforced=%s WHERE id=%s "
-                "RETURNING autonomy_level, autonomy_enforced",
-                (body.level, body.autonomy_enforced, cid),
-            )
-            detail = {"level": body.level, "autonomy_enforced": body.autonomy_enforced}
-        row = cur.fetchone()
-        log_event(
-            cur,
-            cid,
-            "human",
-            body.actor_agent_id,
-            "container",
-            cid,
-            "autonomy_changed",
-            detail,
-        )
-        connection.commit()
-    return {
-        "container_id": cid,
-        "autonomy_level": row["autonomy_level"],
-        "autonomy_enforced": row["autonomy_enforced"],
-    }
+    raise HTTPException(
+        410,
+        {
+            "code": "task_autonomy_only",
+            "message": "Project autonomy was retired. Change autonomy on the individual task.",
+        },
+    )
 
 
 @app.put(
@@ -283,8 +234,8 @@ def set_container_limits(cid: str, body: ContainerLimitsUpdate, request: Request
         require_container(cur, cid)
         enforce_grant(cur, request, cid, "manage_agents")
         actor = trusted_actor(cur, request, cid, body.actor_agent_id)
-        # human-gated like the autonomy slider: the cap guards against runaway agent
-        # creation, so an agent can never raise it for itself
+        # The cap is human-gated because it guards against runaway agent creation;
+        # an agent can never raise it for itself.
         require_kind(cur, actor, ("human",))
         cur.execute(
             "SELECT max_auto_agents FROM containers WHERE id=%s " + sql.for_update(), (cid,)

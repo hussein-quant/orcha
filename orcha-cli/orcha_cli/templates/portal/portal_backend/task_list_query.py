@@ -3,11 +3,40 @@
 from portal_backend import sql
 
 
+def plan_author_sql(message: str) -> str:
+    """A task's assignees own its plan; other participants' briefs are context.
+
+    Keep the legacy agent-post fallback for tasks with no assigned agent.
+    `t` is the task alias shared by the list, attention and push queries.
+    """
+    return (
+        f"(EXISTS (SELECT 1 FROM agent_tasks pa WHERE pa.task_id=t.id "
+        f"AND pa.agent_id={message}.author_id) OR NOT EXISTS "
+        "(SELECT 1 FROM agent_tasks pa WHERE pa.task_id=t.id))"
+    )
+
+
+def plan_candidate_sql(message: str) -> str:
+    """Autonomy ON requires the first word to be Plan; OFF keeps human selection.
+
+    Use portable substring comparisons so both databases apply the same ASCII
+    word boundary as the frontend. Leading spaces/tabs are harmless; later lines
+    and words such as Planning are ordinary updates.
+    """
+    body = f"lower(ltrim({message}.body, ' \t'))"
+    next_char = f"substr({body},5,1)"
+    explicit = (f"(substr({body},1,4)='plan' AND "
+                f"{next_char} NOT BETWEEN 'a' AND 'z' AND "
+                f"{next_char} NOT BETWEEN '0' AND '9' AND {next_char}<>'_')")
+    return f"({plan_author_sql(message)} AND (t.autonomy<>'on' OR {explicit}))"
+
+
 # An agent-authored post on task `t` made after decision `d` (the revised plan).
 _REVISED_AFTER_D = (
     "(d.decision = 'reject' AND EXISTS (SELECT 1 FROM task_messages rm "
     "JOIN agents ra2 ON ra2.id = rm.author_id WHERE rm.task_id = t.id "
-    "AND ra2.kind <> 'human' AND rm.created_at > d.created_at))"
+    f"AND ra2.kind <> 'human' AND {plan_candidate_sql('rm')} "
+    "AND rm.created_at > d.created_at))"
 )
 
 # TG-13: the start of the CURRENT plan round for task `t` — the latest plan REJECT that
@@ -18,7 +47,8 @@ PLAN_CUTOFF_SQL = (
     "WHERE pd.subject_type = 'plan_approval' AND pd.subject_id = CAST(t.id AS TEXT) "
     "AND pd.decision = 'reject' AND EXISTS (SELECT 1 FROM task_messages pm "
     "JOIN agents pa ON pa.id = pm.author_id WHERE pm.task_id = t.id "
-    f"AND pa.kind <> 'human' AND pm.created_at > pd.created_at)), {sql.ts_neg_infinity()})"
+    f"AND pa.kind <> 'human' AND {plan_candidate_sql('pm')} "
+    f"AND pm.created_at > pd.created_at)), {sql.ts_neg_infinity()})"
 )
 
 # TG-13b: order agent posts inside the current plan round (`pc.c` = PLAN_CUTOFF_SQL):
@@ -26,7 +56,7 @@ PLAN_CUTOFF_SQL = (
 # LATEST (an ack like "revising now" usually precedes the real revision).
 PLAN_ROUND_ORDER_SQL = (
     f"CASE WHEN pc.c = {sql.ts_neg_infinity()} THEN m.created_at END ASC, "
-    "m.created_at DESC"
+    "m.created_at DESC, m.id ASC"
 )
 
 # TG-13: an in-progress task's plan gate is OPEN when no plan decision exists, or the
@@ -38,7 +68,8 @@ PLAN_GATE_OPEN_SQL = (
     "AND gd.subject_id = CAST(t.id AS TEXT) ORDER BY gd.created_at DESC LIMIT 1) lg "
     "WHERE lg.decision = 'reject' AND EXISTS (SELECT 1 FROM task_messages gm "
     "JOIN agents ga ON ga.id = gm.author_id WHERE gm.task_id = t.id "
-    "AND ga.kind <> 'human' AND gm.created_at > lg.created_at)))"
+    f"AND ga.kind <> 'human' AND {plan_candidate_sql('gm')} "
+    "AND gm.created_at > lg.created_at)))"
 )
 
 
@@ -78,6 +109,13 @@ def _task_list_sql(where: str, order: str) -> str:
                                      ORDER BY l.started_at DESC LIMIT 1"""))
     return f"""SELECT t.id, t.title, t.description, t.definition_of_done, t.status, t.priority,
                       t.is_root, t.created_by_agent_id, t.result,
+                      t.autonomy, t.autonomy_revision, t.autonomy_changed_at,
+                      t.autonomy_changed_by, t.workflow_id, t.work_revision,
+                      -- GH #350 §4.14: hidden membership is presentation-only. Task views drop
+                      -- the workflow chip / crumb / section when this is true; the task itself,
+                      -- its status, messages, result and evidence are untouched.
+                      (SELECT w.hidden_at IS NOT NULL FROM workflows w
+                        WHERE w.id = t.workflow_id) AS workflow_hidden,
                       -- SPEC-4: per-task working agreement {{review_chain,handoff_to,autonomy,notes}}
                       -- (NULL when unset). Rides the shared task-list builder so it surfaces on the
                       -- snapshot poll + GET /containers/{{cid}}/tasks with no extra call.
@@ -124,6 +162,7 @@ def _task_list_sql(where: str, order: str) -> str:
                          FROM (SELECT {PLAN_CUTOFF_SQL} AS c) pc
                          CROSS JOIN task_messages m LEFT JOIN agents ma ON ma.id = m.author_id
                         WHERE m.task_id = t.id AND m.author_id IS NOT NULL AND ma.kind <> 'human'
+                          AND {plan_candidate_sql('m')}
                           AND m.created_at > pc.c
                         ORDER BY {PLAN_ROUND_ORDER_SQL} LIMIT 1) AS plan_message,
                       -- GH #144: the per-task runs summary counts/reads FEED membership

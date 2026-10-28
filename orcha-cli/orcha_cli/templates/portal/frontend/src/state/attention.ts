@@ -4,9 +4,8 @@
  * An attention item is one ENTITY awaiting a human decision the backend lets a
  * human make:
  *   plan    — task in_progress, no plan_decision, agent plan message present,
- *             and the plan author's (else assignee's) EFFECTIVE autonomy is
- *             "plan" (per-agent override aware — planAwaitsHuman);
- *   verify  — task needs_verification, container autonomy level is not "full";
+ *             and task autonomy is OFF (planAwaitsHuman);
+ *   verify  — task needs_verification (including ON outside results);
  *   request — request open to a human (target null or a human) OR escalated.
  * One entity counts once. The badge number counts items NOT assigned to someone
  * else (a reviewer / target human who is not the acting human). Notifications,
@@ -26,7 +25,6 @@ import {
   actingAuthority,
   agentById,
   agentByAlias,
-  autLevel,
   isToHuman,
   planAwaitsHuman,
   planMessageOf,
@@ -94,7 +92,6 @@ function requestForOtherHuman(snap: Snapshot, r: OrchaRequest, actingId: string 
 export function selectAttention(snap: Snapshot | null, actingHumanId: string | null, opts: AttentionOpts = {}): Attention {
   if (!snap) return { items: [], count: null, partial: false, followUps: [] };
   const cid = snap.container?.id != null ? String(snap.container.id) : null;
-  const level = autLevel(snap);
   const acting = actingHumanId != null ? agentById(snap, actingHumanId) : null;
   const items: AttentionItem[] = [];
 
@@ -107,7 +104,7 @@ export function selectAttention(snap: Snapshot | null, actingHumanId: string | n
       const pm = planMessageOf(t);
       since = (pm && pm.at) || t.started_at || null;
       agentAlias = (pm && pm.from) || agentAlias;
-    } else if (level !== "full" && t.status === "needs_verification") {
+    } else if (t.status === "needs_verification") {
       kind = "verify";
       since = t.completed_at || t.started_at || t.created_at || null;
     }

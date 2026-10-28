@@ -19,10 +19,19 @@ def resolve_context_task_id(
     drain_task_status: Callable[[Any, str], str | None],
     task_bound_bucket: str,
     directive_bucket: str,
+    parked_task_ids: Collection[str] = (),
 ):
-    """Resolve the live task that owns this wake, newest directive last."""
-    if initial_task_id is not None or not pending:
+    """Resolve the live task that owns this wake, newest directive last.
+
+    A parked task (a Workflow task waiting for its turn) never owns a wake: it
+    cannot launch, so binding to it would drop the wake. Its rows stay pending.
+    """
+    if (initial_task_id is not None
+            and str(initial_task_id) not in parked_task_ids
+            and drain_task_status(cur, initial_task_id) not in (None, "completed", "cancelled")):
         return initial_task_id
+    if not pending:
+        return None
     cur.execute(
         f"""SELECT e.event_name, e.payload, e.target_id FROM agent_events e
            WHERE e.event_key=%s AND e.ts > %s AND e.ts <= %s
@@ -45,6 +54,7 @@ def resolve_context_task_id(
         if (
             classification["bucket"] in (task_bound_bucket, directive_bucket)
             and task_id
+            and str(task_id) not in parked_task_ids
             and drain_task_status(cur, task_id) not in (None, "completed", "cancelled")
         ):
             return str(task_id)
@@ -126,11 +136,62 @@ def handled_event_id_sets(
             and context_task_id
             and str(task_id) == str(context_task_id)
         )
-        if bucket in run_ackable_buckets or (
-            bucket == task_bound_bucket and same_task
-        ):
+        if bucket in run_ackable_buckets or (bucket == task_bound_bucket and same_task):
             handled.append(row["id"])
             delivery_handled.append(row["id"])
         elif bucket == directive_bucket and same_task:
             handled.append(row["id"])
     return handled, delivery_handled
+
+
+def parked_pending_events(
+    cur,
+    aid: str,
+    delivered_ts,
+    *,
+    non_waking_events: Collection[str],
+    drain_class: Callable[..., dict],
+    task_bound_bucket: str,
+    directive_bucket: str,
+    is_parked: Callable[[Any], bool],
+    skip_event_ids: Collection = (),
+):
+    """Split pending rows into those waiting on a parked task and the rest.
+
+    A task-bound row or directive (a thread message, a plan decision, an answer) on a
+    Workflow task waiting for its turn can only be acted on in that task's own turn. It
+    stays unacknowledged, so it is delivered when the turn comes, but it neither counts
+    as pending work nor wakes the agent now; otherwise every scan would wake the agent
+    for something no wake may act on. Returns (parked event ids, parked task ids,
+    unparked count, newest unparked event name and payload).
+    """
+    cur.execute(
+        f"""SELECT e.id, e.event_name, e.payload, e.target_id FROM agent_events e
+           WHERE e.event_key=%s AND e.ts > %s
+             AND {sql.not_in_list('e.event_name')}
+             AND NOT EXISTS (
+               SELECT 1 FROM agent_event_acks a
+               WHERE a.agent_id=%s AND a.event_id=e.id
+             )
+           ORDER BY e.ts DESC, e.id DESC""",
+        (aid, delivered_ts, sql.list_param(non_waking_events), aid),
+    )
+    parked_ids, parked_tasks = set(), set()
+    unparked, newest = 0, None
+    for row in cur.fetchall():
+        if row["id"] in skip_event_ids:
+            continue
+        classification = drain_class(
+            cur, row["event_name"], row["payload"], target_id=row["target_id"]
+        )
+        task_id = classification["task_id"]
+        if classification["bucket"] in (task_bound_bucket, directive_bucket) and is_parked(
+            task_id
+        ):
+            parked_ids.add(row["id"])
+            parked_tasks.add(str(task_id))
+            continue
+        unparked += 1
+        if newest is None:
+            newest = (row["event_name"], row["payload"])
+    return parked_ids, parked_tasks, unparked, newest

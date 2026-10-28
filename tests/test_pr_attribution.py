@@ -51,8 +51,13 @@ def test_migration_042_exists_and_is_next_sequential():
     # verdikt_runs.autofix + verdikt_task_autofix / verdikt_autofix_loops / verdikt_autofix_attempts); 069 plan-usage snapshots
     # (plan_usage_snapshots); 070 the plan-usage display setting (plan_usage_display); 071 opt-in
     # agent-run API keys (container_provider_keys.use_for_agents).
+    # 074 moves approval authority to tasks; 075-077 add workflows, durable
+    # evidence and worker controls; 078 freezes evidence supplier attribution;
+    # 079 distinguishes evidence reviewed on import from owner-supplied work;
+    # 080 adds reversible workflow hide/restore (workflows.hidden_at, GH #350).
+    # 081 adds explicit review handoffs.
     # Keep this pin moving with the chain tip so gaps/dupes still fail loudly.
-    assert numbers[-1] == 73, f"073 must be the latest migration, saw {numbers[-1]:03d}"
+    assert numbers[-1] == 81, f"081 must be the latest migration, saw {numbers[-1]:03d}"
 
 
 def test_agents_git_email_column_applied(db):

@@ -7,13 +7,10 @@ snapshot of those projects), so ``GET /api/containers`` ships ``needs_you`` comp
 Both sides MUST agree — ``tests/test_containers_needs_you.py`` pins the parity case by
 case. The rule, per project:
 
-  * plan    — task ``in_progress``, no ``plan_approval`` decision recorded, an agent-
-              authored opening plan message exists, and the plan author's (else the
-              first assignee's) EFFECTIVE autonomy is ``plan`` (``autonomy.py``, the ONE
-              rule: enforced → container level, else the agent override, else the
-              container level). Author/assignee resolve by alias among LIVE agents only,
-              exactly like the snapshot the portal reads.
-  * verify  — task ``needs_verification`` while the container level is not ``full``.
+  * plan    — task ``in_progress``, no ``plan_approval`` decision recorded, an
+              agent-authored opening plan exists, and that task's autonomy is OFF.
+  * verify  — every task ``needs_verification``. An ON worker result self-accepts
+              before reaching this state; an outside result always needs a person.
   * request — request ``escalated``, or ``open`` with no target or a live human target.
 
 One entity counts once. The number counts only the decisions the REQUESTING user can
@@ -31,8 +28,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from portal_backend import sql
-from portal_backend.task_list_query import PLAN_CUTOFF_SQL, PLAN_GATE_OPEN_SQL, PLAN_ROUND_ORDER_SQL
-from portal_backend.autonomy import effective_autonomy
+from portal_backend.task_list_query import PLAN_CUTOFF_SQL, PLAN_GATE_OPEN_SQL, PLAN_ROUND_ORDER_SQL, plan_candidate_sql
 
 # The acting-human resolution result for one container.
 READ_ONLY = "read_only"
@@ -70,7 +66,7 @@ def needs_you_by_container(
 ) -> Dict[str, Dict[str, int]]:
     """Per-container {plan, verify, request} counts of decisions the acting human may make.
 
-    ``containers`` rows need ``id``, ``autonomy_level`` and ``autonomy_enforced``.
+    ``containers`` rows need ``id``.
     ``acting_by_cid[str(cid)]`` is the acting human's agent row (``id``, ``member_role``),
     ``None`` (nobody resolved — count only unassigned decisions), or ``READ_ONLY``.
     """
@@ -79,11 +75,9 @@ def needs_you_by_container(
     if not rows:
         return out
     cids = [str(c["id"]) for c in rows]
-    by_cid = {str(c["id"]): c for c in rows}
-
-    # LIVE agents only — the snapshot the portal resolves aliases against.
+    # LIVE agents are still needed for request targeting, never for task authority.
     cur.execute(
-        f"""SELECT id, container_id, alias, kind, autonomy_override
+        f"""SELECT id, container_id, alias, kind
              FROM agents
             WHERE {sql.in_list('container_id')} AND terminated_at IS NULL""",
         (sql.list_param(cids),),
@@ -97,12 +91,13 @@ def needs_you_by_container(
     # Candidate tasks: needs_verification, or an undecided in-progress task with an
     # agent-authored opening plan (task_list_query plan_message / plan_decision).
     cur.execute(
-        """SELECT t.id, t.container_id, t.status, t.reviewer_agent_id,
+        """SELECT t.id, t.container_id, t.status, t.autonomy, t.reviewer_agent_id,
                   EXISTS (SELECT 1 FROM agents ra WHERE ra.id = t.reviewer_agent_id)
                     AS reviewer_exists,
                   (SELECT ma.alias FROM (SELECT """ + PLAN_CUTOFF_SQL + """ AS c) pc
                     CROSS JOIN task_messages m JOIN agents ma ON ma.id = m.author_id
                     WHERE m.task_id = t.id AND ma.kind <> 'human'
+                      AND """ + plan_candidate_sql('m') + """
                       AND m.created_at > pc.c
                     ORDER BY """ + PLAN_ROUND_ORDER_SQL + """ LIMIT 1) AS plan_author,
                   (SELECT a.alias FROM agent_tasks at JOIN agents a ON a.id = at.agent_id
@@ -129,22 +124,13 @@ def needs_you_by_container(
         acting = acting_by_cid.get(cid)
         if acting == READ_ONLY:
             continue
-        c = by_cid[cid]
-        level = c["autonomy_level"] or "plan"
         kind = None
         if t["status"] == "in_progress":
             if t["plan_author"] is None:
                 continue  # no agent plan posted: not a pending plan
-            aliases = live_by_alias.get(cid, {})
-            who = aliases.get(t["plan_author"]) or aliases.get(t["first_assignee"])
-            eff = effective_autonomy(
-                level,
-                bool(c["autonomy_enforced"]),
-                who.get("autonomy_override") if who else None,
-            )
-            if eff == "plan":
+            if t["autonomy"] != "on":
                 kind = "plan"
-        elif level != "full":
+        elif t["status"] == "needs_verification":
             kind = "verify"
         if kind and not _task_for_other(t, acting):
             out[cid][kind] += 1

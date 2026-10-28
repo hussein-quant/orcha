@@ -48,20 +48,12 @@ def _scan_context(scan, agent_hold_until, services):
     triage_key = services._unseal_scan_key(scan, "triage_key_enc")
 
     def triage(text):
-        return services._triage_wake(
-            text, config=triage_config, api_key=triage_key
-        )
+        return services._triage_wake(text, config=triage_config, api_key=triage_key)
 
     return {
         "triage": triage,
         "ack_config": services._ack_config_from_scan(scan),
         "ack_key": services._unseal_scan_key(scan, "ack_key_enc"),
-        "autonomy_level": scan.get("autonomy_level"),
-        # Scan-wide T2 gate (container level == 'full'). Since mig 043 the ACTING gate is
-        # per-candidate in _grade_ephemeral (candidate.effective_autonomy, falling back to
-        # the container level here for pre-043 portals); this key stays as the scan-wide
-        # truth for embedders that read the context directly.
-        "t2_enabled": scan.get("autonomy_level") == "full",
         "hold_now": time.time(),
         "agent_hold_until": agent_hold_until,
     }
@@ -113,9 +105,7 @@ def tick(
         }
 
     if base_cwd and not dry_run:
-        _backfill_reachability(
-            api_base, container_id, scan, base_cwd, quiet, services
-        )
+        _backfill_reachability(api_base, container_id, scan, base_cwd, quiet, services)
     context = _scan_context(scan, holds, services)
     woke = []
     for candidate in scan.get("candidates", []):
@@ -155,7 +145,9 @@ def _recover_candidate_error(api_base, candidate, context, error, dry_run, servi
         return
     holds = context.get("agent_hold_until")
     if isinstance(holds, dict):
-        holds[agent_id] = context.get("hold_now", time.time()) + CANDIDATE_ERROR_HOLD_SECS
+        holds[agent_id] = (
+            context.get("hold_now", time.time()) + CANDIDATE_ERROR_HOLD_SECS
+        )
     try:
         services._post_json(
             f"{api_base}/api/agents/{agent_id}/wake-ack",

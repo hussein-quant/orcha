@@ -58,10 +58,7 @@ import { AttachGlyph, Composer } from "../../components/primitives";
 import { PageHeader, Pager } from "../../shell/PageChrome";
 import {
   agentByAlias,
-  autLevel,
-  agentAutonomy,
   pendingPlan,
-  planAwaitsHuman,
   planMessageOf,
   useActingAuthority,
   useSnapshot,
@@ -72,6 +69,11 @@ import { modeWords, useProjectMode } from "../../lib/projectMode";
 import { AutofixSection, EvidencePack } from "./evidence";
 import { DeliverablesEvidence, DeliverablesSection } from "./deliverables";
 import { GoalChain } from "./goal";
+import { WorkflowTaskReturn } from "../workflows/WorkflowTaskReturn";
+import { WorkerDetailsNotice } from "../workflows/WorkflowReadViews";
+import { WorkflowTaskInspector, WorkflowTaskStatus, useTaskWorkflow, workflowMemberHref } from "../workflows/WorkflowTaskContext";
+import { WorkflowTaskEntry } from "../workflows/WorkflowTaskEntry";
+import { TaskAuthority, useWorkflowPlanApproval } from "./TaskAuthority";
 import { pausedById, useContainerBudgets, type AgentBudgetStatus } from "../agents/budget/budgetModel";
 import { BudgetPausedChip } from "../agents/budget/AgentBudgetSection";
 import { logRowText } from "../agents/runlog";
@@ -763,6 +765,8 @@ export function GateSurface({
   noDiff?: boolean;
 }) {
   const { snap, refresh } = useSnapshot();
+  const { blockLegacy } = useTaskWorkflow(t.id);
+  const workflowPlan = useWorkflowPlanApproval(t.id);
   // PS-29: the connection-aware actor (null while offline / read-only)
   const actor = useActor();
   const toast = useToast();
@@ -774,10 +778,14 @@ export function GateSurface({
   const [error, setError] = useState<string | null>(null);
   const reasonRef = useRef<HTMLTextAreaElement | null>(null);
   const reasonBoxRef = useRef<HTMLDivElement | null>(null);
+  const rejectButtonRef = useRef<HTMLButtonElement | null>(null);
   const noHuman = useNoHumanReason();
+  // Keep local approval drafts mounted while membership refreshes. Workflow
+  // decisions require the new approval contract and never use legacy verify.
+  if (blockLegacy && !(workflowPlan && pendingPlan(t))) return null;
 
   // mig 057: an AI manager sent the finished work back — a person may still accept it
-  if (t.status === "in_progress" && t.manager_review?.status === "sent_back" && !acted) {
+  if (!blockLegacy && t.status === "in_progress" && t.manager_review?.status === "sent_back" && !acted) {
     return (
       <ManagerSentBackNote
         t={t}
@@ -826,7 +834,7 @@ export function GateSurface({
     );
   }
   if (acted) return null; // optimistic: just acted this session, snapshot catching up
-  const isPlan = pendingPlan(t);
+  const isPlan = pendingPlan(t) && t.autonomy !== "on";
   const isVerify = t.status === "needs_verification";
   if (!isPlan && !isVerify) return null;
   const pm = isPlan ? planMessageOf(t) : null;
@@ -834,11 +842,7 @@ export function GateSurface({
   const disabled = !h || busy;
   const author = isPlan && pm?.from ? agentByAlias(snap, pm.from) : null;
   const whoName = t.assignee || "the assignee";
-  const level = autLevel(snap);
-  // a plan is gated by its author's (else the assignee's) EFFECTIVE autonomy
-  // — per-agent overrides included — the same rule as Needs you / Overview
-  const planLevel = isPlan ? agentAutonomy(snap, author || agentByAlias(snap, t.assignee)) : level;
-  const gatedOff = isPlan ? !planAwaitsHuman(snap, t) : level === "full";
+  const gatedOff = t.autonomy === "on";
 
   const submit = async (approve: boolean, reasonTxt: string) => {
     if (!actor) {
@@ -919,6 +923,7 @@ export function GateSurface({
     // the inline form opens below the fold in a narrow pane: bring it into view
     // and put the caret in the (required) reason field.
     requestAnimationFrame(() => {
+      if (!reasonBoxRef.current?.classList.contains("show")) return;
       reasonBoxRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
       reasonRef.current?.focus({ preventScroll: true });
     });
@@ -930,7 +935,7 @@ export function GateSurface({
     ? "Approving lets " + whoName + " execute."
     : "Accepting marks the task completed. Rejecting returns it to " + whoName + ".";
   const audit = h ? " Logged to the audit trail as " + h.alias + "." : "";
-  const optionalNote = gatedOff ? "Optional at the “" + planLevel + "” autonomy level — not required, but you can still decide." : "";
+  const optionalNote = gatedOff ? "Task autonomy is ON, so the assigned agent may make this decision; a person can still intervene." : "";
   const helpText = [isVerify ? EVIDENCE_CAVEAT : "", optionalNote].filter(Boolean).join(" ");
 
   return (
@@ -975,6 +980,7 @@ export function GateSurface({
           variant="secondary"
           size="sm"
           data-act="reject"
+          ref={rejectButtonRef}
           disabled={disabled}
           title={!h ? noHuman : isPlan ? "Send the plan back with the changes you want" : "Return the task to " + whoName + " with a reason"}
           aria-expanded={reasonOpen}
@@ -1023,6 +1029,7 @@ export function GateSurface({
             onClick={() => {
               setReasonOpen(false);
               setReason("");
+              rejectButtonRef.current?.focus({ preventScroll: true });
             }}
           >
             Cancel
@@ -1106,6 +1113,7 @@ function protoEmpty(p: Proto | null): boolean {
 }
 function ProtocolPanel({ t }: { t: Task }) {
   const { snap, refresh } = useSnapshot();
+  const { blockLegacy } = useTaskWorkflow(t.id);
   // PS-29: the connection-aware actor (null while offline / read-only)
   const actor = useActor();
   const toast = useToast();
@@ -1117,11 +1125,15 @@ function ProtocolPanel({ t }: { t: Task }) {
   // panel re-renders immediately; the next snapshot poll confirms it.
   const [override, setOverride] = useState<Proto | null>(null);
   const p: Proto = override ?? ((t.protocol as Proto | null) || {});
-  const canEdit = !!actor;
+  const canEdit = !!actor && !blockLegacy;
   const noHuman = useNoHumanReason();
 
   const startEdit = () => {
     if (!actor) {
+      toast(noHuman, "danger");
+      return;
+    }
+    if (blockLegacy) {
       toast(noHuman, "danger");
       return;
     }
@@ -1138,6 +1150,7 @@ function ProtocolPanel({ t }: { t: Task }) {
   const save = async () => {
     const h = actor;
     if (!h || !draft) return;
+    if (blockLegacy) return;
     setSaving(true);
     // PARTIAL merge (Ledger contract): send all four; "" clears a key.
     let r: { ok: boolean; status: number; d: { protocol?: unknown; detail?: unknown } };
@@ -1618,7 +1631,12 @@ function ThreadCard({
     const mk = parseThreadMarker(m.body);
     return !!mk && mk.kind === "decision" && mk.subject === "plan_approval";
   });
-  const pmAbove = planAbove ? planMessageOf(t) : null;
+  const displayedPlan = planAbove ? planMessageOf(t) : null;
+  // Self-approved plans fold above Activity. Keep their original post readable
+  // here, including legacy ordinary updates incorrectly treated as plans.
+  const selfApproved = !!displayedPlan && t.plan_decision?.decision === "approve"
+    && t.plan_decision.actor === displayedPlan.from;
+  const pmAbove = selfApproved ? null : displayedPlan;
   const isPlanMsg = (m: ThreadMsg) => !!pmAbove && !m.is_human && m.from === pmAbove.from && m.body === pmAbove.body;
   const msgItem = (m: ThreadMsg, i: number): ActItem => {
     const key = m.id || "m" + (startIdx + i);
@@ -1854,6 +1872,7 @@ function AssignControl({ t, children, className, paused = {} }: {
   paused?: Record<string, AgentBudgetStatus>;
 }) {
   const { snap, refresh } = useSnapshot();
+  const { blockLegacy } = useTaskWorkflow(t.id);
   // PS-29: the connection-aware actor (null while offline / read-only)
   const actor = useActor();
   const toast = useToast();
@@ -1863,6 +1882,7 @@ function AssignControl({ t, children, className, paused = {} }: {
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const [pickOpen, setPickOpen] = useState(false);
   const [confirm, setConfirm] = useState<null | { reassign: boolean; agentId: string; alias: string }>(null);
+  if (blockLegacy) return <>{children}</>;
   if (!canAssign(t, snap)) return <>{children}</>;
   const h = actor;
   const curAgent = cur ? agentByAlias(snap, cur) : null;
@@ -2165,13 +2185,14 @@ function CloseCard({ t, onActed, openRef }: { t: Task; onActed: (id: string) => 
   const { refresh } = useSnapshot();
   // PS-29: the connection-aware actor (null while offline / read-only)
   const actor = useActor();
+  const { blockLegacy } = useTaskWorkflow(t.id);
   const toast = useToast();
   const [reason, setReason] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const imp = useImplications(t.id, confirm);
-  const closable = !(t.is_root || t.status === "completed" || t.status === "cancelled");
+  const closable = !blockLegacy && !(t.is_root || t.status === "completed" || t.status === "cancelled");
   const who = t.assignee;
 
   const noHuman = useNoHumanReason();
@@ -2822,7 +2843,7 @@ export function newestDiffRunKey(runs: Run[]): string | null {
   return best ? best.run_id || best.id || null : null;
 }
 
-function RunCard({ run, diffOpen = false }: { run: Run; diffOpen?: boolean }) {
+function RunCard({ run, diffOpen = false, workflowControlled = false }: { run: Run; diffOpen?: boolean; workflowControlled?: boolean }) {
   const words = modeWords(useProjectMode(useSnapshot().cid).mode);
   // PS-29: the connection-aware actor (null while offline / read-only)
   const actor = useActor();
@@ -2853,7 +2874,7 @@ function RunCard({ run, diffOpen = false }: { run: Run; diffOpen?: boolean }) {
   const stopReq = stopRequestedRuns.has(rid);
 
   const requestStop = () => {
-    if (!rid) return;
+    if (!rid || workflowControlled) return;
     const h = actor;
     if (!h) {
       toast(noHuman, "danger");
@@ -2867,7 +2888,7 @@ function RunCard({ run, diffOpen = false }: { run: Run; diffOpen?: boolean }) {
   };
   const doStop = async () => {
     const h = actor;
-    if (!h) return;
+    if (!h || workflowControlled) return;
     try {
       const r = await fetch("/api/runs/" + encodeURIComponent(rid) + "/stop", {
         method: "POST",
@@ -2912,7 +2933,7 @@ function RunCard({ run, diffOpen = false }: { run: Run; diffOpen?: boolean }) {
           {ended ? " → " + clockTime(ended) : ""}
           {started ? " · " + relTime(ended || started) : ""}
         </span>
-        {live ? (
+        {live && !workflowControlled ? (
           <Button
             variant="secondary"
             size="sm"
@@ -2927,6 +2948,7 @@ function RunCard({ run, diffOpen = false }: { run: Run; diffOpen?: boolean }) {
           </Button>
         ) : null}
       </div>
+      {workflowControlled && run.diff == null && <WorkerDetailsNotice state="unavailable" />}
       {run.diff != null ? (
         <details className="wk-run-sec" open={diffOpen || undefined} data-run-diff={rid}>
           <summary>
@@ -3001,7 +3023,7 @@ function RunCard({ run, diffOpen = false }: { run: Run; diffOpen?: boolean }) {
           </div>
         ) : null}
       </details>
-      {confirmStop && (
+      {confirmStop && !workflowControlled && (
         <Dialog
           title={"Stop run " + shortId(rid) + "?"}
           description="The worker halts at its next checkpoint; the task stays in progress. Other runs keep going."
@@ -3028,7 +3050,7 @@ function RunCard({ run, diffOpen = false }: { run: Run; diffOpen?: boolean }) {
   );
 }
 
-function RunsPanel({ state }: { state: RunsState | null }) {
+function RunsPanel({ state, workflowControlled = false }: { state: RunsState | null; workflowControlled?: boolean }) {
   if (!state) return <Skeleton lines={3} label="Loading runs" />;
   if (state.failed)
     return (
@@ -3042,7 +3064,7 @@ function RunsPanel({ state }: { state: RunsState | null }) {
   return (
     <section className="wk-runs" aria-label="Runs and diffs">
       {runs.length ? (
-        runs.map((r) => <RunCard key={r.run_id || r.id} run={r} diffOpen={!!diffKey && (r.run_id || r.id) === diffKey} />)
+        runs.map((r) => <RunCard key={r.run_id || r.id} workflowControlled={workflowControlled} run={r} diffOpen={!!diffKey && (r.run_id || r.id) === diffKey} />)
       ) : (
         <div className="none">No runs yet — appears when a worker wakes for this task.</div>
       )}
@@ -3074,6 +3096,7 @@ function TaskAutofix({ t }: { t: Task }) {
   return <AutofixSection taskId={t.id} status={t.status} actorId={actor ? String(actor.id) : null} noActorReason={noHuman} />;
 }
 
+
 function TaskDetail({
   t,
   tab,
@@ -3096,6 +3119,7 @@ function TaskDetail({
   mode: "inspector" | "narrow" | "full";
 }) {
   const { snap } = useSnapshot();
+  const { blockLegacy } = useTaskWorkflow(t.id);
   const cur = actsTab(tab);
   const [runsSeen, setRunsSeen] = useState(cur === "runs");
   const [propsOpen, setPropsOpen] = useState(false);
@@ -3104,7 +3128,8 @@ function TaskDetail({
   }, [cur]);
   const pre = "task-" + t.id;
   const pm = planMessageOf(t);
-  const gated = (t.status === "needs_verification" || pendingPlan(t)) && !acted;
+  const workflowPlan = useWorkflowPlanApproval(t.id);
+  const gated = ((!blockLegacy && t.status === "needs_verification") || ((!blockLegacy || workflowPlan) && pendingPlan(t) && t.autonomy !== "on")) && !acted;
   const all = (t.assignees || []).length ? t.assignees : t.assignee ? [t.assignee] : [];
   // KG-6b: a budget-paused assignee explains a stalled task right on the meta line
   const budgets = useContainerBudgets(snap?.container?.id ?? null);
@@ -3157,13 +3182,14 @@ function TaskDetail({
       {/* full: title · description · gate (Linear issue).
           inspector / narrow: title · ONE meta line · gate · description (3 lines) */}
       <div className="td-main">
+        <WorkflowTaskReturn taskId={t.id} />
         <GoalChain taskId={t.id} />
         <h1 className="td-title v2-t-display" title={full ? undefined : t.title}>
           {t.title}
         </h1>
         {!full ? (
           <div className="td-meta" aria-label="Summary">
-            <StatusIcon status={t.status} size={14} showLabel />
+            <WorkflowTaskStatus taskId={t.id} fallback={t.status} size={14} showLabel />
             <span className="td-meta-sep" aria-hidden="true" />
             <span className="td-prio" title={priorityTitle(t.priority)}>
               <PriorityIcon priority={t.priority} showLabel />
@@ -3199,7 +3225,7 @@ function TaskDetail({
           // so the compact meta line carries status / priority / assignee (hidden
           // by CSS once the rail is a right column)
           <div className="td-meta td-meta-full" aria-label="Summary">
-            <StatusIcon status={t.status} size={14} showLabel />
+            <WorkflowTaskStatus taskId={t.id} fallback={t.status} size={14} showLabel />
             <span className="td-meta-sep" aria-hidden="true" />
             <span className="td-prio" title={priorityTitle(t.priority)}>
               <PriorityIcon priority={t.priority} showLabel />
@@ -3222,6 +3248,7 @@ function TaskDetail({
             {budgetStop ? <BudgetPausedChip status={budgetStop} /> : null}
           </div>
         ) : null}
+        <WorkflowTaskInspector taskId={t.id} />
         {full ? description : gate}
         {full ? gate : description}
         {rejection ? (
@@ -3234,14 +3261,14 @@ function TaskDetail({
             {rejection.feedback ? <Md className="wk-text wk-md td-changes-b" text={rejection.feedback} tasks={snap?.tasks} /> : null}
           </div>
         ) : null}
-        {t.status !== "completed" && t.status !== "cancelled" ? <TaskAutofix key={"af-" + t.id} t={t} /> : null}
+        {!blockLegacy && t.status !== "completed" && t.status !== "cancelled" ? <TaskAutofix key={"af-" + t.id} t={t} /> : null}
         {!gated ? (
           <div className="td-block">
             <div className="td-block-k">Definition of done</div>
             <Md className="wk-text wk-md" text={t.definition_of_done || "—"} tasks={snap?.tasks} />
           </div>
         ) : null}
-        {t.result && !(t.status === "needs_verification" && !acted) ? (
+        {t.result && (blockLegacy || !(t.status === "needs_verification" && !acted)) ? (
           <div className={"td-block" + (rejection ? " is-rejected" : "")} data-result-rejected={rejection ? "true" : undefined}>
             <div className="td-block-k">{rejection ? "Previous result · rejected" : "Result"}</div>
             <div className="wk-text">
@@ -3281,7 +3308,7 @@ function TaskDetail({
                 only the full view repeats them here as the Linear rail (D12) */}
             {full ? (
               <Property label="Status">
-                <StatusIcon status={t.status} showLabel />
+                <WorkflowTaskStatus taskId={t.id} fallback={t.status} showLabel />
               </Property>
             ) : null}
             {full ? (
@@ -3334,6 +3361,7 @@ function TaskDetail({
           </PropertySection>
           ) : null}
           <RecurringProperty t={t} />
+          <TaskAuthority task={t} />
           <Relationships t={t} />
           <ProtocolPanel key={"proto-" + t.id} t={t} />
           <CloseCard key={"close-" + t.id} t={t} onActed={onActed} openRef={cancelRef} />
@@ -3355,7 +3383,7 @@ function TaskDetail({
             planAbove={!!pm && (pendingPlan(t) ? gated : !!t.plan_decision)}
           />,
         )}
-        {panel("runs", runsSeen ? <RunsPanel state={runs} /> : null)}
+        {panel("runs", runsSeen ? <RunsPanel state={runs} workflowControlled={blockLegacy} /> : null)}
       </div>
     </div>
   );
@@ -3419,6 +3447,7 @@ export function TaskDetailPane({
   children?: ReactNode;
 }) {
   const { snap, refresh } = useSnapshot();
+  const { blockLegacy, member } = useTaskWorkflow(t?.id ?? null);
   // PS-29: the connection-aware actor (null while offline / read-only)
   const actor = useActor();
   const toast = useToast();
@@ -3426,6 +3455,7 @@ export function TaskDetailPane({
   const runs = useTaskRuns(t ? t.id : null);
   const cancelRef = useRef<(() => void) | null>(null);
   const [unassignOpen, setUnassignOpen] = useState(false);
+  const [workflowEntryOpen, setWorkflowEntryOpen] = useState(false);
   // "Make recurring…": a routine pre-filled as a COPY of this task (the task is never changed)
   const recurGate = useMakeRecurringGate();
   const [recurOpen, setRecurOpen] = useState(false);
@@ -3433,7 +3463,7 @@ export function TaskDetailPane({
   // TG-50: hold / release / unassign — the human dispatch controls
   // (POST /api/tasks/{tid}/readiness and /unassign, both human-authority)
   const dispatch = async (kind: "hold" | "release" | "unassign") => {
-    if (!t) return;
+    if (!t || blockLegacy) return;
     if (!actor) {
       toast(noHuman, "danger");
       return;
@@ -3520,12 +3550,14 @@ export function TaskDetailPane({
           ? { label: "Pair in terminal", icon: "play", hint: aiAssignee.alias, disabled: true, disabledReason: noHuman }
           : { label: "Pair in terminal", icon: "play", disabled: true, disabledReason: "No agent assigned — assign an agent to pair in a terminal" },
     ];
+    if (!blockLegacy) menu.push({ label: "Workflow membership…", icon: "tasks", onSelect: () => setWorkflowEntryOpen(true) });
+    if (member) menu.push({ label: member.detail.hidden ? "View hidden workflow" : "Open workflow task controls", icon: "tasks", href: workflowMemberHref(member.detail, t.id) });
     const recurItem = makeRecurringItem(recurGate, () => setRecurOpen(true), t);
     if (recurItem) menu.push("separator", recurItem);
     // TG-50: readiness + unassign (the server refuses root / finished tasks)
     const finished = ["completed", "needs_verification", "cancelled"].indexOf(t.status) >= 0;
     const dispatchItems: MenuItemSpec[] = [];
-    if (!t.is_root && !finished) {
+    if (!blockLegacy && !t.is_root && !finished) {
       const gate = (spec: MenuItemSpec): MenuItemSpec => (actor ? spec : { ...spec, onSelect: undefined, disabled: true, disabledReason: noHuman });
       if (t.status === "not_ready") {
         dispatchItems.push(gate({ label: "Release hold", icon: "play", hint: "make it ready", disabled: dispatchBusy, onSelect: () => void dispatch("release") }));
@@ -3537,7 +3569,7 @@ export function TaskDetailPane({
       }
     }
     if (dispatchItems.length) menu.push("separator", ...dispatchItems);
-    const closable = !(t.is_root || t.status === "completed" || t.status === "cancelled");
+    const closable = !blockLegacy && !(t.is_root || t.status === "completed" || t.status === "cancelled");
     if (closable) {
       menu.push(
         "separator",
@@ -3554,7 +3586,7 @@ export function TaskDetailPane({
       <PageHeader
         className="td-pagehead"
         titleAs="div"
-        glyph={t ? <StatusIcon status={t.status} size={14} /> : undefined}
+        glyph={t ? <WorkflowTaskStatus taskId={t.id} fallback={t.status} size={14} /> : undefined}
         id={t ? <span className="v2-t-id td-id" title={"Task " + t.id}>{shortId(t.id)}</span> : undefined}
         // the inspector's title lives in the body (D12: never twice); the
         // full view keeps Linear's "ID  Title ☆ ⋯" header row
@@ -3601,7 +3633,7 @@ export function TaskDetailPane({
       <style>{composerCss}</style>
       {header}
       {t && recurOpen ? <MakeRecurringDialog task={t} onClose={() => setRecurOpen(false)} /> : null}
-      {t && unassignOpen ? (
+      {t && unassignOpen && !blockLegacy ? (
         <Dialog
           title="Unassign this task?"
           description={
@@ -3624,6 +3656,7 @@ export function TaskDetailPane({
           }
         />
       ) : null}
+      {t && <WorkflowTaskEntry taskId={t.id} control={{ open: workflowEntryOpen, onOpenChange: setWorkflowEntryOpen }} />}
       {t && thread ? (
         <TaskDetail
           key={t.id}

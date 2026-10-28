@@ -79,6 +79,7 @@ from portal_backend import (
     run_changes_routes,
     slack_routes,
     task_assignment_routes,
+    task_autonomy_routes,
     task_cancellation_routes,
     task_creation_routes,
     task_dispatch_routes,
@@ -102,6 +103,7 @@ from portal_backend import (
     worker_run_finish_routes,
     worker_run_read_routes,
     worker_run_start_routes,
+    workflow_worker_routes,
 )
 
 ROUTE_MODULES = (
@@ -178,6 +180,7 @@ ROUTE_MODULES = (
     run_changes_routes,
     slack_routes,
     task_assignment_routes,
+    task_autonomy_routes,
     task_cancellation_routes,
     task_creation_routes,
     task_dispatch_routes,

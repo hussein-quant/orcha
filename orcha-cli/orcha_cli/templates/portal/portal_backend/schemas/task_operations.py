@@ -1,6 +1,7 @@
-"""Request contracts for task operations endpoints."""
+"""Request and response contracts for task operations endpoints."""
 
-from typing import Optional
+from datetime import datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +9,7 @@ from portal_backend.limits import MAX_FEEDBACK_LEN, MAX_PAYLOAD_LEN
 
 
 class TaskMessage(BaseModel):
+    system_notice: bool = Field(default=False, description="Non-waking, deduplicated system status; anonymous daemon only.")
     author_agent_id: Optional[str] = None
     body: str = Field(..., max_length=MAX_PAYLOAD_LEN)
     # #301: optional attachment refs the client staged via POST .../attachments (uploaded
@@ -20,6 +22,44 @@ class TaskMessage(BaseModel):
 class TaskDone(BaseModel):
     agent_id: str
     result: str = Field(..., max_length=MAX_PAYLOAD_LEN)
+
+
+class TaskAutonomyUpdate(BaseModel):
+    """Only the project owner may change a task's future approval authority."""
+
+    autonomy: Literal["off", "on"]
+    actor_agent_id: Optional[str] = Field(
+        default=None,
+        description="Owner UUID fallback when verified proxy identity is unavailable",
+    )
+
+
+class TaskAutonomyResult(BaseModel):
+    task_id: str
+    autonomy: Literal["off", "on"]
+    autonomy_revision: int = Field(ge=1)
+    changed: bool
+    changed_at: Optional[datetime] = None
+
+
+class TaskApprovalRecord(BaseModel):
+    id: str
+    phase: Literal["plan", "completion"]
+    work_revision: int = Field(ge=1)
+    requirements_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    submission_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    actor_id: str
+    actor_kind: Literal["human", "ai"]
+    actor_alias: str
+    autonomy_at_approval: Literal["off", "on"]
+    autonomy_revision: int = Field(ge=1)
+    permission_source: str
+    approved_at: datetime
+
+
+class TaskApprovalHistory(BaseModel):
+    task_id: str
+    approvals: list[TaskApprovalRecord]
 
 
 class AssignTask(BaseModel):
@@ -38,7 +78,8 @@ class TaskReadiness(BaseModel):
     """#326 (B3): POST /api/tasks/{tid}/readiness — flip a task between 'not_ready' (held) and
     'ready' (dispatchable). HUMAN-AUTHORITY gated (#327: AI cannot yet flip readiness). Holding
     parks a ready/pending row as 'not_ready' so it leaves the ready-queue and can't be claimed via
-    /orcha-next; releasing returns it to 'ready' (or 'pending' if its deps aren't satisfied)."""
+    /orcha-next; releasing returns it to 'ready' (or 'pending' if its deps aren't satisfied).
+    """
 
     actor_agent_id: str = Field(
         ..., description="UUID of the human (kind='human') flipping readiness"
@@ -67,7 +108,8 @@ class TaskReviewerUpdate(BaseModel):
 class TaskUnassign(BaseModel):
     """#326 (B2): POST /api/tasks/{tid}/unassign — clear the active assignee(s) so the row returns
     to the ready queue (owner==null). HUMAN-AUTHORITY gated (Orcha#30 — a deliberate dispatch reset,
-    pairs with #327 AI-can't-assign). Mirrors the release half of the /assign reassign branch."""
+    pairs with #327 AI-can't-assign). Mirrors the release half of the /assign reassign branch.
+    """
 
     actor_agent_id: str = Field(
         ..., description="UUID of the human (kind='human') clearing the assignee"

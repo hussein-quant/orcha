@@ -70,7 +70,8 @@ def pg():
     with psycopg.connect(ADMIN_URL, autocommit=True) as admin:
         admin.execute(f'DROP DATABASE IF EXISTS "{PARITY_DB}" WITH (FORCE)')
         admin.execute(f'CREATE DATABASE "{PARITY_DB}"')
-    conn = psycopg.connect(ADMIN_URL.rsplit("/", 1)[0] + f"/{PARITY_DB}")
+    # Override only the database, preserving socket hosts and URL parameters.
+    conn = psycopg.connect(ADMIN_URL, dbname=PARITY_DB)
     for f in sorted(PG_DIR.glob("*.sql")):
         conn.execute(f.read_text())
     conn.commit()
@@ -135,7 +136,10 @@ def pg_indexes(pg):
           JOIN pg_class ic ON ic.oid = i.indexrelid
           JOIN pg_class tc ON tc.oid = i.indrelid
          WHERE tc.relnamespace = 'public'::regnamespace AND tc.relname <> 'schema_migrations'
-           AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conindid = i.indexrelid)"""):
+           -- A foreign key's conindid points at the REFERENCED unique index; it
+           -- does not make that explicitly-created index constraint-owned.
+           AND NOT EXISTS (SELECT 1 FROM pg_constraint k WHERE k.conindid = i.indexrelid
+                           AND k.contype IN ('p', 'u', 'x'))"""):
         names = dict(pg_rows(pg, f"""SELECT attnum, attname FROM pg_attribute
                                        WHERE attrelid = 'public.{table}'::regclass"""))
         cols = tuple((names[k] if k else "<expr>", bool(o & 1)) for k, o in zip(keys, options))

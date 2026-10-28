@@ -4,7 +4,6 @@ from fastapi import HTTPException, Request
 
 from portal_backend import sql
 from portal_backend.application import app
-from portal_backend.autonomy import effective_autonomy
 from portal_backend.database import db_cursor
 from portal_backend.guards import valid_uuid as _valid_uuid
 from portal_backend.identity_routes import require_member_read as _require_member_read
@@ -286,18 +285,10 @@ def get_container(
         )
         agents = cur.fetchall()
 
-        # mig 043: surface each agent's EFFECTIVE autonomy level alongside its raw override, using
-        # the ONE shared rule (container level if the container enforces it for everyone, else the
-        # agent's override, else the container level). Additive per-agent field — the container's
-        # own autonomy_level/autonomy_enforced remain on `c` unchanged, so no existing field shifts
-        # meaning. The roster reads `autonomy_override` for the badge and `effective_autonomy` for
-        # the "acts as" label; the container carries the lock (autonomy_enforced) glyph.
-        _cl = c["autonomy_level"]
-        _ce = bool(c["autonomy_enforced"])
+        # Keep the former per-agent value under an explicitly historical name for
+        # mixed-version configuration-history readers. It grants no authority.
         for _a in agents:
-            _a["effective_autonomy"] = effective_autonomy(
-                _cl, _ce, _a.get("autonomy_override")
-            )
+            _a["legacy_autonomy_override"] = _a.pop("autonomy_override", None)
             # Additive (agent-status parity): the explicit PAUSE fact, so no surface
             # guesses it. Pause semantics, per the enforcement code: a pause only
             # REFUSES NEW wake claims (wake_lease_claim_routes.wake_claim: container

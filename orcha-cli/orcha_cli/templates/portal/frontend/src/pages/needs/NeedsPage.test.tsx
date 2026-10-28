@@ -51,6 +51,7 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      if (url === "/openapi.json") return jsonRes({ paths: {} });
       const method = (init && init.method) || "GET";
       const body = init && typeof init.body === "string" ? JSON.parse(init.body) : undefined;
       calls.push({ url, method, body });
@@ -105,6 +106,17 @@ describe("NeedsPage", () => {
     // wave-4: the Waiting pill always carries its count (as Requests' "All 12" does),
     // selected or not — the unique entities waiting on you only
     expect(screen.getByRole("radio", { name: /^Waiting\s*3/ })).toBeInTheDocument();
+  });
+
+  it("keeps ON tasks awaiting human verification in both the queue and its badge", async () => {
+    SNAP.tasks = (SNAP.tasks as Record<string, unknown>[]).map((task) => ({ ...task, autonomy: "on" }));
+    mount("/needs?item=verify:t2");
+    await screen.findByRole("group", { name: /^Waiting on you \(2\)/ });
+    expect(rowKeys("Waiting on you")).toEqual(["verify:t2", "request:r1"]);
+    expect(rowKeys("Assigned to someone else")).toEqual(["verify:t3"]);
+    expect(screen.getByRole("radio", { name: /^Waiting\s*2/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Verify me" })).toBeInTheDocument();
+    expect(calls.filter((call) => call.method !== "GET")).toEqual([]);
   });
 
   it("approving a plan posts the decision, then advances to the next item and records history", async () => {
@@ -171,11 +183,11 @@ describe("NeedsPage", () => {
     await waitFor(() => expect(loc.search).toBe(""));
   });
 
-  it("empty queue explains why, including autonomy gating", async () => {
+  it("empty queue explains task authority without legacy project rules", async () => {
     SNAP = { ...SNAP, container: { id: "c1", name: "Orcha", status: "active", autonomy_level: "full" }, tasks: [], requests: [] };
     mount();
     expect(await screen.findByText("Nothing needs you in Orcha")).toBeInTheDocument();
-    expect(screen.getByText(/not required at autonomy “full”/)).toBeInTheDocument();
+    expect(screen.getByText(/Each task has its own OFF\/ON setting/)).toBeInTheDocument();
   });
 
   it("never shows raw JSON: object payloads render their title in rows, follow-ups and history", async () => {
@@ -309,6 +321,7 @@ describe("NeedsPage", () => {
     await waitFor(() => expect(document.querySelector("#reason-t2")?.className).toContain("show"));
     fireEvent.keyDown(document.body, { key: "Escape" });
     await waitFor(() => expect(document.querySelector("#reason-t2")?.className).not.toContain("show"));
+    expect(document.querySelector('#gate-t2 [data-act="reject"]')).toHaveFocus();
     expect(item()).toBe("verify:t2"); // the detail stays open
     fireEvent.keyDown(document.body, { key: "Escape" });
     await waitFor(() => expect(item()).toBeNull());

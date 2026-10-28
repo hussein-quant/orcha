@@ -85,16 +85,22 @@ describe("selectAttention", () => {
     expect(a.items.find((i) => i.key === "verify:tv2")!.assignedToOther).toBe(false);
   });
 
-  it("pr level: no plan approvals (agents proceed); verifications still gate", () => {
+  it("legacy project levels do not change task approval authority", () => {
     const a = selectAttention(snap("pr"), "h1");
-    expect(keys(a).some((k) => k.startsWith("plan:"))).toBe(false);
+    expect(keys(a)).toContain("plan:tp");
     expect(keys(a)).toContain("verify:tv");
   });
 
-  it("full level: neither plans nor verifications; requests still need a human", () => {
-    const a = selectAttention(snap("full"), "h1");
-    expect(keys(a).every((k) => k.startsWith("request:"))).toBe(true);
-    expect(a.count).toBe(3);
+  it("task autonomy ON skips plan approval but preserves every pending human verification", () => {
+    const s = snap("full");
+    s.tasks.forEach((task) => { if (["tp", "tv", "tv2"].includes(task.id)) task.autonomy = "on"; });
+    const a = selectAttention(s, "h1");
+    expect(keys(a)).not.toContain("plan:tp");
+    expect(keys(a)).toContain("verify:tv");
+    expect(keys(a)).toContain("verify:tv2");
+    expect(a.count).toBe(4);
+    s.tasks.find((task) => task.id === "tv")!.status = "completed";
+    expect(keys(selectAttention(s, "h1"))).not.toContain("verify:tv");
   });
 
   it("escalated requests count even when targeted at an agent (GAP-04)", () => {
