@@ -95,6 +95,7 @@ from portal_backend import (
     user_pref_routes,
     version_routes,  # GH #258 PR 9: GET /api/version
     voice_routes,  # dictation: streaming STT proxy + clean-up
+    voice_first_routes,  # GH #409: voice-first briefings + spoken decisions (local MLX speech)
     verdikt_routes,  # Verdikt QA handoff (mig 058)
     managed_message_routes,
     managed_job_routes,

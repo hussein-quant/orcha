@@ -40,6 +40,7 @@ const ALLOWED = new Set([
   'terminal/brandMarks.tsx', // official brand hexes
   'components/BrandMark.tsx', // the product mark's fixed artwork
   'settings/AppearanceSettings.tsx', // the theme previews depict each theme literally
+  'talk/talk.css', // the Talk orb, its halo and the message bubble are fixed artwork (both themes set)
   'icons/emojiData.ts'
 ])
 

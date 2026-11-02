@@ -22,6 +22,29 @@ missing.
   renderer process dies; the next click opens a fresh one (GH #347).
 
 ### Added
+- **Talk** (GH #409): one chat in the Embodent Mac app for all your
+  running projects, typed or spoken. Open it from the sidebar, or press
+  ⌃⌥Space from any app; hold Space to talk.
+  - **What it knows.** Its brain is your own Claude Code, run with no tools.
+    It sees each project's team, open work, workflows and what needs you, and
+    can look into a project's tabs read-only (workflows, a task's thread,
+    routines, activity, GitHub).
+  - **Drafts before anything is written.** It suggests one action at a time:
+    approve or send back a plan or work, answer a question, create, assign or
+    message a task, or send a line to an agent's own chat. Each shows as a full
+    draft you can edit or push back on, and nothing is written until you
+    confirm. Merges, deploys and publishes need the confirm phrase.
+  - **Links and agents.** Tasks, workflows, agents' chats and runs open beside
+    the chat in a side panel showing the project's real page. Asking about agents
+    shows a card per agent: what it's on and what it waits on you for.
+  - **@ tags.** Type @ to tag a project or an agent; each pick becomes a pill.
+  - **Chats.** New chats cover all projects; one chat can be narrowed to one
+    project. Chats are kept on the Mac with search, date groups and running
+    notes for long chats.
+  - **Voice.** Speech runs only on the Mac (Parakeet speech-to-text, Kokoro
+    voice). The first time you turn voice on, Talk offers to set it up (about
+    3 GB, once) and runs `orcha voice install` for you.
+  - Setup and dependencies: `docs/talk-setup.md`.
 - Completed workflows now offer **Run again**, which creates a separate editable draft in the same project. Review its setup and explicitly choose Start; the original workflow and its history are kept (first slice of GH #364).
 - Desktop: a local memory log at
   `~/Library/Application Support/Orcha/logs/memory.jsonl`. A minute after

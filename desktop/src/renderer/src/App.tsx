@@ -59,6 +59,11 @@ import { agentDef, agentShortLabel, type AgentId } from '../../shared/agents'
 import { AgentsProvider, useAgents, useAgentsController, useLaunchers } from './agents/AgentsContext'
 import SettingsView, { NOTIFICATION_SETTINGS_PATH } from './settings/SettingsView'
 import DesktopDictation from './dictation/DesktopDictation'
+import TalkView from './talk/TalkView'
+import { TalkSession } from './talk/session'
+import { Listener, Speaker } from './talk/voice'
+import { readTalkPrefs } from './talk/prefs'
+import { AudioLines } from 'lucide-react'
 
 /** Portal Settings › Voice (dictation engine, language, speech keys). */
 const VOICE_SETTINGS_PATH = '/settings#tab=voice'
@@ -144,11 +149,30 @@ function AppShell() {
   // Stats & Usage fills the panel like Settings; `null` = closed, else the view to open on.
   const [statsView, setStatsView] = useState<'overview' | UsageProviderId | null>(null)
   const statsOpen = statsView !== null
+  // Talk to Orcha (GH-409): the master chat fills the panel like Settings; its session (and a
+  // spoken conversation) outlives the view, so opening a linked task doesn't end it.
+  const [talkOpen, setTalkOpen] = useState(false)
+  const talkScopeRef = useRef<string | null>(null)
+  const [talk] = useState(() =>
+    window.orchaDesktop.talk
+      ? new TalkSession({
+          api: window.orchaDesktop.talk,
+          prefs: readTalkPrefs,
+          listener: (ev) => new Listener(ev),
+          speaker: (render) => new Speaker(render),
+          defaultScope: () => (readTalkPrefs().newChatScope === 'current' ? talkScopeRef.current : null),
+          setTimer: (fn, ms) => window.setTimeout(fn, ms),
+          clearTimer: (t) => window.clearTimeout(t as number),
+          now: () => Date.now()
+        })
+      : null
+  )
   const usage = useUsage(window.orchaDesktop.usage)
-  /** Close whichever full-panel overlay (Settings, Stats & Usage) is showing. */
+  /** Close whichever full-panel overlay (Settings, Stats & Usage, Talk) is showing. */
   const closeOverlays = useCallback(() => {
     setSettingsOpen(false)
     setStatsView(null)
+    setTalkOpen(false)
   }, [])
   const [mode, setMode] = useState<AppMode>('loading')
   const [wizardVariant, setWizardVariant] = useState<WizardVariant>('first-run')
@@ -264,6 +288,7 @@ function AppShell() {
   }, [activeProject, activeCid, cards])
 
   const activeRow = rows.find((r) => r.key === activeKey) ?? null
+  talkScopeRef.current = activeRow?.container ? `${activeRow.stack.project}:${activeRow.container.id}` : null
 
   // ---- Terminal sessions (full panel, Orca-style) + command menu -------------------------
   // `termShown`: a terminal fills the content panel and main hides the portal view; the strip
@@ -303,7 +328,7 @@ function AppShell() {
           sidebarWidth: effectiveWidth,
           collapsed,
           stripHeight,
-          terminalShown: termShown || ((settingsOpen || statsOpen) && mode === 'manager')
+          terminalShown: termShown || ((settingsOpen || statsOpen || talkOpen) && mode === 'manager')
         })
       )
     send()
@@ -311,7 +336,7 @@ function AppShell() {
     // here; re-report so main re-lays out the view with the new zoom factor (QA).
     window.addEventListener('resize', send)
     return () => window.removeEventListener('resize', send)
-  }, [effectiveWidth, collapsed, stripHeight, termShown, settingsOpen, statsOpen, mode])
+  }, [effectiveWidth, collapsed, stripHeight, termShown, settingsOpen, statsOpen, talkOpen, mode])
 
   const focusTerminal = useCallback(() => setTermFocus((n) => n + 1), [])
   const showPortal = useCallback(() => {
@@ -480,6 +505,35 @@ function AppShell() {
       }
     })
   }, [])
+
+  // Talk: hold the system-wide hotkey; a press opens Talk and starts (or interrupts) voice.
+  const openTalk = useCallback(() => {
+    setSettingsOpen(false)
+    setStatsView(null)
+    setTalkOpen(true)
+  }, [])
+  useEffect(() => {
+    const api = window.orchaDesktop.talk
+    if (!api || !talk) return
+    void api.setHotkey(readTalkPrefs().hotkey).catch(() => undefined)
+    const sync = (): void => void api.setHotkey(readTalkPrefs().hotkey).catch(() => undefined)
+    window.addEventListener('orcha:talk-prefs', sync)
+    const off = api.onHotkey(() => {
+      openTalk()
+      void talk.tap()
+    })
+    const offChanged = api.onChanged((id) => void talk.changed(id))
+    return () => {
+      off()
+      offChanged()
+      window.removeEventListener('orcha:talk-prefs', sync)
+    }
+  }, [talk, openTalk])
+
+  // Voice lives on the Talk screen only: leaving it ends voice (the chat itself stays).
+  useEffect(() => {
+    if (!talkOpen) talk?.stopVoice()
+  }, [talkOpen, talk])
 
   // Menu-bar commands (⌘T, ⌥⌘T, ⌘W in the dock, ⌃`) arrive from main whichever view has focus.
   const defaultAgent: AgentId = agents.snapshot?.defaultAgent ?? 'claude'
@@ -801,6 +855,22 @@ function AppShell() {
             setSettingsOpen(true)
           }
         },
+        ...(talk
+          ? [
+              {
+                id: 'talk',
+                section: 'actions' as const,
+                label: 'Talk to Orcha',
+                hint: 'One chat for all your projects — type or talk',
+                keywords: 'talk chat voice assistant ask orcha conversation speak',
+                glyph: <AudioLines className="h-4 w-4 text-text-3" />,
+                run: () => {
+                  closeMenu('host')
+                  openTalk()
+                }
+              }
+            ]
+          : []),
         {
           id: 'stats-usage',
           section: 'actions',
@@ -975,6 +1045,19 @@ function AppShell() {
       onClose={() => setStatsView(null)}
     />
   )
+  const talkView = talkOpen && talk && (
+    <TalkView
+      session={talk}
+      currentProject={talkScopeRef.current}
+      onClose={() => setTalkOpen(false)}
+      onOpenLink={(link) => {
+        const row =
+          rows.find((r) => r.stack.project === link.project && r.container?.id === link.cid) ??
+          rows.find((r) => r.stack.project === link.project)
+        if (row) navigate(row, link.path)
+      }}
+    />
+  )
   const usagePopover = usagePop.open && (
     <>
       <div className="fixed inset-0 z-40" aria-hidden="true" onMouseDown={() => closeUsagePop('view')} />
@@ -1092,6 +1175,7 @@ function AppShell() {
           )}
           {settingsView}
           {statsView_}
+          {talkView}
         </div>
         {stopDialog}
         {removal.ui}
@@ -1159,8 +1243,11 @@ function AppShell() {
         onHelp={() => fire(window.orchaDesktop.openExternal(HELP_URL))}
         onOpenSettings={() => {
           setStatsView(null)
+          setTalkOpen(false)
           setSettingsOpen((v) => !v)
         }}
+        onOpenTalk={talk ? () => (talkOpen ? setTalkOpen(false) : openTalk()) : undefined}
+        talkActive={talkOpen}
         usageSlot={
           usage.available && usageRowVisible(usage.display) ? (
             <UsageIndicator
@@ -1213,6 +1300,7 @@ function AppShell() {
           )}
           {settingsView}
           {statsView_}
+          {talkView}
         </div>
       </div>
       {stopDialog}

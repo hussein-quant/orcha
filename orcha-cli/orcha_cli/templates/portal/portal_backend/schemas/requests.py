@@ -1,6 +1,6 @@
 """Request contracts for requests endpoints."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -68,6 +68,13 @@ class RequestCreate(BaseModel):
 class RequestRespond(BaseModel):
     responder_agent_id: str
     response: str = Field(..., max_length=MAX_PAYLOAD_LEN)
+    via: Optional[Literal["voice"]] = Field(
+        default=None,
+        description="GH #409: 'voice' when the owner answered by voice (send voice_action_id too)",
+    )
+    voice_action_id: Optional[str] = Field(
+        default=None, description="GH #409: the pending voice action recorded for this answer"
+    )
 
 
 class RequestActorBody(BaseModel):

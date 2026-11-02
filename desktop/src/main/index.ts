@@ -1,4 +1,9 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, screen, session, shell, systemPreferences, WebContentsView } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, screen, session, shell, systemPreferences, WebContentsView } from 'electron'
+import { registerTalk } from './talkRuntime'
+import { createTalkPeek, type TalkPeek } from './talkPeek'
+import { TalkStore } from './talkStore'
+import { TALK_CHANNELS } from '../shared/talk'
+import { randomUUID } from 'node:crypto'
 import { isExternalWebLink } from '../shared/externalLink'
 import { installMediaPermissions, micAccessStatus, requestMicAccess } from './micPermission'
 import { MIC_CHANNELS, MIC_SETTINGS_URL } from '../shared/mic'
@@ -719,6 +724,10 @@ function sendToPortal(project: string, msg: HostToPortal): boolean {
   view.webContents.send(EMBED_TO_PORTAL_CHANNEL, msg)
   return true
 }
+
+/** GH #409: Talk to Orcha — the master chat across every project (talkRuntime.ts). */
+let talk: { release(): void } | null = null
+let talkPeek: TalkPeek | null = null
 
 /** Older (pre-V2) portals still honor the desktop's stored theme/skin. V2 is dark-only and
  *  ignores it, so this runs ONLY when a view falls back to legacy mode — once, read-only
@@ -1467,6 +1476,7 @@ app.whenReady().then(() => {
       const keepHostFocus =
         !open && typeof opts === 'object' && opts !== null && (opts as { focus?: unknown }).focus === 'host'
       hostModalOpen = open
+      talkPeek?.modal(open) // a host dialog covers the Talk side panel too
       if (activeProject === null) return
       const project = activeProject
       // Keyboard focus follows the dialog (see applyHostModal): a hidden view that still
@@ -1479,6 +1489,53 @@ app.whenReady().then(() => {
         !keepHostFocus,
         hostTerminalShown
       )
+    })
+  )
+
+  // ---- Talk side panel (GH-409): a project's real page beside the chat, without its chrome ----
+  talkPeek = createTalkPeek({
+    window: () => (managerWindow && !managerWindow.isDestroyed() ? managerWindow : null),
+    stackFor: async (project) => (await listStacks().catch(() => [])).find((s) => s.project === project && s.running && s.apiPort !== null) ?? null,
+    makeView: (origin, project) => {
+      const view = new WebContentsView({
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+          plugins: true,
+          // the portal's own preload (embedded mode: no portal sidebar); this view is NOT
+          // registered as the project's view, so its portal→host messages are dropped
+          preload: path.join(__dirname, '../preload/portal.js'),
+          additionalArguments: portalPreloadArgs(origin, project)
+        }
+      })
+      view.setBackgroundColor(canvas())
+      view.webContents.on('will-navigate', (event, url) => {
+        if (!url.startsWith(`${origin}/`)) {
+          event.preventDefault()
+          void shell.openExternal(url)
+        }
+      })
+      view.webContents.setWindowOpenHandler(({ url }) => {
+        if (url.startsWith(`${origin}/`)) void view.webContents.loadURL(url)
+        else void shell.openExternal(url)
+        return { action: 'deny' }
+      })
+      return view
+    },
+    zoom: () => {
+      try {
+        return managerWindow?.webContents.getZoomFactor() ?? 1
+      } catch {
+        return 1
+      }
+    },
+    hostModalOpen: () => hostModalOpen
+  })
+  ipcMain.handle(TALK_CHANNELS.peek, (event, raw: unknown) =>
+    asResult(async (): Promise<boolean> => {
+      if (!managerWindow || event.sender !== managerWindow.webContents) return false
+      return (await talkPeek?.show(raw)) ?? false
     })
   )
 
@@ -1784,6 +1841,35 @@ app.whenReady().then(() => {
   // Loopback hook receiver + hook files; a failure only costs the ✓ (heuristics remain).
   startAgentHooks().catch((err) => console.warn('[agent-hooks] disabled:', err instanceof Error ? err.message : err))
   let menuAgentLabel = ''
+  // ---- Talk to Orcha (GH #409): the master chat — manager window only ----
+  talk = registerTalk({
+    store: new TalkStore(path.join(userDataDir, 'talk')),
+    listStacks,
+    claudePath: async () => {
+      await agentDetector.get()
+      return agentDetector.pathFor('claude')
+    },
+    ipc: {
+      handle: (channel, fn) =>
+        ipcMain.handle(channel, (event, ...args) => {
+          if (!managerWindow || managerWindow.isDestroyed() || event.sender !== managerWindow.webContents) {
+            return { ok: false, message: 'not allowed here' }
+          }
+          return fn(event, ...args)
+        })
+    },
+    shortcuts: globalShortcut,
+    onHotkey: () => {
+      showManagerWindow()
+      sendToManager(TALK_CHANNELS.hotkey, null)
+    },
+    changed: (id) => sendToManager(TALK_CHANNELS.changed, id),
+    newId: () => randomUUID(),
+    // the owner agreed in Talk: models (~3 GB) and Homebrew espeak-ng, once (cli_voice.py)
+    installSpeech: (onLine) => streamOrcha(os.homedir(), ['voice', 'install'], onLine, 45 * 60_000),
+    installProgress: (line) => sendToManager(TALK_CHANNELS.installProgress, line)
+  })
+
   agentsCtl = createAgentsController({
     detector: agentDetector,
     load: () => readAgentPrefs(app.getPath('userData')),
@@ -2122,4 +2208,7 @@ app.on('before-quit', () => {
 })
 
 // A wedged Docker CLI must not outlive the app as an orphaned `docker ps`.
-app.on('will-quit', () => killPendingProbes())
+app.on('will-quit', () => {
+  killPendingProbes()
+  talk?.release()
+})

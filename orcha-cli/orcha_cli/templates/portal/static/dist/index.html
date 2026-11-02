@@ -18,6 +18,10 @@
          are injected by vite.config.ts (sharedCssPlugin, FAVICON_LINKS) for the
          same reason as the font preload: Vite dev rebases hrefs written here. -->
     <style>
+      /* panel mode (GH-409): only the page content — no project header, tabs or toolbar */
+      html[data-panel] .v2-panel-top { display: none !important; }
+      /* …and no way back to the task list: the panel shows one item; the desktop closes it */
+      html[data-panel] .td-back, html[data-panel] .ag-back { display: none !important; }
       /* Orcha V2 pre-paint: the window canvas exists before ANY stylesheet
          loads (no flash of the wrong theme on full navigations, in the desktop
          view, or while the bundle downloads). The boot script below resolves
@@ -101,6 +105,15 @@
             u.searchParams.delete("embed");
             history.replaceState(history.state, "", u.pathname + u.search + u.hash);
           }
+          // panel mode (GH-409): the desktop's Talk side panel shows ONE page — the task
+          // itself — without the project header and tabs. Kept for this view's session so
+          // links clicked inside the panel stay chromeless; stripped like the embed hint.
+          if (u.searchParams.get("panel") === "1") {
+            sessionStorage.setItem("orcha:panel", "1");
+            u.searchParams.delete("panel");
+            history.replaceState(history.state, "", u.pathname + u.search + u.hash);
+          }
+          if (sessionStorage.getItem("orcha:panel") === "1") d.setAttribute("data-panel", "1");
         } catch (e) {}
       })();
     </script>

@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException, Request
 
-from portal_backend import sql
+from portal_backend import sql, voice_actions
 from portal_backend.agent_status import log_event, recompute_agent_status
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -45,6 +45,11 @@ def verify_task(tid: str, body: TaskVerify, request: Request):
             cur, request, str(t["container_id"]), body.actor_agent_id
         )
         _require_kind(cur, body.actor_agent_id, ("human",))  # Orcha#30
+        # GH #409: a spoken verify names its pending voice action (same rules as a click).
+        voice = voice_actions.provenance(
+            cur, t["container_id"], body.actor_agent_id, body.via, body.voice_action_id,
+            item_kind="verify", item_id=tid,
+        )
         # Issue #11 follow-up: agents can't /done the root task, so it never
         # reaches needs_verification on its own. The human must be able to
         # /verify it from any non-terminal status to declare the container
@@ -127,6 +132,8 @@ def verify_task(tid: str, body: TaskVerify, request: Request):
                     expected_work_revision=t["work_revision"],
                     idempotency_key=str(uuid4()),
                 )
+                voice_actions.mark_done(cur, t["container_id"], body.actor_agent_id, voice, "task", tid,
+                                        {"approved": True, "status": "completed"})
                 conn.commit()
                 return {
                     "task_id": tid,
@@ -142,6 +149,8 @@ def verify_task(tid: str, body: TaskVerify, request: Request):
                 expected_work_revision=t["work_revision"],
                 idempotency_key=str(uuid4()),
             )
+            voice_actions.mark_done(cur, t["container_id"], body.actor_agent_id, voice, "task", tid,
+                                    {"approved": False, "status": "not_ready", "feedback": body.feedback})
             conn.commit()
             return {
                 "task_id": tid,
@@ -195,8 +204,11 @@ def verify_task(tid: str, body: TaskVerify, request: Request):
                     "unblocked": unblocked,
                     "feedback": body.feedback,
                     "verifier_human_id": body.actor_agent_id,
+                    **voice_actions.detail(voice),
                 },
             )
+            voice_actions.mark_done(cur, t["container_id"], body.actor_agent_id, voice, "task", tid,
+                                    {"approved": True, "status": "completed"})
             # Notify the assignees their work was approved + any newly-ready downstream
             cur.execute(
                 "SELECT DISTINCT agent_id FROM agent_tasks WHERE task_id=%s",
@@ -248,8 +260,11 @@ def verify_task(tid: str, body: TaskVerify, request: Request):
                     "feedback": body.feedback,
                     "reassigned_to_agent_ids": restored,
                     "verifier_human_id": body.actor_agent_id,
+                    **voice_actions.detail(voice),
                 },
             )
+            voice_actions.mark_done(cur, t["container_id"], body.actor_agent_id, voice, "task", tid,
+                                    {"approved": False, "status": "in_progress", "feedback": body.feedback})
             for aid in restored:
                 _publish_event(
                     cur,

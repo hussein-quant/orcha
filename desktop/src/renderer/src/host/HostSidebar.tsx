@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import {
   AlertCircle,
+  AudioLines,
   ChevronRight,
   CircleDashed,
   CircleHelp,
@@ -76,6 +77,9 @@ export interface HostSidebarProps {
   onOpenSettings?(): void
   /** Settings is showing (highlights the footer item). */
   settingsActive?: boolean
+  /** Talk to Orcha: the master chat across every project (GH-409). */
+  onOpenTalk?(): void
+  talkActive?: boolean
   /** The usage status indicator (usage/UsageIndicator.tsx), shown first in the footer. */
   usageSlot?: ReactNode
   /** Open the ⌘K command menu (terminals, Claude/Codex, tabs, projects). */
@@ -588,6 +592,23 @@ export default function HostSidebar(props: HostSidebarProps) {
             )}
           </Tooltip>
         )}
+        {props.onOpenTalk && (
+          <Tooltip text="Talk to Orcha" overView={overView}>
+            {(t) => (
+              <button
+                type="button"
+                data-nav-item
+                aria-label="Talk to Orcha"
+                aria-current={props.talkActive ? 'page' : undefined}
+                onClick={props.onOpenTalk}
+                className={cn(railButton, props.talkActive && 'bg-selected text-text')}
+                {...t}
+              >
+                <AudioLines className="h-4 w-4" />
+              </button>
+            )}
+          </Tooltip>
+        )}
         <Tooltip text={`Needs you — ${totalLabel}`} overView={overView}>
           {(t) => (
             <button
@@ -752,6 +773,19 @@ export default function HostSidebar(props: HostSidebarProps) {
       )}
 
       <div className="flex flex-col gap-px px-2">
+        {props.onOpenTalk && (
+          <button
+            type="button"
+            data-nav-item
+            data-testid="open-talk"
+            onClick={props.onOpenTalk}
+            aria-current={props.talkActive ? 'page' : undefined}
+            className={cn(navItem, props.talkActive && 'bg-selected text-text')}
+          >
+            <AudioLines className="h-4 w-4 shrink-0" />
+            <span>Talk</span>
+          </button>
+        )}
         <button
           type="button"
           data-nav-item

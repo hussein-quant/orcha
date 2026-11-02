@@ -124,6 +124,13 @@ class TaskVerify(BaseModel):
     actor_agent_id: str = Field(
         ..., description="UUID of the human agent verifying (kind='human')"
     )
+    via: Optional[Literal["voice"]] = Field(
+        default=None,
+        description="GH #409: 'voice' when the owner decided by voice (send voice_action_id too)",
+    )
+    voice_action_id: Optional[str] = Field(
+        default=None, description="GH #409: the pending voice action recorded for this decision"
+    )
 
 
 class TaskCancel(BaseModel):

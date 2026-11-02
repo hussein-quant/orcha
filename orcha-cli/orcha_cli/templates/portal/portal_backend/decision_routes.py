@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Request
 
+from portal_backend import voice_actions
 from portal_backend.application import app
 from portal_backend.database import db_cursor
 from portal_backend.decision_routing import _post_decision_to_thread
@@ -27,6 +28,8 @@ def create_decision(body: DecisionCreate, request: Request):
         )
     if body.target_agent_id is not None and not valid_uuid(body.target_agent_id):
         raise HTTPException(400, "target_agent_id is not a valid UUID")
+    if (body.via or body.voice_action_id) and body.subject_type != "plan_approval":
+        raise HTTPException(422, "only a plan decision can be made by voice here")
     with db_cursor() as (_, cur):
         if body.subject_type == "plan_approval":
             if not valid_uuid(body.subject_id):
@@ -109,6 +112,11 @@ def create_decision(body: DecisionCreate, request: Request):
         container_id = cur.fetchone()["container_id"]
         if target is not None:
             container_id = target["container_id"]
+        # GH #409: a spoken decision names its pending voice action (validated before writing).
+        voice = voice_actions.provenance(
+            cur, container_id, body.actor_agent_id, body.via, body.voice_action_id,
+            item_kind="plan", item_id=body.subject_id,
+        )
         cur.execute(
             """INSERT INTO decisions
                  (container_id, subject_type, subject_id, decision, reason,
@@ -153,6 +161,7 @@ def create_decision(body: DecisionCreate, request: Request):
                     "subject_id": body.subject_id,
                     "decision": body.decision,
                     "reason": reason or None,
+                    **voice_actions.detail(voice),
                 },
             )
         _post_decision_to_thread(
@@ -162,6 +171,10 @@ def create_decision(body: DecisionCreate, request: Request):
             body.decision,
             reason or None,
             body.actor_agent_id,
+        )
+        voice_actions.mark_done(
+            cur, container_id, body.actor_agent_id, voice, "task", body.subject_id,
+            {"decision_id": decision_id, "decision": body.decision, "reason": reason or None},
         )
     return {
         "decision_id": decision_id,

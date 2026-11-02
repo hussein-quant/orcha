@@ -7,6 +7,8 @@
 import { useEffect, useState } from 'react'
 import type { MicAccess, MicApi } from '../../../shared/mic'
 import { LANGUAGES, SHORTCUTS, readVoicePrefs, writeVoicePrefs, type VoicePrefs } from '../dictation/prefs'
+import { TALK_HOTKEYS, type TalkVoice } from '../../../shared/talk'
+import { HOTKEY_LABEL, useTalkPrefs } from '../talk/prefs'
 
 const ACCESS_TEXT: Record<MicAccess, string> = {
   granted: 'Allowed',
@@ -153,7 +155,149 @@ export default function VoiceSettings({
           </button>
         </div>
       </div>
+      <TalkSettings />
       <p className="mt-4 text-[12px] text-text-3">Audio is never stored. It is streamed to the project’s speech provider (or stays on this computer) and discarded.</p>
     </section>
+  )
+}
+
+/** Talk to Orcha (GH-409): the voice, speed, hotkey and safety settings of the master chat. */
+function TalkSettings({ api = window.orchaDesktop?.talk }: { api?: typeof window.orchaDesktop.talk }) {
+  const [prefs, set] = useTalkPrefs()
+  const [voices, setVoices] = useState<TalkVoice[]>([])
+  const [best, setBest] = useState<string | null>(null)
+  const [trying, setTrying] = useState(false)
+  useEffect(() => {
+    if (!api) return
+    let alive = true
+    api.voices().then(
+      (v) => {
+        if (!alive) return
+        setVoices(v.voices)
+        setBest(v.best)
+      },
+      () => undefined
+    )
+    return () => {
+      alive = false
+    }
+  }, [api])
+  if (!api) return null
+  const natural = voices.filter((v) => v.quality === 'neural')
+  const mac = voices.filter((v) => v.quality !== 'neural')
+  const sample = (): void => {
+    setTrying(true)
+    api
+      .speech(true)
+      .then(() => api.speak('Hi, I’m Orcha. What should we work on?', prefs.voice, prefs.rate))
+      .then((buf) => {
+        const url = URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }))
+        const a = new Audio(url)
+        a.onended = () => URL.revokeObjectURL(url)
+        return a.play()
+      })
+      .catch(() => undefined)
+      .finally(() => setTrying(false))
+  }
+  return (
+    <>
+      <h3 className="mb-2 mt-8 text-[14px] font-semibold text-text">Talk to Orcha</h3>
+      <p className="mb-3 text-[12.5px] text-text-3">
+        One chat for all your projects, typed or spoken. Press {HOTKEY_LABEL[prefs.hotkey]} from any app to talk. Speech runs on this Mac (<code>orcha voice install</code>).
+      </p>
+      <div className="flex flex-col divide-y divide-border rounded-[10px] border border-border">
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-text">Voice</div>
+            <div className="text-[12px] text-text-3">How Orcha sounds when it talks back.</div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <select aria-label="Talk voice" className={select} value={prefs.voice} onChange={(e) => set({ voice: e.target.value })}>
+              <option value="">Best available{best ? ` (${best})` : ''}</option>
+              {natural.length > 0 && (
+                <optgroup label="Natural voices">
+                  {natural.map((v) => (
+                    <option key={v.name} value={v.name}>
+                      {v.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {mac.length > 0 && (
+                <optgroup label="Mac voices">
+                  {mac.map((v) => (
+                    <option key={v.name} value={v.name}>
+                      {v.label}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <button type="button" className={btn} disabled={trying} onClick={sample}>
+              {trying ? 'Playing…' : 'Hear it'}
+            </button>
+          </div>
+        </div>
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-text">Speed</div>
+          </div>
+          <select aria-label="Talk speed" className={select} value={prefs.rate} onChange={(e) => set({ rate: Number(e.target.value) })}>
+            <option value={0}>Normal</option>
+            <option value={160}>Slower</option>
+            <option value={230}>Faster</option>
+            <option value={270}>Fastest</option>
+          </select>
+        </div>
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-text">Talk shortcut</div>
+            <div className="text-[12px] text-text-3">Works from any app: opens Talk and listens, or interrupts Orcha.</div>
+          </div>
+          <select aria-label="Talk shortcut" className={select} value={prefs.hotkey} onChange={(e) => set({ hotkey: e.target.value as (typeof TALK_HOTKEYS)[number] })}>
+            {TALK_HOTKEYS.map((k) => (
+              <option key={k} value={k}>
+                {HOTKEY_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-text">New chats cover</div>
+            <div className="text-[12px] text-text-3">Every chat can be switched later from its header.</div>
+          </div>
+          <select aria-label="New chats cover" className={select} value={prefs.newChatScope} onChange={(e) => set({ newChatScope: e.target.value === 'current' ? 'current' : 'all' })}>
+            <option value="all">All projects</option>
+            <option value="current">The project on screen</option>
+          </select>
+        </div>
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-text">Time to undo</div>
+            <div className="text-[12px] text-text-3">After you confirm, Orcha waits this long before acting. Say “cancel” to stop it.</div>
+          </div>
+          <select aria-label="Time to undo" className={select} value={prefs.undoSeconds} onChange={(e) => set({ undoSeconds: Number(e.target.value) })}>
+            {[0, 3, 5, 10, 15].map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? 'None' : `${n} seconds`}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className={row}>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium text-text">Confirm phrase</div>
+            <div className="text-[12px] text-text-3">Said to approve anything that merges, deploys or publishes.</div>
+          </div>
+          <input
+            aria-label="Confirm phrase"
+            className={`${select} w-32`}
+            defaultValue={prefs.confirmPhrase}
+            onBlur={(e) => set({ confirmPhrase: e.target.value })}
+          />
+        </div>
+      </div>
+    </>
   )
 }

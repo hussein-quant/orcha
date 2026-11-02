@@ -2,6 +2,7 @@
 
 from fastapi import HTTPException, Request
 
+from portal_backend import voice_actions
 from portal_backend.agent_status import bump_agent, log_event, recompute_agent_status
 from portal_backend.application import app
 from portal_backend.database import db_cursor
@@ -96,6 +97,11 @@ def respond_request(rid: str, body: RequestRespond, request: Request):
                 409,
                 f"request is '{r['status']}', not 'open'/'accepted' — cannot respond",
             )
+        # GH #409: a spoken answer names its pending voice action (same rules as a typed one).
+        voice = voice_actions.provenance(
+            cur, r["container_id"], body.responder_agent_id, body.via, body.voice_action_id,
+            item_kind="request", item_id=rid,
+        )
         # Mig 057: an AI manager answering its PRE-REVIEW request records a recommendation
         # ("APPROVE: …" / "SEND BACK: …") on the task instead of a plain answer — it never
         # verifies, and it does not wake the finisher unless the work is sent back.
@@ -129,8 +135,11 @@ def respond_request(rid: str, body: RequestRespond, request: Request):
                 if r["parent_request_id"]
                 else None,
                 "chain_depth": r["chain_depth"],
+                **voice_actions.detail(voice),
             },
         )
+        voice_actions.mark_done(cur, r["container_id"], body.responder_agent_id, voice, "request", rid,
+                                {"status": "answered", "response_preview": body.response[:120]})
 
         # If this answered request had a parent, surface it in the response so the requester
         # (who is the target of the parent) knows their parent task is now unblocked. The

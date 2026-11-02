@@ -5,6 +5,7 @@ import type { ThemeApi } from './theme'
 import type { ProfileApi } from './profile'
 import type { ProviderKeysApi } from './providerKeys'
 import type { MicApi } from './mic'
+import type { TalkApi } from './talk'
 import type { EmbedEvent, EmbedMode, HostToPortal, PortalToHost } from './embed'
 import type { ProjectIcon } from './projectIcon'
 
@@ -572,6 +573,8 @@ export interface OrchaDesktopApi {
   providerKeys?: ProviderKeysApi
   /** Microphone access for dictation (Settings › Voice). */
   mic?: MicApi
+  /** Talk to Orcha: the master chat across every project (absent on an older preload). */
+  talk?: TalkApi
   /** Forward a host → portal message (navigate / openSearch) to the ACTIVE portal view.
    *  Resolves false when there is nothing to deliver to. */
   embedSend(msg: HostToPortal): Promise<boolean>

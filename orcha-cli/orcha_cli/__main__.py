@@ -23,6 +23,7 @@ from .cli_portal import cmd_portal
 from .cli_serve import cmd_serve
 from .cli_service import cmd_service
 from .cli_worktrees import cmd_worktrees
+from .cli_voice import cmd_voice
 from .cli_project_facade import *
 from .cli_runtime_facade import *
 from .cli_text import (
@@ -109,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
         "resume": cmd_resume,
         "stop": cmd_stop,
         "worktrees": cmd_worktrees,
+        "voice": cmd_voice,
     }
     return assemble_parser(_cli_version(), handlers)
 

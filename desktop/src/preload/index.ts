@@ -7,6 +7,7 @@ import type { THEME_CHANNELS, ThemeState } from '../shared/theme'
 import type { PROFILE_CHANNELS, ProfileSaveResult, ProfileState } from '../shared/profile'
 import type { MIC_CHANNELS, MicAccess } from '../shared/mic'
 import type { PROVIDER_KEYS_CHANNELS, ProviderKeysState } from '../shared/providerKeys'
+import type { TALK_CHANNELS, TalkConversation, TalkProjectOption, TalkReply, TalkSearchHit, TalkSpeechStatus, TalkSummary, TalkVoice } from '../shared/talk'
 
 /** Terminal channel names, inlined: this sandboxed preload imports shared/* for TYPES only
  *  (no shared runtime chunk). `satisfies` keeps them identical to shared/terminal.ts. */
@@ -67,6 +68,31 @@ const MIC = {
   request: 'orcha:mic:request',
   openSettings: 'orcha:mic:openSettings'
 } as const satisfies typeof MIC_CHANNELS
+/** Talk channels, inlined for the same reason (identical to shared/talk.ts). */
+const TALK = {
+  list: 'orcha:talk:list',
+  get: 'orcha:talk:get',
+  search: 'orcha:talk:search',
+  peek: 'orcha:talk:peek',
+  create: 'orcha:talk:create',
+  remove: 'orcha:talk:remove',
+  setScope: 'orcha:talk:setScope',
+  projects: 'orcha:talk:projects',
+  send: 'orcha:talk:send',
+  execute: 'orcha:talk:execute',
+  decline: 'orcha:talk:decline',
+  followUp: 'orcha:talk:followUp',
+  quick: 'orcha:talk:quick',
+  changed: 'orcha:talk:changed',
+  speech: 'orcha:talk:speech',
+  installSpeech: 'orcha:talk:installSpeech',
+  installProgress: 'orcha:talk:installProgress',
+  speak: 'orcha:talk:speak',
+  listen: 'orcha:talk:listen',
+  voices: 'orcha:talk:voices',
+  hotkey: 'orcha:talk:hotkey',
+  setHotkey: 'orcha:talk:setHotkey'
+} as const satisfies typeof TALK_CHANNELS
 import type {
   AnalyzeProjectResult,
   AttentionItem,
@@ -271,6 +297,43 @@ const api: OrchaDesktopApi = {
     status: () => invoke<MicAccess>(MIC.status),
     request: () => invoke<MicAccess>(MIC.request),
     openSettings: () => invoke<boolean>(MIC.openSettings)
+  },
+  // Talk to Orcha: the master chat (main/talkRuntime.ts validates every input).
+  talk: {
+    list: () => invoke<TalkSummary[]>(TALK.list),
+    get: (id) => invoke<TalkConversation | null>(TALK.get, id),
+    create: (scope) => invoke<TalkConversation>(TALK.create, scope ?? null),
+    setScope: (id, scope) => invoke<TalkConversation>(TALK.setScope, id, scope),
+    projects: (cached) => invoke<TalkProjectOption[]>(TALK.projects, cached === true),
+    remove: (id) => invoke<TalkSummary[]>(TALK.remove, id),
+    send: (input) => invoke<TalkReply>(TALK.send, input),
+    execute: (id, transcript) => invoke<TalkReply>(TALK.execute, id, transcript),
+    decline: (id) => invoke<TalkReply>(TALK.decline, id),
+    followUp: (id) => invoke<TalkReply>(TALK.followUp, id),
+    quick: (id, project, cid, action, args) => invoke<TalkReply>(TALK.quick, id, project, cid, action, args),
+    onChanged: (cb) => {
+      const listener = (_e: IpcRendererEvent, id: string): void => cb(String(id))
+      ipcRenderer.on(TALK.changed, listener)
+      return () => ipcRenderer.removeListener(TALK.changed, listener)
+    },
+    speech: (start) => invoke<TalkSpeechStatus>(TALK.speech, start),
+    installSpeech: () => invoke<TalkSpeechStatus>(TALK.installSpeech),
+    onInstallProgress: (cb) => {
+      const listener = (_e: IpcRendererEvent, line: string): void => cb(String(line))
+      ipcRenderer.on(TALK.installProgress, listener)
+      return () => ipcRenderer.removeListener(TALK.installProgress, listener)
+    },
+    speak: (text, voice, rate) => invoke<ArrayBuffer>(TALK.speak, text, voice, rate),
+    listen: (wav) => invoke<string>(TALK.listen, wav),
+    voices: () => invoke<{ voices: TalkVoice[]; best: string | null }>(TALK.voices),
+    setHotkey: (key) => invoke<boolean>(TALK.setHotkey, key),
+    onHotkey: (cb) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(TALK.hotkey, listener)
+      return () => ipcRenderer.removeListener(TALK.hotkey, listener)
+    },
+    search: (q) => invoke<TalkSearchHit[]>(TALK.search, q),
+    peek: (p) => invoke<boolean>(TALK.peek, p)
   },
   embedSend: (msg: HostToPortal) => invoke<boolean>('orcha:embedSend', msg),
   onEmbedEvent: (cb) => {

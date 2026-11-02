@@ -171,6 +171,14 @@ class DecisionCreate(BaseModel):
         default=None,
         description="agent that consumes {decision,reason} on next wake (omit if none)",
     )
+    via: Optional[Literal["voice"]] = Field(
+        default=None,
+        description="GH #409: 'voice' when the owner decided by voice (send voice_action_id too)",
+    )
+    voice_action_id: Optional[str] = Field(
+        default=None,
+        description="GH #409: the pending voice action recorded for this decision",
+    )
 
 
 class WakeBackoffRelease(BaseModel):
