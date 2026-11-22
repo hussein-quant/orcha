@@ -75,6 +75,10 @@ class TicketBody(_In):
     engineer_id: str | None = None
     labels: list[str] = Field(default_factory=list, max_length=40)
     source: str = Field(default="manual", pattern="^(manual|github)$")
+    # Also open it as an issue on GitHub (with gh, in the cycle's milestone). Off unless a person ticks it.
+    create_issue: bool = False
+    # Screenshots and recording frames from the intake conversation: {conversation_id, id, name}.
+    attachments: list[dict[str, str]] = Field(default_factory=list, max_length=20)
 
 
 class CutBody(_In):
@@ -147,29 +151,103 @@ def _issue(raw: dict) -> dict:
     labels = [str(x.get("name") if isinstance(x, dict) else x) for x in raw.get("labels") or []]
     platforms, kind = labels_say(labels)
     return {"number": int(raw["number"]), "title": str(raw.get("title") or "")[:200],
-            "body": str(raw.get("body") or "")[:20_000], "url": raw.get("url"), "labels": labels,
+            "body": str(raw.get("body") or "")[:20_000], "url": raw.get("html_url") or raw.get("url"), "labels": labels,
             "platforms": platforms, "kind": kind or "bug", "kind_from_labels": kind is not None}
 
 
-def read_issue(number: int) -> dict:
-    rc, out, err = _run(["gh", "issue", "view", str(number), "--json", "number,title,body,url,labels"])
-    if rc != 0:
-        conflict("issue_unreadable", f"Couldn't read issue #{number}: {(err or 'gh failed').strip()[-300:]}", status=422)
-    try:
-        return _issue(json.loads(out))
-    except (ValueError, KeyError, TypeError):
-        conflict("issue_unreadable", f"Couldn't read issue #{number}: gh's answer wasn't the issue.", status=422)
+# GitHub goes through the GitHub tab's own plumbing (github_hub_routes): the project's repo
+# binding, the same token chain (App token, then the project's PAT), the same GET leaf.
 
 
-def milestone_issues(milestone: str) -> tuple[list[dict], str | None]:
-    rc, out, err = _run(["gh", "issue", "list", "--milestone", milestone, "--state", "open", "--limit", "200",
-                         "--json", "number,title,body,url,labels"])
-    if rc != 0:
-        return [], (err or "gh issue list failed").strip()[-400:]
+def github_repo(cur, cid: str, request: Request) -> tuple[str, str]:
+    """The project's GitHub repo and a token for it, as the GitHub tab resolves them."""
+    from portal_backend import github_hub_routes as hub
+
+    repo = hub._load_binding(cur, cid, request)
+    if repo == hub.LOCAL_REPO:
+        repo = hub._local_fallthrough_repo(cid)
+    if not repo:
+        conflict("github_not_connected", "No GitHub repo is connected to this project. Connect it in the GitHub tab.", status=422)
+    token = hub._resolve_repo_token(repo, cid)
+    if not token:
+        conflict("github_no_token", f"No GitHub token can read {repo}. Add one in Settings → GitHub access.", status=422)
+    return repo, token
+
+
+def _gh_get(path: str, token: str):
+    from portal_backend import github_hub_routes as hub
+
+    return hub._gh_get(path, token)
+
+
+def _gh_send(method: str, path: str, token: str, payload: dict):
+    """The one GitHub write here (opening an issue a person asked for). Tests replace it."""
+    import urllib.error
+    import urllib.request
+
+    from portal_backend import github_hub_routes as hub
+
+    req = urllib.request.Request(
+        f"{hub.GITHUB_API}{path}", data=json.dumps(payload).encode(), method=method,
+        headers={"Authorization": f"token {token}", "Accept": "application/vnd.github+json",
+                 "User-Agent": "orcha-portal", "Content-Type": "application/json"},
+    )
     try:
-        return [_issue(x) for x in json.loads(out or "[]")], None
-    except (ValueError, KeyError, TypeError):
-        return [], "gh's answer wasn't a list of issues."
+        with urllib.request.urlopen(req, timeout=hub.GITHUB_TIMEOUT_SECONDS) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = json.loads(exc.read().decode("utf-8")).get("message", "")
+        except Exception:  # noqa: BLE001 - the status says enough
+            pass
+        raise RuntimeError(f"GitHub said {exc.code}{': ' + detail if detail else ''}") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(f"GitHub didn't answer: {exc}") from exc
+
+
+def _milestone_number(repo: str, token: str, title: str) -> int | None:
+    for m in _gh_get(f"/repos/{repo}/milestones?state=open&per_page=100", token) or []:
+        if str(m.get("title") or "").strip() == title.strip():
+            return int(m["number"])
+    return None
+
+
+def read_issue(repo: str, token: str, number: int) -> dict:
+    try:
+        raw = _gh_get(f"/repos/{repo}/issues/{number}", token)
+    except RuntimeError as exc:
+        conflict("issue_unreadable", f"Couldn't read issue #{number}: {exc}", status=422)
+    if not isinstance(raw, dict) or "number" not in raw or raw.get("pull_request"):
+        conflict("issue_unreadable", f"#{number} isn't an issue.", status=422)
+    return _issue(raw)
+
+
+def milestone_issues(repo: str, token: str, milestone: str) -> tuple[list[dict], str | None]:
+    try:
+        number = _milestone_number(repo, token, milestone)
+        if number is None:
+            return [], f"{repo} has no open milestone named {milestone}."
+        raw = _gh_get(f"/repos/{repo}/issues?milestone={number}&state=open&per_page=100", token)
+    except RuntimeError as exc:
+        return [], str(exc)
+    return [_issue(x) for x in raw or [] if not x.get("pull_request")], None
+
+
+def open_issue(repo: str, token: str, cid: str, title: str, body: str, milestone: str | None) -> tuple[int | None, str | None, str | None]:
+    """Open an issue: (number, url, problem). In the milestone when it exists."""
+    from portal_backend import github_hub_routes as hub
+
+    try:
+        number = _milestone_number(repo, token, milestone) if milestone else None
+        payload = {"title": title[:200], "body": (body or title)[:60_000]}
+        if number is not None:
+            payload["milestone"] = number
+        raw = _gh_send("POST", f"/repos/{repo}/issues", token, payload)
+    except RuntimeError as exc:
+        return None, None, f"Couldn't open the issue on GitHub: {exc}"
+    hub._cache_invalidate(cid)  # the GitHub tab shows it on its next read
+    return int(raw["number"]), raw.get("html_url"), None
 
 
 # ---- reading a cycle -------------------------------------------------------------------
@@ -474,11 +552,17 @@ def github_candidates(cycle_id: str, request: Request):
             (c["container_id"], bool(c["dry_run"])),
         )
         taken = {int(r["issue_number"]): r["version"] for r in cur.fetchall()}
-    milestone = c["milestone"] or c["version"]
-    issues, error = milestone_issues(milestone)
+        milestone = c["milestone"] or c["version"]
+        try:
+            repo, token = github_repo(cur, c["container_id"], request)
+        except Exception as exc:  # noqa: BLE001 - not connected is a state the panel shows, not an error
+            detail = getattr(exc, "detail", None)
+            return {"milestone": milestone, "issues": [], "repo": None,
+                    "error": (detail.get("message") if isinstance(detail, dict) else None) or str(exc)}
+    issues, error = milestone_issues(repo, token, milestone)
     for i in issues:
         i["in_cycle"] = taken.get(i["number"])
-    return {"milestone": milestone, "issues": issues, "error": error}
+    return {"milestone": milestone, "issues": issues, "error": error, "repo": repo}
 
 
 @app.get("/api/release-cycles/{cycle_id}/github/issues/{number}", tags=["release cycles"])
@@ -486,7 +570,8 @@ def github_issue(cycle_id: str, number: int, request: Request):
     with db_cursor(readonly=True) as (_, cur):
         c = _readable(cur, request, cycle_id)
         resolve_human_actor(cur, request, c["container_id"])
-    return read_issue(number)
+        repo, token = github_repo(cur, c["container_id"], request)
+    return read_issue(repo, token, number)
 
 
 def _engineer_for(cycle: dict, platforms: list[str], chosen: str | None) -> str | None:
@@ -499,12 +584,12 @@ def _engineer_for(cycle: dict, platforms: list[str], chosen: str | None) -> str 
     return _load(cycle["roles"], {}).get("engineer")
 
 
-def add_ticket(cur, cycle: dict, actor, body: TicketBody) -> dict:
+def add_ticket(cur, cycle: dict, actor, body: TicketBody, request: Request | None = None) -> tuple[str, str | None]:
     if cycle["state"] != "open":
         conflict("cycle_closed", "This cycle was cut. Add tickets to the next one.", status=409)
     title, text, url, labels = (body.title or "").strip(), body.body, body.url, list(body.labels)
     if body.issue_number and not title:
-        issue = read_issue(body.issue_number)
+        issue = read_issue(*github_repo(cur, cycle["container_id"], request), body.issue_number)
         title, text, url, labels = issue["title"], issue["body"], issue["url"], issue["labels"]
     if not title:
         conflict("title_required", "Give the ticket a title, or an issue number to read it from.", status=422)
@@ -513,15 +598,25 @@ def add_ticket(cur, cycle: dict, actor, body: TicketBody) -> dict:
     if not platforms:
         conflict("platforms_required", "Choose the platforms this ticket touches.", status=422)
     kind = body.kind or kind_from_labels or "bug"
-    if body.issue_number:
+    issue_number, notice = body.issue_number, None
+    if body.create_issue and not issue_number:
+        if cycle["dry_run"]:
+            notice = "Dry run: no issue was opened on GitHub."
+        else:
+            words = ", ".join(templates.PLATFORM_WORD[p] for p in platforms)
+            issue_body = f"{text.strip()}\n\n---\n{kind.capitalize()} · {words} · release {cycle['version']} (logged in Embodent)"
+            repo, token = github_repo(cur, cycle["container_id"], request)
+            issue_number, url, notice = open_issue(repo, token, cycle["container_id"], title, issue_body,
+                                                   cycle["milestone"] or cycle["version"])
+    if issue_number:
         cur.execute("SELECT id FROM release_cycle_tickets WHERE cycle_id=%s AND issue_number=%s AND state<>'dropped'",
-                    (cycle["id"], body.issue_number))
+                    (cycle["id"], issue_number))
         if cur.fetchone():
-            conflict("ticket_exists", f"#{body.issue_number} is already in this cycle.", status=409)
+            conflict("ticket_exists", f"#{issue_number} is already in this cycle.", status=409)
     ticket_id = str(uuid4())
     roles = {**_load(cycle["roles"], {}), "owner": actor.id}
     roles["engineer"] = _engineer_for(cycle, platforms, body.engineer_id)
-    ref = f"#{body.issue_number}" if body.issue_number else ""
+    ref = f"#{issue_number}" if issue_number else ""
     params = {
         "platforms": _qa_platforms(platforms, _load(cycle["platforms"], list(templates.PLATFORMS))),
         "kind": kind, "issue_ref": ref or "this ticket", "issue_title": title, "issue_url": url or "",
@@ -532,13 +627,56 @@ def add_ticket(cur, cycle: dict, actor, body: TicketBody) -> dict:
         key=TICKET_KEY, params=params, roles=roles, dry_run=bool(cycle["dry_run"]), start=True,
         title=f"{ref} {title}".strip()[:200], idempotency_key=f"cycle-ticket:{ticket_id}",
     ))
+    if body.attachments:
+        _carry_attachments(cur, created["id"], actor.id, body.attachments)
     cur.execute(
         "INSERT INTO release_cycle_tickets(id, cycle_id, container_id, workflow_id, issue_number, issue_url, title, "
         "kind, platforms, source, added_by) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        (ticket_id, cycle["id"], cycle["container_id"], created["id"], body.issue_number, url, title[:200], kind,
+        (ticket_id, cycle["id"], cycle["container_id"], created["id"], issue_number, url, title[:200], kind,
          json.dumps(platforms), body.source, actor.id),
     )
-    return ticket_id
+    return ticket_id, notice
+
+
+def _carry_attachments(cur, wid: str, author: str, refs: list[dict]) -> None:
+    """Copy the report's images from the intake conversation to the ticket's first step (and its
+    build step, when that's another one) and post them there, so whoever works it sees them."""
+    import shutil as _shutil
+
+    from portal_backend.attachment_references import (
+        attachment_ref, conversation_attachments_dir, resolve_stored_conv_attachment, task_attachments_dir,
+    )
+    from portal_backend.attachment_storage import contained_path
+
+    cur.execute("SELECT id, step_spec FROM tasks WHERE workflow_id=%s ORDER BY priority, created_at, id", (wid,))
+    rows = [dict(r) for r in cur.fetchall()]
+    targets = [rows[0]["id"]] if rows else []
+    build = next((r["id"] for r in rows if (steps.spec_of(r) or {}).get("key") == "implement"), None)
+    if build and build not in targets:
+        targets.append(build)
+    for tid in targets:
+        out = []
+        for ref in refs[:10]:
+            conv, stored = str(ref.get("conversation_id") or ""), str(ref.get("id") or "")
+            try:
+                conversation_attachments_dir(conv)
+                src = resolve_stored_conv_attachment(conv, stored)
+            except Exception:  # noqa: BLE001 - a bad ref is skipped, the ticket still lands
+                src = None
+            if src is None:
+                continue
+            tdir = task_attachments_dir(tid)
+            tdir.mkdir(parents=True, exist_ok=True)
+            dest = contained_path(tdir, stored)
+            if dest is None:
+                continue
+            _shutil.copyfile(src, dest)
+            out.append(attachment_ref(tid, stored, str(ref.get("name") or stored), dest.stat().st_size, dest))
+        if out:
+            cur.execute(
+                "INSERT INTO task_messages (task_id, author_id, body, attachments) VALUES (%s,%s,%s,%s)",
+                (tid, author, "Screenshots and recording frames from the report.", json.dumps(out)),
+            )
 
 
 @app.post("/api/release-cycles/{cycle_id}/tickets", tags=["release cycles"])
@@ -549,8 +687,8 @@ def create_ticket(cycle_id: str, body: TicketBody, request: Request):
     with db_cursor() as (_, cur):
         c = _cycle(cur, cycle_id)
         actor = resolve_human_actor(cur, request, c["container_id"])
-        add_ticket(cur, c, actor, body)
-        return cycle_view(cur, _cycle(cur, cycle_id))
+        ticket_id, notice = add_ticket(cur, c, actor, body, request)
+        return {**cycle_view(cur, _cycle(cur, cycle_id)), "added": ticket_id, "notice": notice}
 
 
 @app.post("/api/release-cycles/{cycle_id}/tickets/{ticket_id}/drop", tags=["release cycles"])

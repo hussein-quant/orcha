@@ -106,6 +106,7 @@ from portal_backend import (
     templates_routes,  # project mode (Code | General) + industry templates
     workflow_release_routes,  # workflow templates, person/gate/watch steps, proof pack, board
     release_cycle_routes,  # release cycles: tickets on a release branch, then the cut
+    intake_routes,  # logging issues by talking them through: brief, recordings to frames
     terminal_config_routes,
     user_pref_routes,
     version_routes,  # GH #258 PR 9: GET /api/version
@@ -226,6 +227,7 @@ ROUTE_MODULES = (
     templates_routes,  # project mode (Code | General) + industry templates
     workflow_release_routes,  # workflow templates, person/gate/watch steps, proof pack, board
     release_cycle_routes,  # release cycles: tickets on a release branch, then the cut
+    intake_routes,  # logging issues by talking them through: brief, recordings to frames
     terminal_config_routes,
     user_pref_routes,
     version_routes,

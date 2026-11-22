@@ -124,6 +124,7 @@ export function Board() {
         <div className="fl-head-actions">
           <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows", cid, { classic: "1" })}>Classic list</Link>
           <Link className="fl-btn" to={flowHref("/workflows/cycle", cid)} data-release-cycle><GitBranch size={15} />Release cycle</Link>
+          {data?.cycles?.some((c) => c.state === "open") ? <Link className="fl-btn" to={flowHref("/workflows/cycle", cid, { intake: "1" })} data-log-issue>Log an issue</Link> : null}
           <button type="button" className="fl-btn" data-variant="primary" onClick={() => navigate(flowHref("/workflows/new", cid))}><Plus size={15} />New workflow</button>
         </div>
       </header>

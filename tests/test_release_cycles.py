@@ -29,10 +29,10 @@ def local_lane(monkeypatch):
 
 
 class Git:
-    """Stands in for git and gh: records every command, answers from a script."""
+    """Stands in for git: records every command, answers from a script."""
 
-    def __init__(self, remote_has=(), fail=None, issues=None):
-        self.calls, self.remote_has, self.fail, self.issues = [], set(remote_has), fail, issues or []
+    def __init__(self, remote_has=(), fail=None):
+        self.calls, self.remote_has, self.fail = [], set(remote_has), fail
 
     def __call__(self, args, timeout=60):
         self.calls.append(args)
@@ -43,13 +43,36 @@ class Git:
         if args[:2] == ["git", "push"]:
             self.remote_has.add(args[-1].split(":refs/heads/")[-1])
             return 0, "", ""
-        if args[:3] == ["gh", "issue", "list"]:
-            return 0, json.dumps(self.issues), ""
-        if args[:3] == ["gh", "issue", "view"]:
-            n = int(args[3])
-            found = [i for i in self.issues if i["number"] == n]
-            return (0, json.dumps(found[0]), "") if found else (1, "", "issue not found")
         return 0, "", ""
+
+
+class GitHub:
+    """Stands in for the GitHub API behind the GitHub tab's plumbing."""
+
+    def __init__(self, issues=(), milestones=("1.0.3",)):
+        self.issues, self.milestones, self.created, self.gets = list(issues), list(milestones), [], []
+
+    def install(self, monkeypatch):
+        monkeypatch.setattr(cycles, "github_repo", lambda cur, cid, request: ("example/nyumba", "tok"))
+        monkeypatch.setattr(cycles, "_gh_get", self.get)
+        monkeypatch.setattr(cycles, "_gh_send", self.send)
+        return self
+
+    def get(self, path, token):
+        self.gets.append(path)
+        if path.startswith("/repos/example/nyumba/milestones"):
+            return [{"number": i + 1, "title": t} for i, t in enumerate(self.milestones)]
+        if "/issues?milestone=" in path:
+            return [{**i, "html_url": i["url"]} for i in self.issues]
+        n = int(path.rsplit("/", 1)[-1])
+        found = [i for i in self.issues if i["number"] == n]
+        if not found:
+            raise RuntimeError("GitHub said 404: Not Found")
+        return {**found[0], "html_url": found[0]["url"]}
+
+    def send(self, method, path, token, payload):
+        self.created.append(payload)
+        return {"number": 240, "html_url": "https://github.com/example/nyumba/issues/240"}
 
 
 class Project:
@@ -209,7 +232,7 @@ async def test_tickets_from_the_milestone_read_their_platforms_from_labels(clien
         {"number": 219, "title": "Tenant referrals", "body": "", "url": "https://gh/219",
          "labels": [{"name": "enhancement"}, {"name": "ios"}, {"name": "android"}, {"name": "api"}]},
     ]
-    monkeypatch.setattr(cycles, "_run", Git(issues=issues))
+    GitHub(issues).install(monkeypatch)
     c = await p.open()
     found = await p.call("GET", f"/api/release-cycles/{c['id']}/github")
     assert found["milestone"] == "1.0.3" and not found["error"]
@@ -318,8 +341,39 @@ async def test_a_ticket_can_be_dropped_until_it_is_merged(client):
 @pytest.mark.asyncio
 async def test_a_ticket_without_platforms_or_title_is_refused(client, monkeypatch):
     p = Project(client)
-    monkeypatch.setattr(cycles, "_run", Git())
+    GitHub().install(monkeypatch)
     c = await p.open()
     await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {"title": "No platforms"}, expect=422)
     await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {"platforms": ["ios"]}, expect=422)
     await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {"issue_number": 999, "platforms": ["ios"]}, expect=422)
+
+
+@pytest.mark.asyncio
+async def test_a_logged_ticket_can_open_its_github_issue(client, monkeypatch):
+    p = Project(client)
+    monkeypatch.setattr(cycles, "_run", Git())
+    gh = GitHub(milestones=("1.0.2",)).install(monkeypatch)
+    c = await p.open(dry_run=False)
+    out = await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {
+        "title": "Payments screen freezes", "body": "Tapping Pay twice freezes it.", "platforms": ["android"],
+        "create_issue": True})
+    t = next(x for x in out["tickets"] if x["id"] == out["added"])
+    assert (t["issue_number"], t["issue_url"]) == (240, "https://github.com/example/nyumba/issues/240")
+    created = gh.created[0]
+    assert "milestone" not in created  # no open 1.0.3 milestone: opened without one
+    assert created["title"] == "Payments screen freezes" and "Tapping Pay twice freezes it." in created["body"]
+    d = await p.call("GET", f"/api/workflows/{t['workflow_id']}")
+    assert d["title"] == "#240 Payments screen freezes"
+    # Not ticked: nothing is opened on GitHub.
+    await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {"title": "Quiet one", "platforms": ["ios"]})
+    assert len(gh.created) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_dry_run_never_opens_a_github_issue(client, monkeypatch):
+    p = Project(client)
+    gh = GitHub().install(monkeypatch)
+    c = await p.open()
+    out = await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {"title": "X", "platforms": ["ios"], "create_issue": True})
+    assert out["notice"] == "Dry run: no issue was opened on GitHub."
+    assert not gh.created

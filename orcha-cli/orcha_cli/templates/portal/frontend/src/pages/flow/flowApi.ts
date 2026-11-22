@@ -194,6 +194,78 @@ export interface GithubIssue {
 export interface NewTicket {
   issue_number?: number | null; title?: string; body?: string; url?: string | null; kind?: "bug" | "feature";
   platforms: Platform[]; engineer_id?: string | null; labels?: string[]; source?: "manual" | "github";
+  /** Also open it on GitHub, in the cycle's milestone. A person ticks it; never on by default. */
+  create_issue?: boolean;
+  /** Screenshots and recording frames from the intake conversation, carried to the ticket's agent. */
+  attachments?: { conversation_id: string; id: string; name: string }[];
+}
+
+/* ---- the intake: logging issues by talking them through ------------------------------------- */
+
+export interface ConvAttachment { id: string; name: string; size?: number; kind?: "image" | "file"; url?: string; content_type?: string; t?: number }
+export interface Turn {
+  id: string; conversation_id: string; seq: number; role: "human" | "agent"; author_agent_id: string; content: string;
+  meta?: Record<string, unknown> | string | null; attachments?: ConvAttachment[] | string | null; created_at: string;
+}
+export interface VideoFrames {
+  video: { name: string; size: number; duration: number; width: number | null; height: number | null };
+  frames: ConvAttachment[]; sheet: ConvAttachment | null;
+}
+async function upload<T>(url: string, file: File, actor: string | null): Promise<T> {
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  const r = await fetch(url, { method: "POST", body: fd, headers: actor ? { "X-Orcha-Local-Actor": actor } : undefined });
+  if (!r.ok) {
+    let detail: unknown = null;
+    try { detail = ((await r.json()) as { detail?: unknown }).detail; } catch { /* not JSON */ }
+    throw new FlowError(errorDetailText(detail) || `The upload failed (${r.status}).`, r.status, null, null);
+  }
+  return r.json() as Promise<T>;
+}
+export const intakeApi = {
+  get: (cycleId: string, actor: string | null) =>
+    call<{ agent_id: string | null; brief: string; marker: [string, string] }>("GET", `${cyc(cycleId)}/intake`, actor),
+  start: (agentId: string, actor: string | null) =>
+    call<{ conversation: { id: string; status: string } }>("POST", `/api/agents/${encodeURIComponent(agentId)}/conversations`, actor, { actor_agent_id: actor }),
+  turns: (convId: string, actor: string | null, signal?: AbortSignal) =>
+    call<{ turns: Turn[] }>("GET", `/api/conversations/${encodeURIComponent(convId)}/turns?limit=1000`, actor, undefined, signal),
+  say: (convId: string, actor: string, content: string, attachments: ConvAttachment[], cycleId: string) =>
+    call<{ turn: Turn }>("POST", `/api/conversations/${encodeURIComponent(convId)}/turns`, actor, {
+      role: "human", author_agent_id: actor, content, meta: { intake_cycle: cycleId },
+      attachments: attachments.length ? attachments.map((a) => ({ id: a.id, name: a.name })) : undefined,
+    }),
+  image: (convId: string, file: File, actor: string | null) => upload<ConvAttachment>(`/api/conversations/${encodeURIComponent(convId)}/attachments`, file, actor),
+  video: (convId: string, file: File, actor: string | null) => upload<VideoFrames>(`/api/conversations/${encodeURIComponent(convId)}/videos`, file, actor),
+};
+
+/** A ticket the intake agent proposed in an `orcha-ticket` block. */
+export interface ProposedTicket { title: string; kind: "bug" | "feature"; platforms: Platform[]; body: string; attachments: string[] }
+
+/** The agent's words, and the tickets it proposed, from one reply. */
+export function readReply(text: string): { words: string; tickets: ProposedTicket[] } {
+  const tickets: ProposedTicket[] = [];
+  const words = text.replace(/```orcha-ticket\s*([\s\S]*?)```/g, (_m, body: string) => {
+    try {
+      const t = JSON.parse(body) as Partial<ProposedTicket>;
+      if (t && typeof t.title === "string" && t.title.trim()) {
+        tickets.push({
+          title: t.title.trim().slice(0, 200), kind: t.kind === "feature" ? "feature" : "bug",
+          platforms: (Array.isArray(t.platforms) ? t.platforms : []).filter((p): p is Platform => ["ios", "android", "web", "api"].includes(p as string)),
+          body: typeof t.body === "string" ? t.body : "", attachments: Array.isArray(t.attachments) ? t.attachments.map(String) : [],
+        });
+        return "";
+      }
+    } catch { /* not JSON: leave the block as the agent wrote it */ }
+    return _m;
+  }).replace(/\n{3,}/g, "\n\n").trim();
+  return { words, tickets };
+}
+
+/** What a person wrote, without the brief that went with their first message. */
+export function withoutBrief(text: string, marker: [string, string] = ["[[intake-brief]]", "[[/intake-brief]]"]): string {
+  const a = text.indexOf(marker[0]);
+  const b = text.indexOf(marker[1]);
+  return a >= 0 && b > a ? (text.slice(0, a) + text.slice(b + marker[1].length)).trim() : text;
 }
 
 const cyc = (id: string) => `/api/release-cycles/${encodeURIComponent(id)}`;

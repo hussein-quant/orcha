@@ -17,6 +17,7 @@ import {
 import { flowHref } from "./Board";
 import { Figure, Thread } from "./kit";
 import { guessRoles } from "./ReleaseHome";
+import { Intake } from "./Intake";
 
 const ALL: Platform[] = ["ios", "android", "web", "api"];
 type People = Compiled["people"];
@@ -385,10 +386,10 @@ function Group({ title, children, count }: { title: string; children: ReactNode;
   );
 }
 
-function CycleView({ cycle, cid, actor, setCycle }: { cycle: Cycle; cid: string; actor: string | null; setCycle: (c: Cycle) => void }) {
+function CycleView({ cycle, cid, actor, setCycle, startWith }: { cycle: Cycle; cid: string; actor: string | null; setCycle: (c: Cycle) => void; startWith?: "intake" | "" }) {
   const navigate = useNavigate();
   const people = usePeople(cid, actor);
-  const [panel, setPanel] = useState<"" | "add" | "github">("");
+  const [panel, setPanel] = useState<"" | "add" | "github" | "intake">(startWith ?? "");
   const [filter, setFilter] = useState<Platform | "all">("all");
   const [error, setError] = useState("");
   const tickets = (cycle.tickets ?? []).filter((t) => filter === "all" || t.platforms.includes(filter));
@@ -427,6 +428,8 @@ function CycleView({ cycle, cid, actor, setCycle }: { cycle: Cycle; cid: string;
             <button type="button" className="fl-btn" aria-pressed={panel === "github"} onClick={() => setPanel(panel === "github" ? "" : "github")} data-from-github>
               <GitBranch size={14} />From GitHub</button>
             <button type="button" className="fl-btn" aria-pressed={panel === "add"} onClick={() => setPanel(panel === "add" ? "" : "add")} data-add><Plus size={14} />Add ticket</button>
+            <button type="button" className="fl-btn" data-variant="primary" aria-pressed={panel === "intake"} onClick={() => setPanel(panel === "intake" ? "" : "intake")} data-intake>
+              <Sparkles size={14} />Log an issue</button>
           </div>
         ) : null}
       </header>
@@ -451,6 +454,7 @@ function CycleView({ cycle, cid, actor, setCycle }: { cycle: Cycle; cid: string;
 
       {panel === "add" ? <AddTicket cycle={cycle} actor={actor} people={people} onAdded={setCycle} onClose={() => setPanel("")} /> : null}
       {panel === "github" ? <FromGithub cycle={cycle} actor={actor} onAdded={setCycle} onClose={() => setPanel("")} /> : null}
+      {panel === "intake" ? <Intake cycle={cycle} actor={actor} people={people} onLogged={setCycle} onClose={() => setPanel("")} /> : null}
 
       {(cycle.tickets ?? []).length ? (
         <div className="fl-toggles" role="radiogroup" aria-label="Show tickets for">
@@ -463,9 +467,10 @@ function CycleView({ cycle, cid, actor, setCycle }: { cycle: Cycle; cid: string;
       ) : open && !panel ? (
         <section className="fl-panel fl-cy-empty">
           <h2 className="fl-h2">No tickets yet</h2>
-          <p className="fl-muted">Add the issues you want in {cycle.version}: from the <span className="fl-mono">{cycle.milestone ?? cycle.version}</span> milestone on GitHub, or by hand. Each one starts right away and opens a PR into <span className="fl-mono">{cycle.branch}</span>.</p>
+          <p className="fl-muted">Add the issues you want in {cycle.version}: talk them through with an agent, take them from the <span className="fl-mono">{cycle.milestone ?? cycle.version}</span> milestone on GitHub, or type them in. Each one starts right away and opens a PR into <span className="fl-mono">{cycle.branch}</span>.</p>
           <span className="fl-head-actions">
-            <button type="button" className="fl-btn" data-variant="primary" onClick={() => setPanel("github")}><GitBranch size={14} />From GitHub</button>
+            <button type="button" className="fl-btn" data-variant="primary" onClick={() => setPanel("intake")}><Sparkles size={14} />Log an issue</button>
+            <button type="button" className="fl-btn" onClick={() => setPanel("github")}><GitBranch size={14} />From GitHub</button>
             <button type="button" className="fl-btn" onClick={() => setPanel("add")}><Plus size={14} />Add ticket</button>
           </span>
         </section>
@@ -506,6 +511,7 @@ export function ReleaseCycle() {
   const [params] = useSearchParams();
   const id = params.get("cycle");
   const fresh = params.get("new") === "1";
+  const intake = params.get("intake") === "1";
   const [cycle, setCycle] = useState<Cycle | null>(null);
   const [suggested, setSuggested] = useState<string | null | undefined>(undefined);
   const [error, setError] = useState("");
@@ -516,7 +522,7 @@ export function ReleaseCycle() {
     const ctrl = new AbortController();
     cycleApi.list(cid, actor, ctrl.signal).then((l) => {
       const open = fresh ? null : l.open ?? l.open_dry_run;
-      if (open) navigate(flowHref("/workflows/cycle", cid, { cycle: open }), { replace: true });
+      if (open) navigate(flowHref("/workflows/cycle", cid, { cycle: open, ...(intake ? { intake: "1" } : {}) }), { replace: true });
       else setSuggested(l.suggested.version);
     }).catch((e: Error) => { if (e.name !== "AbortError") setError(e.message); });
     return () => ctrl.abort();
@@ -540,5 +546,5 @@ export function ReleaseCycle() {
     return <OpenCycle cid={cid} actor={actor} suggested={suggested} onOpened={(c) => navigate(flowHref("/workflows/cycle", cid, { cycle: c.id }))} />;
   }
   if (!cycle) return <div className="fl-wrap"><p className="fl-muted" aria-busy="true">Loading the release cycle…</p></div>;
-  return <CycleView cycle={cycle} cid={cid} actor={actor} setCycle={setCycle} />;
+  return <CycleView cycle={cycle} cid={cid} actor={actor} setCycle={setCycle} startWith={intake && cycle.state === "open" ? "intake" : ""} />;
 }
