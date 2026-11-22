@@ -10,6 +10,14 @@ missing.
 
 ## [Unreleased]
 
+- Workflows: a **Mobile App Release** template (intake, fix loop, coverage, full regression, your go/no-go with a
+  proof pack, store submit and promote, store review watched for you, live check) in a template library with
+  parameters, removable steps, project copies, import/export and "Run again" with the build bumped. New step kinds
+  (person, gate, watch) finish through the engine's own path; irreversible steps wait for a gate in the same run;
+  watch steps poll a project's status command (`state` JSON); stalled workflows are flagged; a dry run rehearses
+  the whole release with only people deciding. A new Workflows UI (board, template gallery, one-line editor with a
+  live check and one Start, a run page with the proof pack) in the Recipes motion language; the classic screens stay
+  at `?classic=1`. Migration 102 (SQLite 032), additive.
 - Quality runs show a live Activity panel on the pending, live session and run pages: what the agent is doing now, what happened before and why it waits (device holder, time waited, a free device to switch to, Cancel), from the new `GET /api/qa/run-log`.
 - Run pages no longer freeze on a slow portal: reads wait for their answer instead of being restarted, retry after failures, and catch up when the tab returns. "Can't reach Embodent" now takes repeated failures.
 - Explorations count real findings as issues and show automatic measured checks (contrast, tap size) apart.

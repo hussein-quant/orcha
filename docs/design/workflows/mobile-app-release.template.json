@@ -1,0 +1,1463 @@
+{
+  "schema": 1,
+  "key": "mobile_app_release",
+  "name": "Mobile App Release",
+  "version": 1,
+  "icon": "rocket",
+  "tone": "amber",
+  "description": "Intake to live for the App Store, Google Play, a website and an API: fix loop, full regression, your go/no-go with proof, store review watched for you.",
+  "goal": "Ship {version} ({build}) on {platform_words}, with proof before anything reaches a store.",
+  "title": "Release {version} ({build})",
+  "execution_mode": "parallel",
+  "parameters": [
+    {
+      "key": "platforms",
+      "label": "Platforms",
+      "type": "platforms",
+      "default": [
+        "ios",
+        "android",
+        "web",
+        "api"
+      ],
+      "required": true
+    },
+    {
+      "key": "version",
+      "label": "Version",
+      "type": "text",
+      "placeholder": "1.0.2",
+      "required": true
+    },
+    {
+      "key": "build",
+      "label": "Build",
+      "type": "text",
+      "placeholder": "8",
+      "required": true,
+      "help": "Build number on iOS, versionCode on Android."
+    },
+    {
+      "key": "release_type",
+      "label": "iOS release",
+      "type": "choice",
+      "required": true,
+      "platform": "ios",
+      "choices": [
+        {
+          "value": "after_approval",
+          "label": "Automatically after approval"
+        },
+        {
+          "value": "manual",
+          "label": "Manually, when I release it"
+        }
+      ],
+      "help": "Asked every version, never defaulted."
+    },
+    {
+      "key": "android_rollout",
+      "label": "Android rollout",
+      "type": "choice",
+      "default": "100%",
+      "platform": "android",
+      "choices": [
+        {
+          "value": "100%",
+          "label": "Everyone"
+        },
+        {
+          "value": "50%",
+          "label": "50%"
+        },
+        {
+          "value": "20%",
+          "label": "20%"
+        },
+        {
+          "value": "5%",
+          "label": "5%"
+        }
+      ]
+    },
+    {
+      "key": "qa_target_env",
+      "label": "QA environment",
+      "type": "text",
+      "default": "staging"
+    },
+    {
+      "key": "batch_summary",
+      "label": "What's in this release",
+      "type": "longtext",
+      "default": "",
+      "placeholder": "Broker fee shows as a percentage; faster listing photos"
+    },
+    {
+      "key": "qa_subset_tags",
+      "label": "Scenario tags for the changed screens",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "coverage_threshold",
+      "label": "Coverage warning below",
+      "type": "number",
+      "default": 10,
+      "help": "Validated scenarios a platform needs before the proof stops warning."
+    },
+    {
+      "key": "asc_status_command",
+      "label": "App Store status command",
+      "type": "text",
+      "default": "python3 scripts/release-adapters/asc_status.py",
+      "platform": "ios",
+      "advanced": true
+    },
+    {
+      "key": "play_status_command",
+      "label": "Google Play status command",
+      "type": "text",
+      "default": "python3 scripts/release-adapters/play_status.py",
+      "platform": "android",
+      "advanced": true
+    }
+  ],
+  "roles": [
+    {
+      "key": "owner",
+      "label": "Owner (holds the gates)",
+      "kind": "human"
+    },
+    {
+      "key": "engineer",
+      "label": "Engineer",
+      "kind": "ai"
+    },
+    {
+      "key": "release",
+      "label": "Release",
+      "kind": "ai"
+    },
+    {
+      "key": "qa",
+      "label": "QA",
+      "kind": "ai"
+    }
+  ],
+  "stages": [
+    {
+      "key": "intake",
+      "title": "Intake",
+      "steps": [
+        {
+          "client_key": "batch",
+          "title": "Collect the feedback batch",
+          "kind": "person",
+          "role": "owner",
+          "after": [],
+          "platforms": [],
+          "required": false,
+          "description": "List the issues and feature requests that make up this release. One build per round, never one per fix.",
+          "definition_of_done": "The batch is written down and agreed: {batch_summary}",
+          "outcomes": [
+            {
+              "name": "ready",
+              "kind": "success"
+            },
+            {
+              "name": "not_yet",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "ready",
+              "destination": "next"
+            },
+            {
+              "outcome": "not_yet",
+              "destination": "stop"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        },
+        {
+          "client_key": "baseline",
+          "title": "Release readiness baseline",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "batch"
+          ],
+          "platforms": [],
+          "required": false,
+          "description": "Run the project's readiness scripts (store status, signing, metadata) and post what is missing.",
+          "definition_of_done": "A readiness note lists every gap, or says there is none.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "dry_run": {
+            "outcomes": []
+          }
+        }
+      ]
+    },
+    {
+      "key": "build",
+      "title": "Build the change",
+      "steps": [
+        {
+          "client_key": "implement",
+          "title": "Fix or build each batch item",
+          "kind": "agent",
+          "role": "engineer",
+          "after": [
+            "baseline"
+          ],
+          "platforms": [],
+          "required": true,
+          "description": "Test-first, one small PR per batch item, against origin/main in a worktree. In a later round, fix what the QA triage found.",
+          "definition_of_done": "Every batch item has an open PR with tests; the PR links are posted.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [
+            "build:heavy"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        },
+        {
+          "client_key": "review_merge",
+          "title": "Review and merge",
+          "kind": "person",
+          "role": "owner",
+          "after": [
+            "implement"
+          ],
+          "platforms": [],
+          "required": false,
+          "description": "Review the diffs and merge. Agents never merge on their own.",
+          "definition_of_done": "Every PR of this round is merged, or sent back with comments.",
+          "outcomes": [
+            {
+              "name": "merged",
+              "kind": "success"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "merged",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        }
+      ]
+    },
+    {
+      "key": "staging",
+      "title": "Staging",
+      "steps": [
+        {
+          "client_key": "deploy_api_staging",
+          "title": "Deploy the API to staging",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "review_merge"
+          ],
+          "platforms": [
+            "api"
+          ],
+          "required": false,
+          "description": "Deploy to {qa_target_env}, then prove the change is live there: fetch an endpoint the change touched. A script's exit code is not proof.",
+          "definition_of_done": "The changed endpoint answers on {qa_target_env} with the new behaviour (request and response posted).",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        },
+        {
+          "client_key": "deploy_web_staging",
+          "title": "Deploy the website to staging",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "deploy_api_staging"
+          ],
+          "platforms": [
+            "web"
+          ],
+          "required": false,
+          "description": "Deploy to {qa_target_env}, then prove it is live: load a changed page and check the new content. The deploy script can report success without uploading.",
+          "definition_of_done": "A changed page on {qa_target_env} shows the new content (URL and screenshot posted).",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        }
+      ]
+    },
+    {
+      "key": "verify",
+      "title": "Verify while fixing",
+      "steps": [
+        {
+          "client_key": "qa_subset_ios",
+          "title": "Check the changed screens on iOS",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "deploy_api_staging"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Only the scenarios for the screens this batch changed, plus every open finding, on iOS. Uses the scenario tags {qa_subset_tags} when set. Runs on a debug build pointed at {qa_target_env}.",
+          "definition_of_done": "Every scenario in scope has a verdict with screenshots; the build under test (type, version, build, commit, environment) is recorded on the result.",
+          "outcomes": [
+            {
+              "name": "pass",
+              "kind": "success"
+            },
+            {
+              "name": "fail",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "pass",
+              "destination": "next"
+            },
+            {
+              "outcome": "fail",
+              "destination": "next"
+            }
+          ],
+          "resources": [
+            "device:ios-sim"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": "subset",
+          "secrets": [],
+          "qa": {
+            "kind": "check",
+            "platform": "ios",
+            "focus": "The screens changed in this batch: {batch_summary}"
+          },
+          "dry_run": {
+            "outcomes": [
+              "fail",
+              "pass"
+            ],
+            "note": "Round 1 finds the fee shown as an amount; the fix passes in round 2."
+          }
+        },
+        {
+          "client_key": "qa_subset_android",
+          "title": "Check the changed screens on Android",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "deploy_api_staging"
+          ],
+          "platforms": [
+            "android"
+          ],
+          "required": false,
+          "description": "Only the scenarios for the screens this batch changed, plus every open finding, on Android. Uses the scenario tags {qa_subset_tags} when set. Runs on a debug build pointed at {qa_target_env}.",
+          "definition_of_done": "Every scenario in scope has a verdict with screenshots; the build under test (type, version, build, commit, environment) is recorded on the result.",
+          "outcomes": [
+            {
+              "name": "pass",
+              "kind": "success"
+            },
+            {
+              "name": "fail",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "pass",
+              "destination": "next"
+            },
+            {
+              "outcome": "fail",
+              "destination": "next"
+            }
+          ],
+          "resources": [
+            "device:android-emu"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": "subset",
+          "secrets": [],
+          "qa": {
+            "kind": "check",
+            "platform": "android",
+            "focus": "The screens changed in this batch: {batch_summary}"
+          },
+          "dry_run": {
+            "outcomes": [
+              "fail",
+              "pass"
+            ],
+            "note": "Round 1 finds the fee shown as an amount; the fix passes in round 2."
+          }
+        },
+        {
+          "client_key": "qa_subset_web",
+          "title": "Check the changed screens on Web",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "deploy_web_staging"
+          ],
+          "platforms": [
+            "web"
+          ],
+          "required": false,
+          "description": "Only the scenarios for the screens this batch changed, plus every open finding, on Web. Uses the scenario tags {qa_subset_tags} when set. Runs on a debug build pointed at {qa_target_env}.",
+          "definition_of_done": "Every scenario in scope has a verdict with screenshots; the build under test (type, version, build, commit, environment) is recorded on the result.",
+          "outcomes": [
+            {
+              "name": "pass",
+              "kind": "success"
+            },
+            {
+              "name": "fail",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "pass",
+              "destination": "next"
+            },
+            {
+              "outcome": "fail",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": "subset",
+          "secrets": [],
+          "qa": {
+            "kind": "check",
+            "platform": "web",
+            "focus": "The screens changed in this batch: {batch_summary}"
+          },
+          "dry_run": {
+            "outcomes": [
+              "fail",
+              "pass"
+            ],
+            "note": "Round 1 finds the fee shown as an amount; the fix passes in round 2."
+          }
+        },
+        {
+          "client_key": "triage_subset",
+          "title": "Triage what failed",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "qa_subset_ios",
+            "qa_subset_android",
+            "qa_subset_web"
+          ],
+          "platforms": [],
+          "required": false,
+          "description": "Sort every failure: a real bug to fix, a flaky check, or a scenario to update. Fixes go back to Build.",
+          "definition_of_done": "Every failure has a diagnosis; real bugs are findings with steps to reproduce.",
+          "outcomes": [
+            {
+              "name": "fix",
+              "kind": "changes"
+            },
+            {
+              "name": "clear",
+              "kind": "success"
+            },
+            {
+              "name": "needs_person",
+              "kind": "custom"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "fix",
+              "destination": "return",
+              "destination_task": "implement"
+            },
+            {
+              "outcome": "clear",
+              "destination": "exit_group"
+            },
+            {
+              "outcome": "needs_person",
+              "destination": "ask_owner"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "qa": {
+            "kind": "triage"
+          },
+          "dry_run": {
+            "outcomes": [
+              "fix",
+              "clear"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "key": "coverage",
+      "title": "Coverage",
+      "steps": [
+        {
+          "client_key": "coverage",
+          "title": "Draft the missing scenarios",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "triage_subset"
+          ],
+          "platforms": [],
+          "required": false,
+          "description": "Each user-facing change in the batch needs a validated scenario. Draft the missing ones for the owner to approve. Warns below {coverage_threshold} scenarios a platform.",
+          "definition_of_done": "Every change in the batch maps to a scenario, drafted or validated.",
+          "outcomes": [
+            {
+              "name": "drafted",
+              "kind": "success"
+            },
+            {
+              "name": "gaps",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "drafted",
+              "destination": "next"
+            },
+            {
+              "outcome": "gaps",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "qa": {
+            "kind": "draft",
+            "focus": "Scenarios for the changes in this batch: {batch_summary}"
+          }
+        },
+        {
+          "client_key": "coverage_review",
+          "title": "Approve the new scenarios",
+          "kind": "person",
+          "role": "owner",
+          "after": [
+            "coverage"
+          ],
+          "platforms": [],
+          "required": false,
+          "description": "Approve or reject the drafted scenarios in Quality. Coverage per platform is on the release page.",
+          "definition_of_done": "The drafts are approved or rejected.",
+          "outcomes": [
+            {
+              "name": "covered",
+              "kind": "success"
+            },
+            {
+              "name": "go_anyway",
+              "kind": "custom"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "covered",
+              "destination": "next"
+            },
+            {
+              "outcome": "go_anyway",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        }
+      ]
+    },
+    {
+      "key": "builds",
+      "title": "Version and QA builds",
+      "steps": [
+        {
+          "client_key": "bump",
+          "title": "Version {version} ({build})",
+          "kind": "agent",
+          "role": "engineer",
+          "after": [
+            "coverage_review"
+          ],
+          "platforms": [
+            "ios",
+            "android"
+          ],
+          "required": true,
+          "description": "Set the marketing version {version} and build number {build} (versionCode only goes up), and open a PR. In a later round, fix what the regression found first, merge, and redeploy staging.",
+          "definition_of_done": "Version {version} build {build} is merged on main; the commit SHA is posted.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        },
+        {
+          "client_key": "qa_build",
+          "title": "Build the QA builds",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "bump"
+          ],
+          "platforms": [
+            "ios",
+            "android"
+          ],
+          "required": false,
+          "description": "Debug builds of that commit pointed at {qa_target_env} (release builds block screenshots; iOS needs signing on so the login token can be saved). Record each build's identity for the QA steps.",
+          "definition_of_done": "A debug build per platform is installed on the QA devices; type, version, build, commit and environment are posted.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [
+            "build:heavy"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        }
+      ]
+    },
+    {
+      "key": "regression",
+      "title": "Full regression",
+      "steps": [
+        {
+          "client_key": "qa_full_ios",
+          "title": "Full regression on iOS",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "qa_build"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": "if_ship",
+          "description": "Every validated iOS scenario, shared ones included, on the exact commit being released (a debug build of it pointed at {qa_target_env}; release builds block screenshots). Paused and suspicious scenarios are listed as skipped, never silently dropped.",
+          "definition_of_done": "Every scenario in scope has a verdict with screenshots; the build under test (type, version, build, commit, environment) is recorded on the result.",
+          "outcomes": [
+            {
+              "name": "pass",
+              "kind": "success"
+            },
+            {
+              "name": "fail",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "pass",
+              "destination": "next"
+            },
+            {
+              "outcome": "fail",
+              "destination": "next"
+            }
+          ],
+          "resources": [
+            "device:ios-sim"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": "full",
+          "secrets": [],
+          "qa": {
+            "kind": "check",
+            "platform": "ios",
+            "focus": "Full regression: every validated scenario for this platform."
+          },
+          "dry_run": {
+            "outcomes": [
+              "pass"
+            ],
+            "note": ""
+          }
+        },
+        {
+          "client_key": "qa_full_android",
+          "title": "Full regression on Android",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "qa_build"
+          ],
+          "platforms": [
+            "android"
+          ],
+          "required": "if_ship",
+          "description": "Every validated Android scenario, shared ones included, on the exact commit being released (a debug build of it pointed at {qa_target_env}; release builds block screenshots). Paused and suspicious scenarios are listed as skipped, never silently dropped.",
+          "definition_of_done": "Every scenario in scope has a verdict with screenshots; the build under test (type, version, build, commit, environment) is recorded on the result.",
+          "outcomes": [
+            {
+              "name": "pass",
+              "kind": "success"
+            },
+            {
+              "name": "fail",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "pass",
+              "destination": "next"
+            },
+            {
+              "outcome": "fail",
+              "destination": "next"
+            }
+          ],
+          "resources": [
+            "device:android-emu"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": "full",
+          "secrets": [],
+          "qa": {
+            "kind": "check",
+            "platform": "android",
+            "focus": "Full regression: every validated scenario for this platform."
+          },
+          "dry_run": {
+            "outcomes": [
+              "pass"
+            ],
+            "note": ""
+          }
+        },
+        {
+          "client_key": "qa_full_web",
+          "title": "Full regression on Web",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "bump"
+          ],
+          "platforms": [
+            "web"
+          ],
+          "required": "if_ship",
+          "description": "Every validated Web scenario, shared ones included, on the exact commit being released (a debug build of it pointed at {qa_target_env}; release builds block screenshots). Paused and suspicious scenarios are listed as skipped, never silently dropped.",
+          "definition_of_done": "Every scenario in scope has a verdict with screenshots; the build under test (type, version, build, commit, environment) is recorded on the result.",
+          "outcomes": [
+            {
+              "name": "pass",
+              "kind": "success"
+            },
+            {
+              "name": "fail",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "pass",
+              "destination": "next"
+            },
+            {
+              "outcome": "fail",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": "full",
+          "secrets": [],
+          "qa": {
+            "kind": "check",
+            "platform": "web",
+            "focus": "Full regression: every validated scenario for this platform."
+          },
+          "dry_run": {
+            "outcomes": [
+              "pass"
+            ],
+            "note": ""
+          }
+        },
+        {
+          "client_key": "triage_full",
+          "title": "Triage the regression",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "qa_full_ios",
+            "qa_full_android",
+            "qa_full_web"
+          ],
+          "platforms": [],
+          "required": "if_ship",
+          "description": "Sort every regression failure. Real bugs go back to the version step for a fix and a new build.",
+          "definition_of_done": "Every failure has a diagnosis.",
+          "outcomes": [
+            {
+              "name": "fix",
+              "kind": "changes"
+            },
+            {
+              "name": "clear",
+              "kind": "success"
+            },
+            {
+              "name": "needs_person",
+              "kind": "custom"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "fix",
+              "destination": "return",
+              "destination_task": "bump"
+            },
+            {
+              "outcome": "clear",
+              "destination": "exit_group"
+            },
+            {
+              "outcome": "needs_person",
+              "destination": "ask_owner"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "qa": {
+            "kind": "triage"
+          },
+          "dry_run": {
+            "outcomes": [
+              "clear"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "key": "release_builds",
+      "title": "Release builds",
+      "steps": [
+        {
+          "client_key": "build_ios",
+          "title": "Archive, scan and upload iOS",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "triage_full"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Archive and export {version} ({build}) from the commit that passed regression, run the project's pre-upload scans, and upload to App Store Connect.",
+          "definition_of_done": "The upload is accepted; the scans' output is posted.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [
+            "build:heavy"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [
+            "ASC_KEY"
+          ]
+        },
+        {
+          "client_key": "processing_ios",
+          "title": "Wait for build processing",
+          "kind": "watch",
+          "role": null,
+          "after": [
+            "build_ios"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Watches App Store Connect until build {build} is VALID (usually 5 to 15 minutes).",
+          "definition_of_done": "Build {build} is VALID.",
+          "outcomes": [
+            {
+              "name": "valid",
+              "kind": "success"
+            },
+            {
+              "name": "invalid",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "valid",
+              "destination": "next"
+            },
+            {
+              "outcome": "invalid",
+              "destination": "ask_owner"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "watch": {
+            "adapter": {
+              "command": "{asc_status_command} --what build --version {version} --build {build}"
+            },
+            "interval_s": 120,
+            "backoff": 1.2,
+            "max_interval_s": 600,
+            "timeout_h": 3,
+            "state_map": {
+              "valid": "valid",
+              "invalid": "invalid",
+              "failed": "invalid"
+            },
+            "terminal_states": [
+              "valid",
+              "invalid",
+              "failed"
+            ],
+            "dry_run_states": [
+              "processing",
+              "valid"
+            ]
+          }
+        },
+        {
+          "client_key": "build_android",
+          "title": "Build and upload to internal",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "triage_full"
+          ],
+          "platforms": [
+            "android"
+          ],
+          "required": false,
+          "description": "Build the signed AAB for versionCode {build} and upload to the internal track: a dry run first, then for real.",
+          "definition_of_done": "versionCode {build} is on the internal track.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [
+            "build:heavy"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [
+            "PLAY_SERVICE_ACCOUNT"
+          ]
+        },
+        {
+          "client_key": "testflight_owner",
+          "title": "Test the build yourself",
+          "kind": "person",
+          "role": "owner",
+          "after": [
+            "processing_ios",
+            "build_android"
+          ],
+          "platforms": [
+            "ios",
+            "android"
+          ],
+          "required": false,
+          "description": "Install from TestFlight and the internal track, and try it on real devices (iPhone, iPad, App Clip, Android phone).",
+          "definition_of_done": "You tried the release build on your devices.",
+          "outcomes": [
+            {
+              "name": "ok",
+              "kind": "success"
+            },
+            {
+              "name": "issues",
+              "kind": "custom"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "ok",
+              "destination": "next"
+            },
+            {
+              "outcome": "issues",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        }
+      ]
+    },
+    {
+      "key": "go",
+      "title": "Go / no-go",
+      "steps": [
+        {
+          "client_key": "gate",
+          "title": "Your go-ahead",
+          "kind": "gate",
+          "role": "owner",
+          "after": [
+            "testflight_owner"
+          ],
+          "platforms": [],
+          "required": "if_ship",
+          "description": "The proof pack: per-platform counts, every failure with its reason, screenshots of the changed screens, coverage, what only unit tests checked. Nothing reaches a store before you say Go here. A standing 'submit when green' is not accepted.",
+          "definition_of_done": "You chose Go, No-go or Send back, with a reason for the last two.",
+          "outcomes": [
+            {
+              "name": "go",
+              "kind": "success"
+            },
+            {
+              "name": "no_go",
+              "kind": "failure"
+            },
+            {
+              "name": "send_back",
+              "kind": "changes"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "go",
+              "destination": "exit_group"
+            },
+            {
+              "outcome": "no_go",
+              "destination": "stop"
+            },
+            {
+              "outcome": "send_back",
+              "destination": "return",
+              "destination_task": "build_ios"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "gate": {
+            "proof_steps": [
+              "qa_full_ios",
+              "qa_full_android",
+              "qa_full_web",
+              "qa_subset_ios",
+              "qa_subset_android",
+              "qa_subset_web"
+            ],
+            "include_unit_only": true,
+            "include_metadata_diff": true
+          }
+        }
+      ]
+    },
+    {
+      "key": "ship",
+      "title": "Ship",
+      "steps": [
+        {
+          "client_key": "submit_ios",
+          "title": "Submit for App Review",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "gate"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Attach build {build} to version {version}, set the release type to {release_type} (the one you chose for this version), and submit.",
+          "definition_of_done": "Version {version} is Waiting for Review with build {build}.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": true,
+          "outward": "App Store",
+          "scope": null,
+          "secrets": [
+            "ASC_KEY"
+          ]
+        },
+        {
+          "client_key": "promote_android",
+          "title": "Promote to production",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "gate"
+          ],
+          "platforms": [
+            "android"
+          ],
+          "required": false,
+          "description": "Promote the same versionCode {build} to production at {android_rollout} rollout: a dry run, then for real. Managed publishing is off, so an approved update goes live on its own.",
+          "definition_of_done": "versionCode {build} is in production review at {android_rollout}.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": true,
+          "outward": "Google Play",
+          "scope": null,
+          "secrets": [
+            "PLAY_SERVICE_ACCOUNT"
+          ]
+        },
+        {
+          "client_key": "deploy_api_prod",
+          "title": "Deploy the API to production",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "gate"
+          ],
+          "platforms": [
+            "api"
+          ],
+          "required": false,
+          "description": "Production deploy, after staging. Then prove the change is live in production: fetch a changed endpoint.",
+          "definition_of_done": "The changed endpoint answers in production with the new behaviour.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": true,
+          "outward": "Production",
+          "scope": null,
+          "secrets": []
+        },
+        {
+          "client_key": "deploy_web_prod",
+          "title": "Deploy the website to production",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "deploy_api_prod"
+          ],
+          "platforms": [
+            "web"
+          ],
+          "required": false,
+          "description": "Production deploy, after staging. Then prove it is live: load a changed page.",
+          "definition_of_done": "A changed page in production shows the new content.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": true,
+          "outward": "Production",
+          "scope": null,
+          "secrets": []
+        }
+      ]
+    },
+    {
+      "key": "review",
+      "title": "Store review",
+      "steps": [
+        {
+          "client_key": "review_ios",
+          "title": "App Store review",
+          "kind": "watch",
+          "role": null,
+          "after": [
+            "submit_ios"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Watches App Review: waiting, in review, then approved, live or rejected. You hear when it changes.",
+          "definition_of_done": "Version {version} is approved or live.",
+          "outcomes": [
+            {
+              "name": "live",
+              "kind": "success"
+            },
+            {
+              "name": "rejected",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "live",
+              "destination": "next"
+            },
+            {
+              "outcome": "rejected",
+              "destination": "ask_owner"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "watch": {
+            "adapter": {
+              "command": "{asc_status_command} --what review --version {version}"
+            },
+            "interval_s": 900,
+            "backoff": 1.0,
+            "max_interval_s": 1800,
+            "timeout_h": 168,
+            "state_map": {
+              "approved": "live",
+              "live": "live",
+              "ready_for_sale": "live",
+              "pending_developer_release": "live",
+              "rejected": "rejected"
+            },
+            "terminal_states": [
+              "approved",
+              "live",
+              "ready_for_sale",
+              "rejected"
+            ],
+            "dry_run_states": [
+              "waiting_for_review",
+              "in_review",
+              "rejected"
+            ]
+          }
+        },
+        {
+          "client_key": "review_android",
+          "title": "Google Play review",
+          "kind": "watch",
+          "role": null,
+          "after": [
+            "promote_android"
+          ],
+          "platforms": [
+            "android"
+          ],
+          "required": false,
+          "description": "Watches the production track. Google Play's API doesn't expose review state, so this can say 'unknown' honestly; resolve it by hand when you see it live.",
+          "definition_of_done": "versionCode {build} is live.",
+          "outcomes": [
+            {
+              "name": "live",
+              "kind": "success"
+            },
+            {
+              "name": "rejected",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "live",
+              "destination": "next"
+            },
+            {
+              "outcome": "rejected",
+              "destination": "ask_owner"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "watch": {
+            "adapter": {
+              "command": "{play_status_command} --track production --version-code {build}"
+            },
+            "interval_s": 900,
+            "backoff": 1.0,
+            "max_interval_s": 3600,
+            "timeout_h": 168,
+            "state_map": {
+              "live": "live",
+              "completed": "live",
+              "rejected": "rejected"
+            },
+            "terminal_states": [
+              "live",
+              "completed",
+              "rejected"
+            ],
+            "dry_run_states": [
+              "in_review",
+              "unknown",
+              "live"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "key": "close",
+      "title": "Live and close",
+      "steps": [
+        {
+          "client_key": "live_check",
+          "title": "Check what is live",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "review_ios",
+            "review_android",
+            "deploy_web_prod"
+          ],
+          "platforms": [],
+          "required": false,
+          "description": "Confirm the live versions in each store and in production, and run a short smoke check of the live build.",
+          "definition_of_done": "The live versions are posted with a smoke-check result.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        },
+        {
+          "client_key": "close",
+          "title": "Release notes and history",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "live_check"
+          ],
+          "platforms": [],
+          "required": false,
+          "description": "Record the release: versions, build ids, QA run links, decision times. Clean up worktrees, branches and test tokens.",
+          "definition_of_done": "The release history is written and the clean-up is done.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        }
+      ]
+    }
+  ],
+  "repeat_groups": [
+    {
+      "name": "Fix loop",
+      "member_tasks": [
+        "implement",
+        "review_merge",
+        "deploy_api_staging",
+        "deploy_web_staging",
+        "qa_subset_ios",
+        "qa_subset_android",
+        "qa_subset_web",
+        "triage_subset"
+      ],
+      "review_task": "triage_subset",
+      "exit_outcome": "clear",
+      "max_rounds": 3
+    },
+    {
+      "name": "Regression loop",
+      "member_tasks": [
+        "bump",
+        "qa_build",
+        "qa_full_ios",
+        "qa_full_android",
+        "qa_full_web",
+        "triage_full"
+      ],
+      "review_task": "triage_full",
+      "exit_outcome": "clear",
+      "max_rounds": 2
+    },
+    {
+      "name": "Approval loop",
+      "member_tasks": [
+        "build_ios",
+        "processing_ios",
+        "build_android",
+        "testflight_owner",
+        "gate"
+      ],
+      "review_task": "gate",
+      "exit_outcome": "go",
+      "max_rounds": 3
+    }
+  ]
+}

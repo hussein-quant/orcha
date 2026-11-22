@@ -96,7 +96,7 @@ def _variants(cur, cid) -> list[dict]:
 
 
 def _find(cur, cid, key) -> tuple[dict, str]:
-    for t in templates.builtins():
+    for t in templates.builtins(cur, cid):
         if t["key"] == key:
             return t, "builtin"
     for t in _variants(cur, cid):
@@ -110,7 +110,7 @@ def list_templates(cid: str, request: Request):
     """Built-in templates (Mobile App Release first) and this project's own copies."""
     with db_cursor(readonly=True) as (_, cur):
         require_member_read(cur, request, cid)
-        builtin = templates.builtins()
+        builtin = templates.builtins(cur, cid)
         latest = {t["key"]: t.get("version", 1) for t in builtin}
         mine = []
         for t in _variants(cur, cid):
@@ -200,7 +200,7 @@ def save_template(cid: str, body: SaveTemplateBody, request: Request):
         if body.name:
             t["name"] = body.name
         templates.validate_template(t)
-        if any(b["key"] == t["key"] for b in templates.builtins()):
+        if any(b["key"] == t["key"] for b in templates.builtins(cur, cid)):
             conflict("template_key_taken", "Pick a key that isn't a built-in template's.", status=422)
         cur.execute("SELECT id, version FROM workflow_templates WHERE container_id=%s AND key=%s", (cid, t["key"]))
         row = cur.fetchone()

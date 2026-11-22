@@ -21,6 +21,7 @@ function Probe({ name }: { name: string }) {
 vi.mock("../pages/home/HomePage", () => ({ HomePage: () => <Probe name="home" /> }));
 vi.mock("../pages/agents/AgentsPage", () => ({ AgentsPage: () => <Probe name="agents" /> }));
 vi.mock("../pages/workflows/WorkflowsPage", () => ({ WorkflowsPage: () => <Probe name="workflows" /> }));
+vi.mock("../pages/flow/WorkflowsHome", () => ({ WorkflowsHome: () => <Probe name="workflows" /> }));
 vi.mock("../pages/tasks/TasksPage", () => ({ TasksPage: () => <Probe name="tasks" /> }));
 vi.mock("../pages/requests/RequestsPage", () => ({ RequestsPage: () => <Probe name="requests" /> }));
 vi.mock("../pages/settings/SettingsPage", () => ({ SettingsPage: () => <Probe name="settings" /> }));

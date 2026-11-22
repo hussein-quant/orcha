@@ -14,7 +14,7 @@ import { HomePage } from "../pages/home/HomePage";
 import { AgentsPage } from "../pages/agents/AgentsPage";
 import { OrgPage } from "../pages/org/OrgPage";
 import { RoutinesPage } from "../pages/routines/RoutinesPage";
-import { WorkflowsPage } from "../pages/workflows/WorkflowsPage";
+import { WorkflowsHome } from "../pages/flow/WorkflowsHome";
 import { TasksPage } from "../pages/tasks/TasksPage";
 import { RequestsPage } from "../pages/requests/RequestsPage";
 import { SettingsPage } from "../pages/settings/SettingsPage";
@@ -91,9 +91,9 @@ const OPEN_ROUTES: RouteSpec[] = [
   { path: "/agents", element: AgentsPage },
   { path: "/org", element: OrgPage },
   { path: "/routines", element: RoutinesPage },
-  { path: "/workflows", element: WorkflowsPage },
-  { path: "/workflows/new", element: WorkflowsPage },
-  { path: "/workflows/:workflowId", element: WorkflowsPage },
+  { path: "/workflows", element: WorkflowsHome },
+  { path: "/workflows/new", element: WorkflowsHome },
+  { path: "/workflows/:workflowId", element: WorkflowsHome },
   { path: "/tasks", element: TasksPage },
   { path: "/requests", element: RequestsPage },
   { path: "/qa", element: QaRoute },

@@ -341,7 +341,7 @@ def builtins(cur=None, cid=None) -> list[dict]:
     try:
         from portal_backend import qa_blocks
 
-        for preset in qa_blocks.presets():
+        for preset in (qa_blocks.presets(cur, cid) if cur is not None and cid else []):
             draft = preset.get("draft") or preset
             if not draft.get("tasks"):
                 continue
@@ -389,7 +389,8 @@ def validate_template(template: dict) -> None:
 def _fill(text, params) -> str:
     def sub(m):
         v = params.get(m.group(1))
-        return m.group(0) if v is None else str(v)
+        # A value not chosen yet reads as an ellipsis, never as a raw {placeholder}.
+        return "…" if v is None or v == "" else str(v)
     return re.sub(r"\{([a-z_]+)\}", sub, str(text or ""))
 
 
