@@ -14,6 +14,7 @@ import {
   clock, elapsed, flowApi, kindOf, stateOf, STATE_WORD, watchWord,
   type FlowDetail, type FlowTask, type Proof, type ProofStep, type StepState, outcomeWord,
 } from "./flowApi";
+import { notifierState } from "../../lib/notifier";
 import { flowHref } from "./Board";
 import { Circuit, Figure, KindChip, KindGlyph, Orb, StateChip, type CircuitStage, type OrbTone } from "./kit";
 import { useAnnounce, useMoments, useNow } from "./motion";
@@ -35,13 +36,17 @@ function stageState(tasks: FlowTask[]): StepState {
   const states = tasks.map(stateOf);
   if (states.some((s) => s === "asking")) return "asking";
   if (states.some((s) => s === "running" || s === "review")) return "running";
+  if (states.some((s) => s === "ready")) return "ready";
   if (states.some((s) => s === "failed")) return "failed";
   if (states.every((s) => s === "skipped")) return "skipped";
   if (states.every((s) => s === "done" || s === "skipped")) return "done";
   return "waiting";
 }
 
-function resultWords(t: FlowTask): string {
+type Snap = ReturnType<typeof useSnapshot>["snap"];
+const agentOf = (snap: Snap, t: FlowTask) => snap?.agents.find((a) => t.assignee_ids?.includes(a.id))?.alias;
+
+function resultWords(t: FlowTask, who?: string): string {
   const st = stateOf(t);
   const kind = kindOf(t);
   const ran = t.history?.filter((h) => h.round) ?? [];
@@ -60,6 +65,7 @@ function resultWords(t: FlowTask): string {
   }
   if (st === "asking") return kind === "gate" ? "Your go-ahead, with the proof" : t.awaiting_loop_decision ? "Needs your decision" : "Waiting for you";
   if (st === "running") return kind === "watch" ? "Watching" : kind === "qa" ? "QA is checking" : "Working";
+  if (st === "ready") return `Ready. Waiting for ${who || "its agent"} to pick it up`;
   if (st === "waiting") return t.blockers.find((b) => b.code === "gate_required")?.message ?? (t.blockers.find((b) => b.code === "prerequisites")?.message ?? "Not yet");
   return STATE_WORD[st];
 }
@@ -396,6 +402,8 @@ function StepRow({ d, t, landed, take, proofStep, actor, onSaved, onFrame, open,
 }) {
   const st = stateOf(t);
   const kind = kindOf(t);
+  const { snap } = useSnapshot();
+  const who = agentOf(snap, t);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const loop = d.repeat_groups?.find((g) => g.member_tasks.includes(t.id));
@@ -413,7 +421,7 @@ function StepRow({ d, t, landed, take, proofStep, actor, onSaved, onFrame, open,
       </span>
       <span className="fl-scard-main">
         <span className="fl-scard-title"><span>{t.title}</span>{t.step?.irreversible ? <ArrowUpRight size={13} color="var(--v2-warn)" aria-label="Leaves Embodent" /> : null}</span>
-        <span className="fl-scard-words">{resultWords(t)}</span>
+        <span className="fl-scard-words">{resultWords(t, who)}</span>
       </span>
       <span className="fl-scard-side">
         {loop && (loop.current_round ?? 0) > 1 ? <span className="fl-chip" data-tone="warn">Round {loop.current_round} of {loop.max_rounds}</span> : null}
@@ -428,7 +436,7 @@ function StepRow({ d, t, landed, take, proofStep, actor, onSaved, onFrame, open,
         <div className="fl-detail">
           <div>
             <h4>What happened</h4>
-            <p>{resultWords(t)}</p>
+            <p>{resultWords(t, who)}</p>
             {t.reported_outcome?.findings?.length ? (
               <ul className="fl-findings">{t.reported_outcome.findings.map((f) => <li key={f.id}><span className="fl-chip" data-tone={f.severity === "blocker" || f.severity === "major" ? "danger" : "muted"}>{f.severity}</span>{f.text}</li>)}</ul>
             ) : null}
@@ -476,7 +484,7 @@ function StepRow({ d, t, landed, take, proofStep, actor, onSaved, onFrame, open,
 /* ---- the page --------------------------------------------------------------------------- */
 
 export function Run() {
-  const { cid, bump } = useSnapshot();
+  const { cid, bump, snap } = useSnapshot();
   const authority = useActingAuthority();
   const actor = authority.human?.id ?? null;
   const { workflowId } = useParams();
@@ -556,6 +564,10 @@ export function Run() {
   const gates = asking.filter((t) => kindOf(t) === "gate" && !t.awaiting_loop_decision);
   const people = asking.filter((t) => !(kindOf(t) === "gate" && !t.awaiting_loop_decision));
   const running = d.tasks.find((t) => stateOf(t) === "running");
+  const ready = running ? undefined : d.tasks.find((t) => stateOf(t) === "ready");
+  // A ready step only moves when an agent is woken. Say so when this project's wake service is off.
+  const wakes = notifierState(snap?.container);
+  const asleep = !!ready && d.status === "active" && d.launch_enabled && (wakes === "stale" || wakes === "none" || wakes === "paused");
   const settled = d.status === "active" && d.launch_enabled && d.tasks.every((t) => ["completed", "cancelled"].includes(t.status) || t.route_state === "not_selected") && !asking.length;
   const tone: OrbTone = d.status === "completed" ? (d.tasks.some((t) => stateOf(t) === "failed") ? "bad" : "good")
     : d.status === "cancelled" ? "stopped" : d.status === "paused" || !d.launch_enabled ? "held" : asking.length || settled ? "asking" : "live";
@@ -574,7 +586,8 @@ export function Run() {
   ];
   const outcome = d.status === "completed" ? "Finished. Every step that ran is done." : d.status === "cancelled" ? "Stopped." : !d.launch_enabled ? "A draft: nothing runs until you start it."
     : gates.length ? `${gates[0].title}: the proof is ready for your decision.` : people.length ? `${people[0].title} needs you.` : settled ? "Every step is done. Close it to record the release."
-    : running ? `${running.title}: ${resultWords(running).replace(/\.+$/, "")}.` : "Waiting for the next step.";
+    : running ? `${running.title}: ${resultWords(running).replace(/\.+$/, "")}.`
+    : ready ? `${ready.title}: ${resultWords(ready, agentOf(snap, ready)).replace(/\.+$/, "")}.` : "Waiting for the next step.";
   const afterGate = (g: FlowTask) => {
     // Everything this go-ahead releases: down the line until the next gate, which asks again.
     const out: FlowTask[] = [];
@@ -610,6 +623,9 @@ export function Run() {
               {d.stalled ? <span className="fl-chip" data-tone="warn"><TriangleAlert size={12} />Stalled {Math.floor(d.stalled.days)} days</span> : null}
             </div>
             <p className="fl-stage-line" aria-live="polite">{outcome}</p>
+            {asleep ? <p className="fl-problem" data-tone="warn" role="status"><TriangleAlert size={13} aria-hidden="true" />{wakes === "paused"
+              ? "Agent wakes are off for this project, so no agent will pick up the next step. Turn them on from the button at the top right."
+              : "This project's agents aren't running, so no agent will pick up the next step. Start them with orcha serve in the project folder."}</p> : null}
             {notice && !d.launch_enabled ? <p className="fl-problem" data-tone="warn" role="status"><TriangleAlert size={13} aria-hidden="true" />{notice}</p> : null}
             <p className="fl-stage-line fl-muted fl-count">{done} of {live.length} steps done · {d.created_at ? elapsed(d.created_at, now) : ""}{justStarted && d.launch_enabled && !over && done === 0 ? " · just started" : ""}</p>
           </div>

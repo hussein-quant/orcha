@@ -48,11 +48,17 @@ export interface TemplateSummary {
   has_inventory?: boolean;
 }
 
+/** What runs somewhere. For web and API, `commit` is the commit the deploy stamped on the server and
+ *  `behind` the commits on main that touch the platform's code since it (0 = up to date). */
+export interface DeployReading {
+  version?: string | null; since?: string | null; source?: string; url?: string; build_id?: string | string[] | null;
+  commit?: string | null; behind?: number | null; dirty?: boolean; deployed_at?: string | null;
+}
 export interface InventoryPlatform {
   last_release?: { tag: string; version?: string; build?: number; date?: string } | null;
-  live?: { version?: string | null; since?: string | null; source?: string; url?: string; build_id?: string | string[] | null } | null;
-  staging?: { url?: string; build_id?: string | string[] | null } | null;
-  in_flight?: { state?: string; summary?: string; terminal?: boolean } | null;
+  live?: DeployReading | null;
+  staging?: DeployReading | null;
+  in_flight?: { state?: string; summary?: string; terminal?: boolean; data?: { version?: string } } | null;
   changes: { sha: string; pr: number | null; title: string; merged_at?: string }[];
   next?: { version: string | null; build: number | null; reason?: string } | null;
 }
@@ -248,7 +254,8 @@ export function stateOf(t: FlowTask): StepState {
   if (t.status === "ready" && t.watch?.needs_owner) return "asking";
   if (t.status === "ready") {
     const kind = kindOf(t);
-    return kind === "person" || kind === "gate" ? "asking" : "running";
+    // Only a watch runs on its own; any other step is ready until its agent picks it up (in_progress).
+    return kind === "person" || kind === "gate" ? "asking" : kind === "watch" ? "running" : "ready";
   }
   return "waiting";
 }

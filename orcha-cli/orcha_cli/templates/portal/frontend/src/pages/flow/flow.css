@@ -319,7 +319,7 @@
   border: 1px solid var(--v2-border-strong); background: var(--v2-surface); color: var(--v2-text-2);
   transition: border-color 300ms ease, background-color 300ms ease, color 300ms ease, box-shadow 400ms ease, opacity 300ms ease; }
 .fl-cnode[data-state="waiting"] { border-style: dashed; color: var(--v2-text-3); }
-.fl-cnode[data-state="running"] { border-color: var(--v2-accent); background: color-mix(in srgb, var(--v2-accent) 12%, var(--v2-surface)); color: var(--v2-accent);
+.fl-cnode[data-state="running"] { border-color: color-mix(in srgb, var(--v2-accent) 35%, var(--v2-border)); background: color-mix(in srgb, var(--v2-accent) 12%, var(--v2-surface)); color: var(--v2-accent);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--v2-accent) 14%, transparent); }
 .fl-cnode[data-state="asking"] { border-color: var(--v2-warn); background: color-mix(in srgb, var(--v2-warn) 12%, var(--v2-surface)); color: var(--v2-warn); }
 .fl-cnode[data-state="asking"]::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; border: 1px solid var(--v2-warn); animation: ring-out 2.4s cubic-bezier(0.2, 0.6, 0.3, 1) infinite; }
@@ -330,7 +330,15 @@
 .fl-cnode[data-kind="end"][data-state="landed"] { border-color: var(--tone); background: var(--tone); color: var(--v2-panel); }
 .fl-cnode[data-out="true"]::before { content: "↗"; position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; display: flex; align-items: center; justify-content: center;
   border-radius: 999px; background: var(--v2-panel); color: var(--v2-warn); font-size: 9.5px; font-weight: 800; box-shadow: 0 0 0 1px color-mix(in srgb, var(--v2-warn) 50%, transparent); }
-.fl-cspin { position: absolute; inset: -1px; border-radius: inherit; border: 1.5px solid transparent; border-top-color: var(--v2-accent); animation: spin-ring 900ms linear infinite; }
+/* "Working": a highlight that travels along the node's own border (rounded square or circle). Rotating a bordered box
+   would swing its corners outside the tile, so the box stays still and only the gradient angle moves. */
+@property --fl-sweep { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes fl-sweep { to { --fl-sweep: 360deg; } }
+.fl-cspin, .fl-scard[data-state="running"] .fl-scard-node::after { position: absolute; inset: -1px; border-radius: inherit; padding: 1.5px; pointer-events: none;
+  background: conic-gradient(from var(--fl-sweep), transparent 0deg, transparent 250deg, color-mix(in srgb, var(--v2-accent) 35%, transparent) 300deg, var(--v2-accent) 358deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude;
+  animation: fl-sweep 1.2s linear infinite; }
 .fl-cwire { position: absolute; top: 16px; left: calc(50% + 21px); width: calc(100% - 42px); height: 2px; overflow: hidden; border-radius: 2px; background: var(--v2-border); }
 .fl-cwire > i { position: absolute; inset: 0; background: var(--v2-ok); transform-origin: left center; transform: scaleX(0); transition: transform 640ms var(--fl-swift); }
 .fl-cwire[data-wire="lit"] > i { transform: scaleX(1); }
@@ -379,7 +387,7 @@
   transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease; }
 .fl-scard[data-state="done"] .fl-scard-node { background: var(--v2-ok); border-color: var(--v2-ok); color: var(--v2-panel); }
 .fl-scard[data-state="failed"] .fl-scard-node { background: var(--v2-danger); border-color: var(--v2-danger); color: var(--v2-panel); }
-.fl-scard[data-state="running"] .fl-scard-node::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; border: 1.5px solid transparent; border-top-color: var(--v2-accent); animation: spin-ring 900ms linear infinite; }
+.fl-scard[data-state="running"] .fl-scard-node::after { content: ""; }
 .fl-scard[data-state="asking"] .fl-scard-node::after { content: ""; position: absolute; inset: -4px; border-radius: 13px; border: 2px solid var(--v2-warn); animation: ring-out-soft 1.8s var(--fl-swift) infinite; }
 @keyframes ring-out-soft { 0% { opacity: 0.7; transform: scale(0.85); } 100% { opacity: 0; transform: scale(1.5); } }
 .fl-scard-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -676,10 +684,15 @@
 .fl-rh-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .fl-rh-card-head b { font-size: 15px; }
 .fl-rh-facts { display: grid; gap: 6px; margin: 0; }
-.fl-rh-facts > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 12.5px; }
-.fl-rh-facts dt { color: var(--v2-text-3); }
+.fl-rh-facts > div { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 8px; align-items: start; font-size: 12.5px; }
+.fl-rh-facts dt { padding-top: 2px; color: var(--v2-text-3); }
 .fl-rh-facts dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fl-rh-facts small { color: var(--v2-text-3); font-family: var(--v2-font-sans); }
+.fl-rh-reading { display: inline-flex; min-width: 0; max-width: 100%; flex-wrap: wrap; align-items: center; gap: 2px 6px; white-space: normal; }
+.fl-rh-reading > .fl-mono { flex-shrink: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-rh-reading > small, .fl-rh-reading a { white-space: nowrap; }
+.fl-rh-reading a { display: inline-flex; align-items: center; gap: 3px; color: var(--v2-text-3); text-decoration: none; }
+.fl-rh-reading a:hover, .fl-rh-reading a:focus-visible { color: var(--v2-text); }
 .fl-rh-next { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-radius: 10px; background: var(--v2-band); border: 1px solid var(--v2-border); }
 .fl-rh-version { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
 .fl-rh-version span { color: var(--v2-text-2); font-weight: 500; }

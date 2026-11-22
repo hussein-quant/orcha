@@ -53,3 +53,22 @@ it("shows what's live and what's next, asks only the iOS release type, and start
   expect(create.body.params).toMatchObject({ version: "1.0.2", build: "8", android_version: "1.0.20", android_version_code: "20", release_type: "manual" });
   expect(create.body.roles).toMatchObject({ release: "rel", owner: "owner" });
 });
+
+it("says whether production and staging run the latest commit, and keeps a plain live badge when no commit is stamped", async () => {
+  const withDeploys = { ...inventory, data: { ...inventory.data, platforms: { ...inventory.data.platforms,
+    web: { last_release: { tag: "web/2026-11-21" }, changes: [],
+      live: { url: "https://example.test/", build_id: "crPmX8RH_cGkRZPo28TCS", commit: "65cb32e65b25", behind: 0, deployed_at: "2026-11-21T18:15:00Z" },
+      staging: { url: "https://staging.example.test/", build_id: "5KSQ78bqn9C", commit: "04a26816967017", behind: 3 } },
+    api: { last_release: { tag: "api/2026-11-21" }, changes: [], live: null } } } };
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.includes("/inventory") ? json(withDeploys)
+    : url.endsWith("/compile") ? json({ problems: [], ready: true, steps: [], stages: [], loops: [], parameters: [], values: {}, roles: [], people: [], template: {} }) : json({})));
+  render(<MemoryRouter initialEntries={["/workflows/new?cid=project&template=mobile_app_release&home=1"]}><Routes>
+    <Route path="/workflows/new" element={<ReleaseHome />} /></Routes></MemoryRouter>);
+  const web = await screen.findByRole("article", { name: "Web" });
+  expect(web).toHaveTextContent("Production");
+  expect(web).toHaveTextContent("Up to date");
+  expect(web).toHaveTextContent("65cb32e");
+  expect(web).toHaveTextContent("3 behind main");
+  expect(screen.getByRole("article", { name: "API" })).toHaveTextContent("Not checked yet");
+  expect(screen.getByRole("article", { name: "iOS" })).toHaveTextContent("Last submission");
+});

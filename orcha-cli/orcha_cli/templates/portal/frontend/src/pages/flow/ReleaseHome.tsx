@@ -25,12 +25,34 @@ function ago(iso?: string | null): string {
   return `${Math.round(s / 86400)} days ago`;
 }
 
-function liveWords(p: Platform, e: InventoryPlatform): string {
-  const live = e.live;
-  if (!live) return p === "api" ? "Not read" : "Couldn't read";
-  if (live.version) return live.version;
-  const id = Array.isArray(live.build_id) ? live.build_id.join(", ") : live.build_id;
-  return id ? `build ${String(id).slice(0, 10)}` : "Couldn't read";
+type Where = InventoryPlatform["live"];
+const buildOf = (w: Where) => { const id = Array.isArray(w?.build_id) ? w?.build_id.join(", ") : w?.build_id; return id ? String(id) : ""; };
+const hostOf = (url?: string) => { try { return url ? new URL(url).host : ""; } catch { return ""; } };
+
+/** One line for a live or staging reading: a status chip, then the version or build, then where. */
+function Reading({ p, w, what }: { p: Platform; w: Where; what: "live" | "staging" }) {
+  const version = w?.version || "";
+  const build = buildOf(w);
+  if (!version && !build) {
+    // The API has no live check in the inventory yet; anything else means the script couldn't read it.
+    return p === "api" && !w ? <span className="fl-muted">Not checked yet</span>
+      : <span className="fl-chip" data-tone="warn"><TriangleAlert size={11} />Couldn't read</span>;
+  }
+  const host = hostOf(w?.url);
+  // A stamped commit answers "is it on the latest?"; without one only the build is known.
+  const behind = typeof w?.behind === "number" ? w.behind : null;
+  const chip = w?.commit && behind !== null
+    ? behind === 0 ? { tone: w.dirty ? "warn" : "ok", word: w.dirty ? "Up to date, with local edits" : "Up to date" } : { tone: "warn", word: `${behind} behind main` }
+    : { tone: what === "live" ? "ok" : "info", word: what === "live" ? "Live" : "Deployed" };
+  const when = w?.deployed_at ?? w?.since;
+  return (
+    <span className="fl-rh-reading">
+      <span className="fl-chip" data-tone={chip.tone}>{chip.word}</span>
+      <span className="fl-mono" title={w?.commit || version || build}>{w?.commit ? w.commit.slice(0, 7) : version || `build ${build.slice(0, 10)}`}</span>
+      {when ? <small>since {new Date(when).toLocaleDateString()}</small> : null}
+      {host ? <a href={w!.url} target="_blank" rel="noreferrer" title={w!.url}><small>{host}</small><ExternalLink size={11} aria-hidden="true" /></a> : null}
+    </span>
+  );
 }
 
 /** Guess who does what from agent names, so the common case needs no choosing. */
@@ -56,8 +78,11 @@ function PlatformCard({ p, e, picked, i }: { p: Platform; e: InventoryPlatform; 
         <span className="fl-chip" data-tone={picked ? "accent" : "muted"}>{picked ? "In this release" : n ? `${n} changes` : "No changes"}</span>
       </header>
       <dl className="fl-rh-facts">
-        <div><dt>Live</dt><dd className="fl-mono">{liveWords(p, e)}{e.live?.since ? <small> · since {new Date(e.live.since).toLocaleDateString()}</small> : null}</dd></div>
-        {store ? <div><dt>In review</dt><dd>{review ? <span className="fl-chip" data-tone={review === "rejected" ? "danger" : review === "error" ? "warn" : review.includes("ready") || review === "live" ? "ok" : "info"}>{watchWord(review)}</span> : <span className="fl-muted">Nothing</span>}</dd></div> : null}
+        <div><dt>{store ? "Live" : "Production"}</dt><dd><Reading p={p} w={e.live} what="live" /></dd></div>
+        {e.staging ? <div><dt>Staging</dt><dd><Reading p={p} w={e.staging} what="staging" /></dd></div> : null}
+        {store ? <div><dt>Last submission</dt><dd title={e.in_flight?.summary}>{review ? <span className="fl-rh-reading">
+          <span className="fl-chip" data-tone={review === "rejected" ? "danger" : review === "error" ? "warn" : review.includes("ready") || review === "live" ? "ok" : "info"}>{watchWord(review)}</span>
+          {e.in_flight?.data?.version ? <span className="fl-mono">{e.in_flight.data.version}</span> : null}</span> : <span className="fl-muted">Nothing in review</span>}</dd></div> : null}
         <div><dt>Last release</dt><dd className="fl-mono">{e.last_release?.tag ?? <span className="fl-muted">No tag yet</span>}</dd></div>
       </dl>
       {store ? (
