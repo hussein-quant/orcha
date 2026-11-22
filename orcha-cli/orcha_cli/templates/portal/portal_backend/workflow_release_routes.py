@@ -403,10 +403,35 @@ def close_release(wid: str, body: CloseBody, request: Request):
                           {"expected_revision": w["revision"], "idempotency_key": uuid4().hex, "reason": ""}, wid=wid)
 
 
+def _bump_patch(version: str) -> str:
+    """1.0.2 → 1.0.3. A version that doesn't end in a number stays as it is."""
+    parts = str(version or "").split(".")
+    if parts and parts[-1].isdigit():
+        parts[-1] = str(int(parts[-1]) + 1)
+        return ".".join(parts)
+    return str(version or "")
+
+
+def _plus_one(value) -> str:
+    return str(int(value) + 1) if str(value or "").isdigit() else str(value or "")
+
+
+def _went_live(svc, w) -> bool:
+    """A release counts as live when it finished and its live check (or a store's live watch) was done."""
+    if w["status"] != "completed":
+        return False
+    for t in svc.rows("SELECT * FROM tasks WHERE workflow_id=%s AND status='completed'", (w["id"],)):
+        if (steps.spec_of(t) or {}).get("key") in {"live_check", "live_ios"}:
+            return True
+    return False
+
+
 @app.get("/api/workflows/{wid}/next-release", tags=["workflow templates"])
 def next_release(wid: str, request: Request):
-    """What "Run again" pre-fills for a templated workflow: its template, parameters with the
-    build bumped, and the same removals."""
+    """What "Run again" pre-fills for a templated workflow: its template and parameters, the same
+    removals, and the next version. Dry runs never feed it: from a dry run it starts from the last
+    real release of the same template. After a release that went live the version moves on
+    (1.0.2 → 1.0.3) with the next build; after one that didn't, only the builds go up."""
     with db_cursor(readonly=True) as (_, cur):
         svc = service.WorkflowService(cur, HOOKS)
         w = svc.workflow(wid)
@@ -414,11 +439,68 @@ def next_release(wid: str, request: Request):
         ref = steps.template_of(w)
         if not ref:
             conflict("not_templated", "This workflow wasn't made from a template.", status=404)
+        base, based_on = w, "this_release"
+        if w.get("dry_run"):
+            base, based_on = None, "dry_run"
+            for other in svc.rows(
+                "SELECT * FROM workflows WHERE container_id=%s AND id<>%s AND template_ref IS NOT NULL "
+                "ORDER BY created_at DESC LIMIT 200", (w["container_id"], w["id"]),
+            ):
+                other_ref = steps.template_of(other)
+                if not other.get("dry_run") and other_ref and other_ref.get("key") == ref.get("key"):
+                    base, based_on = other, "last_real_release"
+                    ref = other_ref
+                    break
         params = dict(ref.get("params") or {})
-        if str(params.get("build", "")).isdigit():
-            params["build"] = str(int(params["build"]) + 1)
+        if base is not None:
+            live = _went_live(svc, base)
+            if live:
+                params["version"] = _bump_patch(params.get("version"))
+                if params.get("android_version"):
+                    params["android_version"] = _bump_patch(params["android_version"])
+            params["build"] = _plus_one(params.get("build"))
+            if params.get("android_version_code"):
+                params["android_version_code"] = _plus_one(params["android_version_code"])
         params.pop("release_type", None)  # asked every version, never carried over
-        return {"key": ref["key"], "params": params, "removed": ref.get("removed") or [], "from": wid}
+        return {"key": ref["key"], "params": params, "removed": ref.get("removed") or [],
+                "from": base["id"] if base else wid, "based_on": based_on,
+                "note": ("Only dry runs so far: these are the dry run's numbers, unchanged." if base is None else None)}
+
+
+# ---- the Release home: what the project's inventory script says ------------------------
+
+_INVENTORY: dict[tuple[str, str], tuple[float, dict]] = {}
+INVENTORY_TTL_S = 120
+
+
+@app.get("/api/containers/{cid}/workflow-templates/{key}/inventory", tags=["workflow templates"])
+def template_inventory(cid: str, key: str, request: Request, refresh: bool = False):
+    """Run the template's inventory command (`inventory_command`, from the project root, no shell)
+    and return its §4.2-style JSON: per platform what's live, in review, merged since the last
+    release tag and the next version and build, plus `release_params` to pre-fill a release. A
+    person asks for it; the answer is kept two minutes. A failed read is an `error` state."""
+    import os
+    import time
+
+    with db_cursor(readonly=True) as (_, cur):
+        require_member_read(cur, request, cid)
+        resolve_human_actor(cur, request, cid)
+        template, _source = _find(cur, cid, key)
+    param = next((p for p in template.get("parameters", []) if p["key"] == "inventory_command"), None)
+    command = str((param or {}).get("default") or "").strip()
+    if not command:
+        conflict("no_inventory", "This template has no inventory command.", status=404)
+    now = time.monotonic()
+    cached = _INVENTORY.get((cid, key))
+    if cached and not refresh and now - cached[0] < INVENTORY_TTL_S:
+        return {**cached[1], "cached": True}
+    reading = steps.run_adapter({"command": command}, os.environ.get("ORCHA_LOCAL_REPO_DIR"))
+    out = {"state": reading.get("state"), "summary": reading.get("summary"), "error": reading.get("error"),
+           "data": steps._redact_obj(reading.get("data") or {}), "command": command,
+           "read_at": sql.utcnow().isoformat(), "cached": False}
+    if reading.get("state") != "error":
+        _INVENTORY[(cid, key)] = (now, out)
+    return out
 
 
 # ---- the board ------------------------------------------------------------------------

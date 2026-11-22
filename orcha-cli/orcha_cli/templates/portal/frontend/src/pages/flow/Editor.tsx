@@ -7,7 +7,7 @@
  * until the check is clean. Starting is one button.
  */
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useActingAuthority, useSnapshot } from "../../state/SnapshotProvider";
 import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, CornerDownLeft, Download, Play, Plus, Archive as Save, TriangleAlert, X } from "./icons";
 import { flowApi, FlowError, KIND_WORD, PLATFORM_WORD, type AddedStep, type Compiled, type CompiledStep, type Platform, type StepKind, type TemplateParam, type TemplateSummary } from "./flowApi";
@@ -109,7 +109,7 @@ function StepCard({ s, i, problems, onToggle, onAddAfter, plug, assignee, names 
   s: CompiledStep; i: number; problems: string[]; onToggle: () => void; onAddAfter: () => void; plug: boolean; assignee: string; names: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
-  const removable = !s.required && s.removed_why !== "platform";
+  const removable = !s.required && s.removed_why !== "platform" && s.removed_why !== "condition";
   return (
     <li className="fl-step" data-kind={s.kind} data-removed={s.removed} data-plug={plug} data-key={s.client_key} style={{ ["--i" as string]: i }}>
       <span className="fl-node" data-kind={s.kind} data-out={s.irreversible}><KindGlyph kind={s.kind} size={17} /></span>
@@ -117,7 +117,7 @@ function StepCard({ s, i, problems, onToggle, onAddAfter, plug, assignee, names 
         <div className="fl-card-top">
           <span className="fl-card-title" title={s.title}>{s.title}</span>
           <KindChip kind={s.kind} outward={s.irreversible ? s.outward : null} />
-          {s.required ? <Lockline>Required</Lockline> : s.removed_why === "platform" ? <span className="fl-muted" style={{ fontSize: 11.5 }}>Not for these platforms</span> : (
+          {s.required ? <Lockline>Required</Lockline> : s.removed_why === "platform" || s.removed_why === "condition" ? <span className="fl-muted" style={{ fontSize: 11.5 }}>{s.removed_why === "condition" ? "Not for this release type" : "Not for these platforms"}</span> : (
             <button type="button" role="switch" className="fl-switch" aria-checked={!s.removed} aria-label={`${s.removed ? "Add back" : "Remove"} ${s.title}`} onClick={onToggle} data-remove={s.client_key} disabled={!removable} />
           )}
         </div>
@@ -184,11 +184,13 @@ export function Editor() {
   const key = params.get("template");
   const from = params.get("from");
   const [templates, setTemplates] = useState<TemplateSummary[] | null>(null);
-  const [values, setValues] = useState<Record<string, unknown>>({});
+  // "Customize steps" on the Release home brings its values along.
+  const seed = (useLocation().state ?? null) as { params?: Record<string, unknown>; roles?: Record<string, string | null> | null; dryRun?: boolean } | null;
+  const [values, setValues] = useState<Record<string, unknown>>(seed?.params ?? {});
   const [removed, setRemoved] = useState<string[]>([]);
   const [added, setAdded] = useState<AddedStep[]>([]);
-  const [roles, setRoles] = useState<Record<string, string | null>>({});
-  const [dryRun, setDryRun] = useState(false);
+  const [roles, setRoles] = useState<Record<string, string | null>>(seed?.roles ?? {});
+  const [dryRun, setDryRun] = useState(!!seed?.dryRun);
   const [compiled, setCompiled] = useState<Compiled | null>(null);
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
@@ -252,7 +254,7 @@ export function Editor() {
           <button type="button" className="fl-btn" data-variant="ghost" onClick={() => navigate(flowHref("/workflows", cid))}><ArrowLeft size={14} />All workflows</button>
         </header>
         {error ? <p className="fl-problem" role="alert">{error}</p> : null}
-        {templates ? <Gallery templates={templates} onPick={(k) => navigate(flowHref("/workflows/new", cid, { template: k }))}
+        {templates ? <Gallery templates={templates} onPick={(k) => navigate(flowHref("/workflows/new", cid, { template: k, ...(templates.find((t) => t.key === k)?.has_inventory ? { home: "1" } : {}) }))}
           onBlank={() => navigate(flowHref("/workflows/new", cid, { blank: "1" }))}
           onImport={async (json) => {
             try { const s = await flowApi.importTemplate(cid, actor, json); navigate(flowHref("/workflows/new", cid, { template: s.key })); }

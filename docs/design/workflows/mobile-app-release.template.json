@@ -2,12 +2,12 @@
   "schema": 1,
   "key": "mobile_app_release",
   "name": "Mobile App Release",
-  "version": 1,
+  "version": 2,
   "icon": "rocket",
   "tone": "amber",
   "description": "Intake to live for the App Store, Google Play, a website and an API: fix loop, full regression, your go/no-go with proof, store review watched for you.",
-  "goal": "Ship {version} ({build}) on {platform_words}, with proof before anything reaches a store.",
-  "title": "Release {version} ({build})",
+  "goal": "Ship {release_label} on {platform_words}, with proof before anything reaches a store.",
+  "title": "Release {release_label}",
   "execution_mode": "parallel",
   "parameters": [
     {
@@ -27,15 +27,32 @@
       "label": "Version",
       "type": "text",
       "placeholder": "1.0.2",
-      "required": true
+      "required": true,
+      "help": "The marketing version on iOS, the website and the API."
     },
     {
       "key": "build",
-      "label": "Build",
+      "label": "iOS build",
       "type": "text",
       "placeholder": "8",
       "required": true,
-      "help": "Build number on iOS, versionCode on Android."
+      "platform": "ios"
+    },
+    {
+      "key": "android_version",
+      "label": "Android version",
+      "type": "text",
+      "placeholder": "1.0.20",
+      "platform": "android",
+      "help": "Leave empty to use the same version as iOS."
+    },
+    {
+      "key": "android_version_code",
+      "label": "Android versionCode",
+      "type": "text",
+      "placeholder": "20",
+      "required": true,
+      "platform": "android"
     },
     {
       "key": "release_type",
@@ -112,7 +129,16 @@
       "type": "text",
       "default": "python3 scripts/release-adapters/asc_status.py",
       "platform": "ios",
-      "advanced": true
+      "advanced": true,
+      "help": "Run from the project root without a shell: ~ and $VARS are not expanded, so use absolute paths."
+    },
+    {
+      "key": "inventory_command",
+      "label": "Release inventory command",
+      "type": "text",
+      "default": "python3 scripts/release-adapters/release_inventory.py",
+      "advanced": true,
+      "help": "Fills the Release home: what's live, in review, merged since the last release, and the next versions. Same rules: no shell, absolute paths."
     },
     {
       "key": "play_status_command",
@@ -120,7 +146,8 @@
       "type": "text",
       "default": "python3 scripts/release-adapters/play_status.py",
       "platform": "android",
-      "advanced": true
+      "advanced": true,
+      "help": "Run from the project root without a shell: ~ and $VARS are not expanded, so use absolute paths."
     }
   ],
   "roles": [
@@ -247,8 +274,8 @@
           ],
           "platforms": [],
           "required": false,
-          "description": "Review the diffs and merge. Agents never merge on their own.",
-          "definition_of_done": "Every PR of this round is merged, or sent back with comments.",
+          "description": "Review the diffs and merge. Agents never merge on their own. To ask for changes, comment on the PR; the engineer updates it, and you mark this step once it's merged.",
+          "definition_of_done": "Every PR of this round is merged.",
           "outcomes": [
             {
               "name": "merged",
@@ -599,7 +626,7 @@
           ],
           "platforms": [],
           "required": false,
-          "description": "Approve or reject the drafted scenarios in Quality. Coverage per platform is on the release page.",
+          "description": "Approve or reject the drafted scenarios in Quality. Coverage per platform is on the gate card before you decide.",
           "definition_of_done": "The drafts are approved or rejected.",
           "outcomes": [
             {
@@ -635,7 +662,7 @@
       "steps": [
         {
           "client_key": "bump",
-          "title": "Version {version} ({build})",
+          "title": "Version {release_label}",
           "kind": "agent",
           "role": "engineer",
           "after": [
@@ -646,8 +673,8 @@
             "android"
           ],
           "required": true,
-          "description": "Set the marketing version {version} and build number {build} (versionCode only goes up), and open a PR. In a later round, fix what the regression found first, merge, and redeploy staging.",
-          "definition_of_done": "Version {version} build {build} is merged on main; the commit SHA is posted.",
+          "description": "Set the versions for this release: {versions_detail}. Build numbers and versionCodes only go up. Open a PR. In a later round, fix what the regression found first, merge, and redeploy staging.",
+          "definition_of_done": "{versions_detail} is merged on main; the commit SHA is posted.",
           "outcomes": [],
           "routes": [],
           "resources": [],
@@ -1008,8 +1035,8 @@
             "android"
           ],
           "required": false,
-          "description": "Build the signed AAB for versionCode {build} and upload to the internal track: a dry run first, then for real.",
-          "definition_of_done": "versionCode {build} is on the internal track.",
+          "description": "Build the signed AAB for {android_version} (versionCode {android_version_code}) and upload to the internal track: a dry run first, then for real.",
+          "definition_of_done": "versionCode {android_version_code} is on the internal track.",
           "outcomes": [],
           "routes": [],
           "resources": [
@@ -1171,8 +1198,8 @@
             "android"
           ],
           "required": false,
-          "description": "Promote the same versionCode {build} to production at {android_rollout} rollout: a dry run, then for real. Managed publishing is off, so an approved update goes live on its own.",
-          "definition_of_done": "versionCode {build} is in production review at {android_rollout}.",
+          "description": "Promote the same versionCode {android_version_code} ({android_version}) to production at {android_rollout} rollout: a dry run, then for real. Managed publishing is off, so an approved update goes live on its own.",
+          "definition_of_done": "versionCode {android_version_code} is in production review at {android_rollout}.",
           "outcomes": [],
           "routes": [],
           "resources": [],
@@ -1245,9 +1272,13 @@
             "ios"
           ],
           "required": false,
-          "description": "Watches App Review: waiting, in review, then approved, live or rejected. You hear when it changes.",
-          "definition_of_done": "Version {version} is approved or live.",
+          "description": "Watches App Review: waiting, in review, then approved or rejected. Approved is not live yet: a manual release waits for you, an automatic one for the App Store.",
+          "definition_of_done": "Version {version} is approved, or you decided what a rejection means.",
           "outcomes": [
+            {
+              "name": "approved",
+              "kind": "success"
+            },
             {
               "name": "live",
               "kind": "success"
@@ -1255,16 +1286,31 @@
             {
               "name": "rejected",
               "kind": "failure"
+            },
+            {
+              "name": "resubmit",
+              "kind": "changes"
             }
           ],
           "routes": [
             {
+              "outcome": "approved",
+              "destination": "step",
+              "destination_task": "release_ios"
+            },
+            {
               "outcome": "live",
-              "destination": "next"
+              "destination": "step",
+              "destination_task": "release_ios"
             },
             {
               "outcome": "rejected",
               "destination": "ask_owner"
+            },
+            {
+              "outcome": "resubmit",
+              "destination": "step",
+              "destination_task": "fix_rejection"
             }
           ],
           "resources": [],
@@ -1281,17 +1327,22 @@
             "max_interval_s": 1800,
             "timeout_h": 168,
             "state_map": {
-              "approved": "live",
-              "live": "live",
+              "approved": "approved",
+              "pending_developer_release": "approved",
               "ready_for_sale": "live",
-              "pending_developer_release": "live",
-              "rejected": "rejected"
+              "live": "live",
+              "rejected": "rejected",
+              "metadata_rejected": "rejected"
             },
             "terminal_states": [
               "approved",
-              "live",
+              "pending_developer_release",
               "ready_for_sale",
-              "rejected"
+              "live",
+              "rejected",
+              "metadata_rejected",
+              "withdrawn",
+              "developer_rejected"
             ],
             "dry_run_states": [
               "waiting_for_review",
@@ -1312,8 +1363,8 @@
             "android"
           ],
           "required": false,
-          "description": "Watches the production track. Google Play's API doesn't expose review state, so this can say 'unknown' honestly; resolve it by hand when you see it live.",
-          "definition_of_done": "versionCode {build} is live.",
+          "description": "Watches the production track. Google Play's API can't say when an update is live, so after review it reports unknown: then you confirm it in Play Console.",
+          "definition_of_done": "versionCode {android_version_code} is live.",
           "outcomes": [
             {
               "name": "live",
@@ -1321,6 +1372,10 @@
             },
             {
               "name": "rejected",
+              "kind": "failure"
+            },
+            {
+              "name": "halted",
               "kind": "failure"
             }
           ],
@@ -1332,6 +1387,10 @@
             {
               "outcome": "rejected",
               "destination": "ask_owner"
+            },
+            {
+              "outcome": "halted",
+              "destination": "ask_owner"
             }
           ],
           "resources": [],
@@ -1341,7 +1400,7 @@
           "secrets": [],
           "watch": {
             "adapter": {
-              "command": "{play_status_command} --track production --version-code {build}"
+              "command": "{play_status_command} --track production --version-code {android_version_code}"
             },
             "interval_s": 900,
             "backoff": 1.0,
@@ -1350,17 +1409,490 @@
             "state_map": {
               "live": "live",
               "completed": "live",
-              "rejected": "rejected"
+              "rejected": "rejected",
+              "halted": "halted"
             },
             "terminal_states": [
               "live",
               "completed",
-              "rejected"
+              "rejected",
+              "halted"
             ],
+            "owner_states": [
+              "unknown"
+            ],
+            "owner_hint": "Google Play's API can't say whether versionCode {android_version_code} is live. Only you can confirm it: check Play Console.",
             "dry_run_states": [
               "in_review",
-              "unknown",
-              "live"
+              "unknown"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "key": "resubmit",
+      "title": "Fix and resubmit",
+      "steps": [
+        {
+          "client_key": "fix_rejection",
+          "title": "Fix what App Review rejected",
+          "kind": "agent",
+          "role": "engineer",
+          "after": [
+            "review_ios"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Read the rejection in App Store Connect and fix it: code in a small PR with tests, or the metadata. Post what changed and why it answers the reviewer.",
+          "definition_of_done": "The fix is in an open PR (or the metadata is updated), with the rejection reason quoted.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        },
+        {
+          "client_key": "merge_fix",
+          "title": "Review and merge the fix",
+          "kind": "person",
+          "role": "owner",
+          "after": [
+            "fix_rejection"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Review the fix and merge it. For a metadata-only fix, say so.",
+          "definition_of_done": "The fix is merged, or it was metadata only.",
+          "outcomes": [
+            {
+              "name": "merged",
+              "kind": "success"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "merged",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": []
+        },
+        {
+          "client_key": "rebuild_ios",
+          "title": "New iOS build and upload",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "merge_fix"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Bump the iOS build number past {build}, archive {version} from the merged commit, run the pre-upload scans and upload. Post the new build number.",
+          "definition_of_done": "The new build is uploaded; its build number and the scans' output are posted.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [
+            "build:heavy"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [
+            "ASC_KEY"
+          ]
+        },
+        {
+          "client_key": "processing_resubmit",
+          "title": "Wait for the new build to process",
+          "kind": "watch",
+          "role": null,
+          "after": [
+            "rebuild_ios"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Watches App Store Connect until the newest build of {version} is VALID.",
+          "definition_of_done": "The new build is VALID.",
+          "outcomes": [
+            {
+              "name": "valid",
+              "kind": "success"
+            },
+            {
+              "name": "invalid",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "valid",
+              "destination": "next"
+            },
+            {
+              "outcome": "invalid",
+              "destination": "ask_owner"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "watch": {
+            "adapter": {
+              "command": "{asc_status_command} --what build --version {version}"
+            },
+            "interval_s": 120,
+            "backoff": 1.2,
+            "max_interval_s": 600,
+            "timeout_h": 3,
+            "state_map": {
+              "valid": "valid",
+              "invalid": "invalid",
+              "failed": "invalid"
+            },
+            "terminal_states": [
+              "valid",
+              "invalid",
+              "failed"
+            ],
+            "dry_run_states": [
+              "processing",
+              "valid"
+            ]
+          }
+        },
+        {
+          "client_key": "qa_resubmit_ios",
+          "title": "Check the fix on iOS",
+          "kind": "qa",
+          "role": "qa",
+          "after": [
+            "processing_resubmit"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "The screens the fix touched, plus every open finding, on a debug build of the merged commit pointed at {qa_target_env}.",
+          "definition_of_done": "Every scenario in scope has a verdict with screenshots; the build under test (type, version, build, commit, environment) is recorded on the result.",
+          "outcomes": [
+            {
+              "name": "pass",
+              "kind": "success"
+            },
+            {
+              "name": "fail",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "pass",
+              "destination": "next"
+            },
+            {
+              "outcome": "fail",
+              "destination": "next"
+            }
+          ],
+          "resources": [
+            "device:ios-sim"
+          ],
+          "irreversible": false,
+          "outward": null,
+          "scope": "subset",
+          "secrets": [],
+          "qa": {
+            "kind": "check",
+            "platform": "ios",
+            "focus": "The fix for the App Review rejection and the screens it touched."
+          },
+          "dry_run": {
+            "outcomes": [
+              "pass"
+            ],
+            "note": ""
+          }
+        },
+        {
+          "client_key": "gate_resubmit",
+          "title": "Your go-ahead to resubmit",
+          "kind": "gate",
+          "role": "owner",
+          "after": [
+            "qa_resubmit_ios"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "The proof for the fixed build. Nothing goes back to App Review before you say Go here.",
+          "definition_of_done": "You chose Go or No-go, with a reason for No-go.",
+          "outcomes": [
+            {
+              "name": "go",
+              "kind": "success"
+            },
+            {
+              "name": "no_go",
+              "kind": "failure"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "go",
+              "destination": "next"
+            },
+            {
+              "outcome": "no_go",
+              "destination": "stop"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "gate": {
+            "proof_steps": [
+              "qa_resubmit_ios",
+              "qa_full_ios"
+            ],
+            "include_unit_only": true
+          }
+        },
+        {
+          "client_key": "resubmit_ios",
+          "title": "Resubmit for App Review",
+          "kind": "agent",
+          "role": "release",
+          "after": [
+            "gate_resubmit"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Attach the new build to version {version}, answer the reviewer in Resolution Center, keep the release type {release_type}, and submit.",
+          "definition_of_done": "Version {version} is Waiting for Review with the new build.",
+          "outcomes": [],
+          "routes": [],
+          "resources": [],
+          "irreversible": true,
+          "outward": "App Store",
+          "scope": null,
+          "secrets": [
+            "ASC_KEY"
+          ]
+        },
+        {
+          "client_key": "review_resubmit_ios",
+          "title": "App Store review, again",
+          "kind": "watch",
+          "role": null,
+          "after": [
+            "resubmit_ios"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Watches App Review for the resubmitted build.",
+          "definition_of_done": "Version {version} is approved, or you decided what a new rejection means.",
+          "outcomes": [
+            {
+              "name": "approved",
+              "kind": "success"
+            },
+            {
+              "name": "live",
+              "kind": "success"
+            },
+            {
+              "name": "rejected",
+              "kind": "failure"
+            },
+            {
+              "name": "resubmit",
+              "kind": "changes"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "approved",
+              "destination": "exit_group"
+            },
+            {
+              "outcome": "live",
+              "destination": "exit_group"
+            },
+            {
+              "outcome": "rejected",
+              "destination": "ask_owner"
+            },
+            {
+              "outcome": "resubmit",
+              "destination": "return",
+              "destination_task": "fix_rejection"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "watch": {
+            "adapter": {
+              "command": "{asc_status_command} --what review --version {version}"
+            },
+            "interval_s": 900,
+            "backoff": 1.0,
+            "max_interval_s": 1800,
+            "timeout_h": 168,
+            "state_map": {
+              "approved": "approved",
+              "pending_developer_release": "approved",
+              "ready_for_sale": "live",
+              "live": "live",
+              "rejected": "rejected",
+              "metadata_rejected": "rejected"
+            },
+            "terminal_states": [
+              "approved",
+              "pending_developer_release",
+              "ready_for_sale",
+              "live",
+              "rejected",
+              "metadata_rejected",
+              "withdrawn",
+              "developer_rejected"
+            ],
+            "dry_run_states": [
+              "waiting_for_review",
+              "in_review",
+              "approved"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "key": "release",
+      "title": "Release",
+      "steps": [
+        {
+          "client_key": "release_ios",
+          "title": "Release it on the App Store",
+          "kind": "person",
+          "role": "owner",
+          "after": [
+            "review_ios",
+            "review_resubmit_ios"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Version {version} is approved and waits for you (manual release). Release it in App Store Connect when you're ready, then say so here.",
+          "definition_of_done": "You pressed Release in App Store Connect.",
+          "outcomes": [
+            {
+              "name": "released",
+              "kind": "success"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "released",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "keep_after": [
+            "review_ios",
+            "review_resubmit_ios"
+          ],
+          "when": {
+            "param": "release_type",
+            "equals": "manual"
+          }
+        },
+        {
+          "client_key": "live_ios",
+          "title": "Check it's live on the App Store",
+          "kind": "watch",
+          "role": null,
+          "after": [
+            "release_ios"
+          ],
+          "platforms": [
+            "ios"
+          ],
+          "required": false,
+          "description": "Watches until version {version} is Ready for Sale.",
+          "definition_of_done": "Version {version} is Ready for Sale.",
+          "outcomes": [
+            {
+              "name": "live",
+              "kind": "success"
+            }
+          ],
+          "routes": [
+            {
+              "outcome": "live",
+              "destination": "next"
+            }
+          ],
+          "resources": [],
+          "irreversible": false,
+          "outward": null,
+          "scope": null,
+          "secrets": [],
+          "keep_after": [
+            "review_ios",
+            "review_resubmit_ios"
+          ],
+          "watch": {
+            "adapter": {
+              "command": "{asc_status_command} --what review --version {version}"
+            },
+            "interval_s": 300,
+            "backoff": 1.2,
+            "max_interval_s": 1800,
+            "timeout_h": 48,
+            "state_map": {
+              "ready_for_sale": "live",
+              "live": "live"
+            },
+            "terminal_states": [
+              "ready_for_sale",
+              "live",
+              "removed_from_sale",
+              "developer_removed_from_sale"
+            ],
+            "dry_run_states": [
+              "pending_developer_release",
+              "ready_for_sale"
             ]
           }
         }
@@ -1376,7 +1908,7 @@
           "kind": "agent",
           "role": "release",
           "after": [
-            "review_ios",
+            "live_ios",
             "review_android",
             "deploy_web_prod"
           ],
@@ -1457,6 +1989,22 @@
       ],
       "review_task": "gate",
       "exit_outcome": "go",
+      "max_rounds": 3
+    },
+    {
+      "name": "Resubmit loop",
+      "member_tasks": [
+        "fix_rejection",
+        "merge_fix",
+        "rebuild_ios",
+        "processing_resubmit",
+        "qa_resubmit_ios",
+        "gate_resubmit",
+        "resubmit_ios",
+        "review_resubmit_ios"
+      ],
+      "review_task": "review_resubmit_ios",
+      "exit_outcome": "approved",
       "max_rounds": 3
     }
   ]

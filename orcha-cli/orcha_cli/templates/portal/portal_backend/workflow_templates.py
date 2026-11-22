@@ -38,7 +38,7 @@ def _r(outcome, destination, task=None):
 
 def _step(key, title, kind, *, role=None, after=(), platforms=(), required=False, description="",
           done="", outcomes=(), routes=(), qa=None, watch=None, gate=None, resources=(),
-          irreversible=False, outward=None, scope=None, dry_run=None, secrets=()):
+          irreversible=False, outward=None, scope=None, dry_run=None, secrets=(), when=None, keep_after=()):
     step = {
         "client_key": key, "title": title, "kind": kind, "role": role, "after": list(after),
         "platforms": list(platforms), "required": required, "description": description,
@@ -46,7 +46,11 @@ def _step(key, title, kind, *, role=None, after=(), platforms=(), required=False
         "resources": list(resources), "irreversible": irreversible, "outward": outward,
         "scope": scope, "secrets": list(secrets),
     }
-    for k, v in (("qa", qa), ("watch", watch), ("gate", gate), ("dry_run", dry_run)):
+    if keep_after:
+        # Joins a branch back: keep these prerequisites even where another one already waits for them,
+        # so the step stays a direct dependent its prerequisite's branch can name.
+        step["keep_after"] = list(keep_after)
+    for k, v in (("qa", qa), ("watch", watch), ("gate", gate), ("dry_run", dry_run), ("when", when)):
         if v is not None:
             step[k] = v
     return step
@@ -102,8 +106,8 @@ def mobile_app_release() -> dict:
                   done="Every batch item has an open PR with tests; the PR links are posted.",
                   resources=["build:heavy"]),
             _step("review_merge", "Review and merge", "person", role="owner", after=["implement"],
-                  description="Review the diffs and merge. Agents never merge on their own.",
-                  done="Every PR of this round is merged, or sent back with comments.",
+                  description="Review the diffs and merge. Agents never merge on their own. To ask for changes, comment on the PR; the engineer updates it, and you mark this step once it's merged.",
+                  done="Every PR of this round is merged.",
                   outcomes=[_o("merged", "success")], routes=[_r("merged", "next")]),
         ]},
         {"key": "staging", "title": "Staging", "steps": [
@@ -136,16 +140,16 @@ def mobile_app_release() -> dict:
                   routes=[_r("drafted", "next"), _r("gaps", "next")],
                   qa={"kind": "draft", "focus": "Scenarios for the changes in this batch: {batch_summary}"}),
             _step("coverage_review", "Approve the new scenarios", "person", role="owner", after=["coverage"],
-                  description="Approve or reject the drafted scenarios in Quality. Coverage per platform is on the release page.",
+                  description="Approve or reject the drafted scenarios in Quality. Coverage per platform is on the gate card before you decide.",
                   done="The drafts are approved or rejected.",
                   outcomes=[_o("covered", "success"), _o("go_anyway", "custom")],
                   routes=[_r("covered", "next"), _r("go_anyway", "next")]),
         ]},
         {"key": "builds", "title": "Version and QA builds", "steps": [
-            _step("bump", "Version {version} ({build})", "agent", role="engineer", after=["coverage_review"],
+            _step("bump", "Version {release_label}", "agent", role="engineer", after=["coverage_review"],
                   platforms=["ios", "android"], required=True,
-                  description="Set the marketing version {version} and build number {build} (versionCode only goes up), and open a PR. In a later round, fix what the regression found first, merge, and redeploy staging.",
-                  done="Version {version} build {build} is merged on main; the commit SHA is posted."),
+                  description="Set the versions for this release: {versions_detail}. Build numbers and versionCodes only go up. Open a PR. In a later round, fix what the regression found first, merge, and redeploy staging.",
+                  done="{versions_detail} is merged on main; the commit SHA is posted."),
             _step("qa_build", "Build the QA builds", "agent", role="release", after=["bump"],
                   platforms=["ios", "android"],
                   description="Debug builds of that commit pointed at {qa_target_env} (release builds block screenshots; iOS needs signing on so the login token can be saved). Record each build's identity for the QA steps.",
@@ -182,8 +186,8 @@ def mobile_app_release() -> dict:
                          "dry_run_states": ["processing", "valid"]}),
             _step("build_android", "Build and upload to internal", "agent", role="release", after=["triage_full"],
                   platforms=["android"],
-                  description="Build the signed AAB for versionCode {build} and upload to the internal track: a dry run first, then for real.",
-                  done="versionCode {build} is on the internal track.",
+                  description="Build the signed AAB for {android_version} (versionCode {android_version_code}) and upload to the internal track: a dry run first, then for real.",
+                  done="versionCode {android_version_code} is on the internal track.",
                   resources=["build:heavy"], secrets=["PLAY_SERVICE_ACCOUNT"]),
             _step("testflight_owner", "Test the build yourself", "person", role="owner",
                   after=["processing_ios", "build_android"], platforms=["ios", "android"],
@@ -209,8 +213,8 @@ def mobile_app_release() -> dict:
                   done="Version {version} is Waiting for Review with build {build}.", secrets=["ASC_KEY"]),
             _step("promote_android", "Promote to production", "agent", role="release", after=["gate"],
                   platforms=["android"], irreversible=True, outward="Google Play",
-                  description="Promote the same versionCode {build} to production at {android_rollout} rollout: a dry run, then for real. Managed publishing is off, so an approved update goes live on its own.",
-                  done="versionCode {build} is in production review at {android_rollout}.",
+                  description="Promote the same versionCode {android_version_code} ({android_version}) to production at {android_rollout} rollout: a dry run, then for real. Managed publishing is off, so an approved update goes live on its own.",
+                  done="versionCode {android_version_code} is in production review at {android_rollout}.",
                   secrets=["PLAY_SERVICE_ACCOUNT"]),
             _step("deploy_api_prod", "Deploy the API to production", "agent", role="release", after=["gate"],
                   platforms=["api"], irreversible=True, outward="Production",
@@ -223,30 +227,106 @@ def mobile_app_release() -> dict:
         ]},
         {"key": "review", "title": "Store review", "steps": [
             _step("review_ios", "App Store review", "watch", after=["submit_ios"], platforms=["ios"],
-                  description="Watches App Review: waiting, in review, then approved, live or rejected. You hear when it changes.",
-                  done="Version {version} is approved or live.",
-                  outcomes=[_o("live", "success"), _o("rejected", "failure")],
-                  routes=[_r("live", "next"), _r("rejected", "ask_owner")],
+                  description="Watches App Review: waiting, in review, then approved or rejected. Approved is not live yet: a manual release waits for you, an automatic one for the App Store.",
+                  done="Version {version} is approved, or you decided what a rejection means.",
+                  outcomes=[_o("approved", "success"), _o("live", "success"), _o("rejected", "failure"), _o("resubmit", "changes")],
+                  routes=[_r("approved", "step", "release_ios"), _r("live", "step", "release_ios"),
+                          _r("rejected", "ask_owner"), _r("resubmit", "step", "fix_rejection")],
                   watch={"adapter": {"command": "{asc_status_command} --what review --version {version}"},
                          "interval_s": 900, "backoff": 1.0, "max_interval_s": 1800, "timeout_h": 24 * 7,
-                         "state_map": {"approved": "live", "live": "live", "ready_for_sale": "live",
-                                       "pending_developer_release": "live", "rejected": "rejected"},
-                         "terminal_states": ["approved", "live", "ready_for_sale", "rejected"],
+                         "state_map": {"approved": "approved", "pending_developer_release": "approved",
+                                       "ready_for_sale": "live", "live": "live", "rejected": "rejected",
+                                       "metadata_rejected": "rejected"},
+                         "terminal_states": ["approved", "pending_developer_release", "ready_for_sale", "live",
+                                             "rejected", "metadata_rejected", "withdrawn", "developer_rejected"],
                          "dry_run_states": ["waiting_for_review", "in_review", "rejected"]}),
             _step("review_android", "Google Play review", "watch", after=["promote_android"], platforms=["android"],
-                  description="Watches the production track. Google Play's API doesn't expose review state, so this can say 'unknown' honestly; resolve it by hand when you see it live.",
-                  done="versionCode {build} is live.",
-                  outcomes=[_o("live", "success"), _o("rejected", "failure")],
-                  routes=[_r("live", "next"), _r("rejected", "ask_owner")],
-                  watch={"adapter": {"command": "{play_status_command} --track production --version-code {build}"},
+                  description="Watches the production track. Google Play's API can't say when an update is live, so after review it reports unknown: then you confirm it in Play Console.",
+                  done="versionCode {android_version_code} is live.",
+                  outcomes=[_o("live", "success"), _o("rejected", "failure"), _o("halted", "failure")],
+                  routes=[_r("live", "next"), _r("rejected", "ask_owner"), _r("halted", "ask_owner")],
+                  watch={"adapter": {"command": "{play_status_command} --track production --version-code {android_version_code}"},
                          "interval_s": 900, "backoff": 1.0, "max_interval_s": 3600, "timeout_h": 24 * 7,
-                         "state_map": {"live": "live", "completed": "live", "rejected": "rejected"},
-                         "terminal_states": ["live", "completed", "rejected"],
-                         "dry_run_states": ["in_review", "unknown", "live"]}),
+                         "state_map": {"live": "live", "completed": "live", "rejected": "rejected", "halted": "halted"},
+                         "terminal_states": ["live", "completed", "rejected", "halted"],
+                         "owner_states": ["unknown"],
+                         "owner_hint": "Google Play's API can't say whether versionCode {android_version_code} is live. Only you can confirm it: check Play Console.",
+                         "dry_run_states": ["in_review", "unknown"]}),
+        ]},
+        {"key": "resubmit", "title": "Fix and resubmit", "steps": [
+            _step("fix_rejection", "Fix what App Review rejected", "agent", role="engineer", after=["review_ios"], platforms=["ios"],
+                  description="Read the rejection in App Store Connect and fix it: code in a small PR with tests, or the metadata. Post what changed and why it answers the reviewer.",
+                  done="The fix is in an open PR (or the metadata is updated), with the rejection reason quoted."),
+            _step("merge_fix", "Review and merge the fix", "person", role="owner", after=["fix_rejection"], platforms=["ios"],
+                  description="Review the fix and merge it. For a metadata-only fix, say so.",
+                  done="The fix is merged, or it was metadata only.",
+                  outcomes=[_o("merged", "success")], routes=[_r("merged", "next")]),
+            _step("rebuild_ios", "New iOS build and upload", "agent", role="release", after=["merge_fix"], platforms=["ios"],
+                  description="Bump the iOS build number past {build}, archive {version} from the merged commit, run the pre-upload scans and upload. Post the new build number.",
+                  done="The new build is uploaded; its build number and the scans' output are posted.",
+                  resources=["build:heavy"], secrets=["ASC_KEY"]),
+            _step("processing_resubmit", "Wait for the new build to process", "watch", after=["rebuild_ios"], platforms=["ios"],
+                  description="Watches App Store Connect until the newest build of {version} is VALID.",
+                  done="The new build is VALID.",
+                  outcomes=[_o("valid", "success"), _o("invalid", "failure")],
+                  routes=[_r("valid", "next"), _r("invalid", "ask_owner")],
+                  watch={"adapter": {"command": "{asc_status_command} --what build --version {version}"},
+                         "interval_s": 120, "backoff": 1.2, "max_interval_s": 600, "timeout_h": 3,
+                         "state_map": {"valid": "valid", "invalid": "invalid", "failed": "invalid"},
+                         "terminal_states": ["valid", "invalid", "failed"],
+                         "dry_run_states": ["processing", "valid"]}),
+            _qa("qa_resubmit_ios", "ios", "subset", ["processing_resubmit"], False) | {
+                "title": "Check the fix on iOS",
+                "qa": {"kind": "check", "platform": "ios", "focus": "The fix for the App Review rejection and the screens it touched."},
+                "description": "The screens the fix touched, plus every open finding, on a debug build of the merged commit pointed at {qa_target_env}.",
+                "dry_run": {"outcomes": ["pass"], "note": ""}},
+            _step("gate_resubmit", "Your go-ahead to resubmit", "gate", role="owner", after=["qa_resubmit_ios"], platforms=["ios"],
+                  description="The proof for the fixed build. Nothing goes back to App Review before you say Go here.",
+                  done="You chose Go or No-go, with a reason for No-go.",
+                  outcomes=[_o("go", "success"), _o("no_go", "failure")],
+                  routes=[_r("go", "next"), _r("no_go", "stop")],
+                  gate={"proof_steps": ["qa_resubmit_ios", "qa_full_ios"], "include_unit_only": True}),
+            _step("resubmit_ios", "Resubmit for App Review", "agent", role="release", after=["gate_resubmit"], platforms=["ios"],
+                  irreversible=True, outward="App Store",
+                  description="Attach the new build to version {version}, answer the reviewer in Resolution Center, keep the release type {release_type}, and submit.",
+                  done="Version {version} is Waiting for Review with the new build.", secrets=["ASC_KEY"]),
+            _step("review_resubmit_ios", "App Store review, again", "watch", after=["resubmit_ios"], platforms=["ios"],
+                  description="Watches App Review for the resubmitted build.",
+                  done="Version {version} is approved, or you decided what a new rejection means.",
+                  outcomes=[_o("approved", "success"), _o("live", "success"), _o("rejected", "failure"), _o("resubmit", "changes")],
+                  routes=[_r("approved", "exit_group"), _r("live", "exit_group"), _r("rejected", "ask_owner"),
+                          _r("resubmit", "return", "fix_rejection")],
+                  watch={"adapter": {"command": "{asc_status_command} --what review --version {version}"},
+                         "interval_s": 900, "backoff": 1.0, "max_interval_s": 1800, "timeout_h": 24 * 7,
+                         "state_map": {"approved": "approved", "pending_developer_release": "approved",
+                                       "ready_for_sale": "live", "live": "live", "rejected": "rejected",
+                                       "metadata_rejected": "rejected"},
+                         "terminal_states": ["approved", "pending_developer_release", "ready_for_sale", "live",
+                                             "rejected", "metadata_rejected", "withdrawn", "developer_rejected"],
+                         "dry_run_states": ["waiting_for_review", "in_review", "approved"]}),
+        ]},
+        {"key": "release", "title": "Release", "steps": [
+            _step("release_ios", "Release it on the App Store", "person", role="owner",
+                  after=["review_ios", "review_resubmit_ios"], platforms=["ios"],
+                  keep_after=["review_ios", "review_resubmit_ios"],
+                  when={"param": "release_type", "equals": "manual"},
+                  description="Version {version} is approved and waits for you (manual release). Release it in App Store Connect when you're ready, then say so here.",
+                  done="You pressed Release in App Store Connect.",
+                  outcomes=[_o("released", "success")], routes=[_r("released", "next")]),
+            _step("live_ios", "Check it's live on the App Store", "watch", after=["release_ios"], platforms=["ios"],
+                  keep_after=["review_ios", "review_resubmit_ios"],
+                  description="Watches until version {version} is Ready for Sale.",
+                  done="Version {version} is Ready for Sale.",
+                  outcomes=[_o("live", "success")], routes=[_r("live", "next")],
+                  watch={"adapter": {"command": "{asc_status_command} --what review --version {version}"},
+                         "interval_s": 300, "backoff": 1.2, "max_interval_s": 1800, "timeout_h": 48,
+                         "state_map": {"ready_for_sale": "live", "live": "live"},
+                         "terminal_states": ["ready_for_sale", "live", "removed_from_sale", "developer_removed_from_sale"],
+                         "dry_run_states": ["pending_developer_release", "ready_for_sale"]}),
         ]},
         {"key": "close", "title": "Live and close", "steps": [
             _step("live_check", "Check what is live", "agent", role="release",
-                  after=["review_ios", "review_android", "deploy_web_prod"],
+                  after=["live_ios", "review_android", "deploy_web_prod"],
                   description="Confirm the live versions in each store and in production, and run a short smoke check of the live build.",
                   done="The live versions are posted with a smoke-check result."),
             _step("close", "Release notes and history", "agent", role="release", after=["live_check"],
@@ -258,18 +338,22 @@ def mobile_app_release() -> dict:
         "schema": TEMPLATE_SCHEMA,
         "key": "mobile_app_release",
         "name": "Mobile App Release",
-        "version": 1,
+        "version": 2,
         "icon": "rocket",
         "tone": "amber",
         "description": "Intake to live for the App Store, Google Play, a website and an API: fix loop, full regression, your go/no-go with proof, store review watched for you.",
-        "goal": "Ship {version} ({build}) on {platform_words}, with proof before anything reaches a store.",
-        "title": "Release {version} ({build})",
+        "goal": "Ship {release_label} on {platform_words}, with proof before anything reaches a store.",
+        "title": "Release {release_label}",
         "execution_mode": "parallel",
         "parameters": [
             {"key": "platforms", "label": "Platforms", "type": "platforms", "default": ["ios", "android", "web", "api"], "required": True},
-            {"key": "version", "label": "Version", "type": "text", "placeholder": "1.0.2", "required": True},
-            {"key": "build", "label": "Build", "type": "text", "placeholder": "8", "required": True,
-             "help": "Build number on iOS, versionCode on Android."},
+            {"key": "version", "label": "Version", "type": "text", "placeholder": "1.0.2", "required": True,
+             "help": "The marketing version on iOS, the website and the API."},
+            {"key": "build", "label": "iOS build", "type": "text", "placeholder": "8", "required": True, "platform": "ios"},
+            {"key": "android_version", "label": "Android version", "type": "text", "placeholder": "1.0.20", "platform": "android",
+             "help": "Leave empty to use the same version as iOS."},
+            {"key": "android_version_code", "label": "Android versionCode", "type": "text", "placeholder": "20", "required": True,
+             "platform": "android"},
             {"key": "release_type", "label": "iOS release", "type": "choice", "required": True, "platform": "ios",
              "choices": [{"value": "after_approval", "label": "Automatically after approval"},
                          {"value": "manual", "label": "Manually, when I release it"}],
@@ -284,9 +368,14 @@ def mobile_app_release() -> dict:
             {"key": "coverage_threshold", "label": "Coverage warning below", "type": "number", "default": 10,
              "help": "Validated scenarios a platform needs before the proof stops warning."},
             {"key": "asc_status_command", "label": "App Store status command", "type": "text",
-             "default": "python3 scripts/release-adapters/asc_status.py", "platform": "ios", "advanced": True},
+             "default": "python3 scripts/release-adapters/asc_status.py", "platform": "ios", "advanced": True,
+             "help": "Run from the project root without a shell: ~ and $VARS are not expanded, so use absolute paths."},
+            {"key": "inventory_command", "label": "Release inventory command", "type": "text",
+             "default": "python3 scripts/release-adapters/release_inventory.py", "advanced": True,
+             "help": "Fills the Release home: what's live, in review, merged since the last release, and the next versions. Same rules: no shell, absolute paths."},
             {"key": "play_status_command", "label": "Google Play status command", "type": "text",
-             "default": "python3 scripts/release-adapters/play_status.py", "platform": "android", "advanced": True},
+             "default": "python3 scripts/release-adapters/play_status.py", "platform": "android", "advanced": True,
+             "help": "Run from the project root without a shell: ~ and $VARS are not expanded, so use absolute paths."},
         ],
         "roles": [
             {"key": "owner", "label": "Owner (holds the gates)", "kind": "human"},
@@ -305,6 +394,9 @@ def mobile_app_release() -> dict:
             {"name": "Approval loop", "member_tasks": ["build_ios", "processing_ios", "build_android",
                                                        "testflight_owner", "gate"],
              "review_task": "gate", "exit_outcome": "go", "max_rounds": 3},
+            {"name": "Resubmit loop", "member_tasks": ["fix_rejection", "merge_fix", "rebuild_ios", "processing_resubmit",
+                                                       "qa_resubmit_ios", "gate_resubmit", "resubmit_ios", "review_resubmit_ios"],
+             "review_task": "review_resubmit_ios", "exit_outcome": "approved", "max_rounds": 3},
         ],
     }
 
@@ -404,6 +496,11 @@ def _fill_obj(value, params):
     return value
 
 
+def _label_word(label: str) -> str:
+    """"Version" reads "version" mid-sentence; "iOS build" and "Android versionCode" keep their case."""
+    return label if any(c.isupper() for c in label[1:]) else label.lower()
+
+
 def resolve_params(template, params) -> tuple[dict, list[dict]]:
     """Defaults filled in, and a problem for each required parameter left empty."""
     out, problems = {}, []
@@ -416,7 +513,7 @@ def resolve_params(template, params) -> tuple[dict, list[dict]]:
         applies = not p.get("platform") or p["platform"] in (chosen or [])
         if p.get("required") and applies and (value is None or value == "" or value == []):
             problems.append({"code": "parameter_required", "param": p["key"],
-                             "message": f"Choose {p['label'].lower()}."})
+                             "message": f"Choose {_label_word(p['label'])}."})
     for k, v in params.items():
         out.setdefault(k, v)
     out["platforms"] = [p for p in PLATFORMS if p in (out.get("platforms") or [])]
@@ -424,9 +521,48 @@ def resolve_params(template, params) -> tuple[dict, list[dict]]:
     if out.get("release_type"):
         out["release_type_words"] = {"after_approval": "automatic release after approval",
                                      "manual": "manual release"}.get(out["release_type"], out["release_type"])
+    ios_v, ios_b = str(out.get("version") or "").strip(), str(out.get("build") or "").strip()
+    and_v = str(out.get("android_version") or "").strip() or ios_v
+    and_c = str(out.get("android_version_code") or "").strip()
+    out["android_version"] = and_v
+    ios_word = f"{ios_v or '…'} ({ios_b or '…'})"
+    and_word = f"{and_v or '…'} ({and_c or '…'})"
+    has_ios, has_android = "ios" in out["platforms"], "android" in out["platforms"]
+    if has_ios and has_android:
+        out["release_label"] = ios_word if (ios_v, ios_b) == (and_v, and_c) else f"iOS {ios_word} · Android {and_word}"
+        out["versions_detail"] = f"iOS {ios_v or '…'} build {ios_b or '…'} and Android {and_v or '…'} versionCode {and_c or '…'}"
+    elif has_ios:
+        out["release_label"], out["versions_detail"] = ios_word, f"iOS {ios_v or '…'} build {ios_b or '…'}"
+    elif has_android:
+        out["release_label"], out["versions_detail"] = and_word, f"Android {and_v or '…'} versionCode {and_c or '…'}"
+    else:
+        out["release_label"] = out["versions_detail"] = ios_v or "…"
     if not str(out.get("batch_summary") or "").strip():
         out["batch_summary"] = "the batch the owner listed in Intake"
     return out, problems
+
+
+def _ancestors_of(key: str, by_key: dict) -> set[str]:
+    """Every step `key` waits for, directly or not, in the template as written."""
+    seen, todo = set(), list(by_key.get(key, {}).get("after") or [])
+    while todo:
+        k = todo.pop()
+        if k in seen or k not in by_key:
+            continue
+        seen.add(k)
+        todo.extend(by_key[k].get("after") or [])
+    return seen
+
+
+def _descendants_in(key: str, deps: dict[str, list[str]]) -> set[str]:
+    out, todo = set(), [key]
+    while todo:
+        k = todo.pop()
+        for d, prereqs in deps.items():
+            if k in prereqs and d not in out:
+                out.add(d)
+                todo.append(d)
+    return out
 
 
 def _requirement(step, ships: bool) -> bool:
@@ -478,8 +614,12 @@ def compile_template(template: dict, params: dict, removed=(), added=(), *, dry_
         a["added"] = True
     by_key = {s["client_key"]: s for s in steps}
 
+    def condition_ok(s):
+        cond = s.get("when")
+        return not cond or values.get(cond.get("param")) == cond.get("equals")
+
     def platform_ok(s):
-        return not s.get("platforms") or bool(chosen & set(s["platforms"]))
+        return (not s.get("platforms") or bool(chosen & set(s["platforms"]))) and condition_ok(s)
 
     def ships_with(keep):
         return any(by_key[k].get("irreversible") for k in keep)
@@ -511,6 +651,10 @@ def compile_template(template: dict, params: dict, removed=(), added=(), *, dry_
         return memo[k]
 
     deps = _reduce({k: kept_before(k) for k in keep})
+    for k in keep:
+        for p in by_key[k].get("keep_after") or []:
+            if p in kept and p not in deps[k] and p not in _descendants_in(k, deps):
+                deps[k].append(p)
     for k, d in deps.items():
         if len(d) > 3:
             problems.append({"code": "dependency_limit", "task_id": k,
@@ -545,7 +689,11 @@ def compile_template(template: dict, params: dict, removed=(), added=(), *, dry_
                     target = next(m for m in g["member_tasks"] if m != k)
                 r["destination_task"] = target
             elif dest == "step" and r.get("destination_task") not in kept:
-                r = {"outcome": r["outcome"], "destination": "next"}
+                # The branch's step was left out: go to the kept step that took its place.
+                target = r.get("destination_task")
+                instead = next((d for d in keep if k in deps.get(d, []) and target in _ancestors_of(d, by_key)), None)
+                r = ({"outcome": r["outcome"], "destination": "step", "destination_task": instead} if instead
+                     else {"outcome": r["outcome"], "destination": "next"})
             routes.append(r)
         gate = copy.deepcopy(s.get("gate"))
         if kind == "gate" and k not in reviews:
@@ -577,8 +725,11 @@ def compile_template(template: dict, params: dict, removed=(), added=(), *, dry_
                                "note": s["dry_run"].get("note", "")}
         if kind == "qa" and s.get("scope"):
             platform = (s.get("qa") or {}).get("platform")
-            spec["build"] = {"type": "debug", "version": str(values.get("version") or "") or None,
-                             "build": str(values.get("build") or "") or None, "env": values.get("qa_target_env")}
+            android = platform == "android"
+            spec["build"] = {"type": "debug",
+                             "version": str(values.get("android_version" if android else "version") or "") or None,
+                             "build": str(values.get("android_version_code" if android else "build") or "") or None,
+                             "env": values.get("qa_target_env")}
             if not platform:
                 spec["build"] = None
         task = {
@@ -618,7 +769,7 @@ def compile_template(template: dict, params: dict, removed=(), added=(), *, dry_
                 "client_key": s["client_key"], "title": _fill(s["title"], values), "kind": s.get("kind", "agent"),
                 "stage": stage_of[s["client_key"]]["key"], "role": s.get("role"), "required": False,
                 "locked_reason": None, "removed": True,
-                "removed_why": "platform" if not platform_ok(s) else "removed",
+                "removed_why": ("condition" if not condition_ok(s) else "platform") if not platform_ok(s) else "removed",
                 "platforms": s.get("platforms") or [], "irreversible": bool(s.get("irreversible")),
                 "outward": s.get("outward"), "done_when": _fill(s.get("definition_of_done"), values),
                 "description": _fill(s.get("description"), values), "after": [], "loop": None, "branches": [],
@@ -668,6 +819,7 @@ def summary(template: dict, source: str = "builtin") -> dict:
         "watches": sum(1 for s in steps if s.get("kind") == "watch"),
         "outward": sum(1 for s in steps if s.get("irreversible")),
         "base_key": template.get("base_key"), "base_version": template.get("base_version"),
+        "has_inventory": any(p.get("key") == "inventory_command" and p.get("default") for p in template.get("parameters", [])),
         "thread": [{"kind": s.get("kind", "agent"), "outward": bool(s.get("irreversible")),
                     "stage": st["key"]} for st in template.get("stages", []) for s in st.get("steps", [])],
     }

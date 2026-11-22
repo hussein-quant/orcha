@@ -333,6 +333,38 @@ def _record_decision(cur, w, t, p, choice, reason):
 # ---- watch steps --------------------------------------------------------------
 
 
+def history_by_task(cur, wid) -> dict[str, list[dict]]:
+    """Every outcome each step reported in this workflow, oldest first, with its loop round, so a
+    step a later round skipped still shows what it found before (finding 4)."""
+    # A round records each member at the work revision it started with; preparing and finishing
+    # move the revision on, so a report belongs to the latest round started at or before it.
+    cur.execute(
+        "SELECT i.task_id, i.work_revision, g.round_number FROM workflow_step_instances i "
+        "JOIN workflow_group_rounds g ON g.id=i.group_round_id WHERE g.workflow_id=%s",
+        (wid,),
+    )
+    starts: dict[str, list[tuple[int, int]]] = {}
+    for r in cur.fetchall():
+        starts.setdefault(str(r["task_id"]), []).append((int(r["work_revision"]), int(r["round_number"])))
+    cur.execute(
+        "SELECT task_id, work_revision, outcome_name, findings, note, reporter_kind, reported_at "
+        "FROM workflow_outcome_reports WHERE workflow_id=%s ORDER BY reported_at, work_revision",
+        (wid,),
+    )
+    out: dict[str, list[dict]] = {}
+    for r in cur.fetchall():
+        tid = str(r["task_id"])
+        rounds = [n for rev, n in sorted(starts.get(tid, [])) if rev <= int(r["work_revision"])]
+        findings = _load(r["findings"]) or []
+        out.setdefault(tid, []).append({
+            "round": rounds[-1] if rounds else None, "work_revision": r["work_revision"],
+            "outcome": r["outcome_name"], "note": redact(str(r["note"] or ""))[:600],
+            "reporter_kind": r["reporter_kind"], "reported_at": r["reported_at"],
+            "findings": [redact(str(f.get("text") if isinstance(f, dict) else f))[:300] for f in findings][:10],
+        })
+    return out
+
+
 def watch_view(cur, task) -> dict:
     cur.execute(
         "SELECT state, terminal, summary, detail_url, data, source, error, observed_at, created_at "
@@ -345,15 +377,57 @@ def watch_view(cur, task) -> dict:
         r["terminal"] = bool(r.get("terminal"))
     cur.execute("SELECT * FROM workflow_watch_state WHERE task_id=%s", (task["id"],))
     state = cur.fetchone()
+    spec = spec_of(task) or {}
+    latest = rows[0] if rows else None
+    last_good = next((r for r in rows if r["state"] != "error"), None)
     return {
-        "latest": rows[0] if rows else None,
+        "latest": latest,
         "observations": list(reversed(rows)),
         "next_check_at": state["next_check_at"] if state else None,
         "attempts": state["attempts"] if state else 0,
+        # The adapter itself failed (crash, bad output, its own "error"): not a store state.
+        "error": latest["error"] or latest["summary"] if latest and latest["state"] == "error" else None,
+        "needs_owner": owner_reason(spec, last_good, task) if last_good and last_good["source"] != "manual" else None,
+        "outcomes": sorted({v for v in ((spec.get("watch") or {}).get("state_map") or {}).values()}),
     }
 
 
-_JSON_LINE = re.compile(r"\{.*\}\s*$", re.S)
+def owner_reason(spec: dict, reading: dict | None, task: dict | None = None) -> str | None:
+    """Why a watch stopped reading and asks a person instead: a state only a person can settle
+    (Play's "unknown"), a final state the step doesn't route on, or a watch that timed out."""
+    if not reading:
+        return None
+    watch = spec.get("watch") or {}
+    st = str(reading.get("state") or "").casefold()
+    if st in {x.casefold() for x in watch.get("owner_states") or []}:
+        return watch.get("owner_hint") or f"The status says {st.replace('_', ' ')}. Only you can confirm what happened."
+    final = bool(reading.get("terminal")) or st in {x.casefold() for x in watch.get("terminal_states") or []}
+    if final and watch_outcome(spec, st) is None and st not in {"unknown", "error"}:
+        return f"The store reported {st.replace('_', ' ')}, a final state this step doesn't route on. Tell Orcha what it means."
+    if reading.get("timed_out"):
+        return "Stopped reading after the time limit. Tell Orcha what you see."
+    return None
+
+
+def _last_json(text: str):
+    """The JSON object that ends the output. Log lines may come before it, braces and all, so
+    the first `{` is not where it starts: the outermost object that runs to the end is."""
+    text = text.strip()
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            value, end = decoder.raw_decode(text, i)
+        except ValueError:
+            continue
+        if not text[end:].strip():
+            return value
+    raise ValueError("no JSON object at the end of the output")
+
+
+def _error(summary: str, detail: str) -> dict:
+    return {"state": "error", "terminal": False, "summary": summary, "error": redact(detail)[:600]}
 
 
 def run_adapter(adapter: dict, cwd: str | None) -> dict:
@@ -370,17 +444,18 @@ def run_adapter(adapter: dict, cwd: str | None) -> dict:
             )
             text = proc.stdout or ""
             if proc.returncode != 0 and not text.strip():
-                return {"state": "unknown", "terminal": False,
-                        "summary": "The status command failed.",
-                        "error": redact((proc.stderr or "")[-600:])}
-        found = _JSON_LINE.search(text.strip())
-        body = json.loads(found.group(0) if found else text)
+                return _error("Couldn't read the status: the command failed.",
+                              (proc.stderr or f"exit code {proc.returncode}")[-600:])
+        body = _last_json(text)
         if not isinstance(body, dict) or not isinstance(body.get("state"), str):
-            raise ValueError("no state")
+            raise ValueError("the output has no state")
+        if body["state"].casefold() == "error":
+            # The adapter's own failure (exit 2 with a contract JSON): retry, never route on it.
+            return _error(f"Couldn't read the status: {body.get('summary') or 'the adapter reported an error'}",
+                          str(body.get("error") or body.get("summary") or "error"))
         return body
-    except Exception as error:  # noqa: BLE001 - any adapter failure is an honest unknown
-        return {"state": "unknown", "terminal": False,
-                "summary": "The status could not be read.", "error": redact(f"{type(error).__name__}: {error}")[:600]}
+    except Exception as error:  # noqa: BLE001 - a failed reading is an error, not a store state
+        return _error("Couldn't read the status.", f"{type(error).__name__}: {error}")
 
 
 def record_reading(cur, w, task, reading: dict, source: str) -> None:
@@ -436,13 +511,17 @@ def check_watch(svc, w, tid, *, manual_state: str | None = None, by=None) -> dic
     row = cur.fetchone()
     attempts = (row["attempts"] if row and row["work_revision"] == t["work_revision"] else 0) + 1
     if manual_state:
+        if watch_outcome(spec, manual_state) is None:
+            conflict("state_not_routed", "That state doesn't lead anywhere from this step.", status=422,
+                     states=sorted(((spec.get("watch") or {}).get("state_map") or {}).keys()))
         reading = {"state": manual_state, "terminal": True,
                    "summary": f"Resolved by hand by {by['alias'] if by else 'the owner'}."}
         source = "manual"
     elif w.get("dry_run"):
         states = (spec.get("watch") or {}).get("dry_run_states") or ["unknown"]
         state = states[min(attempts - 1, len(states) - 1)]
-        reading = {"state": state, "terminal": watch_outcome(spec, state) is not None,
+        reading = {"state": state, "terminal": watch_outcome(spec, state) is not None
+                   or state in ((spec.get("watch") or {}).get("owner_states") or []),
                    "summary": f"Dry run: the store reports {state.replace('_', ' ')}."}
         source = "dry_run"
     else:
@@ -455,15 +534,22 @@ def check_watch(svc, w, tid, *, manual_state: str | None = None, by=None) -> dic
     timed_out = (sql.utcnow() - (started or sql.utcnow())).total_seconds() > timeout_h * 3600
     _schedule(cur, t, spec, attempts, reading.get("state"), dry=bool(w.get("dry_run")))
     if timed_out and not outcome:
+        reading["timed_out"] = True
+    asks = None if outcome or reading.get("state") == "error" else owner_reason(spec, reading)
+    if asks:
+        # Stop reading: only a person can settle this (finding 5, 6). The card asks them.
         cur.execute(
             "UPDATE workflow_watch_state SET next_check_at=%s WHERE task_id=%s",
             (sql.ts(sql.from_now(365 * 86400)), tid),
         )
-        reading["timed_out"] = True
+        reading["needs_owner"] = asks
     from portal_backend.events import publish_event
 
     publish_event(cur, w["container_id"], None, "workflow_watch_reading",
                   {"workflow_id": w["id"], "task_id": tid, "state": reading.get("state")})
+    if asks:
+        publish_event(cur, w["container_id"], str(w["owner_human_id"]), "workflow_watch_needs_owner",
+                      {"workflow_id": w["id"], "task_id": tid, "state": reading.get("state"), "why": asks})
     if outcome:
         owner = WorkflowActor(str(w["owner_human_id"]), True)
         finish(svc, w, tid, owner, outcome=outcome,

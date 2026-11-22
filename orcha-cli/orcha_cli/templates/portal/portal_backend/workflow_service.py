@@ -562,6 +562,9 @@ class WorkflowService:
             if w.get("semantics_version") == 2
             else {}
         )
+        histories = (
+            workflow_steps.history_by_task(self.cur, wid) if w.get("semantics_version") == 2 else {}
+        )
         for tid, task in s["tasks"].items():
             executions = executions_by_task[tid]
             live = next((e for e in executions if e["state"] in LIVE_EXECUTIONS), None)
@@ -614,6 +617,7 @@ class WorkflowService:
                 if workflow_steps.kind_of(task) == "watch"
                 else None
             )
+            row["history"] = histories.get(tid) or None
             row["repeat_group_id"] = group_of[tid]["id"] if tid in group_of else None
             row["round"] = group_of[tid]["current_round"] if tid in group_of else None
             report = reports.get((tid, task["work_revision"]))

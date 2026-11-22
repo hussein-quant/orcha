@@ -12,7 +12,7 @@ import {
 } from "./icons";
 import {
   clock, elapsed, flowApi, kindOf, stateOf, STATE_WORD, watchWord,
-  type FlowDetail, type FlowTask, type Proof, type ProofStep, type StepState,
+  type FlowDetail, type FlowTask, type Proof, type ProofStep, type StepState, outcomeWord,
 } from "./flowApi";
 import { flowHref } from "./Board";
 import { Circuit, Figure, KindChip, KindGlyph, Orb, StateChip, type CircuitStage, type OrbTone } from "./kit";
@@ -44,7 +44,14 @@ function stageState(tasks: FlowTask[]): StepState {
 function resultWords(t: FlowTask): string {
   const st = stateOf(t);
   const kind = kindOf(t);
+  const ran = t.history?.filter((h) => h.round) ?? [];
+  if (st === "skipped" && ran.length) {
+    const last = ran[ran.length - 1];
+    return `Ran in round ${last.round}: ${last.outcome.replace(/_/g, " ")}${last.findings?.length ? ` · ${last.findings.length} ${last.findings.length === 1 ? "finding" : "findings"}` : ""}. Not needed after that.`;
+  }
   if (st === "skipped") return t.route_state === "not_selected" ? "Not needed on this path" : "Skipped";
+  if (kind === "watch" && t.watch?.needs_owner && st === "asking") return t.watch.needs_owner;
+  if (kind === "watch" && t.watch?.latest?.state === "error") return `Couldn't read the status${t.watch.error ? `: ${t.watch.error}` : ""}. Trying again.`;
   if (kind === "watch" && t.watch?.latest) return `${watchWord(t.watch.latest.state)}${t.watch.latest.summary ? `: ${t.watch.latest.summary}` : ""}`;
   const o = t.reported_outcome;
   if (st === "done" || st === "failed") {
@@ -115,7 +122,7 @@ export function ProofPack({ proof, onFrame }: { proof: Proof; onFrame: (id: stri
               })() : null}
               {p.coverage ? (
                 <div className="fl-meter" data-warn={p.coverage.warn} title={`${p.coverage.validated} validated scenarios; warns below ${p.coverage.threshold}`}>
-                  <span>Coverage: <b className="fl-mono" style={{ color: "var(--v2-text)" }}>{p.coverage.validated}</b> validated{p.coverage.threshold ? ` of ${p.coverage.threshold} wanted` : ""}{p.coverage.draft ? ` · ${p.coverage.draft} drafts` : ""}</span>
+                  <span>Coverage: <b className="fl-mono" style={{ color: "var(--v2-text)" }}>{p.coverage.validated}</b> validated{p.coverage.threshold ? ` of ${p.coverage.threshold} wanted` : ""}{p.coverage.shared ? ` (${p.coverage.shared} shared)` : ""}{p.coverage.draft ? ` · ${p.coverage.draft} drafts` : ""}</span>
                   <span className="fl-meter-bar"><i style={{ ["--p" as string]: Math.min(1, p.coverage.validated / Math.max(1, p.coverage.threshold || p.coverage.validated || 1)) }} />
                     {p.coverage.threshold ? <span className="fl-meter-mark" style={{ ["--t" as string]: 1 }} /> : null}</span>
                 </div>
@@ -217,7 +224,7 @@ function GateCard({ d, t, actor, onDone, onFrame, after }: { d: FlowDetail; t: F
       <div className="fl-gate-head">
         <span className="fl-ask-node" aria-hidden="true"><Hand size={16} /></span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h2 id={`gate-${t.id}`}>{t.title}: Go, No-go or Send back</h2>
+          <h2 id={`gate-${t.id}`}>{t.title}: {t.outcomes.some((o) => o.name === "send_back") ? "Go, No-go or Send back" : "Go or No-go"}</h2>
           <p>{d.dry_run ? "Dry run: the QA counts are canned; coverage is this project's real Quality data. " : ""}Nothing reaches a store or production before you say Go here.{proof ? ` Proof ${proof.digest}.` : ""}</p>
         </div>
       </div>
@@ -282,13 +289,27 @@ function PersonCard({ d, t, actor, onDone }: { d: FlowDetail; t: FlowTask; actor
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const loop = t.awaiting_loop_decision;
-  const choices = loop
-    ? [...t.outcomes.filter((o) => t.routes.find((r) => r.outcome === o.name)?.destination !== "ask_owner").map((o) => ({ key: o.name, word: kindOf(t) === "watch" ? `Mark it ${o.name.replace(/_/g, " ")}` : o.name.replace(/_/g, " ") }))]
-    : t.outcomes.map((o) => ({ key: o.name, word: o.name.replace(/_/g, " ") }));
-  const title = loop === "ask_owner"
-    ? `${t.title}: ${t.reported_outcome?.outcome?.replace(/_/g, " ") ?? "needs you"}`
-    : loop === "limit_reached" ? `${t.title}: the loop ran out of rounds` : loop ? `${t.title} needs a decision` : t.title;
-  const why = loop === "ask_owner" ? (kindOf(t) === "watch" ? "The store said no. Once it's fixed and resubmitted, mark it live; or stop the release." : "The step asked you what happens next.")
+  const settle = !loop && kindOf(t) === "watch" && !!t.watch?.needs_owner;
+  const stateFor = (outcome: string) => Object.entries(t.step?.watch?.state_map ?? {}).find(([, o]) => o === outcome)?.[0];
+  const ranked = (names: string[]) => [...names].sort((a, b) => (a === "resubmit" ? -1 : b === "resubmit" ? 1 : 0));
+  const choices = settle
+    ? (t.watch?.outcomes ?? []).filter((o) => stateFor(o))
+      .sort((a, b) => Number(t.outcomes.find((o) => o.name === b)?.kind === "success") - Number(t.outcomes.find((o) => o.name === a)?.kind === "success"))
+      .map((o) => ({ key: o, word: outcomeWord(o) }))
+    : loop
+      ? ranked(t.outcomes.filter((o) => t.routes.find((r) => r.outcome === o.name)?.destination !== "ask_owner").map((o) => o.name))
+        .map((name) => ({ key: name, word: kindOf(t) === "watch" ? outcomeWord(name) : name.replace(/_/g, " ") }))
+      : t.outcomes.map((o) => ({ key: o.name, word: o.name.replace(/_/g, " ") }));
+  const resubmits = t.outcomes.some((o) => o.name === "resubmit");
+  const title = settle ? `${t.title}: only you can confirm this`
+    : loop === "ask_owner"
+      ? `${t.title}: ${t.reported_outcome?.outcome?.replace(/_/g, " ") ?? "needs you"}`
+      : loop === "limit_reached" ? `${t.title}: the loop ran out of rounds` : loop ? `${t.title} needs a decision` : t.title;
+  const why = settle ? t.watch!.needs_owner!
+    : loop === "ask_owner" ? (kindOf(t) === "watch"
+      ? resubmits ? "App Review said no. Fix and resubmit goes back through a fix, a new build, QA and your go-ahead before anything is sent again."
+        : "The store said no. Say what happened, or stop the release."
+      : "The step asked you what happens next.")
     : loop === "limit_reached" ? "Raise the limit for one more round, accept it as it is, or stop." : t.description ?? t.definition_of_done;
   async function go(key: string) {
     setBusy(key); setError("");
@@ -299,7 +320,8 @@ function PersonCard({ d, t, actor, onDone }: { d: FlowDetail; t: FlowTask; actor
         else if (key === "__raise") out = await flowApi.loopDecision(d, actor, { kind: "raise_limit", task_id: t.id, new_max_rounds: (d.repeat_groups?.find((g) => g.review_task === t.id)?.max_rounds ?? 1) + 1, note });
         else if (key === "__accept") out = await flowApi.loopDecision(d, actor, { kind: "accept_override", task_id: t.id, note: note || "Accepted as it is." });
         else out = await flowApi.loopDecision(d, actor, { kind: "pick_outcome", task_id: t.id, outcome: key, note });
-      } else out = await flowApi.decide(d.id, t.id, actor, { outcome: key, reason: note || undefined });
+      } else if (settle) out = await flowApi.resolve(d.id, t.id, actor, stateFor(key)!);
+      else out = await flowApi.decide(d.id, t.id, actor, { outcome: key, reason: note || undefined });
       onDone(out, `${t.title}: ${key.replace(/^__/, "").replace(/_/g, " ")}.`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   }
@@ -310,7 +332,7 @@ function PersonCard({ d, t, actor, onDone }: { d: FlowDetail; t: FlowTask; actor
         <div style={{ flex: 1, minWidth: 0 }}><h2 id={`p-${t.id}`}>{title}</h2><p>{why}</p></div>
       </div>
       {kindOf(t) === "watch" && t.watch ? <WatchLine t={t} /> : null}
-      <textarea className="fl-textarea" placeholder="A note (optional)" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Note" />
+      {settle ? null : <textarea className="fl-textarea" placeholder="A note (optional)" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Note" />}
       <div className="fl-gate-buttons">
         {choices.map((c, i) => (
           <button key={c.key} type="button" className="fl-btn" data-variant={i === 0 ? "primary" : undefined} data-size="lg" disabled={!!busy} onClick={() => go(c.key)} data-outcome={c.key}>
@@ -331,6 +353,7 @@ function WatchLine({ t }: { t: FlowTask }) {
   const runs: { state: string; at: string | undefined }[] = [];
   for (const o of obs) if (!runs.length || runs.at(-1)!.state !== o.state) runs.push({ state: o.state, at: o.observed_at ?? o.created_at });
   if (!runs.length) return <span className="fl-muted" style={{ fontSize: 12 }}>No reading yet.</span>;
+  const failing = t.watch?.latest?.state === "error";
   return (
     <div className="fl-watch" aria-label="Status readings">
       {runs.map((r, i) => (
@@ -339,6 +362,28 @@ function WatchLine({ t }: { t: FlowTask }) {
           <span className="fl-watch-step" data-state={r.state} data-last={i === runs.length - 1}>{watchWord(r.state)}{r.at ? <span className="fl-muted fl-mono"> {clock(r.at)}</span> : null}</span>
         </Fragment>
       ))}
+      {failing ? <p className="fl-problem" role="status"><TriangleAlert size={13} aria-hidden="true" />Couldn't read the status{t.watch?.error ? `: ${t.watch.error}` : ""}. This is the status command failing, not the store; it tries again.</p> : null}
+    </div>
+  );
+}
+
+/** What a step reported in each round, so a step skipped later still shows what it found. */
+function Rounds({ t }: { t: FlowTask }) {
+  const rows = t.history ?? [];
+  if (rows.length < 2 && !(rows.length === 1 && stateOf(t) === "skipped")) return null;
+  return (
+    <div className="fl-rounds">
+      <h4>Rounds</h4>
+      <ol>
+        {rows.map((h, i) => (
+          <li key={i}>
+            <span className="fl-chip" data-tone={/fail|fix|reject|changes|no_go|send_back/.test(h.outcome) ? "warn" : "ok"}>{h.round ? `Round ${h.round}` : `Report ${i + 1}`}</span>
+            <b>{h.outcome.replace(/_/g, " ")}</b>
+            {h.note ? <span className="fl-muted">{h.note}</span> : null}
+            {h.findings?.length ? <ul>{h.findings.map((f, j) => <li key={j}>{f}</li>)}</ul> : null}
+          </li>
+        ))}
+      </ol>
     </div>
   );
 }
@@ -387,6 +432,7 @@ function StepRow({ d, t, landed, take, proofStep, actor, onSaved, onFrame, open,
             {t.reported_outcome?.findings?.length ? (
               <ul className="fl-findings">{t.reported_outcome.findings.map((f) => <li key={f.id}><span className="fl-chip" data-tone={f.severity === "blocker" || f.severity === "major" ? "danger" : "muted"}>{f.severity}</span>{f.text}</li>)}</ul>
             ) : null}
+            <Rounds t={t} />
             <p className="fl-muted">Done when: {t.definition_of_done}</p>
             {t.step?.build ? <p className="fl-mono fl-muted">Build: {[t.step.build.type, t.step.build.version, t.step.build.build, t.step.build.env].filter(Boolean).join(" · ")}</p> : null}
             {t.step?.secrets?.length ? <p className="fl-muted">Uses secrets by name only: {t.step.secrets.join(", ")}</p> : null}
@@ -529,7 +575,19 @@ export function Run() {
   const outcome = d.status === "completed" ? "Finished. Every step that ran is done." : d.status === "cancelled" ? "Stopped." : !d.launch_enabled ? "A draft: nothing runs until you start it."
     : gates.length ? `${gates[0].title}: the proof is ready for your decision.` : people.length ? `${people[0].title} needs you.` : settled ? "Every step is done. Close it to record the release."
     : running ? `${running.title}: ${resultWords(running).replace(/\.+$/, "")}.` : "Waiting for the next step.";
-  const afterGate = (g: FlowTask) => d.tasks.filter((t) => t.depends_on.includes(g.id));
+  const afterGate = (g: FlowTask) => {
+    // Everything this go-ahead releases: down the line until the next gate, which asks again.
+    const out: FlowTask[] = [];
+    const seen = new Set<string>([g.id]);
+    let edge = [g.id];
+    while (edge.length) {
+      const next = d.tasks.filter((t) => !seen.has(t.id) && t.depends_on.some((x) => edge.includes(x)));
+      next.forEach((t) => seen.add(t.id));
+      out.push(...next.filter((t) => t.route_state !== "not_selected"));
+      edge = next.filter((t) => kindOf(t) !== "gate").map((t) => t.id);
+    }
+    return out.filter((t) => kindOf(t) !== "gate");
+  };
   const proofOf = (t: FlowTask) => proof?.platforms.flatMap((p) => p.steps).find((s) => s.task_id === t.id);
   const saved = (x: FlowDetail, words?: string) => { setD(x); if (words) say(words); };
 
@@ -553,7 +611,7 @@ export function Run() {
             </div>
             <p className="fl-stage-line" aria-live="polite">{outcome}</p>
             {notice && !d.launch_enabled ? <p className="fl-problem" data-tone="warn" role="status"><TriangleAlert size={13} aria-hidden="true" />{notice}</p> : null}
-            <p className="fl-stage-line fl-muted fl-mono">{done}/{live.length} steps · {d.created_at ? elapsed(d.created_at, now) : ""}{justStarted && d.launch_enabled && !over && done === 0 ? " · just started" : ""}</p>
+            <p className="fl-stage-line fl-muted fl-count">{done} of {live.length} steps done · {d.created_at ? elapsed(d.created_at, now) : ""}{justStarted && d.launch_enabled && !over && done === 0 ? " · just started" : ""}</p>
           </div>
           <div className="fl-stage-actions">
             <button type="button" className="fl-btn" data-variant="ghost" onClick={() => { void navigator.clipboard?.writeText(window.location.href); say("Link copied."); }} aria-label="Copy link"><Copy size={14} /></button>

@@ -1,5 +1,5 @@
 // Generated from FastAPI OpenAPI slices. DO NOT EDIT.
-// Workflow source SHA-256: 2c4027c03694c790d027bf1b459e43a3711c0baf69d464e972938bf949d3bb7a
+// Workflow source SHA-256: 75677376e9973b9552d2a43b48142b240d414d37d13af56fc6ec8e1cae410a84
 // Evidence GET source SHA-256: f2a794298f992bd3ff3955fa5d6aefc30a97e373794a3c1e9d03c8f46796853e
 // Regenerate with tools/generate-workflow-contract.mjs and both source files.
 
@@ -656,6 +656,8 @@ export type WatchSpec = {
   "timeout_h"?: number;
   "state_map"?: Record<string, string>;
   "terminal_states"?: Array<string>;
+  "owner_states"?: Array<string>;
+  "owner_hint"?: string | null;
   "dry_run_states"?: Array<string>;
 };
 
@@ -848,6 +850,7 @@ export type WorkflowTask = {
   "reported_outcome"?: ReportedOutcome | null;
   "step"?: StepSpec | null;
   "watch"?: Record<string, unknown> | null;
+  "history"?: Array<Record<string, unknown>> | null;
 };
 
 export type WorkflowTaskChoice = {
@@ -4442,6 +4445,25 @@ export const workflowSchemas = {
         "type": "array",
         "maxItems": 20
       },
+      "owner_states": {
+        "items": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "type": "array",
+        "maxItems": 20
+      },
+      "owner_hint": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 500
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "dry_run_states": {
         "items": {
           "type": "string",
@@ -5653,6 +5675,20 @@ export const workflowSchemas = {
           {
             "additionalProperties": true,
             "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "history": {
+        "anyOf": [
+          {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
           },
           {
             "type": "null"

@@ -1,10 +1,62 @@
 # Mobile App Release: what shipped, the contracts, and what is deferred
 
-Branch `feat/mobile-release-template` (from `origin/main` 1ad8ce3b). Brief: nyumba-connect
+Branch `feat/mobile-release-template` (from `origin/main` 1ad8ce3b). Template version 2. Brief: nyumba-connect
 `docs/embodent/mobile-release-template-brief.md`. Rule kept throughout: **the workflow engine's logic is
 unchanged**. Templates compile to an ordinary `WorkflowCreate` (semantics v2), and the new step kinds finish
 through the engine's own outside-result path, so routes, loops, history, acceptance and the finish check behave
 exactly as before. Migration 102 / SQLite 032 is additive only.
+
+## Round 2: the nyumba-connect dry-run findings (2026-11-22)
+Findings file: nyumba-connect `docs/embodent/dry-run-findings-2026-11-22.md`. Template version 2.
+
+**Release home (new).** Picking Mobile App Release opens `/workflows/new?template=mobile_app_release&home=1`
+(`frontend/src/pages/flow/ReleaseHome.tsx`). It runs the template's `inventory_command` (default
+`python3 scripts/release-adapters/release_inventory.py`, from the project root, no shell, kept 2 minutes,
+`GET /api/containers/{cid}/workflow-templates/{key}/inventory[?refresh=true]`, a person must ask). It shows, per
+platform, what's live, what's in review, the last release tag, the PRs merged since and the next version and
+build, then the open PRs. One Start pre-fills everything from `data.release_params`: only the iOS release type is
+asked. Agents are guessed from their names and can be changed. "Customize steps" opens the editor with the same
+values.
+
+1. **Version and build per platform.** New parameters `android_version` (empty = the iOS version) and
+   `android_version_code`. `build` is now "iOS build". Android steps, the Play watch, the Android QA steps'
+   build under test and the title use the Android values: "Release iOS 1.0.2 (8) · Android 1.0.20 (20)".
+2. **A rejection goes back through a gate.** The App Store rejection card offers **Fix and resubmit** first. It
+   runs the new "Fix and resubmit" stage, a loop of up to 3 rounds: fix → merge → new iOS build → processing →
+   check the fix on iOS → **your go-ahead to resubmit** → resubmit → App Store review again. A rejection there
+   asks you again.
+   - Engine fix this needed: an outcome routed to "ask the owner" no longer unselects the step's branches before
+     the owner picks. Before, the pick could point at a step already marked not needed.
+3. **Approved is not live.** The review watch maps approved / pending_developer_release to **approved** and
+   ready_for_sale to live. With a manual release, approved leads to **Release it on the App Store** (a person
+   step) and then **Check it's live on the App Store** (a watch for ready_for_sale). With an automatic release,
+   approved goes straight to that live check.
+4. **Round history.** Each step carries `history` (every outcome it reported, with its loop round). The run view
+   shows "Rounds" in the step's detail. A step skipped later reads "Ran in round 1: fix · 1 finding. Not needed
+   after that."
+5. **Play "unknown" is settled by the owner.** `watch.owner_states: ["unknown"]` stops the readings and asks:
+   "Only you can confirm it: check Play Console", with It's live / It was halted / It was rejected. `halted` is a
+   final state. The dry run plays in_review → unknown and asks, as the real one will.
+6. **Unmapped final states ask the owner** (`withdrawn`, `developer_rejected`, …) instead of polling for a week.
+7. **Adapter errors are errors.** A crash, a non-zero exit with no output, unreadable output, or the adapter's own
+   `state: "error"` is recorded as `error`: retried, never routed on, and shown as "Couldn't read the status: …
+   This is the status command failing, not the store". The output is read from the JSON object that ends it, so
+   log lines with braces before it are fine.
+8. **next-release ignores dry runs.** From a dry run it uses the last real release of the same template. After a
+   release that went live, the version moves on (1.0.2 → 1.0.3, Android too) with the next build. After one that
+   didn't, only the builds go up.
+
+Nits:
+- The step counter reads "N of M steps done", in the regular font. At Start it showed 0; the mono font's slashed
+  zero looked like a 3.
+- "Review and merge" no longer promises a send-back: comment on the PR, then mark it merged.
+- Go lists every irreversible step it releases, down to the next gate, including Deploy the website to
+  production.
+- A finished workflow says "This workflow is already finished.", not "Resume…" (same blocker code).
+- "Approve the new scenarios" points at the gate card.
+- Coverage counts shared scenarios on every platform, as Quality does: Android 4 (3 shared), not 1.
+- The command help says `~` and `$VARS` aren't expanded.
+- A gate for one platform shows only that platform's proof, led by the steps it lists first.
 
 ## Decisions on the brief's open questions (§9)
 1. Ported into Embodent only (`frontend/src/pages/flow/`), no shared package yet.

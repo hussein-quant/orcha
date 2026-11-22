@@ -165,6 +165,10 @@ class WatchSpec(Input):
     timeout_h: float = Field(default=72, gt=0, le=24 * 30)
     state_map: dict[str, OutcomeName] = Field(default_factory=dict)
     terminal_states: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=20)
+    # States only a person can settle (Google Play's "unknown"): reading one stops the readings and
+    # asks the owner, with `owner_hint` saying where to look.
+    owner_states: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=20)
+    owner_hint: str | None = Field(default=None, max_length=500)
     # Dry run only: the states the adapter "reports", one per reading.
     dry_run_states: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=20)
 
@@ -556,6 +560,8 @@ class WorkflowTask(BaseModel):
     reported_outcome: ReportedOutcome | None = None
     step: StepSpec | None = None
     watch: dict[str, Any] | None = None
+    # Every outcome this step reported, oldest first, with the loop round it belonged to.
+    history: list[dict[str, Any]] | None = None
 
 
 class Progress(BaseModel):

@@ -44,6 +44,26 @@ export interface TemplateSummary {
   key: string; name: string; version: number; description: string; icon: string; tone: string;
   source: "builtin" | "project"; stage_count: number; step_count: number; gates: number; watches: number;
   outward: number; thread: ThreadDot[]; base_key?: string | null; base_version?: number | null; update_available?: boolean;
+  /** The template can read the project's release inventory: it opens on the Release home. */
+  has_inventory?: boolean;
+}
+
+export interface InventoryPlatform {
+  last_release?: { tag: string; version?: string; build?: number; date?: string } | null;
+  live?: { version?: string | null; since?: string | null; source?: string; url?: string; build_id?: string | string[] | null } | null;
+  staging?: { url?: string; build_id?: string | string[] | null } | null;
+  in_flight?: { state?: string; summary?: string; terminal?: boolean } | null;
+  changes: { sha: string; pr: number | null; title: string; merged_at?: string }[];
+  next?: { version: string | null; build: number | null; reason?: string } | null;
+}
+export interface Inventory {
+  state: string; summary?: string | null; error?: string | null; read_at: string; cached: boolean; command: string;
+  data: {
+    platforms?: Partial<Record<Platform, InventoryPlatform>>;
+    open_prs?: { number: number; title: string; url: string; draft: boolean; branch: string; updated_at?: string; platforms: Platform[] }[];
+    release_params?: Record<string, unknown> & { platforms?: Platform[] };
+    warnings?: string[];
+  };
 }
 
 export interface TemplateParam {
@@ -56,7 +76,7 @@ export interface TemplateRole { key: string; label: string; kind: "human" | "ai"
 
 export interface CompiledStep {
   client_key: string; title: string; kind: StepKind; stage: string; role: string | null;
-  required: boolean; locked_reason: string | null; removed: boolean; removed_why?: "platform" | "removed";
+  required: boolean; locked_reason: string | null; removed: boolean; removed_why?: "platform" | "condition" | "removed";
   platforms: Platform[]; irreversible: boolean; outward: string | null; done_when: string; description: string;
   after: string[]; loop: string | null; branches: { outcome: string; destination: string; to?: string | null }[];
   assignee_id: string | null; added: boolean;
@@ -92,6 +112,8 @@ export const flowApi = {
   importTemplate: (cid: string, actor: string | null, template: unknown) =>
     call<TemplateSummary>("POST", `/api/containers/${encodeURIComponent(cid)}/workflow-templates`, actor, { template }),
   exportUrl: (cid: string, key: string) => `/api/containers/${encodeURIComponent(cid)}/workflow-templates/${encodeURIComponent(key)}/export`,
+  inventory: (cid: string, key: string, actor: string | null, refresh: boolean, signal?: AbortSignal) =>
+    call<Inventory>("GET", `/api/containers/${encodeURIComponent(cid)}/workflow-templates/${encodeURIComponent(key)}/inventory?refresh=${refresh}`, actor, undefined, signal),
   board: (cid: string, actor: string | null, finished: boolean, signal?: AbortSignal) =>
     call<Board>("GET", `/api/containers/${encodeURIComponent(cid)}/workflow-board?include_finished=${finished}`, actor, undefined, signal),
   detail: (wid: string, actor: string | null, signal?: AbortSignal) =>
@@ -156,9 +178,20 @@ export interface FlowTask {
   reported_outcome?: { outcome: string; findings?: { id: string; text: string; severity: string }[]; note?: string; reporter_kind?: string | null; applied?: boolean } | null;
   acceptance?: { actor_alias?: string; accepted_at?: string; created_at?: string } | null;
   step?: StepSpec | null;
-  watch?: { latest: WatchReading | null; observations: WatchReading[]; next_check_at?: string | null; attempts: number } | null;
+  watch?: {
+    latest: WatchReading | null; observations: WatchReading[]; next_check_at?: string | null; attempts: number;
+    /** The adapter itself failed: not a store state. */
+    error?: string | null;
+    /** Readings stopped: only a person can settle this one. */
+    needs_owner?: string | null;
+    outcomes?: string[];
+  } | null;
+  /** Every outcome this step reported, oldest first, with its loop round. */
+  history?: StepReport[] | null;
   withdrawn_at?: string | null;
 }
+
+export interface StepReport { round: number | null; outcome: string; note?: string; findings?: string[]; reported_at?: string | null; reporter_kind?: string | null }
 
 export interface FlowDetail {
   id: string; container_id: string; title: string; goal: string; owner_human_id: string;
@@ -182,7 +215,7 @@ export interface ProofStep {
 export interface Proof {
   workflow_id: string; gate_task_id: string | null; title: string; dry_run: boolean; params: Record<string, unknown>;
   platforms: { platform: string; word: string; steps: ProofStep[]; headline: string; totals: ProofStep["counts"];
-    coverage: { platform: string; validated: number; draft: number; paused: number; threshold: number; warn: boolean } | null; checked: boolean }[];
+    coverage: { platform: string; validated: number; shared?: number; draft: number; paused: number; threshold: number; warn: boolean } | null; checked: boolean }[];
   findings: { items: { id: string; title: string; severity: string; state: string; fixed_ref?: string | null; frame_ids: string[]; platform?: string | null }[]; tally: Record<string, number> };
   unit_only: { task_id: string; title: string }[];
   watches: (NonNullable<FlowTask["watch"]> & { task_id: string; title: string; platforms: string[] })[];
@@ -212,6 +245,7 @@ export function stateOf(t: FlowTask): StepState {
   }
   if (t.status === "in_progress") return "running";
   if (t.status === "needs_verification") return "review";
+  if (t.status === "ready" && t.watch?.needs_owner) return "asking";
   if (t.status === "ready") {
     const kind = kindOf(t);
     return kind === "person" || kind === "gate" ? "asking" : "running";
@@ -260,3 +294,10 @@ export function elapsed(fromIso: string | null | undefined, now = Date.now()): s
   if (h < 48) return `${h}h ${m % 60}m`;
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
+
+/** Words for outcomes a person picks on a card. */
+export const OUTCOME_WORD: Record<string, string> = {
+  resubmit: "Fix and resubmit", live: "It's live", approved: "It was approved", rejected: "It was rejected",
+  halted: "It was halted", released: "I released it", valid: "It's valid", invalid: "It's invalid",
+};
+export const outcomeWord = (name: string) => OUTCOME_WORD[name] ?? name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());

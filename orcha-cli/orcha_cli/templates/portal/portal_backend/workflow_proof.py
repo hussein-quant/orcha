@@ -98,7 +98,7 @@ def qa_step_view(svc, w, task) -> dict:
         else status.replace("_", " ")
     )
     return {
-        "task_id": task["id"], "title": task["title"], "platform": platform,
+        "task_id": task["id"], "key": (steps.spec_of(task) or {}).get("key"), "title": task["title"], "platform": platform,
         "scope": spec.get("scope"), "kind": qa.get("kind"), "status": status, "word": word,
         "outcome": latest["outcome_name"] if latest else None,
         "rounds": _rounds(cur, task["id"]),
@@ -116,13 +116,17 @@ def coverage(cur, cid, platforms, threshold) -> list[dict]:
     for p in platforms:
         if p == "api":
             continue
+        # A shared scenario runs on every platform of the project, as Quality lists it.
         cur.execute(
-            "SELECT status, count(*) AS n FROM qa_scenarios WHERE container_id=%s AND platform=%s GROUP BY status",
-            (cid, p),
+            "SELECT status, count(*) AS n, sum(CASE WHEN platform<>%s AND shared THEN 1 ELSE 0 END) AS shared_n "
+            "FROM qa_scenarios WHERE container_id=%s AND (platform=%s OR shared) GROUP BY status",
+            (p, cid, p),
         )
-        by = {r["status"]: int(r["n"]) for r in cur.fetchall()}
+        rows = cur.fetchall()
+        by = {r["status"]: int(r["n"]) for r in rows}
+        shared = sum(int(r["shared_n"] or 0) for r in rows if r["status"] == "validated")
         validated = by.get("validated", 0)
-        out.append({"platform": p, "validated": validated, "draft": by.get("draft", 0),
+        out.append({"platform": p, "validated": validated, "shared": shared, "draft": by.get("draft", 0),
                     "paused": by.get("paused", 0), "threshold": threshold,
                     "warn": threshold > 0 and validated < threshold})
     return out
@@ -175,16 +179,27 @@ def build(svc, wid, gate_tid: str | None = None) -> dict:
         view = qa_step_view(svc, w, t)
         by_platform.setdefault(view["platform"] or "other", []).append(view)
     platforms = params.get("platforms") or sorted(p for p in by_platform if p in PLATFORM_WORD)
+    gate_platforms = (steps.spec_of(gate) or {}).get("platforms") if gate else None
+    if gate_platforms:
+        # A gate for one platform (the iOS resubmission) shows that platform's proof only.
+        platforms = [p for p in platforms if p in gate_platforms] or list(gate_platforms)
+        by_platform = {k: v for k, v in by_platform.items() if k in platforms}
+    order = list((gate_spec or {}).get("proof_steps") or [])
     threshold = int(params.get("coverage_threshold") or 0)
     cover = {c["platform"]: c for c in coverage(cur, w["container_id"], platforms, threshold)}
     commits = {}
     pack = []
     for p in [*platforms, *[x for x in by_platform if x not in platforms]]:
         views = by_platform.get(p, [])
-        full = [v for v in views if v["scope"] == "full"]
-        headline = (full or views or [None])[0]
+        if order:
+            # The gate names its proof in order: the first one it lists leads.
+            views = sorted(views, key=lambda v: order.index(v.get("key")) if v.get("key") in order else len(order))
+            lead = views[:1]
+        else:
+            lead = [v for v in views if v["scope"] == "full"]
+        headline = (lead or views or [None])[0]
         totals = {"passed": 0, "failed": 0, "blocked": 0, "skipped": 0}
-        for v in (full or views):
+        for v in (lead or views):
             for k in totals:
                 totals[k] += v["counts"][k]
         for v in views:

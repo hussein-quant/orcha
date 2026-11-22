@@ -79,7 +79,7 @@ export function Board() {
   const active = rows.filter((r) => !r.finished);
   const done = rows.filter((r) => r.finished);
   const empty = data && !active.length && !data.finished_count;
-  const pick = (key: string) => navigate(flowHref("/workflows/new", cid, { template: key }));
+  const pick = (key: string) => navigate(flowHref("/workflows/new", cid, { template: key, ...(templates?.find((t) => t.key === key)?.has_inventory ? { home: "1" } : {}) }));
 
   return (
     <div className="fl-wrap">

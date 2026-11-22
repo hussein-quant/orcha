@@ -482,7 +482,10 @@ def progress_and_completion(
     def add(code, message):
         blockers.append({"code": code, "message": message})
 
-    if workflow["status"] != "active" or workflow.get("container_status") != "active":
+    if workflow["status"] == "completed":
+        # Nothing to resume: a finished workflow just can't be finished again (same code, honest words).
+        add("workflow_not_active", "This workflow is already finished.")
+    elif workflow["status"] != "active" or workflow.get("container_status") != "active":
         add("workflow_not_active", "Resume the workflow and project before finishing.")
     if not workflow["launch_enabled"]:
         add("workflow_not_started", "Start the workflow before finishing.")

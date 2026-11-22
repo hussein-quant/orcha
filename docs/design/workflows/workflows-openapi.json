@@ -6902,6 +6902,27 @@
             "maxItems": 20,
             "title": "Terminal States"
           },
+          "owner_states": {
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Owner States"
+          },
+          "owner_hint": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Hint"
+          },
           "dry_run_states": {
             "items": {
               "type": "string",
@@ -8299,6 +8320,21 @@
               }
             ],
             "title": "Watch"
+          },
+          "history": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History"
           }
         },
         "type": "object",

@@ -408,3 +408,4 @@ missing.
 - First versioned release. Everything before 0.2.0 was installed from a
   source clone (`uv tool install --from ... orcha-cli`).
 - Workflows: a blank workflow now opens a composer in the new style (one line of steps, Enter to add, paste a plan, loops and outcomes inline, live check, Save as draft or Save and start). Same draft, checks and create path as before.
+- Mobile App Release v2: Release home pre-filled from the project's release inventory; a version and build per platform; Fix and resubmit through a new go-ahead; manual iOS release is a person step before the live check; round history in the run view; watch errors and owner-only states told apart; next-release ignores dry runs.

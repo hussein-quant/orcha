@@ -658,6 +658,51 @@
 .fl-cmp-existing .fl-cmp-after { max-width: 100%; justify-content: space-between; }
 @media (max-width: 640px) { .fl-shelf-row { grid-template-columns: 20px minmax(0, 1fr) auto; } .fl-shelf-who { display: none; } }
 
+/* ---- what a step reported in each round ------------------------------------------------- */
+.fl-rounds { margin: 4px 0 8px; }
+.fl-rounds ol { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.fl-rounds ol > li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; }
+.fl-rounds ol > li > b { text-transform: capitalize; }
+.fl-rounds ul { flex-basis: 100%; margin: 0 0 0 4px; padding-left: 16px; color: var(--v2-text-2); font-size: 12px; }
+
+/* ---- the Release home ------------------------------------------------------------------- */
+.fl-rh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.fl-rh-card { display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 14px; border: 1px solid var(--v2-border); background: var(--v2-surface);
+  animation: tcard-in 420ms var(--fl-rise) both; animation-delay: calc(var(--i, 0) * 60ms); transition: border-color 200ms ease; }
+.fl-rh-card[data-picked="true"] { border-color: color-mix(in srgb, var(--v2-accent) 45%, var(--v2-border)); }
+.fl-rh-card[data-picked="false"] { opacity: 0.78; }
+.fl-rh-skeleton { min-height: 260px; background: linear-gradient(100deg, var(--v2-surface) 30%, var(--v2-hover-solid) 50%, var(--v2-surface) 70%); background-size: 200% 100%; animation: rh-shimmer 1.4s linear infinite; }
+@keyframes rh-shimmer { to { background-position: -200% 0; } }
+.fl-rh-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.fl-rh-card-head b { font-size: 15px; }
+.fl-rh-facts { display: grid; gap: 6px; margin: 0; }
+.fl-rh-facts > div { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 12.5px; }
+.fl-rh-facts dt { color: var(--v2-text-3); }
+.fl-rh-facts dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-rh-facts small { color: var(--v2-text-3); font-family: var(--v2-font-sans); }
+.fl-rh-next { display: flex; flex-direction: column; gap: 2px; padding: 10px; border-radius: 10px; background: var(--v2-band); border: 1px solid var(--v2-border); }
+.fl-rh-version { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
+.fl-rh-version span { color: var(--v2-text-2); font-weight: 500; }
+.fl-rh-changes ul { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.fl-rh-changes li { display: flex; gap: 6px; font-size: 12.5px; min-width: 0; }
+.fl-rh-changes li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-text-2); }
+.fl-rh-changes p { margin: 4px 0 0; font-size: 12.5px; }
+.fl-rh-prs ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.fl-rh-prs li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+.fl-rh-prs li:hover { background: var(--v2-hover); }
+.fl-rh-prs a { display: inline-flex; align-items: center; gap: 8px; min-width: 0; text-decoration: none; font-size: 13px; }
+.fl-rh-prs a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-rh-prs h2 { display: flex; align-items: center; gap: 6px; }
+.fl-rh-tags { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.fl-rh-warn { font-size: 12.5px; color: var(--v2-warn); }
+.fl-rh-warn summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.fl-rh-warn ul { margin: 6px 0 0; color: var(--v2-text-2); }
+.fl-rh-start { align-items: center; }
+.fl-rh-start-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.fl-rh-label { font-size: 14px; }
+.fl-rh-roles { display: flex; gap: 6px; flex-wrap: wrap; }
+.fl-spinning { animation: spin-ring 900ms linear infinite; }
+
 /* ---- reduced motion: loops stop, entrances become a short fade, nothing travels ---------- */
 @media (prefers-reduced-motion: reduce) {
   .fl *, .fl *::before, .fl *::after { animation-duration: 200ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; }
@@ -667,7 +712,7 @@
   }
   .fl-line-rule { animation: none !important; }
   .fl-orb-spin, .fl-orb-breathe, .fl-cspin, .fl-band, .fl-orb-burst, .fl-pulse, .fl-wash,
-  .fl-cnode[data-state="asking"]::after, .fl-scard-node::after, .fl-ask-node::after, .fl-mini-node::after, .fl-teach-node::after, .fl-waiting::before, .fl-cmp-empty-node { animation: none !important; }
+  .fl-cnode[data-state="asking"]::after, .fl-scard-node::after, .fl-ask-node::after, .fl-mini-node::after, .fl-teach-node::after, .fl-waiting::before, .fl-cmp-empty-node, .fl-rh-skeleton, .fl-spinning { animation: none !important; }
   .fl-orb-burst, .fl-pulse, .fl-wash { display: none; }
   .fl-cwire[data-wire="live"]::after, .fl-band::after { animation: none !important; width: 100%; opacity: 0.35; }
   .fl-routeline { animation: none !important; }
@@ -683,3 +728,5 @@
   .fl-scard { grid-template-columns: 30px minmax(0, 1fr); }
   .fl-scard-side { grid-column: 2; }
 }
+
+.fl-count { font-variant-numeric: tabular-nums; }

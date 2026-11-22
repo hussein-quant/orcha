@@ -447,6 +447,10 @@ def resolve(snapshot, flow, tid, outcome):
     branches = {r["destination_task"] for r in routes.get(tid, []) if r["destination"] == "step"}
     # A step further along the chosen branch stays selected, even when another outcome names it.
     seed = branches - {target} - (descendants(target, deps) if target else set())
+    if kind == "ask_owner":
+        # No branch is chosen yet: the owner's pick decides which branches stay. Unselecting them
+        # now would leave the pick pointing at a step that can no longer run.
+        seed = set()
     if kind == "stop":
         seed |= descendants(tid, deps)
     unselected = {
