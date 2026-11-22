@@ -6,8 +6,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useActingAuthority, useSnapshot } from "../../state/SnapshotProvider";
-import { ChevronDown, ChevronUp, Clock, Layers, Plus, Rocket, TriangleAlert, Workflow } from "./icons";
-import { ago, flowApi, type Board as BoardData, type BoardRow, type TemplateSummary } from "./flowApi";
+import { ChevronDown, ChevronUp, Clock, GitBranch, Layers, Plus, Rocket, TriangleAlert, Workflow } from "./icons";
+import { ago, flowApi, PLATFORM_WORD, type Board as BoardData, type BoardRow, type Cycle, type TemplateSummary } from "./flowApi";
 import { Gallery } from "./Gallery";
 import { TeachScene, Thread } from "./kit";
 
@@ -46,6 +46,39 @@ function Row({ row, i, cid }: { row: BoardRow; i: number; cid: string }) {
   );
 }
 
+/** A release cycle on the home: its branch, its tickets in one line, and what waits for you. */
+function CycleCard({ c, cid, i }: { c: Cycle; cid: string; i: number }) {
+  const open = c.state === "open";
+  return (
+    <li>
+      <Link to={flowHref("/workflows/cycle", cid, { cycle: c.id })} className="fl-row fl-cy-card" data-kind="gate" style={{ ["--i" as string]: i }} data-cycle={c.id}>
+        <span className="fl-row-icon" aria-hidden="true"><GitBranch size={18} /></span>
+        <span className="fl-row-main">
+          <span className="fl-row-title">
+            <span>Release {c.version}</span>
+            {c.dry_run ? <span className="fl-chip" data-tone="info">Dry run</span> : null}
+            <span className="fl-chip" data-tone={open ? "accent" : "muted"}>{open ? "Collecting" : "Releasing"}</span>
+          </span>
+          <span className="fl-cy-bar" role="img" aria-label={`${c.counts.merged} of ${c.counts.total} tickets in the branch`}>
+            <i style={{ width: `${c.counts.total ? (c.counts.checked / c.counts.total) * 100 : 0}%` }} data-tone="ok" />
+            <i style={{ width: `${c.counts.total ? ((c.counts.merged - c.counts.checked) / c.counts.total) * 100 : 0}%` }} data-tone="merged" />
+          </span>
+          <span className="fl-row-meta">
+            <span className="fl-mono">{c.branch}</span><span>·</span>
+            <span>{c.counts.total} {c.counts.total === 1 ? "ticket" : "tickets"}</span><span>·</span>
+            <span>{c.counts.merged} in the branch</span>
+            {c.cut.platforms.length ? <><span>·</span><span>{c.cut.platforms.map((p) => PLATFORM_WORD[p]).join(", ")}</span></> : null}
+          </span>
+        </span>
+        <span className="fl-row-side">
+          {c.counts.needs_you > 0 ? <span className="fl-waiting">{c.counts.needs_you} waiting for you</span> : null}
+          <span><Clock size={12} aria-hidden="true" /> {ago(c.created_at)}</span>
+        </span>
+      </Link>
+    </li>
+  );
+}
+
 export function Board() {
   const { cid, bump, connection } = useSnapshot();
   const authority = useActingAuthority();
@@ -78,7 +111,7 @@ export function Board() {
   const rows = data?.workflows ?? [];
   const active = rows.filter((r) => !r.finished);
   const done = rows.filter((r) => r.finished);
-  const empty = data && !active.length && !data.finished_count;
+  const empty = data && !active.length && !data.finished_count && !data.cycles?.length;
   const pick = (key: string) => navigate(flowHref("/workflows/new", cid, { template: key, ...(templates?.find((t) => t.key === key)?.has_inventory ? { home: "1" } : {}) }));
 
   return (
@@ -90,11 +123,17 @@ export function Board() {
         </div>
         <div className="fl-head-actions">
           <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows", cid, { classic: "1" })}>Classic list</Link>
+          <Link className="fl-btn" to={flowHref("/workflows/cycle", cid)} data-release-cycle><GitBranch size={15} />Release cycle</Link>
           <button type="button" className="fl-btn" data-variant="primary" onClick={() => navigate(flowHref("/workflows/new", cid))}><Plus size={15} />New workflow</button>
         </div>
       </header>
       {error ? <p className="fl-problem" role="alert">{error}</p> : null}
       {!data && !error ? <p className="fl-muted" aria-busy="true">Loading workflows…</p> : null}
+      {data?.cycles?.length ? (
+        <section className="fl-board" aria-label="Release cycles">
+          <ul className="fl-rows">{data.cycles.map((c, i) => <CycleCard key={c.id} c={c} cid={cid} i={i} />)}</ul>
+        </section>
+      ) : null}
       {active.length ? (
         <section className="fl-board" aria-label="Running workflows">
           <ul className="fl-rows">{active.map((r, i) => <Row key={r.id} row={r} i={i} cid={cid} />)}</ul>

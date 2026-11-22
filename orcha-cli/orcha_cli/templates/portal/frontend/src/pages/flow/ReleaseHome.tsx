@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useActingAuthority, useSnapshot } from "../../state/SnapshotProvider";
 import { ArrowLeft, ArrowUpRight, ExternalLink, GitBranch, Play, RefreshCw, Settings2, TriangleAlert } from "./icons";
-import { flowApi, PLATFORM_WORD, watchWord, type Compiled, type Inventory, type InventoryPlatform, type Platform } from "./flowApi";
+import { cycleApi, flowApi, PLATFORM_WORD, watchWord, type Compiled, type Cycle, type Inventory, type InventoryPlatform, type Platform } from "./flowApi";
 import { flowHref } from "./Board";
 import { useDebounced } from "./motion";
 
@@ -56,7 +56,7 @@ function Reading({ p, w, what }: { p: Platform; w: Where; what: "live" | "stagin
 }
 
 /** Guess who does what from agent names, so the common case needs no choosing. */
-function guessRoles(people: Compiled["people"], me: string | null): Record<string, string | null> {
+export function guessRoles(people: Compiled["people"], me: string | null): Record<string, string | null> {
   const ai = people.filter((p) => p.kind === "ai");
   const find = (re: RegExp, not?: RegExp) => ai.find((a) => re.test(`${a.alias} ${a.role ?? ""}`) && !(not && not.test(a.alias)))?.id ?? null;
   return {
@@ -105,6 +105,29 @@ function PlatformCard({ p, e, picked, i }: { p: Platform; e: InventoryPlatform; 
   );
 }
 
+/** What a cycle's cut ships and what rolls to the next one. */
+function CycleShips({ cycle }: { cycle: Cycle }) {
+  const all = cycle.tickets ?? [];
+  const ships = all.filter((t) => cycle.cut.ships.includes(t.id));
+  const rolls = all.filter((t) => cycle.cut.rolls.includes(t.id));
+  const line = (t: (typeof all)[number]) => (
+    <li key={t.id}><span className="fl-cy-ship">{t.issue_number ? <b className="fl-mono">#{t.issue_number}</b> : null}<span>{t.title}</span></span>
+      <span className="fl-rh-tags">{t.platforms.map((p) => <span key={p} className="fl-chip" data-tone="muted">{PLATFORM_WORD[p]}</span>)}
+        {t.merged && !t.checked ? <span className="fl-chip" data-tone="warn">Not checked on staging yet</span> : null}</span></li>
+  );
+  return (
+    <section className="fl-panel fl-rh-prs" aria-label={`What release ${cycle.version} ships`}>
+      <h2 className="fl-h2">Ships in {cycle.version} <span className="fl-mono fl-muted">{ships.length}</span></h2>
+      {ships.length ? <ul>{ships.map(line)}</ul> : <p className="fl-muted">Nothing is merged into {cycle.branch} yet.</p>}
+      {rolls.length ? (<>
+        <h2 className="fl-h2">Rolls to {cycle.cut.next_version} <span className="fl-mono fl-muted">{rolls.length}</span></h2>
+        <ul>{rolls.map(line)}</ul>
+        <p className="fl-help">Not merged, so not in the branch. They keep going in {cycle.cut.next_branch}, and their agents are told to retarget their PRs.</p>
+      </>) : null}
+    </section>
+  );
+}
+
 export function ReleaseHome() {
   const { cid } = useSnapshot();
   const authority = useActingAuthority();
@@ -112,6 +135,9 @@ export function ReleaseHome() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const key = params.get("template") ?? "mobile_app_release";
+  // From a release cycle: the release ships what's merged into the cycle's branch, and Start is the cut.
+  const cycleId = params.get("cycle");
+  const [cycle, setCycle] = useState<Cycle | null>(null);
   const [inv, setInv] = useState<Inventory | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -129,15 +155,22 @@ export function ReleaseHome() {
     flowApi.inventory(cid, key, actor, refresh).then(setInv).catch((e: Error) => setError(e.message)).finally(() => setLoading(false));
   }
   useEffect(() => { read(false); }, [cid, key, actor]);
+  useEffect(() => {
+    if (!cycleId) { setCycle(null); return; }
+    const ctrl = new AbortController();
+    cycleApi.get(cycleId, actor, ctrl.signal).then((c) => { setCycle(c); setDryRun(c.dry_run); }).catch((e: Error) => { if (e.name !== "AbortError") setError(e.message); });
+    return () => ctrl.abort();
+  }, [cycleId, actor]);
 
-  const rp = inv?.data.release_params ?? {};
+  const rp = useMemo(() => (cycle ? { ...(inv?.data.release_params ?? {}), ...cycle.release_params } : inv?.data.release_params ?? {}),
+    [inv?.read_at, cycle?.id, JSON.stringify(cycle?.release_params)]);
   const platforms = (rp.platforms ?? []) as Platform[];
   const values = useMemo(() => ({ ...rp, ...(releaseType ? { release_type: releaseType } : {}) }), [JSON.stringify(rp), releaseType]);
   const input = useMemo(() => ({ params: values, removed: [] as string[], added: [], roles: roles ?? {}, dry_run: dryRun }), [values, roles, dryRun]);
   const debounced = useDebounced(input, 400);
 
   useEffect(() => {
-    if (!cid || !inv || inv.state === "error" || !platforms.length) return;
+    if (!cid || !inv || inv.state === "error" || !platforms.length || (cycleId && !cycle)) return;
     const mine = ++seq.current;
     setChecking(true);
     flowApi.compile(cid, key, actor, debounced).then((c) => {
@@ -152,9 +185,12 @@ export function ReleaseHome() {
   const ios = platforms.includes("ios");
   const problems = (compiled?.problems ?? []).filter((p) => p.param !== "release_type");
   const label = (compiled?.values?.release_label as string | undefined) ?? "";
-  const ready = !!compiled && !checking && problems.length === 0 && (!ios || !!releaseType) && JSON.stringify(debounced) === JSON.stringify(input);
+  const ready = !!compiled && !checking && problems.length === 0 && (!ios || !!releaseType) && JSON.stringify(debounced) === JSON.stringify(input)
+    && (!cycleId || (!!cycle && cycle.state === "open"));
   const why = !inv ? "" : inv.state === "error" ? "The inventory couldn't be read."
-    : !platforms.length ? "Nothing changed since the last release."
+    : cycleId && !cycle ? "Reading the release cycle…"
+    : cycle && cycle.state !== "open" ? "This cycle was already cut."
+    : !platforms.length ? (cycle ? "Nothing is merged into the release branch yet." : "Nothing changed since the last release.")
     : ios && !releaseType ? "Choose how iOS is released."
     : checking || !compiled ? "Checking…"
     : problems.length ? problems[0].message : "";
@@ -165,8 +201,10 @@ export function ReleaseHome() {
     if (!ready || !cid) return;
     setStarting(true); setError("");
     try {
-      const d = await flowApi.create(cid, actor, { key, ...input, start: true });
-      navigate(flowHref(`/workflows/${encodeURIComponent(d.id)}`, cid), { state: { justStarted: true } });
+      const id = cycle
+        ? (await cycleApi.cut(cycle.id, actor, input)).release_workflow_id
+        : (await flowApi.create(cid, actor, { key, ...input, start: true })).id;
+      navigate(flowHref(`/workflows/${encodeURIComponent(id)}`, cid), { state: { justStarted: true } });
     } catch (e) { setError((e as Error).message); setStarting(false); }
   }
 
@@ -176,11 +214,12 @@ export function ReleaseHome() {
     <div className="fl-wrap fl-rh">
       <header className="fl-head">
         <div>
-          <h1 className="fl-h1">Release home</h1>
-          <p className="fl-sub">{inv?.summary ?? "Reading what's live, in review and merged…"}</p>
+          <h1 className="fl-h1">{cycle ? `Cut release ${cycle.version}` : "Release home"}</h1>
+          <p className="fl-sub">{cycle ? <>From <span className="fl-mono">{cycle.branch}</span>. {inv?.summary ?? ""}</> : inv?.summary ?? "Reading what's live, in review and merged…"}</p>
         </div>
         <div className="fl-head-actions">
-          <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows/new", cid)}><ArrowLeft size={14} />Templates</Link>
+          {cycle ? <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows/cycle", cid, { cycle: cycle.id })}><ArrowLeft size={14} />Release {cycle.version}</Link>
+            : <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows/new", cid)}><ArrowLeft size={14} />Templates</Link>}
           <button type="button" className="fl-btn" onClick={() => read(true)} disabled={loading} data-refresh>
             <RefreshCw size={14} className={loading ? "fl-spinning" : undefined} />{loading ? "Reading…" : `Read again${inv ? ` · ${ago(inv.read_at)}` : ""}`}
           </button>
@@ -202,6 +241,7 @@ export function ReleaseHome() {
         </details>
       ) : null}
 
+      {cycle ? <CycleShips cycle={cycle} /> : null}
       {!inv && loading ? <div className="fl-rh-grid" aria-busy="true">{ORDER.map((p) => <div key={p} className="fl-rh-card fl-rh-skeleton" />)}</div> : null}
       {inv && inv.state !== "error" ? (
         <div className="fl-rh-grid">
@@ -255,15 +295,15 @@ export function ReleaseHome() {
             {why ? <span className="fl-help" aria-live="polite">{why}</span> : null}
           </div>
           <div className="fl-head-actions">
-            <label style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 13, color: "var(--v2-text-2)" }}>
+            {cycle ? (cycle.dry_run ? <span className="fl-chip" data-tone="info">Dry run</span> : null) : <label style={{ display: "inline-flex", gap: 8, alignItems: "center", fontSize: 13, color: "var(--v2-text-2)" }}>
               <button type="button" role="switch" className="fl-switch" aria-checked={dryRun} onClick={() => setDryRun((d) => !d)} aria-label="Dry run" />Dry run
-            </label>
-            <button type="button" className="fl-btn" disabled={!platforms.length} data-customize
+            </label>}
+            {cycle ? null : <button type="button" className="fl-btn" disabled={!platforms.length} data-customize
               onClick={() => navigate(flowHref("/workflows/new", cid, { template: key }), { state: { params: values, roles, dryRun } })}>
               <Settings2 size={14} />Customize steps
-            </button>
+            </button>}
             <button type="button" className="fl-btn" data-variant="primary" data-size="lg" disabled={!ready || starting} onClick={start} data-start>
-              <Play size={15} />{starting ? "Starting…" : dryRun ? "Start the dry run" : "Start the release"}
+              <Play size={15} />{starting ? "Starting…" : cycle ? (dryRun ? "Cut and start the dry run" : "Cut and start the release") : dryRun ? "Start the dry run" : "Start the release"}
             </button>
           </div>
         </div>

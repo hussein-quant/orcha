@@ -23,6 +23,10 @@ from portal_backend.workflow_graph import conflict
 TEMPLATE_SCHEMA = 1
 PLATFORMS = ("ios", "android", "web", "api")
 PLATFORM_WORD = {"ios": "iOS", "android": "Android", "web": "Web", "api": "API"}
+# A release either collects its batch itself (the default) or ships a release cycle's branch,
+# whose tickets were already built, merged and checked one by one.
+BATCH = {"param": "source", "equals": "batch"}
+CYCLE = {"param": "source", "equals": "cycle"}
 
 
 def _o(name, kind):
@@ -90,7 +94,7 @@ def mobile_app_release() -> dict:
     """The full Mobile App Release: intake to live, with proof before every irreversible step."""
     stages = [
         {"key": "intake", "title": "Intake", "steps": [
-            _step("batch", "Collect the feedback batch", "person", role="owner",
+            _step("batch", "Collect the feedback batch", "person", role="owner", when=BATCH,
                   description="List the issues and feature requests that make up this release. One build per round, never one per fix.",
                   done="The batch is written down and agreed: {batch_summary}",
                   outcomes=[_o("ready", "success"), _o("not_yet", "failure")],
@@ -102,30 +106,31 @@ def mobile_app_release() -> dict:
         ]},
         {"key": "build", "title": "Build the change", "steps": [
             _step("implement", "Fix or build each batch item", "agent", role="engineer", after=["baseline"], required=True,
-                  description="Test-first, one small PR per batch item, against origin/main in a worktree. In a later round, fix what the QA triage found.",
+                  when=BATCH,
+                  description="Test-first, one small PR per batch item, against origin/{release_branch} in a worktree. In a later round, fix what the QA triage found.",
                   done="Every batch item has an open PR with tests; the PR links are posted.",
                   resources=["build:heavy"]),
-            _step("review_merge", "Review and merge", "person", role="owner", after=["implement"],
+            _step("review_merge", "Review and merge", "person", role="owner", after=["implement"], when=BATCH,
                   description="Review the diffs and merge. Agents never merge on their own. To ask for changes, comment on the PR; the engineer updates it, and you mark this step once it's merged.",
                   done="Every PR of this round is merged.",
                   outcomes=[_o("merged", "success")], routes=[_r("merged", "next")]),
         ]},
         {"key": "staging", "title": "Staging", "steps": [
             _step("deploy_api_staging", "Deploy the API to staging", "agent", role="release", after=["review_merge"],
-                  platforms=["api"],
+                  platforms=["api"], when=BATCH,
                   description="Deploy to {qa_target_env}, then prove the change is live there: fetch an endpoint the change touched. A script's exit code is not proof.",
                   done="The changed endpoint answers on {qa_target_env} with the new behaviour (request and response posted)."),
             _step("deploy_web_staging", "Deploy the website to staging", "agent", role="release",
-                  after=["deploy_api_staging"], platforms=["web"],
+                  after=["deploy_api_staging"], platforms=["web"], when=BATCH,
                   description="Deploy to {qa_target_env}, then prove it is live: load a changed page and check the new content. The deploy script can report success without uploading.",
                   done="A changed page on {qa_target_env} shows the new content (URL and screenshot posted)."),
         ]},
         {"key": "verify", "title": "Verify while fixing", "steps": [
-            _qa("qa_subset_ios", "ios", "subset", ["deploy_api_staging"], False),
-            _qa("qa_subset_android", "android", "subset", ["deploy_api_staging"], False),
-            _qa("qa_subset_web", "web", "subset", ["deploy_web_staging"], False),
+            _qa("qa_subset_ios", "ios", "subset", ["deploy_api_staging"], False) | {"when": BATCH},
+            _qa("qa_subset_android", "android", "subset", ["deploy_api_staging"], False) | {"when": BATCH},
+            _qa("qa_subset_web", "web", "subset", ["deploy_web_staging"], False) | {"when": BATCH},
             _step("triage_subset", "Triage what failed", "qa", role="qa",
-                  after=["qa_subset_ios", "qa_subset_android", "qa_subset_web"],
+                  after=["qa_subset_ios", "qa_subset_android", "qa_subset_web"], when=BATCH,
                   description="Sort every failure: a real bug to fix, a flaky check, or a scenario to update. Fixes go back to Build.",
                   done="Every failure has a diagnosis; real bugs are findings with steps to reproduce.",
                   outcomes=[_o("fix", "changes"), _o("clear", "success"), _o("needs_person", "custom")],
@@ -148,8 +153,8 @@ def mobile_app_release() -> dict:
         {"key": "builds", "title": "Version and QA builds", "steps": [
             _step("bump", "Version {release_label}", "agent", role="engineer", after=["coverage_review"],
                   platforms=["ios", "android"], required=True,
-                  description="Set the versions for this release: {versions_detail}. Build numbers and versionCodes only go up. Open a PR. In a later round, fix what the regression found first, merge, and redeploy staging.",
-                  done="{versions_detail} is merged on main; the commit SHA is posted."),
+                  description="Set the versions for this release: {versions_detail}. Build numbers and versionCodes only go up. Open a PR into {release_branch}. In a later round, fix what the regression found first (a PR into {release_branch}), merge, and redeploy staging from {release_branch}.",
+                  done="{versions_detail} is merged on {release_branch}; the commit SHA is posted."),
             _step("qa_build", "Build the QA builds", "agent", role="release", after=["bump"],
                   platforms=["ios", "android"],
                   description="Debug builds of that commit pointed at {qa_target_env} (release builds block screenshots; iOS needs signing on so the login token can be saved). Record each build's identity for the QA steps.",
@@ -329,7 +334,16 @@ def mobile_app_release() -> dict:
                   after=["live_ios", "review_android", "deploy_web_prod"],
                   description="Confirm the live versions in each store and in production, and run a short smoke check of the live build.",
                   done="The live versions are posted with a smoke-check result."),
-            _step("close", "Release notes and history", "agent", role="release", after=["live_check"],
+            _step("merge_back", "Merge {release_branch} back", "agent", role="engineer", after=["live_check"],
+                  when=CYCLE,
+                  description="Tag the shipped commit v{version}. Open a PR from {release_branch} into main, and once it's merged, a PR from main into {next_release_branch} so the next cycle starts from what shipped. Agents never merge.",
+                  done="The tag is pushed and both PRs are open; their links are posted."),
+            _step("merge_back_review", "Merge the release back into main", "person", role="owner", after=["merge_back"],
+                  when=CYCLE,
+                  description="Merge the PR from {release_branch} into main, then the one from main into {next_release_branch}.",
+                  done="Both PRs are merged.",
+                  outcomes=[_o("merged", "success")], routes=[_r("merged", "next")]),
+            _step("close", "Release notes and history", "agent", role="release", after=["merge_back_review"],
                   description="Record the release: versions, build ids, QA run links, decision times. Clean up worktrees, branches and test tokens.",
                   done="The release history is written and the clean-up is done."),
         ]},
@@ -338,7 +352,7 @@ def mobile_app_release() -> dict:
         "schema": TEMPLATE_SCHEMA,
         "key": "mobile_app_release",
         "name": "Mobile App Release",
-        "version": 2,
+        "version": 3,
         "icon": "rocket",
         "tone": "amber",
         "description": "Intake to live for the App Store, Google Play, a website and an API: fix loop, full regression, your go/no-go with proof, store review watched for you.",
@@ -362,6 +376,10 @@ def mobile_app_release() -> dict:
              "choices": [{"value": "100%", "label": "Everyone"}, {"value": "50%", "label": "50%"},
                          {"value": "20%", "label": "20%"}, {"value": "5%", "label": "5%"}]},
             {"key": "qa_target_env", "label": "QA environment", "type": "text", "default": "staging"},
+            {"key": "source", "label": "Made from", "type": "text", "default": "batch", "hidden": True},
+            {"key": "release_branch", "label": "Release branch", "type": "text", "default": "main", "advanced": True,
+             "help": "The branch this release builds from. A release cycle sets its own release/x.y.z branch."},
+            {"key": "next_release_branch", "label": "Next release branch", "type": "text", "default": "", "hidden": True},
             {"key": "batch_summary", "label": "What's in this release", "type": "longtext", "default": "",
              "placeholder": "Broker fee shows as a percentage; faster listing photos"},
             {"key": "qa_subset_tags", "label": "Scenario tags for the changed screens", "type": "text", "default": ""},
@@ -401,6 +419,120 @@ def mobile_app_release() -> dict:
     }
 
 
+FEATURE = {"param": "kind", "equals": "feature"}
+
+
+def _ticket_qa(platform: str, after: list[str]) -> dict:
+    word = PLATFORM_WORD[platform]
+    return _qa(f"qa_{platform}", platform, "subset", after, False) | {
+        "title": f"Check {{issue_ref}} on {word}",
+        "description": (f"The screens {{issue_ref}} changed, plus every open finding, on {word}: a debug build of "
+                        "{release_branch} pointed at {qa_target_env}. Uses the scenario tags {qa_subset_tags} when set."),
+        "qa": {"kind": "check", "platform": platform if platform != "api" else None,
+               "focus": "{issue_ref} {issue_title}: the screens it changed, plus every open finding."},
+        "dry_run": {"outcomes": ["pass"], "note": ""},
+    }
+
+
+def release_ticket() -> dict:
+    """One ticket of a release cycle: (a spec you approve, for a feature) → a PR into the cycle's
+    release branch → your merge, which is your decision that it ships → checked on staging on the
+    ticket's platforms → triage, which sends real bugs back. Made by the release cycle, never
+    picked from the gallery."""
+    stages = [
+        {"key": "spec", "title": "Spec", "steps": [
+            _step("spec", "Write the spec for {issue_ref}", "agent", role="engineer", when=FEATURE,
+                  description="Read the issue ({issue_url}). Write a short spec: what the user sees and does on {platform_words}, "
+                              "edge cases, what is out of scope, and how it will be tested. Post it here and as a comment on the issue. "
+                              "In a later round, change it the way the owner asked.",
+                  done="The spec is posted here and on the issue.",
+                  dry_run={"outcomes": []}),
+            _step("approve_spec", "Approve the spec", "person", role="owner", after=["spec"], when=FEATURE,
+                  description="Read the spec. Approve it, or ask for changes with a note; nothing is built before you approve.",
+                  done="You approved the spec, or asked for changes.",
+                  outcomes=[_o("approved", "success"), _o("changes", "changes")],
+                  routes=[_r("approved", "exit_group"), _r("changes", "return", "spec")]),
+        ]},
+        {"key": "build", "title": "Build", "steps": [
+            _step("implement", "Build {issue_ref}", "agent", role="engineer", after=["approve_spec"], required=True,
+                  description="{issue_ref} {issue_title} ({kind_word}, {platform_words}). Work in a worktree from origin/{release_branch}, "
+                              "never main. Test-first: a failing test that shows the problem or the new behaviour, then the change. "
+                              "Run the {platform_words} tests locally and post the output. Open one PR into {release_branch} with "
+                              "\"Fixes {issue_ref}\" in its body. In a later round, fix what QA found on the same PR, or in a "
+                              "follow-up PR into {release_branch} once it's merged.\n\n{issue_body}",
+                  done="A PR into {release_branch} is open with its tests passing; the PR link and the test output are posted.",
+                  resources=["build:heavy"], dry_run={"outcomes": []}),
+            _step("review_merge", "Review and merge into {release_branch}", "person", role="owner", after=["implement"],
+                  description="Merging is your decision that {issue_ref} ships in {cycle_version}. Agents never merge. "
+                              "To ask for changes, comment on the PR; the engineer updates it, and you mark this step once it's merged.",
+                  done="The PR is merged into {release_branch}.",
+                  outcomes=[_o("merged", "success")], routes=[_r("merged", "next")]),
+        ]},
+        {"key": "staging", "title": "Check on staging", "steps": [
+            _step("deploy_api_staging", "Deploy the API to staging", "agent", role="release", after=["review_merge"],
+                  platforms=["api"],
+                  description="Deploy {release_branch} to {qa_target_env}, then prove {issue_ref} is live there: fetch an endpoint it changed.",
+                  done="The changed endpoint answers on {qa_target_env} with the new behaviour (request and response posted).",
+                  dry_run={"outcomes": []}),
+            _step("deploy_web_staging", "Deploy the website to staging", "agent", role="release",
+                  after=["deploy_api_staging"], platforms=["web"],
+                  description="Deploy {release_branch} to {qa_target_env}, then prove {issue_ref} is live there: load a page it changed.",
+                  done="A changed page on {qa_target_env} shows the new content (URL and screenshot posted).",
+                  dry_run={"outcomes": []}),
+            _ticket_qa("ios", ["deploy_api_staging"]),
+            _ticket_qa("android", ["deploy_api_staging"]),
+            _ticket_qa("web", ["deploy_web_staging"]),
+            _step("triage", "Triage what failed", "qa", role="qa", after=["qa_ios", "qa_android", "qa_web"],
+                  description="Sort every failure on {issue_ref}: a real bug to fix, a flaky check, or a scenario to update. Real bugs go back to Build.",
+                  done="Every failure has a diagnosis; real bugs are findings with steps to reproduce.",
+                  outcomes=[_o("fix", "changes"), _o("clear", "success"), _o("needs_person", "custom")],
+                  routes=[_r("fix", "return", "implement"), _r("clear", "exit_group"), _r("needs_person", "ask_owner")],
+                  qa={"kind": "triage"}, dry_run={"outcomes": ["clear"]}),
+        ]},
+    ]
+    return {
+        "schema": TEMPLATE_SCHEMA,
+        "key": "release_ticket",
+        "name": "Release ticket",
+        "version": 1,
+        "icon": "workflows",
+        "tone": "indigo",
+        "hidden": True,
+        "description": "One ticket of a release cycle: built into the release branch, merged by you, checked on staging.",
+        "goal": "{issue_ref} {issue_title} is merged into {release_branch} and checked on staging, ready for {cycle_version}.",
+        "title": "{issue_ref} {issue_title}",
+        "execution_mode": "parallel",
+        "parameters": [
+            {"key": "platforms", "label": "Platforms", "type": "platforms", "default": ["ios", "android", "web", "api"], "required": True},
+            {"key": "kind", "label": "Kind", "type": "choice", "default": "bug",
+             "choices": [{"value": "bug", "label": "Bug"}, {"value": "feature", "label": "Feature"}]},
+            {"key": "issue_ref", "label": "Issue", "type": "text", "default": ""},
+            {"key": "issue_title", "label": "Title", "type": "text", "default": "", "required": True},
+            {"key": "issue_url", "label": "Issue link", "type": "text", "default": ""},
+            {"key": "issue_body", "label": "Details", "type": "longtext", "default": ""},
+            {"key": "release_branch", "label": "Release branch", "type": "text", "default": "", "required": True},
+            {"key": "cycle_version", "label": "Release", "type": "text", "default": ""},
+            {"key": "cycle_id", "label": "Release cycle", "type": "text", "default": "", "hidden": True},
+            {"key": "qa_target_env", "label": "QA environment", "type": "text", "default": "staging"},
+            {"key": "qa_subset_tags", "label": "Scenario tags", "type": "text", "default": ""},
+        ],
+        "roles": [
+            {"key": "owner", "label": "Owner (approves and merges)", "kind": "human"},
+            {"key": "engineer", "label": "Engineer", "kind": "ai"},
+            {"key": "release", "label": "Release", "kind": "ai"},
+            {"key": "qa", "label": "QA", "kind": "ai"},
+        ],
+        "stages": stages,
+        "repeat_groups": [
+            {"name": "Spec loop", "member_tasks": ["spec", "approve_spec"], "review_task": "approve_spec",
+             "exit_outcome": "approved", "max_rounds": 5},
+            {"name": "Fix loop", "member_tasks": ["implement", "review_merge", "deploy_api_staging", "deploy_web_staging",
+                                                  "qa_ios", "qa_android", "qa_web", "triage"],
+             "review_task": "triage", "exit_outcome": "clear", "max_rounds": 3},
+        ],
+    }
+
+
 def _from_preset(key, name, description, draft, icon, tone) -> dict:
     """A QA preset (qa_blocks) as a template: one stage a step, the same flow."""
     stages = []
@@ -429,7 +561,7 @@ def _from_preset(key, name, description, draft, icon, tone) -> dict:
 
 def builtins(cur=None, cid=None) -> list[dict]:
     """Built-in templates, Mobile App Release first. The QA presets join when Quality is on."""
-    out = [mobile_app_release()]
+    out = [mobile_app_release(), release_ticket()]
     try:
         from portal_backend import qa_blocks
 
@@ -537,6 +669,7 @@ def resolve_params(template, params) -> tuple[dict, list[dict]]:
         out["release_label"], out["versions_detail"] = and_word, f"Android {and_v or '…'} versionCode {and_c or '…'}"
     else:
         out["release_label"] = out["versions_detail"] = ios_v or "…"
+    out["kind_word"] = {"bug": "bug", "feature": "feature"}.get(str(out.get("kind") or ""), "change")
     if not str(out.get("batch_summary") or "").strip():
         out["batch_summary"] = "the batch the owner listed in Intake"
     return out, problems

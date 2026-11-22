@@ -285,7 +285,7 @@ export function Editor() {
   };
   const kept = (c?.steps ?? []).filter((s) => !s.removed);
   const ready = !!c && !checking && c.problems.length === 0 && JSON.stringify(debounced) === JSON.stringify(input);
-  const visibleParams = (c?.parameters ?? []).filter((p) => !p.platform || ((values.platforms as string[]) ?? []).includes(p.platform));
+  const visibleParams = (c?.parameters ?? []).filter((p) => !p.hidden && (!p.platform || ((values.platforms as string[]) ?? []).includes(p.platform)));
   let stageIndex = 0;
   let stepIndex = 0;
 
@@ -351,7 +351,7 @@ export function Editor() {
           </div>
           {visibleParams.some((p) => p.advanced) ? (
             <button type="button" className="fl-btn" data-variant="ghost" aria-expanded={advanced} onClick={() => setAdvanced((a) => !a)} style={{ alignSelf: "flex-start" }}>
-              {advanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}Status commands
+              {advanced ? <ChevronUp size={13} /> : <ChevronDown size={13} />}Branch and status commands
             </button>
           ) : null}
           {advanced ? visibleParams.filter((p) => p.advanced).map((p) => (

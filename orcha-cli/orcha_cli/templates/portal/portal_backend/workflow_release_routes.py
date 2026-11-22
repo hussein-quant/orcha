@@ -118,7 +118,8 @@ def list_templates(cid: str, request: Request):
             base = latest.get(t.get("base_key"))
             s["update_available"] = bool(base and t.get("base_version") and base > t["base_version"])
             mine.append(s)
-        return {"templates": [templates.summary(t) for t in builtin] + mine}
+        # A hidden template (a release cycle's ticket) is made by its owner, never picked here.
+        return {"templates": [templates.summary(t) for t in builtin if not t.get("hidden")] + mine}
 
 
 @app.get("/api/containers/{cid}/workflow-templates/{key}", tags=["workflow templates"])
@@ -281,24 +282,30 @@ def create_from_template(cid: str, body: FromTemplateBody, request: Request):
     service.require_capability()
     with db_cursor() as (_, cur):
         actor = resolve_human_actor(cur, request, cid)
-        t, _ = _find(cur, cid, body.key)
-        roles = {**(t.get("default_roles") or {}), **body.roles}
-        compiled = _compile(cur, cid, t, CompileBody(params=body.params, removed=body.removed, added=body.added,
-                                                     roles=roles, dry_run=body.dry_run), actor.id)
-        if compiled["problems"]:
-            conflict("template_problems", "Fix these before starting.", status=422, problems=compiled["problems"])
-        draft = compiled["draft"]
-        if body.title:
-            draft["title"] = body.title
-        svc = service.WorkflowService(cur, HOOKS)
-        created = svc.mutate(cid, actor, "create", {**draft, "idempotency_key": body.idempotency_key})
-        if not body.start or created.get("launch_enabled"):
-            return created
-        return svc.mutate(
-            cid, actor, "launch",
-            {"expected_revision": created["revision"], "idempotency_key": f"{body.idempotency_key}:launch", "reason": ""},
-            wid=created["id"],
-        )
+        return start_from_template(cur, cid, actor, body)
+
+
+def start_from_template(cur, cid, actor, body: FromTemplateBody) -> dict:
+    """Compile, create and (unless `start` is off) Start, in the caller's transaction. A release
+    cycle uses it for each ticket and for the release it cuts."""
+    t, _ = _find(cur, cid, body.key)
+    roles = {**(t.get("default_roles") or {}), **body.roles}
+    compiled = _compile(cur, cid, t, CompileBody(params=body.params, removed=body.removed, added=body.added,
+                                                 roles=roles, dry_run=body.dry_run), actor.id)
+    if compiled["problems"]:
+        conflict("template_problems", "Fix these before starting.", status=422, problems=compiled["problems"])
+    draft = compiled["draft"]
+    if body.title:
+        draft["title"] = body.title
+    svc = service.WorkflowService(cur, HOOKS)
+    created = svc.mutate(cid, actor, "create", {**draft, "idempotency_key": body.idempotency_key})
+    if not body.start or created.get("launch_enabled"):
+        return created
+    return svc.mutate(
+        cid, actor, "launch",
+        {"expected_revision": created["revision"], "idempotency_key": f"{body.idempotency_key}:launch", "reason": ""},
+        wid=created["id"],
+    )
 
 
 # One Start for any workflow: prepare what isn't, then Start (§6.3, "Starting is one button").
@@ -531,9 +538,13 @@ def board(cid: str, request: Request, include_finished: bool = False):
             "SELECT * FROM workflows WHERE container_id=%s AND hidden_at IS NULL ORDER BY created_at DESC LIMIT 300",
             (cid,),
         )
-        out = []
+        out, tickets = [], 0
         for w in rows:
             finished = w["status"] in {"completed", "cancelled"}
+            if (steps.template_of(w) or {}).get("key") == "release_ticket":
+                # A release cycle's ticket shows on its cycle's card, not as a row of its own.
+                tickets += 1
+                continue
             tasks = svc.rows(
                 "SELECT id, title, status, route_state, withdrawn_at, awaiting_loop_decision, awaiting_owner_decision, "
                 "step_spec, qa_step, preparation_state FROM tasks WHERE workflow_id=%s ORDER BY priority, created_at, id",
@@ -566,5 +577,7 @@ def board(cid: str, request: Request, include_finished: bool = False):
         active = [r for r in out if not r["finished"]]
         active.sort(key=lambda r: (not r["stalled"], -r["waiting_for_you"]))  # stable: newest first within
         done = [r for r in out if r["finished"]]
+        from portal_backend import release_cycle_routes as cycles
+
         return {"workflows": active + (done if include_finished else []), "finished_count": len(done),
-                "stall_days": steps.STALL_DAYS}
+                "stall_days": steps.STALL_DAYS, "cycles": cycles.board_cycles(cur, cid), "ticket_workflows": tickets}

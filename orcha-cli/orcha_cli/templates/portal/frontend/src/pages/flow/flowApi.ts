@@ -75,6 +75,8 @@ export interface Inventory {
 export interface TemplateParam {
   key: string; label: string; type: "platforms" | "text" | "longtext" | "number" | "choice";
   default?: unknown; required?: boolean; placeholder?: string; help?: string; platform?: Platform; advanced?: boolean;
+  /** Set by whatever made the workflow (a release cycle), never typed in the editor. */
+  hidden?: boolean;
   choices?: { value: string; label: string }[];
 }
 
@@ -157,7 +159,63 @@ export interface BoardRow {
   waiting_for_you: number; stage: string | null; created_at: string; last_activity: string | null;
   stalled: { since: string; days: number } | null; finished: boolean; done: number; total: number;
 }
-export interface Board { workflows: BoardRow[]; finished_count: number; stall_days: number }
+export interface Board { workflows: BoardRow[]; finished_count: number; stall_days: number; cycles?: Cycle[]; ticket_workflows?: number }
+
+/* ---- release cycles ----------------------------------------------------------------- */
+
+export interface CycleTicket {
+  id: string; issue_number: number | null; issue_url: string | null; title: string; kind: "bug" | "feature";
+  platforms: Platform[]; source: "manual" | "github"; state: "active" | "shipped" | "dropped"; workflow_id: string | null;
+  rolled_from_cycle_id: string | null; created_at: string;
+  /** Where it is, in the owner's words: "Waiting for your merge", "In the branch, checked"… */
+  word: string; tone: "muted" | "running" | "asking" | "ok";
+  merged: boolean; checked: boolean; needs_you: boolean;
+  step: { id: string; title: string; state: string } | null;
+  thread: (ThreadDot & { id: string; title: string; state: string })[]; done: number; total: number;
+  workflow_status: string | null;
+}
+export interface Cycle {
+  id: string; container_id: string; version: string; branch: string; base_branch: string; milestone: string | null;
+  state: "open" | "cut" | "closed"; platforms: Platform[]; roles: Record<string, string>; engineers: Partial<Record<Platform, string>>;
+  dry_run: boolean; branch_state: "pending" | "created" | "existed" | "failed" | "skipped"; branch_note: string | null;
+  created_at: string; cut_at: string | null;
+  release_workflow: { id: string; title: string; status: string; dry_run: boolean } | null;
+  next_cycle: { id: string; version: string; branch: string } | null;
+  previous_cycle: { id: string; version: string } | null;
+  counts: { total: number; merged: number; checked: number; needs_you: number; building: number };
+  cut: { ships: string[]; rolls: string[]; platforms: Platform[]; unchecked: string[]; next_version: string; next_branch: string };
+  release_params: Record<string, unknown> & { platforms: Platform[]; batch_summary: string };
+  tickets?: CycleTicket[];
+}
+export interface GithubIssue {
+  number: number; title: string; body: string; url: string; labels: string[]; platforms: Platform[];
+  kind: "bug" | "feature"; kind_from_labels: boolean; in_cycle?: string | null;
+}
+export interface NewTicket {
+  issue_number?: number | null; title?: string; body?: string; url?: string | null; kind?: "bug" | "feature";
+  platforms: Platform[]; engineer_id?: string | null; labels?: string[]; source?: "manual" | "github";
+}
+
+const cyc = (id: string) => `/api/release-cycles/${encodeURIComponent(id)}`;
+export const cycleApi = {
+  list: (cid: string, actor: string | null, signal?: AbortSignal) =>
+    call<{ cycles: Cycle[]; open: string | null; open_dry_run: string | null; suggested: { version: string | null; branch: string | null } }>("GET", `/api/containers/${encodeURIComponent(cid)}/release-cycles`, actor, undefined, signal),
+  open: (cid: string, actor: string | null, body: { version: string; branch?: string; base_branch?: string; milestone?: string; platforms: Platform[]; roles: Record<string, string | null>; engineers: Record<string, string | null>; create_branch: boolean; dry_run: boolean }) =>
+    call<Cycle>("POST", `/api/containers/${encodeURIComponent(cid)}/release-cycles`, actor, body),
+  get: (id: string, actor: string | null, signal?: AbortSignal) => call<Cycle>("GET", cyc(id), actor, undefined, signal),
+  settings: (id: string, actor: string | null, body: { roles?: Record<string, string | null>; engineers?: Record<string, string | null>; milestone?: string }) =>
+    call<Cycle>("PATCH", cyc(id), actor, body),
+  branch: (id: string, actor: string | null) => call<Cycle>("POST", `${cyc(id)}/branch`, actor, {}),
+  github: (id: string, actor: string | null, signal?: AbortSignal) =>
+    call<{ milestone: string; issues: GithubIssue[]; error: string | null }>("GET", `${cyc(id)}/github`, actor, undefined, signal),
+  issue: (id: string, n: number, actor: string | null) => call<GithubIssue>("GET", `${cyc(id)}/github/issues/${n}`, actor),
+  addTicket: (id: string, actor: string | null, body: NewTicket) => call<Cycle>("POST", `${cyc(id)}/tickets`, actor, body),
+  dropTicket: (id: string, tid: string, actor: string | null) => call<Cycle>("POST", `${cyc(id)}/tickets/${encodeURIComponent(tid)}/drop`, actor, {}),
+  cut: (id: string, actor: string | null, body: CompileInput & { next_version?: string }) =>
+    call<{ cycle: Cycle; release_workflow_id: string; next_cycle_id: string }>("POST", `${cyc(id)}/cut`, actor, {
+      params: body.params, removed: body.removed, added: body.added, roles: body.roles, next_version: body.next_version, idempotency_key: newKey(),
+    }),
+};
 
 /* ---- a run --------------------------------------------------------------------- */
 

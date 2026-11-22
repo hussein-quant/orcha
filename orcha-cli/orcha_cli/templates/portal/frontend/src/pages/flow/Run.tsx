@@ -46,7 +46,7 @@ function stageState(tasks: FlowTask[]): StepState {
 type Snap = ReturnType<typeof useSnapshot>["snap"];
 const agentOf = (snap: Snap, t: FlowTask) => snap?.agents.find((a) => t.assignee_ids?.includes(a.id))?.alias;
 
-function resultWords(t: FlowTask, who?: string): string {
+function resultWords(t: FlowTask, who?: string, dry?: boolean): string {
   const st = stateOf(t);
   const kind = kindOf(t);
   const ran = t.history?.filter((h) => h.round) ?? [];
@@ -65,7 +65,7 @@ function resultWords(t: FlowTask, who?: string): string {
   }
   if (st === "asking") return kind === "gate" ? "Your go-ahead, with the proof" : t.awaiting_loop_decision ? "Needs your decision" : "Waiting for you";
   if (st === "running") return kind === "watch" ? "Watching" : kind === "qa" ? "QA is checking" : "Working";
-  if (st === "ready") return `Ready. Waiting for ${who || "its agent"} to pick it up`;
+  if (st === "ready") return dry ? "Ready. The dry run finishes it in a few seconds" : `Ready. Waiting for ${who || "its agent"} to pick it up`;
   if (st === "waiting") return t.blockers.find((b) => b.code === "gate_required")?.message ?? (t.blockers.find((b) => b.code === "prerequisites")?.message ?? "Not yet");
   return STATE_WORD[st];
 }
@@ -421,7 +421,7 @@ function StepRow({ d, t, landed, take, proofStep, actor, onSaved, onFrame, open,
       </span>
       <span className="fl-scard-main">
         <span className="fl-scard-title"><span>{t.title}</span>{t.step?.irreversible ? <ArrowUpRight size={13} color="var(--v2-warn)" aria-label="Leaves Embodent" /> : null}</span>
-        <span className="fl-scard-words">{resultWords(t, who)}</span>
+        <span className="fl-scard-words">{resultWords(t, who, !!d.dry_run)}</span>
       </span>
       <span className="fl-scard-side">
         {loop && (loop.current_round ?? 0) > 1 ? <span className="fl-chip" data-tone="warn">Round {loop.current_round} of {loop.max_rounds}</span> : null}
@@ -436,7 +436,7 @@ function StepRow({ d, t, landed, take, proofStep, actor, onSaved, onFrame, open,
         <div className="fl-detail">
           <div>
             <h4>What happened</h4>
-            <p>{resultWords(t, who)}</p>
+            <p>{resultWords(t, who, !!d.dry_run)}</p>
             {t.reported_outcome?.findings?.length ? (
               <ul className="fl-findings">{t.reported_outcome.findings.map((f) => <li key={f.id}><span className="fl-chip" data-tone={f.severity === "blocker" || f.severity === "major" ? "danger" : "muted"}>{f.severity}</span>{f.text}</li>)}</ul>
             ) : null}
@@ -567,7 +567,7 @@ export function Run() {
   const ready = running ? undefined : d.tasks.find((t) => stateOf(t) === "ready");
   // A ready step only moves when an agent is woken. Say so when this project's wake service is off.
   const wakes = notifierState(snap?.container);
-  const asleep = !!ready && d.status === "active" && d.launch_enabled && (wakes === "stale" || wakes === "none" || wakes === "paused");
+  const asleep = !!ready && !d.dry_run && d.status === "active" && d.launch_enabled && (wakes === "stale" || wakes === "none" || wakes === "paused");
   const settled = d.status === "active" && d.launch_enabled && d.tasks.every((t) => ["completed", "cancelled"].includes(t.status) || t.route_state === "not_selected") && !asking.length;
   const tone: OrbTone = d.status === "completed" ? (d.tasks.some((t) => stateOf(t) === "failed") ? "bad" : "good")
     : d.status === "cancelled" ? "stopped" : d.status === "paused" || !d.launch_enabled ? "held" : asking.length || settled ? "asking" : "live";
@@ -582,12 +582,12 @@ export function Run() {
         kind: kinds.includes("gate") ? "gate" as const : kinds.includes("watch") ? "watch" as const : kinds.includes("qa") ? "qa" as const : kinds.includes("person") ? "person" as const : "agent" as const,
       };
     }),
-    { key: "__end", title: over ? "Landed" : "Live", state: over ? "landed" as const : "waiting" as const, outward: false, count: "" },
+    { key: "__end", title: over ? "Landed" : d.template?.key === "release_ticket" ? "Ready to ship" : "Live", state: over ? "landed" as const : "waiting" as const, outward: false, count: "" },
   ];
   const outcome = d.status === "completed" ? "Finished. Every step that ran is done." : d.status === "cancelled" ? "Stopped." : !d.launch_enabled ? "A draft: nothing runs until you start it."
     : gates.length ? `${gates[0].title}: the proof is ready for your decision.` : people.length ? `${people[0].title} needs you.` : settled ? "Every step is done. Close it to record the release."
     : running ? `${running.title}: ${resultWords(running).replace(/\.+$/, "")}.`
-    : ready ? `${ready.title}: ${resultWords(ready, agentOf(snap, ready)).replace(/\.+$/, "")}.` : "Waiting for the next step.";
+    : ready ? `${ready.title}: ${resultWords(ready, agentOf(snap, ready), !!d.dry_run).replace(/\.+$/, "")}.` : "Waiting for the next step.";
   const afterGate = (g: FlowTask) => {
     // Everything this go-ahead releases: down the line until the next gate, which asks again.
     const out: FlowTask[] = [];
@@ -611,7 +611,14 @@ export function Run() {
 
   return (
     <div className="fl-wrap" data-run={d.id}>
-      <nav><Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows", cid)}><ArrowLeft size={14} />All workflows</Link></nav>
+      <nav style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows", cid)}><ArrowLeft size={14} />All workflows</Link>
+        {d.template?.params.cycle_id ? (
+          <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows/cycle", cid, { cycle: String(d.template.params.cycle_id) })} data-cycle-link>
+            {d.template.key === "release_ticket" ? "Part of release" : "Release cycle"} {String(d.template.params.cycle_version ?? "")}
+          </Link>
+        ) : null}
+      </nav>
       <section className="fl-stage" data-tone={stageTone} aria-label="The run">
         <div className="fl-stage-top">
           <Orb tone={tone} fraction={live.length ? done / live.length : 0} landedAt={moment.finished ? moment.take : 0} kind={running ? kindOf(running) : null} />
@@ -639,7 +646,7 @@ export function Run() {
               ? <><button type="button" className="fl-btn" data-variant="danger" disabled={!!busy} onClick={() => act("stop", () => flowApi.simple(d, actor, "cancel")).then(() => setConfirmStop(false))}>Stop the run</button>
                 <button type="button" className="fl-btn" data-variant="ghost" onClick={() => setConfirmStop(false)}>Keep it</button></>
               : <button type="button" className="fl-btn" data-variant="ghost" onClick={() => setConfirmStop(true)}><Square size={13} />Stop</button>) : null}
-            {over && d.template ? <button type="button" className="fl-btn" onClick={() => navigate(flowHref("/workflows/new", cid, { template: d.template!.key, from: d.id }))}><RotateCcw size={14} />Run again</button> : null}
+            {over && d.template && d.template.key !== "release_ticket" && d.template.params.source !== "cycle" ? <button type="button" className="fl-btn" onClick={() => navigate(flowHref("/workflows/new", cid, { template: d.template!.key, from: d.id }))}><RotateCcw size={14} />Run again</button> : null}
           </div>
         </div>
         <Circuit stages={circuit} pulse={pulse} asking={tone === "asking"} />
