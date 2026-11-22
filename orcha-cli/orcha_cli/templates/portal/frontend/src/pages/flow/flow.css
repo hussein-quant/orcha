@@ -621,11 +621,48 @@
 .fl-cmp-line .fl-line-rule { bottom: 64px; }
 @media (max-width: 640px) { .fl-cmp-name { font-size: 22px; line-height: 30px; } .fl-cmp-actions, .fl-cmp-paste { padding-left: 0; margin-left: 0; } }
 
+/* ---- bring in existing tasks: the whole project, grouped -------------------------------- */
+.fl-dialog.fl-shelf { width: min(720px, 100%); max-height: min(760px, 88vh); padding: 0; gap: 0; overflow: hidden; }
+.fl-shelf > .fl-head { padding: 18px 18px 10px; align-items: flex-start; }
+.fl-shelf-search { display: flex; align-items: center; gap: 8px; margin: 0 18px 8px; padding: 0 12px; height: 38px; border-radius: 10px;
+  border: 1px solid var(--v2-border-strong); background: var(--v2-panel); color: var(--v2-text-3); transition: border-color 150ms ease, box-shadow 150ms ease; }
+.fl-shelf-search:focus-within { border-color: var(--v2-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--v2-accent) 18%, transparent); }
+.fl-shelf-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--v2-text); font: inherit; font-size: 13.5px; outline: none; }
+.fl-shelf-search input:focus-visible { box-shadow: none; }
+.fl-shelf-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+.fl-shelf-group { display: flex; flex-direction: column; gap: 4px; }
+.fl-shelf-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 8px 2px; }
+.fl-shelf-head .fl-section-title { margin: 0; }
+.fl-shelf-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.fl-shelf-list > li { animation: row-in 300ms var(--fl-rise) both; animation-delay: calc(var(--i, 0) * 18ms); }
+.fl-shelf-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; width: 100%; padding: 8px; border-radius: 9px;
+  border: 1px solid transparent; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background-color 140ms ease, border-color 140ms ease; }
+.fl-shelf-row:hover:not(:disabled) { background: var(--v2-hover); }
+.fl-shelf-row[aria-checked="true"] { background: color-mix(in srgb, var(--v2-accent) 9%, transparent); border-color: color-mix(in srgb, var(--v2-accent) 30%, transparent); }
+.fl-shelf-row:disabled { cursor: not-allowed; opacity: 0.55; }
+.fl-shelf-box { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 5px; border: 1.5px solid var(--v2-border-strong);
+  color: var(--v2-text-on-accent); transition: background-color 150ms ease, border-color 150ms ease, transform 180ms var(--fl-rise); }
+.fl-shelf-row[aria-checked="true"] .fl-shelf-box { background: var(--v2-accent); border-color: var(--v2-accent); transform: scale(1.05); }
+.fl-shelf-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fl-shelf-title { font-size: 13.5px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-shelf-note { font-size: 11.5px; color: var(--v2-text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-shelf-who { font-size: 12px; color: var(--v2-text-2); max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-shelf-fold { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px; border: 0; border-radius: 8px; background: transparent; color: var(--v2-text-2);
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; text-align: left; flex-wrap: wrap; }
+.fl-shelf-fold:hover { background: var(--v2-hover); }
+.fl-shelf-fold .fl-help { font-weight: 400; }
+.fl-shelf-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--v2-border); background: var(--v2-band); }
+.fl-panel.fl-cmp-import { max-width: none; width: auto; margin: 0; }
+.fl-cmp-import > section, .fl-cmp-import > div { max-width: none; margin: 0; }
+.fl-cmp-existing { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.fl-cmp-existing .fl-cmp-after { max-width: 100%; justify-content: space-between; }
+@media (max-width: 640px) { .fl-shelf-row { grid-template-columns: 20px minmax(0, 1fr) auto; } .fl-shelf-who { display: none; } }
+
 /* ---- reduced motion: loops stop, entrances become a short fade, nothing travels ---------- */
 @media (prefers-reduced-motion: reduce) {
   .fl *, .fl *::before, .fl *::after { animation-duration: 200ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; }
   .fl-row, .fl-tcard, .fl-node, .fl-card, .fl-waypoint, .fl-stage, .fl-gate, .fl-plat, .fl-frame, .fl-land-rise, .fl-row-land, .fl-node-land, .fl-land-pop,
-  .fl-step[data-plug="true"] .fl-card, .fl-step[data-plug="true"] .fl-node, .fl-stamp, .fl-cmp-head, .fl-cmp-obj, .fl-cmp-loop, .fl-cmp-after, .fl-cmp-detail, .fl-cmp-branch, .fl-cmp-paste, .fl-cmp-empty, .fl-watch-step, .fl-params, .fl-startbar, .fl-dialog, .fl-teach-caption, .fl-caption, .fl-problem, .fl-detail {
+  .fl-step[data-plug="true"] .fl-card, .fl-step[data-plug="true"] .fl-node, .fl-stamp, .fl-cmp-head, .fl-shelf-list > li, .fl-cmp-obj, .fl-cmp-loop, .fl-cmp-after, .fl-cmp-detail, .fl-cmp-branch, .fl-cmp-paste, .fl-cmp-empty, .fl-watch-step, .fl-params, .fl-startbar, .fl-dialog, .fl-teach-caption, .fl-caption, .fl-problem, .fl-detail {
     animation-name: fade-in !important;
   }
   .fl-line-rule { animation: none !important; }

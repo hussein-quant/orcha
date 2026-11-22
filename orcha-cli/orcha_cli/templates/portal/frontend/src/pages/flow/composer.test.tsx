@@ -92,3 +92,27 @@ it("keeps the draft on this device and refuses nothing silently: problems show b
   expect(screen.getByRole("button", { name: "Save as draft" })).toBeDisabled();
   expect(Object.keys(localStorage).some((k) => k.startsWith("orcha.flow.draft"))).toBe(true);
 });
+
+it("brings in existing tasks from the whole project, not a five-result search", async () => {
+  const { TaskShelf } = await import("./TaskShelf");
+  const tasks = [
+    ...Array.from({ length: 8 }, (_, i) => ({ id: `open-${i}`, title: `Open task ${i}`, status: "ready", is_root: false, workflow_id: null })),
+    { id: "done", title: "Shipped thing", status: "completed", is_root: false, workflow_id: null },
+    { id: "taken", title: "In another workflow", status: "ready", is_root: false, workflow_id: "w" },
+    { id: "review", title: "Under review", status: "needs_verification", is_root: false, workflow_id: null },
+  ];
+  (context.snap as unknown as { tasks: unknown[] }).tasks = tasks;
+  const onChange = vi.fn();
+  const onSelectedChoices = vi.fn();
+  render(<TaskShelf selected={[]} onChange={onChange} onSelectedChoices={onSelectedChoices} onClose={() => {}} />);
+  expect(screen.getAllByRole("checkbox")).toHaveLength(9); // 8 open + 1 finished; the two that can't join are folded
+  fireEvent.click(screen.getByRole("button", { name: "Select all 8" }));
+  expect(onChange).toHaveBeenLastCalledWith(tasks.slice(0, 8).map((t) => t.id));
+  fireEvent.click(screen.getByRole("button", { name: /Can't join yet/ }));
+  expect(screen.getByRole("checkbox", { name: /In another workflow/ })).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: /Under review/ })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Filter tasks"), { target: { value: "shipped" } });
+  expect(screen.getByRole("checkbox", { name: /Shipped thing/ })).toBeEnabled();
+  expect(screen.queryByRole("checkbox", { name: /Open task 1/ })).toBeNull();
+  (context.snap as unknown as { tasks?: unknown[] }).tasks = undefined;
+});

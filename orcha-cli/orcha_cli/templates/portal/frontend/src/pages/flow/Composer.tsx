@@ -27,7 +27,8 @@ import { workflowPaths, workflowRequest, workflowWriteReason } from "../workflow
 import type { Capability, Preview } from "../workflows/workflowContract.generated";
 import { sendWorkflowOperation, useWorkflowOperation } from "../workflows/workflowOperations";
 import { WorkflowOperationNotice } from "../workflows/WorkflowOperationNotice";
-import { WorkflowImportChoices, WorkflowImportImpact, type ImportChoice } from "../workflows/WorkflowImport";
+import { WorkflowImportImpact, type ImportChoice } from "../workflows/WorkflowImport";
+import { TaskShelf } from "./TaskShelf";
 import { WorkflowImportReview, importAcceptances, missingImportReview, type ImportReviews } from "../workflows/WorkflowImportReview";
 import { WorkflowQaStepDialog, WorkflowTriageStepDialog } from "../workflows/WorkflowQaStep";
 import { WorkflowBlockPicker } from "../workflows/WorkflowBlockPicker";
@@ -321,6 +322,8 @@ function ScopedComposer({ scope, verified, agents, ownerName }: { scope: DraftSc
 
   const change = (next: WorkflowDraft) => { if (frozen) return; keepDraft(scope, next); storeDraft(scope, next); setDraft(next); };
   const update = (key: string, patch: Partial<DraftTask>) => change({ ...draft, tasks: draft.tasks.map((t) => (t.key === key ? { ...t, ...patch } : t)) });
+  const { snap } = useSnapshot();
+  const existingTitle = (id: string) => existing.find((t) => t.id === id)?.title ?? snap?.tasks.find((t) => t.id === id)?.title ?? "An existing task";
   const lastAssignee = [...draft.tasks].reverse().find((t) => t.assignee)?.assignee ?? (agents.length === 1 ? agents[0].id : "");
 
   function addSteps(titles: string[], focusLast = false) {
@@ -502,8 +505,18 @@ function ScopedComposer({ scope, verified, agents, ownerName }: { scope: DraftSc
 
           <div className="fl-field">
             <span className="fl-label"><ListChecks size={12} /> Tasks you already have</span>
+            {(draft.existingTaskIds ?? []).length ? (
+              <ul className="fl-cmp-existing">
+                {draft.existingTaskIds!.map((id) => (
+                  <li key={id} className="fl-cmp-after">
+                    <span className="fl-cmp-after-t">{existingTitle(id)}</span>
+                    <button type="button" aria-label={`Leave out ${existingTitle(id)}`} onClick={() => change({ ...draft, existingTaskIds: draft.existingTaskIds!.filter((x) => x !== id) })}><X size={11} /></button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <button type="button" className="fl-addbtn" style={{ alignSelf: "flex-start" }} onClick={() => setImportOpen(true)}>
-              <Plus size={13} />{(draft.existingTaskIds ?? []).length ? `${draft.existingTaskIds!.length} brought in · change` : "Bring in existing tasks"}
+              <Plus size={13} />{(draft.existingTaskIds ?? []).length ? "Change" : "Bring in existing tasks"}
             </button>
           </div>
         </aside>
@@ -516,7 +529,7 @@ function ScopedComposer({ scope, verified, agents, ownerName }: { scope: DraftSc
               <ol className="fl-steps" ref={reorder.listRef}>
                 {draft.tasks.map((task, i) => (
                   <StepCard key={task.key} task={task} index={i} draft={draft} agents={agents} flexible={flexible} ownerName={ownerName}
-                    existing={(draft.existingTaskIds ?? []).map((id) => ({ id, title: existing.find((t) => t.id === id)?.title ?? "An existing task" }))}
+                    existing={(draft.existingTaskIds ?? []).map((id) => ({ id, title: existingTitle(id) }))}
                     problems={problemsOf(task.key)} plug={plugged === task.key} onChange={(patch) => update(task.key, patch)}
                     onRemove={() => { change(removeStep(draft, task.key)); say(`${draftTaskName(task, draft.tasks)} removed.`); }}
                     onEditQa={() => (task.qa?.kind === "triage" ? setTriageStep({ editing: task.key }) : setQaStep({ editing: task.key }))}
@@ -569,7 +582,8 @@ function ScopedComposer({ scope, verified, agents, ownerName }: { scope: DraftSc
       </div>
 
       {current && (draft.existingTaskIds?.length ?? 0) > 0 ? (
-        <section className="fl-panel wf-page" aria-label="Existing tasks">
+        <section className="fl-panel fl-cmp-import wf-page" aria-labelledby="fl-cmp-import-h">
+          <h2 id="fl-cmp-import-h" className="fl-h2">Tasks you're bringing in</h2>
           <WorkflowImportImpact preview={current} selected={draft.existingTaskIds ?? []} onChange={(ids) => change({ ...draft, existingTaskIds: ids })} cid={cid} />
           <WorkflowImportReview preview={current} reviews={reviews} onChange={setReviews} disabled={!!busy || frozen} />
         </section>
@@ -603,9 +617,7 @@ function ScopedComposer({ scope, verified, agents, ownerName }: { scope: DraftSc
       <p className="fl-sr" aria-live="polite">{said}{reorder.said}</p>
 
       {importOpen ? (
-        <Dialog title="Bring in existing tasks" className="wf-page" onClose={() => setImportOpen(false)} footer={<Button onClick={() => setImportOpen(false)}>Done</Button>}>
-          <WorkflowImportChoices scope={scope} selected={draft.existingTaskIds ?? []} onChange={(ids) => change({ ...draft, existingTaskIds: ids })} onSelectedChoices={setExisting} />
-        </Dialog>
+        <TaskShelf selected={draft.existingTaskIds ?? []} onChange={(ids) => change({ ...draft, existingTaskIds: ids })} onSelectedChoices={setExisting} onClose={() => setImportOpen(false)} />
       ) : null}
       {confirmDiscard ? (
         <Dialog title="Discard this draft?" description="Its name, goal and steps are removed from this device. No saved workflow changes." onClose={() => setConfirmDiscard(false)}
