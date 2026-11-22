@@ -6,14 +6,17 @@ import { useLocation } from "react-router-dom";
 import { Shell } from "../../shell/Shell";
 import { WorkflowsPage } from "../workflows/WorkflowsPage";
 import { Board } from "./Board";
+import { Composer } from "./Composer";
 import { Editor } from "./Editor";
 import { Run } from "./Run";
 import "./flow.css";
 
 export function WorkflowsHome() {
   const { pathname, search } = useLocation();
-  if (new URLSearchParams(search).get("classic") === "1") return <WorkflowsPage />;
-  const view = pathname === "/workflows" ? <Board /> : pathname === "/workflows/new" ? <Editor /> : <Run key={pathname} />;
+  const q = new URLSearchParams(search);
+  // "Add this task to a workflow" (addTask) is a classic-page flow: keep it there.
+  if (q.get("classic") === "1" || q.has("addTask")) return <WorkflowsPage />;
+  const view = pathname === "/workflows" ? <Board /> : pathname === "/workflows/new" ? (q.get("blank") === "1" ? <Composer /> : <Editor />) : <Run key={pathname} />;
   return (
     <Shell page="workflows" title="Workflows" flush>
       <div className="fl fl-page">{view}</div>

@@ -499,6 +499,7 @@ export function Run() {
   }, [moment.take]);
 
   const justStarted = (location.state as { justStarted?: boolean } | null)?.justStarted;
+  const notice = (location.state as { notice?: string } | null)?.notice;
 
   if (error && !d) return <div className="fl-wrap"><p className="fl-problem" role="alert">{error}</p><Link className="fl-btn" to={flowHref("/workflows", cid)}>All workflows</Link></div>;
   if (!d) return <div className="fl-wrap"><p className="fl-muted" aria-busy="true">Loading…</p></div>;
@@ -551,6 +552,7 @@ export function Run() {
               {d.stalled ? <span className="fl-chip" data-tone="warn"><TriangleAlert size={12} />Stalled {Math.floor(d.stalled.days)} days</span> : null}
             </div>
             <p className="fl-stage-line" aria-live="polite">{outcome}</p>
+            {notice && !d.launch_enabled ? <p className="fl-problem" data-tone="warn" role="status"><TriangleAlert size={13} aria-hidden="true" />{notice}</p> : null}
             <p className="fl-stage-line fl-muted fl-mono">{done}/{live.length} steps · {d.created_at ? elapsed(d.created_at, now) : ""}{justStarted && d.launch_enabled && !over && done === 0 ? " · just started" : ""}</p>
           </div>
           <div className="fl-stage-actions">

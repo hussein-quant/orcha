@@ -148,7 +148,7 @@ function StepCard({ s, i, problems, onToggle, onAddAfter, plug, assignee, names 
 }
 
 /** Brackets beside the line for each loop, measured from the cards it spans. */
-function LoopBrackets({ loops, host, sig }: { loops: Compiled["loops"]; host: React.RefObject<HTMLDivElement>; sig: string }) {
+export function LoopBrackets({ loops, host, sig }: { loops: Compiled["loops"]; host: React.RefObject<HTMLDivElement>; sig: string }) {
   const [boxes, setBoxes] = useState<{ name: string; top: number; height: number; rounds: number }[]>([]);
   useLayoutEffect(() => {
     const el = host.current;
@@ -253,7 +253,7 @@ export function Editor() {
         </header>
         {error ? <p className="fl-problem" role="alert">{error}</p> : null}
         {templates ? <Gallery templates={templates} onPick={(k) => navigate(flowHref("/workflows/new", cid, { template: k }))}
-          onBlank={() => navigate(flowHref("/workflows/new", cid, { classic: "1" }))}
+          onBlank={() => navigate(flowHref("/workflows/new", cid, { blank: "1" }))}
           onImport={async (json) => {
             try { const s = await flowApi.importTemplate(cid, actor, json); navigate(flowHref("/workflows/new", cid, { template: s.key })); }
             catch (e) { setError((e as Error).message); }

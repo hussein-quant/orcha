@@ -100,6 +100,8 @@ coverage_threshold, dry_run?: {outcomes[], note}, secrets[]}`. A step without `s
     - Run page parts: Orb, stage circuit with wire fill and pulse, step rail with inline detail, gate card with the proof pack (count-up figures, stamps, filmstrip and lightbox, coverage meters), watch timeline, round chips, decision cards and Close.
     - Live-moments-only animation, reduced motion, and aria-live announcements.
     - The classic screens at `?classic=1`.
+    - A blank workflow opens the composer (`/workflows/new?blank=1`, `frontend/src/pages/flow/Composer.tsx`): the name and goal as a title, steps on the same line, Enter adds a step that waits for the one before, "Paste a plan" turns lines into chained steps, drag or arrow keys reorder, prerequisites as chips (max 3, cycles refused), outcomes and where they go, loops with a bracket on the line, objectives, existing tasks, and a live check. It runs the classic draft, `draftProblems`, Preview and Create (with the preview digest and the same idempotent operation) unchanged; "Save and start" is Create then `/launch`. The draft is also kept on this device per project and person.
+    - `?addTask=` links (add a task to a workflow) still open the classic page, which owns that flow.
   - Deferred:
     - Drag reorder in the editor (the hook is ported, `useReorder`, but not wired).
     - The read-only Graph toggle (the classic Route tab has it).

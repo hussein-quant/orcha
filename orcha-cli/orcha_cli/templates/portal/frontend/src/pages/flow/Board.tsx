@@ -114,7 +114,7 @@ export function Board() {
         <section aria-label="Start a workflow" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {empty ? <TeachScene /> : null}
           <h2 className="fl-h2">Start from a template</h2>
-          {templates ? <Gallery templates={templates} onPick={pick} onBlank={() => navigate(flowHref("/workflows/new", cid, { classic: "1" }))}
+          {templates ? <Gallery templates={templates} onPick={pick} onBlank={() => navigate(flowHref("/workflows/new", cid, { blank: "1" }))}
             onImport={async (json) => { const s = await flowApi.importTemplate(cid, actor, json); pick(s.key); }} /> : null}
         </section>
       ) : null}

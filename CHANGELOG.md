@@ -407,3 +407,4 @@ missing.
 ### Changed
 - First versioned release. Everything before 0.2.0 was installed from a
   source clone (`uv tool install --from ... orcha-cli`).
+- Workflows: a blank workflow now opens a composer in the new style (one line of steps, Enter to add, paste a plan, loops and outcomes inline, live check, Save as draft or Save and start). Same draft, checks and create path as before.
