@@ -23,6 +23,7 @@ from portal_backend.workflow_graph import (
     validate_graph,
 )
 from portal_backend import workflow_routing as routing
+from portal_backend import workflow_steps
 from portal_backend.workflow_scheduling import (
     LIVE_EXECUTIONS,
     accepted,
@@ -607,6 +608,12 @@ class WorkflowService:
             row["routes"] = routes.get(tid, [])
             row["qa"] = routing.qa_spec(task)
             row["block"] = routing.block_of(task)
+            row["step"] = workflow_steps.spec_of(task)
+            row["watch"] = (
+                workflow_steps.watch_view(self.cur, task)
+                if workflow_steps.kind_of(task) == "watch"
+                else None
+            )
             row["repeat_group_id"] = group_of[tid]["id"] if tid in group_of else None
             row["round"] = group_of[tid]["current_round"] if tid in group_of else None
             report = reports.get((tid, task["work_revision"]))
@@ -1013,6 +1020,9 @@ class WorkflowService:
                 **routing.capability(),
             },
             repeat_groups=groups,
+            template=workflow_steps.template_of(w),
+            dry_run=bool(w.get("dry_run")),
+            stalled=workflow_steps.stalled_view(self, w),
             available_actions=workflow_actions,
             progress=s["progress"],
             completion=s["completion"],
@@ -1685,6 +1695,7 @@ class WorkflowService:
                 "The workflow draft or imported work changed. Review it again.",
             )
         version = routing.semantics_for(body)
+        workflow_steps.check_draft(body.get("tasks", []))
         wid = _id()
         self.cur.execute(
             "INSERT INTO workflows(id,container_id,owner_human_id,created_by_human_id,title,goal,execution_mode,semantics_version,turn_allowance,drafted_by_agent_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -1705,6 +1716,11 @@ class WorkflowService:
             self.cur.execute(
                 "UPDATE workflows SET task_limit=%s,round_limit=%s WHERE id=%s",
                 (copied_setup["task_limit"], copied_setup["round_limit"], wid),
+            )
+        if body.get("dry_run") or body.get("template"):
+            self.cur.execute(
+                "UPDATE workflows SET dry_run=%s,template_ref=%s WHERE id=%s",
+                (bool(body.get("dry_run")), _json(body["template"]) if body.get("template") else None, wid),
             )
         w = self.workflow(wid)
         created = {"title": w["title"]}
@@ -1788,6 +1804,7 @@ class WorkflowService:
                 deps.setdefault(row["task_id"], []).append(row["depends_on_id"])
         validate_graph(ids, deps)
         routing.semantics_for(draft)
+        workflow_steps.check_draft(draft["tasks"])
         if routing.wants_flow(draft):
             outcomes, routes, groups = routing.draft_flow(
                 draft["tasks"], draft["repeat_groups"]
@@ -1799,6 +1816,12 @@ class WorkflowService:
         return preview
 
     def assign(self, task, aid):
+        if workflow_steps.no_worker(task):
+            conflict(
+                "person_step",
+                "A person owns this step; an agent can't be assigned to it.",
+                status=422,
+            )
         a = self.one(
             "SELECT * FROM agents WHERE id=%s AND container_id=%s AND terminated_at IS NULL",
             (aid, task["container_id"]),
@@ -1838,7 +1861,10 @@ class WorkflowService:
     def _add(self, w, actor, specs):
         self.active(w)
         p = self.actor(actor, w["container_id"])
-        if any(s.get("qa") and not s.get("assignee_id") for s in specs):
+        if w.get("dry_run"):
+            # A dry run never assigns: no agent wakes for a rehearsal.
+            specs = [{**s, "assignee_id": None} for s in specs]
+        elif any(s.get("qa") and not s.get("assignee_id") for s in specs):
             from portal_backend import qa_handoff
 
             qa_agent = qa_handoff.qa_agent_id(self.cur, w["container_id"])
@@ -1880,7 +1906,11 @@ class WorkflowService:
         ids = {k: _id() for k in keys}
         for spec in specs:
             complete = bool(
-                spec.get("definition_of_done", "").strip() and spec.get("assignee_id")
+                spec.get("definition_of_done", "").strip()
+                and (
+                    spec.get("assignee_id")
+                    or (spec.get("step") or {}).get("kind") in workflow_steps.NO_WORKER
+                )
             )
             if p["kind"] == "ai" and not complete:
                 conflict(
@@ -1908,6 +1938,10 @@ class WorkflowService:
                 routing.save_qa(self.cur, tid, spec["qa"])
             if spec.get("block"):
                 routing.save_block(self.cur, tid, spec["block"])
+            if spec.get("step"):
+                workflow_steps.save_step(
+                    self.cur, tid, {**spec["step"], "key": spec["client_key"]}
+                )
             if spec.get("assignee_id"):
                 self.assign(self.task(w["id"], tid), spec["assignee_id"])
         s = self.snapshot(w["id"])
@@ -2275,6 +2309,10 @@ class WorkflowService:
 
     def op_release(self, w, actor, b, tid):
         self._release(w, actor, b)
+
+    def op_launch(self, w, actor, b, tid):
+        """One Start: prepare every unprepared step, then Start (Mobile App Release §6.3)."""
+        workflow_steps.launch(self, w, actor, b)
 
     def op_hold(self, w, actor, b, tid):
         p = self.owner(w, actor, project_owner=True)
@@ -2675,6 +2713,8 @@ class WorkflowService:
         # `qa_final_decision` never comes from a client: AcceptTask forbids extra fields, and only
         # qa_run_tasks sends it. What needs a person's own eyes stays with a person under it too.
         decided = b.get("qa_final_decision")
+        if p["kind"] != "human" and workflow_steps.no_worker(t):
+            conflict("person_step", "Only a person completes this step.", status=403)
         if h and (p['kind'] != 'human' or decided):
             conflict('human_approval_required', 'A person verifies the finished review loop.', status=403)
         e = self.live_turn(tid, lock=True) or acceptance_turn(self, t)

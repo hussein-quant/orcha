@@ -223,7 +223,8 @@ class FindingConditionsBody(ActorBody):
 
 
 class FindingPatchBody(ActorBody):
-    action: Literal["dismiss", "file", "reopen"]
+    action: Literal["dismiss", "file", "reopen", "mark_fixed", "mark_verified"]
+    fixed_ref: Optional[str] = Field(default=None, max_length=300, description="The PR or commit that fixed it (mark_fixed)")
     title: Optional[str] = Field(default=None, max_length=MAX_NAME_LEN, description="Task title when filing")
     assignee_agent_id: Optional[str] = Field(default=None, description="Assign the filed task to this member")
 
@@ -943,6 +944,25 @@ def patch_qa_finding(fid: str, body: FindingPatchBody, request: Request):
         f = qs.load_finding(cur, fid)
         cid = str(f["container_id"])
         who = qs.actor(cur, request, cid, body.actor_agent_id)
+        if body.action in {"mark_fixed", "mark_verified"}:
+            # The fix lifecycle beside the status: open -> fixed (by a PR or commit) -> verified
+            # (a re-run passed). A dismissed finding has nothing to fix.
+            if f["status"] == "dismissed":
+                raise HTTPException(409, "this finding was dismissed; reopen it first")
+            if body.action == "mark_verified" and f.get("lifecycle") not in {"fixed", "verified"}:
+                raise HTTPException(409, "mark the finding fixed before verifying it")
+            if body.action == "mark_fixed" and not (body.fixed_ref or "").strip():
+                raise HTTPException(422, "name the PR or commit that fixed it")
+            lifecycle = "fixed" if body.action == "mark_fixed" else "verified"
+            cur.execute(
+                "UPDATE qa_findings SET lifecycle=%s, fixed_ref=COALESCE(%s, fixed_ref), lifecycle_at=%s, lifecycle_by=%s WHERE id=%s",
+                (lifecycle, (body.fixed_ref or "").strip() or None, sql.ts(sql.utcnow()), who["id"], fid),
+            )
+            log_event(cur, cid, "ai" if who["kind"] != "human" else "human", who["id"], "qa_finding", fid,
+                      f"qa_finding_{lifecycle}", {"fixed_ref": body.fixed_ref})
+            out = qs.public(qs.load_finding(cur, fid))
+            conn.commit()
+            return out
         if body.action != "file":
             if f["status"] == "filed":
                 raise HTTPException(409, "this finding was already filed as a task")

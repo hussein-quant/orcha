@@ -1,7 +1,7 @@
 """Typed Workflows contracts. OpenAPI generated from these models is authoritative."""
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -142,6 +142,100 @@ class QaStepBlock(Input):
     name: Name
 
 
+StepKind = Literal["agent", "person", "qa", "watch", "gate"]
+ResourceClass = Literal["build:heavy", "device:ios-sim", "device:android-emu", "device:phone"]
+
+
+class WatchAdapter(Input):
+    """How a watch step reads an outside status: a command run in the project's checkout
+    (its stdout is the status JSON) or an HTTP GET that returns it."""
+
+    command: str | None = Field(default=None, max_length=2000)
+    http: str | None = Field(default=None, max_length=2000)
+
+
+class WatchSpec(Input):
+    """A step that waits on an outside status (store review, build processing). `state_map`
+    turns a reported state into one of the step's outcomes; any other state keeps watching."""
+
+    adapter: WatchAdapter
+    interval_s: int = Field(default=300, ge=5, le=86400)
+    backoff: float = Field(default=1.5, ge=1, le=4)
+    max_interval_s: int = Field(default=3600, ge=5, le=86400)
+    timeout_h: float = Field(default=72, gt=0, le=24 * 30)
+    state_map: dict[str, OutcomeName] = Field(default_factory=dict)
+    terminal_states: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=20)
+    # Dry run only: the states the adapter "reports", one per reading.
+    dry_run_states: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=20)
+
+
+class GateSpec(Input):
+    """A person's go / no-go over the proof pack. Send back returns to a step of the gate's loop."""
+
+    proof_steps: list[Annotated[str, Field(max_length=80)]] = Field(default_factory=list, max_length=20)
+    include_unit_only: bool = True
+    include_metadata_diff: bool = False
+    choices: list[Literal["go", "no_go", "send_back"]] = Field(
+        default_factory=lambda: ["go", "no_go", "send_back"], min_length=1, max_length=3
+    )
+    require_reason: list[Literal["go", "no_go", "send_back"]] = Field(
+        default_factory=lambda: ["no_go", "send_back"], max_length=3
+    )
+
+
+class BuildIdentity(Input):
+    """The build a QA step tests (and the proof shows): type, version, build, commit, environment."""
+
+    type: Literal["debug", "release"] | None = None
+    version: str | None = Field(default=None, max_length=40)
+    build: str | None = Field(default=None, max_length=40)
+    commit: str | None = Field(default=None, max_length=64)
+    env: str | None = Field(default=None, max_length=40)
+
+
+class DryRunSpec(Input):
+    """Dry run only: the outcome a step reports on each round (the last one repeats)."""
+
+    outcomes: list[OutcomeName] = Field(default_factory=list, max_length=10)
+    note: str = Field(default="", max_length=400)
+
+
+class StepSpec(Input):
+    """What kind of step this is beyond its assignee: worked by an agent, owned by a person,
+    a QA step, a watch on an outside status, or a person's gate. Optional: a step without it
+    is a classic agent (or QA) step."""
+
+    kind: StepKind = "agent"
+    # The template's key for this step (set on save; the proof pack and the editor use it).
+    key: str | None = Field(default=None, max_length=80)
+    stage: str | None = Field(default=None, max_length=80)
+    stage_title: str | None = Field(default=None, max_length=120)
+    role: str | None = Field(default=None, max_length=60)
+    person_id: str | None = None
+    required: bool = False
+    platforms: list[Literal["ios", "android", "web", "api"]] = Field(default_factory=list, max_length=4)
+    irreversible: bool = False
+    outward: str | None = Field(default=None, max_length=80)
+    resources: list[ResourceClass] = Field(default_factory=list, max_length=4)
+    watch: WatchSpec | None = None
+    gate: GateSpec | None = None
+    scope: Literal["subset", "full"] | None = None
+    build: BuildIdentity | None = None
+    coverage_threshold: int | None = Field(default=None, ge=0, le=10000)
+    dry_run: DryRunSpec | None = None
+    secrets: list[Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]{1,63}$")]] = Field(default_factory=list, max_length=10)
+
+
+class TemplateRef(Input):
+    """The template a workflow was made from and the parameters it was made with."""
+
+    key: str = Field(max_length=80)
+    version: int = Field(ge=1)
+    name: str = Field(max_length=120)
+    params: dict[str, Any] = Field(default_factory=dict)
+    removed: list[str] = Field(default_factory=list, max_length=200)
+
+
 class NewTask(Input):
     client_key: Key
     title: Name
@@ -154,6 +248,7 @@ class NewTask(Input):
     routes: list[StepRoute] = Field(default_factory=list, max_length=8)
     qa: QaStepSpec | None = None
     block: QaStepBlock | None = None
+    step: StepSpec | None = None
 
 
 class NewObjective(Input):
@@ -459,6 +554,8 @@ class WorkflowTask(BaseModel):
     repeat_group_id: str | None = None
     round: int | None = None
     reported_outcome: ReportedOutcome | None = None
+    step: StepSpec | None = None
+    watch: dict[str, Any] | None = None
 
 
 class Progress(BaseModel):
@@ -624,6 +721,9 @@ class WorkflowDetail(BaseModel):
     turn_allowance: int = 40
     turns_used: int = 0
     repeat_groups: list[RepeatGroupView] = Field(default_factory=list)
+    template: TemplateRef | None = None
+    dry_run: bool = False
+    stalled: dict[str, Any] | None = None
 
 
 class VisibilityCheck(BaseModel):

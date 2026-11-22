@@ -104,6 +104,7 @@ from portal_backend import (
     task_reviewer_routes,
     task_verification_routes,
     templates_routes,  # project mode (Code | General) + industry templates
+    workflow_release_routes,  # workflow templates, person/gate/watch steps, proof pack, board
     terminal_config_routes,
     user_pref_routes,
     version_routes,  # GH #258 PR 9: GET /api/version
@@ -222,6 +223,7 @@ ROUTE_MODULES = (
     task_reviewer_routes,
     task_verification_routes,
     templates_routes,  # project mode (Code | General) + industry templates
+    workflow_release_routes,  # workflow templates, person/gate/watch steps, proof pack, board
     terminal_config_routes,
     user_pref_routes,
     version_routes,

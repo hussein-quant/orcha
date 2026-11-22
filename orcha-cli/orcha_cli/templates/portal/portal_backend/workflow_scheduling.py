@@ -247,6 +247,13 @@ def _base_blockers(
         add('review_handoff', 'Waiting for the current review or correction turn.')
     if workflow.get("limit_reached"):
         add("limit_reached", "Limit reached — no new starts.")
+    from portal_backend import workflow_steps
+
+    gate = workflow_steps.irreversible_blocker(
+        task, tasks, dependencies, lambda t: accepted(t, acceptances)
+    )
+    if gate:
+        add("gate_required", gate)
     if source_kind == "worker":
         gate = availability.get(
             task["id"],
@@ -299,7 +306,11 @@ def workflow_eligibility(
         kind, reasons = base[tid]
         reasons = list(reasons)
         message = None
-        if not reasons:
+        from portal_backend import workflow_steps
+
+        if not reasons and workflow_steps.turn_free(tasks[tid], workflow):
+            pass  # a person, gate or watch step (or a dry run) never holds a worker turn
+        elif not reasons:
             if workflow["execution_mode"] == "serial":
                 if live or (eligible and tid != eligible[0]):
                     message = (

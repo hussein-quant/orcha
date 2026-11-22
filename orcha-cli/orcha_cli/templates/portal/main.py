@@ -213,6 +213,8 @@ _configure_lifecycle(lambda: run_migrations)
 app.on_event("startup")(_startup_migrate)
 app.on_event("startup")(_start_local_index_warmer)
 app.on_event("startup")(_start_qa_session_sweeper)
+from portal_backend.workflow_steps import start_driver as _start_workflow_driver  # noqa: E402
+app.on_event("startup")(_start_workflow_driver)
 _configure_active_conversations(lambda: _MODEL_IDS)
 agent_registration_routes.configure_model_ids(lambda: _MODEL_IDS)
 agent_model_routes.configure_catalogs(

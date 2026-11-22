@@ -1906,6 +1906,56 @@
         }
       }
     },
+    "/api/workflows/{wid}/launch": {
+      "post": {
+        "summary": "Workflow Launch",
+        "operationId": "workflow_launch_api_workflows__wid__launch_post",
+        "parameters": [
+          {
+            "name": "wid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Wid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Mutation"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-workflow-operation": "launch"
+      }
+    },
     "/api/workflows/{wid}/move": {
       "post": {
         "summary": "Workflow Move",
@@ -3298,6 +3348,77 @@
         ],
         "title": "Blocker"
       },
+      "BuildIdentity": {
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "debug",
+                  "release"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "build": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build"
+          },
+          "commit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit"
+          },
+          "env": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 40
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Env"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BuildIdentity",
+        "description": "The build a QA step tests (and the proof shows): type, version, build, commit, environment."
+      },
       "Capability": {
         "properties": {
           "workflow_read": {
@@ -3447,6 +3568,30 @@
           "label"
         ],
         "title": "DisplayState"
+      },
+      "DryRunSpec": {
+        "properties": {
+          "outcomes": {
+            "items": {
+              "type": "string",
+              "maxLength": 40,
+              "minLength": 1
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Outcomes"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DryRunSpec",
+        "description": "Dry run only: the outcome a step reports on each round (the last one repeats)."
       },
       "EarlierRound": {
         "properties": {
@@ -3716,6 +3861,60 @@
         ],
         "title": "FlowStep",
         "description": "One step's outcomes and next-step rules in a flow edit. `expected_work_revision`\nis optional; when given, the edit is refused if the step's work changed meanwhile."
+      },
+      "GateSpec": {
+        "properties": {
+          "proof_steps": {
+            "items": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Proof Steps"
+          },
+          "include_unit_only": {
+            "type": "boolean",
+            "title": "Include Unit Only",
+            "default": true
+          },
+          "include_metadata_diff": {
+            "type": "boolean",
+            "title": "Include Metadata Diff",
+            "default": false
+          },
+          "choices": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "go",
+                "no_go",
+                "send_back"
+              ]
+            },
+            "type": "array",
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Choices"
+          },
+          "require_reason": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "go",
+                "no_go",
+                "send_back"
+              ]
+            },
+            "type": "array",
+            "maxItems": 3,
+            "title": "Require Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "GateSpec",
+        "description": "A person's go / no-go over the proof pack. Send back returns to a step of the gate's loop."
       },
       "HTTPValidationError": {
         "properties": {
@@ -4437,6 +4636,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/QaStepBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepSpec"
               },
               {
                 "type": "null"
@@ -5839,6 +6048,212 @@
         "title": "StepRoute",
         "description": "What happens next for one outcome. `step` is a branch to one direct dependent,\n`return` starts a new round of the reporter's repeat group at an earlier member."
       },
+      "StepSpec": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "person",
+              "qa",
+              "watch",
+              "gate"
+            ],
+            "title": "Kind",
+            "default": "agent"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "stage_title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage Title"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "person_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Person Id"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "default": false
+          },
+          "platforms": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "ios",
+                "android",
+                "web",
+                "api"
+              ]
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Platforms"
+          },
+          "irreversible": {
+            "type": "boolean",
+            "title": "Irreversible",
+            "default": false
+          },
+          "outward": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outward"
+          },
+          "resources": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "build:heavy",
+                "device:ios-sim",
+                "device:android-emu",
+                "device:phone"
+              ]
+            },
+            "type": "array",
+            "maxItems": 4,
+            "title": "Resources"
+          },
+          "watch": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WatchSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "subset",
+                  "full"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "build": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BuildIdentity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "coverage_threshold": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Threshold"
+          },
+          "dry_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DryRunSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secrets": {
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Secrets"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StepSpec",
+        "description": "What kind of step this is beyond its assignee: worked by an agent, owned by a person,\na QA step, a watch on an outside status, or a person's gate. Optional: a step without it\nis a classic agent (or QA) step."
+      },
       "TaskAcceptance": {
         "properties": {
           "id": {
@@ -6171,6 +6586,47 @@
         ],
         "title": "TaskMutation"
       },
+      "TemplateRef": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Key"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "title": "Name"
+          },
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params"
+          },
+          "removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Removed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "version",
+          "name"
+        ],
+        "title": "TemplateRef",
+        "description": "The template a workflow was made from and the parameters it was made with."
+      },
       "ThisRound": {
         "properties": {
           "trigger": {
@@ -6362,6 +6818,107 @@
         ],
         "title": "VisibilityCheck",
         "description": "GH #350 (spec \u00a74.14): fresh server eligibility for Hide / Restore. `can_hide` is true\nonly for a completed or cancelled workflow with no live worker turn that is not already\nhidden; `can_restore` only for a hidden one. Blockers carry the exact reason."
+      },
+      "WatchAdapter": {
+        "properties": {
+          "command": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command"
+          },
+          "http": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "WatchAdapter",
+        "description": "How a watch step reads an outside status: a command run in the project's checkout\n(its stdout is the status JSON) or an HTTP GET that returns it."
+      },
+      "WatchSpec": {
+        "properties": {
+          "adapter": {
+            "$ref": "#/components/schemas/WatchAdapter"
+          },
+          "interval_s": {
+            "type": "integer",
+            "maximum": 86400.0,
+            "minimum": 5.0,
+            "title": "Interval S",
+            "default": 300
+          },
+          "backoff": {
+            "type": "number",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Backoff",
+            "default": 1.5
+          },
+          "max_interval_s": {
+            "type": "integer",
+            "maximum": 86400.0,
+            "minimum": 5.0,
+            "title": "Max Interval S",
+            "default": 3600
+          },
+          "timeout_h": {
+            "type": "number",
+            "maximum": 720.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Timeout H",
+            "default": 72
+          },
+          "state_map": {
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 40,
+              "minLength": 1
+            },
+            "type": "object",
+            "title": "State Map"
+          },
+          "terminal_states": {
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Terminal States"
+          },
+          "dry_run_states": {
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Dry Run States"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "adapter"
+        ],
+        "title": "WatchSpec",
+        "description": "A step that waits on an outside status (store review, build processing). `state_map`\nturns a reported state into one of the step's outcomes; any other state keeps watching."
       },
       "WorkerToStop": {
         "properties": {
@@ -6783,6 +7340,33 @@
             },
             "type": "array",
             "title": "Repeat Groups"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TemplateRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          },
+          "stalled": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stalled"
           }
         },
         "type": "object",
@@ -7179,6 +7763,33 @@
             },
             "type": "array",
             "title": "Repeat Groups"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TemplateRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "default": false
+          },
+          "stalled": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stalled"
           },
           "impact": {
             "$ref": "#/components/schemas/Impact"
@@ -7666,6 +8277,28 @@
                 "type": "null"
               }
             ]
+          },
+          "step": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepSpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "watch": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watch"
           }
         },
         "type": "object",

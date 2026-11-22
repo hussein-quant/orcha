@@ -1,5 +1,5 @@
 // Generated from FastAPI OpenAPI slices. DO NOT EDIT.
-// Workflow source SHA-256: 02d17966580c3272334f26275de41974b17aa5ce1454439180cffda066b90711
+// Workflow source SHA-256: 2c4027c03694c790d027bf1b459e43a3711c0baf69d464e972938bf949d3bb7a
 // Evidence GET source SHA-256: f2a794298f992bd3ff3955fa5d6aefc30a97e373794a3c1e9d03c8f46796853e
 // Regenerate with tools/generate-workflow-contract.mjs and both source files.
 
@@ -73,6 +73,14 @@ export type Blocker = {
   "task_id"?: string | null;
 };
 
+export type BuildIdentity = {
+  "type"?: "debug" | "release" | null;
+  "version"?: string | null;
+  "build"?: string | null;
+  "commit"?: string | null;
+  "env"?: string | null;
+};
+
 export type Capability = {
   "workflow_read"?: boolean;
   "workflow_human_write"?: boolean;
@@ -100,6 +108,11 @@ export type DisplayState = {
   "release_available_at"?: string | null;
   "warning"?: string | null;
   "list_warning"?: boolean;
+};
+
+export type DryRunSpec = {
+  "outcomes"?: Array<string>;
+  "note"?: string;
 };
 
 export type EarlierRound = {
@@ -147,6 +160,14 @@ export type FlowStep = {
   "routes"?: Array<StepRoute>;
   "qa"?: QaStepSpec | null;
   "expected_work_revision"?: number | null;
+};
+
+export type GateSpec = {
+  "proof_steps"?: Array<string>;
+  "include_unit_only"?: boolean;
+  "include_metadata_diff"?: boolean;
+  "choices"?: Array<"go" | "no_go" | "send_back">;
+  "require_reason"?: Array<"go" | "no_go" | "send_back">;
 };
 
 export type HTTPValidationError = {
@@ -268,6 +289,7 @@ export type NewTask = {
   "routes"?: Array<StepRoute>;
   "qa"?: QaStepSpec | null;
   "block"?: QaStepBlock | null;
+  "step"?: StepSpec | null;
 };
 
 export type Objective = {
@@ -496,6 +518,27 @@ export type StepRoute = {
   "destination_task"?: string | null;
 };
 
+export type StepSpec = {
+  "kind"?: "agent" | "person" | "qa" | "watch" | "gate";
+  "key"?: string | null;
+  "stage"?: string | null;
+  "stage_title"?: string | null;
+  "role"?: string | null;
+  "person_id"?: string | null;
+  "required"?: boolean;
+  "platforms"?: Array<"ios" | "android" | "web" | "api">;
+  "irreversible"?: boolean;
+  "outward"?: string | null;
+  "resources"?: Array<"build:heavy" | "device:ios-sim" | "device:android-emu" | "device:phone">;
+  "watch"?: WatchSpec | null;
+  "gate"?: GateSpec | null;
+  "scope"?: "subset" | "full" | null;
+  "build"?: BuildIdentity | null;
+  "coverage_threshold"?: number | null;
+  "dry_run"?: DryRunSpec | null;
+  "secrets"?: Array<string>;
+};
+
 export type TaskAcceptance = {
   "id": string;
   "work_revision": number;
@@ -557,6 +600,14 @@ export type TaskMutation = {
   "expected_work_revision": number;
 };
 
+export type TemplateRef = {
+  "key": string;
+  "version": number;
+  "name": string;
+  "params"?: Record<string, unknown>;
+  "removed"?: Array<string>;
+};
+
 export type ThisRound = {
   "trigger"?: string | null;
   "outcome"?: string | null;
@@ -590,6 +641,22 @@ export type VisibilityCheck = {
   "can_hide": boolean;
   "can_restore": boolean;
   "blockers"?: Array<Blocker>;
+};
+
+export type WatchAdapter = {
+  "command"?: string | null;
+  "http"?: string | null;
+};
+
+export type WatchSpec = {
+  "adapter": WatchAdapter;
+  "interval_s"?: number;
+  "backoff"?: number;
+  "max_interval_s"?: number;
+  "timeout_h"?: number;
+  "state_map"?: Record<string, string>;
+  "terminal_states"?: Array<string>;
+  "dry_run_states"?: Array<string>;
 };
 
 export type WorkerToStop = {
@@ -656,6 +723,9 @@ export type WorkflowDetail = {
   "turn_allowance"?: number;
   "turns_used"?: number;
   "repeat_groups"?: Array<RepeatGroupView>;
+  "template"?: TemplateRef | null;
+  "dry_run"?: boolean;
+  "stalled"?: Record<string, unknown> | null;
 };
 
 export type WorkflowDraft = {
@@ -714,6 +784,9 @@ export type WorkflowImpact = {
   "turn_allowance"?: number;
   "turns_used"?: number;
   "repeat_groups"?: Array<RepeatGroupView>;
+  "template"?: TemplateRef | null;
+  "dry_run"?: boolean;
+  "stalled"?: Record<string, unknown> | null;
   "impact": Impact;
 };
 
@@ -773,6 +846,8 @@ export type WorkflowTask = {
   "repeat_group_id"?: string | null;
   "round"?: number | null;
   "reported_outcome"?: ReportedOutcome | null;
+  "step"?: StepSpec | null;
+  "watch"?: Record<string, unknown> | null;
 };
 
 export type WorkflowTaskChoice = {
@@ -841,10 +916,12 @@ export type WorkflowModels = {
   AddEvidence: AddEvidence;
   AvailableAction: AvailableAction;
   Blocker: Blocker;
+  BuildIdentity: BuildIdentity;
   Capability: Capability;
   CompletionCheck: CompletionCheck;
   DependencyEdit: DependencyEdit;
   DisplayState: DisplayState;
+  DryRunSpec: DryRunSpec;
   EarlierRound: EarlierRound;
   EvidenceBasis: EvidenceBasis;
   EvidenceItem: EvidenceItem;
@@ -852,6 +929,7 @@ export type WorkflowModels = {
   Finding: Finding;
   FlowEdit: FlowEdit;
   FlowStep: FlowStep;
+  GateSpec: GateSpec;
   HTTPValidationError: HTTPValidationError;
   Impact: Impact;
   ImpactTask: ImpactTask;
@@ -889,6 +967,7 @@ export type WorkflowModels = {
   RoutingPreview: RoutingPreview;
   StepOutcome: StepOutcome;
   StepRoute: StepRoute;
+  StepSpec: StepSpec;
   TaskAcceptance: TaskAcceptance;
   TaskApprovalHistory: TaskApprovalHistory;
   TaskApprovalRecord: TaskApprovalRecord;
@@ -896,10 +975,13 @@ export type WorkflowModels = {
   TaskAutonomyUpdate: TaskAutonomyUpdate;
   TaskBatch: TaskBatch;
   TaskMutation: TaskMutation;
+  TemplateRef: TemplateRef;
   ThisRound: ThisRound;
   TransferOwner: TransferOwner;
   ValidationError: ValidationError;
   VisibilityCheck: VisibilityCheck;
+  WatchAdapter: WatchAdapter;
+  WatchSpec: WatchSpec;
   WorkerToStop: WorkerToStop;
   WorkflowCreate: WorkflowCreate;
   WorkflowDetail: WorkflowDetail;
@@ -1310,6 +1392,70 @@ export const workflowSchemas = {
       "message"
     ]
   },
+  "BuildIdentity": {
+    "properties": {
+      "type": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "debug",
+              "release"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "version": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 40
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "build": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 40
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "commit": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 64
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "env": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 40
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "type": "object"
+  },
   "Capability": {
     "properties": {
       "workflow_read": {
@@ -1431,6 +1577,25 @@ export const workflowSchemas = {
     "required": [
       "label"
     ]
+  },
+  "DryRunSpec": {
+    "properties": {
+      "outcomes": {
+        "items": {
+          "type": "string",
+          "maxLength": 40,
+          "minLength": 1
+        },
+        "type": "array",
+        "maxItems": 10
+      },
+      "note": {
+        "type": "string",
+        "maxLength": 400
+      }
+    },
+    "additionalProperties": false,
+    "type": "object"
   },
   "EarlierRound": {
     "properties": {
@@ -1665,6 +1830,51 @@ export const workflowSchemas = {
     "required": [
       "task_id"
     ]
+  },
+  "GateSpec": {
+    "properties": {
+      "proof_steps": {
+        "items": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "type": "array",
+        "maxItems": 20
+      },
+      "include_unit_only": {
+        "type": "boolean"
+      },
+      "include_metadata_diff": {
+        "type": "boolean"
+      },
+      "choices": {
+        "items": {
+          "type": "string",
+          "enum": [
+            "go",
+            "no_go",
+            "send_back"
+          ]
+        },
+        "type": "array",
+        "maxItems": 3,
+        "minItems": 1
+      },
+      "require_reason": {
+        "items": {
+          "type": "string",
+          "enum": [
+            "go",
+            "no_go",
+            "send_back"
+          ]
+        },
+        "type": "array",
+        "maxItems": 3
+      }
+    },
+    "additionalProperties": false,
+    "type": "object"
   },
   "HTTPValidationError": {
     "properties": {
@@ -2283,6 +2493,16 @@ export const workflowSchemas = {
         "anyOf": [
           {
             "$ref": "#/components/schemas/QaStepBlock"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "step": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/StepSpec"
           },
           {
             "type": "null"
@@ -3490,6 +3710,193 @@ export const workflowSchemas = {
       "destination"
     ]
   },
+  "StepSpec": {
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "agent",
+          "person",
+          "qa",
+          "watch",
+          "gate"
+        ]
+      },
+      "key": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 80
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stage": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 80
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stage_title": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 120
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "role": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 60
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "person_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "required": {
+        "type": "boolean"
+      },
+      "platforms": {
+        "items": {
+          "type": "string",
+          "enum": [
+            "ios",
+            "android",
+            "web",
+            "api"
+          ]
+        },
+        "type": "array",
+        "maxItems": 4
+      },
+      "irreversible": {
+        "type": "boolean"
+      },
+      "outward": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 80
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "resources": {
+        "items": {
+          "type": "string",
+          "enum": [
+            "build:heavy",
+            "device:ios-sim",
+            "device:android-emu",
+            "device:phone"
+          ]
+        },
+        "type": "array",
+        "maxItems": 4
+      },
+      "watch": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/WatchSpec"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "gate": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/GateSpec"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "scope": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": [
+              "subset",
+              "full"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "build": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/BuildIdentity"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "coverage_threshold": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "maximum": 10000,
+            "minimum": 0
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "dry_run": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/DryRunSpec"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "secrets": {
+        "items": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{1,63}$"
+        },
+        "type": "array",
+        "maxItems": 10
+      }
+    },
+    "additionalProperties": false,
+    "type": "object"
+  },
   "TaskAcceptance": {
     "properties": {
       "id": {
@@ -3770,6 +4177,40 @@ export const workflowSchemas = {
       "expected_work_revision"
     ]
   },
+  "TemplateRef": {
+    "properties": {
+      "key": {
+        "type": "string",
+        "maxLength": 80
+      },
+      "version": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "name": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "params": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "removed": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array",
+        "maxItems": 200
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+      "key",
+      "version",
+      "name"
+    ]
+  },
   "ThisRound": {
     "properties": {
       "trigger": {
@@ -3930,6 +4371,90 @@ export const workflowSchemas = {
       "live_turns",
       "can_hide",
       "can_restore"
+    ]
+  },
+  "WatchAdapter": {
+    "properties": {
+      "command": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 2000
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "http": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 2000
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "type": "object"
+  },
+  "WatchSpec": {
+    "properties": {
+      "adapter": {
+        "$ref": "#/components/schemas/WatchAdapter"
+      },
+      "interval_s": {
+        "type": "integer",
+        "maximum": 86400,
+        "minimum": 5
+      },
+      "backoff": {
+        "type": "number",
+        "maximum": 4,
+        "minimum": 1
+      },
+      "max_interval_s": {
+        "type": "integer",
+        "maximum": 86400,
+        "minimum": 5
+      },
+      "timeout_h": {
+        "type": "number",
+        "maximum": 720,
+        "exclusiveMinimum": 0
+      },
+      "state_map": {
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 40,
+          "minLength": 1
+        },
+        "type": "object"
+      },
+      "terminal_states": {
+        "items": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "type": "array",
+        "maxItems": 20
+      },
+      "dry_run_states": {
+        "items": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "type": "array",
+        "maxItems": 20
+      }
+    },
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+      "adapter"
     ]
   },
   "WorkerToStop": {
@@ -4289,6 +4814,30 @@ export const workflowSchemas = {
           "$ref": "#/components/schemas/RepeatGroupView"
         },
         "type": "array"
+      },
+      "template": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/TemplateRef"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "dry_run": {
+        "type": "boolean"
+      },
+      "stalled": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "type": "object",
@@ -4627,6 +5176,30 @@ export const workflowSchemas = {
           "$ref": "#/components/schemas/RepeatGroupView"
         },
         "type": "array"
+      },
+      "template": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/TemplateRef"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "dry_run": {
+        "type": "boolean"
+      },
+      "stalled": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "impact": {
         "$ref": "#/components/schemas/Impact"
@@ -5059,6 +5632,27 @@ export const workflowSchemas = {
         "anyOf": [
           {
             "$ref": "#/components/schemas/ReportedOutcome"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "step": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/StepSpec"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "watch": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
           },
           {
             "type": "null"
@@ -5627,6 +6221,12 @@ export const workflowRoutes = [
     "path": "/api/workflows/{wid}/import-preview",
     "method": "post",
     "body": "ImportPreview"
+  },
+  {
+    "path": "/api/workflows/{wid}/launch",
+    "method": "post",
+    "operation": "launch",
+    "body": "Mutation"
   },
   {
     "path": "/api/workflows/{wid}/move",
