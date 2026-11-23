@@ -49,8 +49,9 @@ class Git:
 class GitHub:
     """Stands in for the GitHub API behind the GitHub tab's plumbing."""
 
-    def __init__(self, issues=(), milestones=("1.0.3",)):
+    def __init__(self, issues=(), milestones=("1.0.3",), labels=("bug",)):
         self.issues, self.milestones, self.created, self.gets = list(issues), list(milestones), [], []
+        self.labels, self.new_labels, self.labelled, self.unlabelled = set(labels), [], [], []
 
     def install(self, monkeypatch):
         monkeypatch.setattr(cycles, "github_repo", lambda cur, cid, request: ("example/nyumba", "tok"))
@@ -62,6 +63,12 @@ class GitHub:
         self.gets.append(path)
         if path.startswith("/repos/example/nyumba/milestones"):
             return [{"number": i + 1, "title": t} for i, t in enumerate(self.milestones)]
+        if "/labels/" in path:
+            from urllib.parse import unquote
+            name = unquote(path.rsplit("/", 1)[-1])
+            if name not in self.labels:
+                raise RuntimeError("GitHub said 404: Not Found")
+            return {"name": name}
         if "/issues?milestone=" in path:
             return [{**i, "html_url": i["url"]} for i in self.issues]
         n = int(path.rsplit("/", 1)[-1])
@@ -71,6 +78,17 @@ class GitHub:
         return {**found[0], "html_url": found[0]["url"]}
 
     def send(self, method, path, token, payload):
+        if path.endswith("/nyumba/labels"):
+            self.labels.add(payload["name"])
+            self.new_labels.append(payload)
+            return payload
+        if "/issues/" in path and "/labels" in path:
+            n = int(path.split("/issues/")[1].split("/")[0])
+            if method == "DELETE":
+                self.unlabelled.append((n, path.rsplit("/", 1)[-1]))
+            else:
+                self.labelled.append((n, payload["labels"]))
+            return []
         if path.endswith("/rename"):
             if getattr(self, "refuse_rename", False):
                 raise RuntimeError("GitHub said 403: Resource not accessible")
@@ -368,6 +386,9 @@ async def test_a_logged_ticket_can_open_its_github_issue(client, monkeypatch):
     created = gh.created[0]
     assert "milestone" not in created  # no open 1.0.3 milestone: opened without one
     assert created["title"] == "Payments screen freezes" and "Tapping Pay twice freezes it." in created["body"]
+    assert created["labels"] == ["release-1.0.3", "bug", "android", "embodent"]
+    made = {l["name"]: l for l in gh.new_labels}
+    assert "bug" not in made and made["release-1.0.3"]["color"] == "5b5bd6" and made["android"]["description"] == "Android app"
     d = await p.call("GET", f"/api/workflows/{t['workflow_id']}")
     assert d["title"] == "#240 Payments screen freezes"
     # Not ticked: nothing is opened on GitHub.
@@ -437,3 +458,29 @@ async def test_moving_the_planned_release_renames_its_branch_on_github_or_change
     moved = await p.call("GET", f"/api/release-cycles/{planned['id']}")
     assert moved["branch"] == "release/1.0.3" and "GitHub renamed" in moved["branch_note"]
     assert hot["branch"] == "hotfix/1.0.2" and hot["branch_state"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_issues_carry_the_release_labels_and_move_with_their_ticket(client, monkeypatch):
+    p = Project(client)
+    monkeypatch.setattr(cycles, "_run", Git())
+    issues = [{"number": 212, "title": "Login spinner", "body": "", "url": "https://gh/212", "labels": [{"name": "ios"}]}]
+    gh = GitHub(issues).install(monkeypatch)
+    c = await p.open(dry_run=False)
+    # An issue already on GitHub joins: it gets the release's labels, plus what the intake proposed.
+    c = await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {"issue_number": 212, "labels": ["Area: Login", "severity: major", "iOS"]})
+    assert gh.labelled == [(212, ["release-1.0.3", "bug", "ios", "embodent", "area-login", "severity-major"])]
+    # A hotfix takes 1.0.3: the release moves to 1.0.4, and its issues' release label moves with it.
+    await p.call("POST", f"/api/containers/{p.cid}/release-cycles", {"kind": "hotfix", "version": "1.0.3", "base_branch": "ios/1.0.2-8"})
+    assert (212, "release-1.0.3") in gh.unlabelled
+    assert gh.labelled[-1] == (212, ["release-1.0.4"])
+
+
+@pytest.mark.asyncio
+async def test_a_dry_run_never_labels_anything(client, monkeypatch):
+    p = Project(client)
+    issues = [{"number": 212, "title": "Login spinner", "body": "", "url": "https://gh/212", "labels": []}]
+    gh = GitHub(issues).install(monkeypatch)
+    c = await p.open()
+    await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {"issue_number": 212, "platforms": ["ios"]})
+    assert not gh.labelled and not gh.new_labels

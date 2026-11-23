@@ -244,7 +244,10 @@ export const intakeApi = {
 };
 
 /** A ticket the intake agent proposed in an `orcha-ticket` block. */
-export interface ProposedTicket { title: string; kind: "bug" | "feature"; platforms: Platform[]; body: string; attachments: string[] }
+export interface ProposedTicket { title: string; kind: "bug" | "feature"; platforms: Platform[]; body: string; attachments: string[]; labels: string[] }
+
+/** A label as GitHub will carry it: `Area: Profile` → `area-profile`. */
+export const labelName = (text: string) => text.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
 
 /** The agent's words, and the tickets it proposed, from one reply. */
 export function readReply(text: string): { words: string; tickets: ProposedTicket[] } {
@@ -257,6 +260,7 @@ export function readReply(text: string): { words: string; tickets: ProposedTicke
           title: t.title.trim().slice(0, 200), kind: t.kind === "feature" ? "feature" : "bug",
           platforms: (Array.isArray(t.platforms) ? t.platforms : []).filter((p): p is Platform => ["ios", "android", "web", "api"].includes(p as string)),
           body: typeof t.body === "string" ? t.body : "", attachments: Array.isArray(t.attachments) ? t.attachments.map(String) : [],
+          labels: Array.isArray(t.labels) ? [...new Set(t.labels.map((x) => labelName(String(x))).filter(Boolean))].slice(0, 10) : [],
         });
         return "";
       }

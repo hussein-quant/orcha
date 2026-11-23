@@ -898,3 +898,34 @@
 .fl-in-md h1, .fl-in-md h2, .fl-in-md h3 { font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
 .fl-in-md code { font-size: 12px; padding: 1px 4px; border-radius: 4px; background: var(--v2-panel); }
 .fl-in-card .fl-in-md { color: var(--v2-text-2); }
+
+/* ---- pickers and labels ------------------------------------------------------------------- */
+.fl-pick { position: relative; }
+.fl-pick-btn { width: 100%; min-height: 36px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--v2-border-strong); background: var(--v2-panel); color: var(--v2-text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: border-color 150ms ease, box-shadow 150ms ease; }
+.fl-pick-btn:hover { border-color: color-mix(in srgb, var(--v2-accent) 40%, var(--v2-border-strong)); }
+.fl-pick-btn:focus-visible, .fl-pick-btn[aria-expanded="true"] { outline: none; border-color: var(--v2-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--v2-accent) 20%, transparent); }
+.fl-pick-icon { display: inline-grid; color: var(--v2-text-3); }
+.fl-pick-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-pick-chev { color: var(--v2-text-3); flex: none; transition: transform 150ms ease; }
+.fl-pick-btn[aria-expanded="true"] .fl-pick-chev { transform: rotate(180deg); }
+.fl-pick-badge { flex: none; font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--v2-accent) 14%, var(--v2-panel)); color: var(--v2-text-2); }
+.fl-pick-list { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none; max-height: 300px; overflow-y: auto;
+  border-radius: 10px; border: 1px solid var(--v2-border-strong); background: var(--v2-surface); box-shadow: 0 12px 32px rgba(0,0,0,.45); animation: fl-pick-in 120ms ease-out both; }
+.fl-pick:has(.fl-help) .fl-pick-list { top: 62px; }
+@keyframes fl-pick-in { from { opacity: 0; transform: translateY(-3px); } }
+.fl-pick-list li { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--v2-text); }
+.fl-pick-list li[data-active] { background: var(--v2-hover); }
+.fl-pick-list li[aria-selected="true"] .fl-pick-text > span { font-weight: 600; }
+.fl-pick-check { width: 14px; flex: none; display: inline-grid; color: var(--v2-accent); }
+.fl-pick-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fl-pick-text > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-pick-text small { font-size: 11.5px; color: var(--v2-text-3); }
+.fl-pick-none { color: var(--v2-text-3) !important; cursor: default !important; }
+@media (prefers-reduced-motion: reduce) { .fl-pick-list { animation: none; } .fl-pick-chev { transition: none; } }
+.fl-in-labels { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.fl-in-label { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--v2-border-strong); color: var(--v2-text); font-family: var(--v2-mono, ui-monospace, monospace); }
+.fl-in-label[data-auto="true"] { color: var(--v2-text-3); border-style: dashed; }
+.fl-in-label button { border: 0; background: none; padding: 0; color: var(--v2-text-3); cursor: pointer; display: inline-grid; }
+.fl-in-label button:hover { color: var(--v2-text); }
+.fl-in-label-add { width: 84px; border: 0; background: none; color: var(--v2-text-2); font: inherit; font-size: 11px; padding: 2px 4px; }
+.fl-in-label-add:focus { outline: none; border-bottom: 1px solid var(--v2-accent); }

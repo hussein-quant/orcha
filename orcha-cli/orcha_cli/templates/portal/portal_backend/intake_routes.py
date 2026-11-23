@@ -208,9 +208,9 @@ Your job:
    Don't guess what I haven't said; ask. Point at what you see in the images when it matters.
 2. Never log anything yourself and never change code. When an item is clear, propose it as one ticket in a fenced block, exactly like this:
 ```orcha-ticket
-{{"title": "Short, specific title", "kind": "bug", "platforms": ["ios"], "body": "## Summary\\n...\\n## Steps to reproduce\\n1. ...\\n## Expected\\n...\\n## Actual\\n...\\n## Acceptance criteria\\n- ...", "attachments": ["<the attachment ids that show it>"]}}
+{{"title": "Short, specific title", "kind": "bug", "platforms": ["ios"], "labels": ["area: profile", "severity: major"], "body": "## Summary\\n...\\n## Steps to reproduce\\n1. ...\\n## Expected\\n...\\n## Actual\\n...\\n## Acceptance criteria\\n- ...", "attachments": ["<the attachment ids that show it>"]}}
 ```
-   kind is bug or feature; platforms are some of: ios, android, web, api (an API change also gets checked on every app). Use the feature sections for a feature (Goal, Behaviour, Edge cases, Out of scope, Acceptance criteria). Split unrelated problems into separate tickets. I confirm each one in Embodent; if I ask for changes, propose it again.
+   kind is bug or feature; platforms are some of: ios, android, web, api (an API change also gets checked on every app). labels help find it on GitHub later: always the area of the product it's in (area: …), a severity for a bug (severity: critical, major or minor), and anything else that would help someone filter for it (for example regression, crash, ui, performance, payments). The release, kind, platform and "embodent" labels are added for you. Use the feature sections for a feature (Goal, Behaviour, Edge cases, Out of scope, Acceptance criteria). Split unrelated problems into separate tickets. I confirm each one in Embodent; if I ask for changes, propose it again.
 3. This project ships on: {platforms}. Already in this release (don't log these again; say so if I describe one):
 {logged}
 {BRIEF_END}"""

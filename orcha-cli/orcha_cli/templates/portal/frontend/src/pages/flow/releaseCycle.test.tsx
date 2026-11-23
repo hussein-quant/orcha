@@ -152,6 +152,7 @@ it("opens with the next version filled in, and you can change it", async () => {
   const posts: { url: string; body: Record<string, unknown> }[] = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "POST" && !url.endsWith("/compile")) posts.push({ url, body: JSON.parse(String(init.body)) });
+    if (url.startsWith("/api/release-cycles/")) return json({ ...cycle, id: "new" });
     if (url.includes("/release-cycles") && init?.method !== "POST") return json({ cycles: [], open: null, open_dry_run: null, open_hotfix: null, open_hotfix_dry_run: null, suggested: { version: null, branch: null } });
     if (url.includes("/inventory")) return json(inventoryFor());
     if (url.endsWith("/compile")) return json(compiled);
@@ -165,7 +166,7 @@ it("opens with the next version filled in, and you can change it", async () => {
   fireEvent.change(screen.getByRole("textbox", { name: /^Version/ }), { target: { value: "1.1.0" } });
   expect(screen.getByLabelText("Branch")).toHaveValue("release/1.1.0"); // follows until you type one
   expect(screen.getByRole("button", { name: "1.0.2" })).toBeVisible(); // the suggestion, one click back
-  await waitFor(() => expect(screen.getByLabelText("Engineer")).toHaveValue("eng"));
+  await waitFor(() => expect(screen.getByLabelText("Engineer")).toHaveAttribute("data-value", "eng"));
   fireEvent.click(screen.getByRole("button", { name: /Open the cycle/ }));
   await waitFor(() => expect(posts.length).toBe(1));
   expect(posts[0].body).toMatchObject({ kind: "release", version: "1.1.0", branch: "release/1.1.0", base_branch: "main", milestone: "1.1.0" });
@@ -182,6 +183,13 @@ it("a hotfix starts one patch up from what's live, cut from its release tag, and
   expect(await screen.findByRole("heading", { name: "Start a hotfix" })).toBeVisible();
   await waitFor(() => expect(screen.getByRole("textbox", { name: /^Version/ })).toHaveValue("1.0.2"));
   expect(screen.getByLabelText("Branch")).toHaveValue("hotfix/1.0.2");
-  expect(screen.getByLabelText("Cut from")).toHaveValue("ios/1.0.1-7");
+  const cut = screen.getByLabelText("Cut from");
+  expect(cut).toHaveAttribute("data-value", "ios/1.0.1-7");
+  // The tags in a picker of our own, with their platform; choosing one changes where it's cut from.
+  fireEvent.click(cut);
+  const list = screen.getByRole("listbox", { name: "Cut from" });
+  expect(within(list).getAllByRole("option").map((o) => o.textContent)).toEqual(["ios/1.0.1-7The last release tagiOS", "android/1.0.19-19The last release tagAndroid"]);
+  fireEvent.click(within(list).getByText("android/1.0.19-19"));
+  expect(cut).toHaveAttribute("data-value", "android/1.0.19-19");
   expect(screen.getByText(/Release 1\.0\.2 moves to 1\.0\.3/)).toBeVisible();
 });

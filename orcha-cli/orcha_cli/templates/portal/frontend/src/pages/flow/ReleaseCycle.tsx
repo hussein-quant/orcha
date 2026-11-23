@@ -18,6 +18,7 @@ import { flowHref } from "./Board";
 import { Figure, Thread } from "./kit";
 import { guessRoles } from "./ReleaseHome";
 import { Intake } from "./Intake";
+import { Picker, type PickOption } from "./Picker";
 
 const ALL: Platform[] = ["ios", "android", "web", "api"];
 type People = Compiled["people"];
@@ -65,7 +66,7 @@ function AgentPick({ label, value, people, onChange, empty = "Choose…" }: { la
 const bump = (v: string) => { const parts = v.split("."); const last = Number(parts[parts.length - 1]); return Number.isFinite(last) ? [...parts.slice(0, -1), String(last + 1)].join(".") : v; };
 const versionOfTag = (tag?: string | null) => tag?.match(/(\d+\.\d+\.\d+)/)?.[1] ?? null;
 
-interface Suggestion { version: string; base: string; why: string; tags: { tag: string; platform: Platform }[] }
+interface Suggestion { version: string; base: string; why: string; tags: { tag: string; platform: Platform; version?: string; build?: number; date?: string }[] }
 
 /** What to open next: a planned release after the last one, or a hotfix on top of what's live. */
 function useSuggestion(cid: string, actor: string | null, kind: CycleKind, fromCycles: string | null) {
@@ -80,7 +81,7 @@ function useSuggestion(cid: string, actor: string | null, kind: CycleKind, fromC
       .then(setInv).catch(() => undefined).finally(() => { if (!ctrl.signal.aborted) setReading(false); });
     return () => ctrl.abort();
   }, [cid, actor]);
-  const tags = ALL.flatMap((p) => { const t = inv?.data.platforms?.[p]?.last_release?.tag; return t ? [{ tag: t, platform: p }] : []; });
+  const tags = ALL.flatMap((p) => { const r = inv?.data.platforms?.[p]?.last_release; return r?.tag ? [{ tag: r.tag, platform: p, version: r.version, build: r.build, date: r.date }] : []; });
   let s: Suggestion | null = null;
   if (kind === "release") {
     const v = fromCycles ?? (typeof inv?.data.release_params?.version === "string" ? inv.data.release_params.version : null);
@@ -93,16 +94,6 @@ function useSuggestion(cid: string, actor: string | null, kind: CycleKind, fromC
     else if (tags[0]) s = { version: "", base: tags[0].tag, tags, why: "Cut from the last release tag." };
   }
   return { suggestion: s, reading };
-}
-
-function Select({ id, label, value, onChange, children, help }: { id: string; label: string; value: string; onChange: (v: string) => void; children: ReactNode; help?: string }) {
-  return (
-    <div className="fl-field">
-      <label htmlFor={id}>{label}</label>
-      <span className="fl-cy-select"><select id={id} className="fl-select" value={value} onChange={(e) => onChange(e.target.value)}>{children}</select><ChevronDown size={14} aria-hidden="true" /></span>
-      {help ? <span className="fl-help">{help}</span> : null}
-    </div>
-  );
 }
 
 function OpenCycle({ cid, actor, suggested, startKind, openRelease, onOpened }: {
@@ -149,7 +140,14 @@ function OpenCycle({ cid, actor, suggested, startKind, openRelease, onOpened }: 
   }
   const why = !v ? (reading ? "Reading the next version…" : "Choose the version.") : !base.trim() ? "Choose what to cut it from." : !platforms.length ? "Choose at least one platform." : !roles.engineer && !dryRun ? "Choose who builds the tickets." : "";
   const word = kind === "hotfix" ? "hotfix" : "release";
-  const agents = (empty: string) => [<option key="" value="">{empty}</option>, ...ai.map((x) => <option key={x.id} value={x.id}>{x.alias}</option>)];
+  const agents = (empty: string): PickOption[] => [{ value: "", label: empty }, ...ai.map((x) => ({ value: x.id, label: x.alias, hint: "Agent in this project" }))];
+  const tagOptions: PickOption[] = [
+    ...(suggestion?.tags ?? []).map((t) => ({
+      value: t.tag, label: t.tag, mono: true, badge: PLATFORM_WORD[t.platform],
+      hint: [t.version ? `Version ${t.version}` : null, t.build ? `build ${t.build}` : null, t.date ? `released ${new Date(t.date).toLocaleDateString()}` : null].filter(Boolean).join(" · ") || "The last release tag",
+    })),
+    ...(base && !(suggestion?.tags ?? []).some((t) => t.tag === base) ? [{ value: base, label: base, mono: true, hint: "Typed in" }] : []),
+  ];
   return (
     <div className="fl-wrap fl-cy fl-cy-new">
       <header className="fl-head">
@@ -185,11 +183,9 @@ function OpenCycle({ cid, actor, suggested, startKind, openRelease, onOpened }: 
             <span className="fl-help">{makeBranch && !dryRun ? "Created on GitHub when you open it." : "Not created: you make it, or it's a dry run."}</span>
           </div>
           {kind === "hotfix" ? (
-            <Select id="cy-base" label="Cut from" value={base} onChange={set("base")} help="The release tag of what's live. Its fix merges back into main and the planned release.">
-              {suggestion?.tags.length ? null : <option value="">No release tags found</option>}
-              {(suggestion?.tags ?? []).map((t) => <option key={t.tag} value={t.tag}>{t.tag} · {PLATFORM_WORD[t.platform]}</option>)}
-              {base && !(suggestion?.tags ?? []).some((t) => t.tag === base) ? <option value={base}>{base}</option> : null}
-            </Select>
+            <Picker id="cy-base" label="Cut from" value={base} onChange={set("base")} options={tagOptions} icon={<GitBranch size={13} />}
+              placeholder={reading ? "Reading the release tags…" : "No release tags found"}
+              help="The release tag of what's live. Its fix merges back into main and the planned release." />
           ) : (
             <div className="fl-field">
               <label htmlFor="cy-base">Cut from</label>
@@ -213,16 +209,16 @@ function OpenCycle({ cid, actor, suggested, startKind, openRelease, onOpened }: 
       <section className="fl-panel fl-cy-section" aria-label="Who works on the tickets">
         <h2 className="fl-cy-section-title">Who works on the tickets</h2>
         <div className="fl-cy-trio">
-          <Select id="cy-engineer" label="Engineer" value={roles.engineer ?? ""} onChange={(x) => setRoles({ ...roles, engineer: x || null })} help="Builds each ticket.">{agents("Choose…")}</Select>
-          <Select id="cy-release" label="Release" value={roles.release ?? ""} onChange={(x) => setRoles({ ...roles, release: x || null })} help="Deploys to staging, builds the release.">{agents("Choose…")}</Select>
-          <Select id="cy-qa" label="QA" value={roles.qa ?? ""} onChange={(x) => setRoles({ ...roles, qa: x || null })} help="Checks each ticket on its platforms.">{agents("Choose…")}</Select>
+          <Picker id="cy-engineer" label="Engineer" value={roles.engineer ?? ""} onChange={(x) => setRoles({ ...roles, engineer: x || null })} options={agents("Nobody yet")} help="Builds each ticket." />
+          <Picker id="cy-release" label="Release" value={roles.release ?? ""} onChange={(x) => setRoles({ ...roles, release: x || null })} options={agents("Nobody yet")} help="Deploys to staging, builds the release." />
+          <Picker id="cy-qa" label="QA" value={roles.qa ?? ""} onChange={(x) => setRoles({ ...roles, qa: x || null })} options={agents("Nobody yet")} help="Checks each ticket on its platforms." />
         </div>
         <button type="button" className="fl-cy-disclose" aria-expanded={perPlatform} onClick={() => setPerPlatform((x) => !x)}>
           {perPlatform ? <ChevronUp size={14} /> : <ChevronDown size={14} />}A different engineer per platform
         </button>
         {perPlatform ? (
           <div className="fl-cy-trio">
-            {platforms.map((p) => <Select key={p} id={`cy-eng-${p}`} label={`${PLATFORM_WORD[p]} only`} value={engineers[p] ?? ""} onChange={(x) => setEngineers({ ...engineers, [p]: x || null })}>{agents("Same engineer")}</Select>)}
+            {platforms.map((p) => <Picker key={p} id={`cy-eng-${p}`} label={`${PLATFORM_WORD[p]} only`} value={engineers[p] ?? ""} onChange={(x) => setEngineers({ ...engineers, [p]: x || null })} options={agents("Same engineer")} />)}
           </div>
         ) : null}
       </section>

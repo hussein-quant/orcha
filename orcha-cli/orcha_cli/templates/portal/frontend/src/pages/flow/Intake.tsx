@@ -12,7 +12,7 @@ import { DictationButton } from "../../dictation/DictationButton";
 import { Md } from "../../components/ui";
 import { Bug, Check, ExternalLink, FileUp, Plus, RefreshCw, Sparkles, TriangleAlert, X } from "./icons";
 import {
-  cycleApi, intakeApi, PLATFORM_WORD, readReply, withoutBrief,
+  cycleApi, intakeApi, labelName, PLATFORM_WORD, readReply, withoutBrief,
   type Compiled, type ConvAttachment, type Cycle, type Platform, type ProposedTicket, type Turn,
 } from "./flowApi";
 import { flowHref } from "./Board";
@@ -57,6 +57,8 @@ function TicketCard({ t, cycle, convId, actor, known, onLogged }: {
   const [kind, setKind] = useState(t.kind);
   const [platforms, setPlatforms] = useState<Platform[]>(t.platforms.filter((p) => cycle.platforms.includes(p)));
   const [github, setGithub] = useState(false);
+  const [labels, setLabels] = useState<string[]>(t.labels.filter((l) => !["bug", "enhancement", "feature", ...cycle.platforms].includes(l)));
+  const auto = [`${cycle.kind === "hotfix" ? "hotfix" : "release"}-${cycle.version}`, kind === "feature" ? "enhancement" : "bug", ...platforms, "embodent"];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -66,7 +68,7 @@ function TicketCard({ t, cycle, convId, actor, known, onLogged }: {
     setBusy(true); setError("");
     try {
       const out = await cycleApi.addTicket(cycle.id, actor, {
-        title: title.trim(), body: t.body, kind, platforms, create_issue: github, source: github ? "github" : "manual",
+        title: title.trim(), body: t.body, kind, platforms, create_issue: github, source: github ? "github" : "manual", labels,
         attachments: refs.map((a) => ({ conversation_id: convId, id: a.id, name: a.name })),
       }) as Cycle & { notice?: string | null };
       if (out.notice) setNotice(out.notice);
@@ -86,6 +88,19 @@ function TicketCard({ t, cycle, convId, actor, known, onLogged }: {
         <Md className="tx md fl-in-md fl-in-body" text={t.body || "No details."} />
       </details>
       <Thumbs refs={refs} convId={convId} />
+      <div className="fl-in-labels" aria-label="GitHub labels">
+        {auto.map((l) => <span key={l} className="fl-in-label" data-auto="true" title="Added for every ticket">{l}</span>)}
+        {labels.map((l) => (
+          <span key={l} className="fl-in-label">{l}
+            {logged ? null : <button type="button" aria-label={`Remove ${l}`} onClick={() => setLabels(labels.filter((x) => x !== l))}><X size={10} /></button>}
+          </span>
+        ))}
+        {logged ? null : <input className="fl-in-label-add" aria-label="Add a label" placeholder="+ label"
+          onKeyDown={(e) => {
+            const v = labelName((e.target as HTMLInputElement).value);
+            if ((e.key === "Enter" || e.key === ",") && v) { e.preventDefault(); if (!labels.includes(v) && !auto.includes(v)) setLabels([...labels, v]); (e.target as HTMLInputElement).value = ""; }
+          }} />}
+      </div>
       {logged ? (
         <footer>
           <span className="fl-chip" data-tone="ok"><Check size={12} />Logged</span>

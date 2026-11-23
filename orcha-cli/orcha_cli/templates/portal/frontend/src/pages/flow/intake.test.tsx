@@ -13,7 +13,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 it("reads the agent's proposed tickets out of its reply, and leaves its words", () => {
   const reply = 'Got it. Two things here.\n\n```orcha-ticket\n{"title": "Checkout freezes after a double tap", "kind": "bug", "platforms": ["android", "tv"], "body": "## Steps", "attachments": ["f1"]}\n```\n\n```orcha-ticket\nnot json\n```\nAnything else?';
   const { words, tickets } = readReply(reply);
-  expect(tickets).toEqual([{ title: "Checkout freezes after a double tap", kind: "bug", platforms: ["android"], body: "## Steps", attachments: ["f1"] }]);
+  expect(tickets).toEqual([{ title: "Checkout freezes after a double tap", kind: "bug", platforms: ["android"], body: "## Steps", attachments: ["f1"], labels: [] }]);
   expect(words).toContain("Got it. Two things here.");
   expect(words).toContain("not json"); // a block that isn't a ticket stays as written
   expect(words).not.toContain("Checkout freezes");
@@ -66,16 +66,20 @@ it("talks it through: the brief goes with the first message only, and a proposed
   expect(await screen.findByText("Checkout freezes when I tap Pay twice")).toBeVisible();
   expect(screen.queryByText(/Be the intake/)).toBeNull();
   turns = [...turns, { id: "t2", conversation_id: "conv", seq: 2, role: "agent", author_agent_id: "pm", created_at: "",
-    content: 'Which screen?\n\n1. **How did you get here?** After scrolling?\n2. **Does it fix itself?**\n```orcha-ticket\n{"title": "Checkout freezes after a double tap on Pay", "kind": "bug", "platforms": ["android"], "body": "## Steps\\n1. Tap Pay twice", "attachments": ["shot.png"]}\n```' }];
+    content: 'Which screen?\n\n1. **How did you get here?** After scrolling?\n2. **Does it fix itself?**\n```orcha-ticket\n{"title": "Checkout freezes after a double tap on Pay", "kind": "bug", "platforms": ["android"], "labels": ["Area: Checkout", "severity: major", "android"], "body": "## Steps\\n1. Tap Pay twice", "attachments": ["shot.png"]}\n```' }];
   const card = (await screen.findByDisplayValue("Checkout freezes after a double tap on Pay", {}, { timeout: 5000 })).closest("article")!;
   // The agent's words are formatted: bold and lists, never raw asterisks.
   expect(screen.getByText("How did you get here?").tagName).toBe("STRONG");
   expect(document.body.textContent).not.toContain("**How did you get here?**");
+  // The release, kind and platform labels are added for you; the agent's own are shown to keep or remove.
+  expect(within(card).getByText("release-1.0.3")).toBeVisible();
+  expect(within(card).getByText("area-checkout")).toBeVisible();
   fireEvent.click(within(card).getByRole("checkbox", { name: "Also open it on GitHub" }));
   fireEvent.click(within(card).getByRole("button", { name: /Log it/ }));
   await waitFor(() => expect(posts.some((p) => p.url.endsWith("/tickets"))).toBe(true));
   expect(posts.find((p) => p.url.endsWith("/tickets"))!.body).toMatchObject({
     title: "Checkout freezes after a double tap on Pay", kind: "bug", platforms: ["android"], create_issue: true,
     body: "## Steps\n1. Tap Pay twice", attachments: [{ conversation_id: "conv", id: "shot.png", name: "shot.png" }],
+    labels: ["area-checkout", "severity-major"],
   });
 });

@@ -236,8 +236,83 @@ def milestone_issues(repo: str, token: str, milestone: str) -> tuple[list[dict],
     return [_issue(x) for x in raw or [] if not x.get("pull_request")], None
 
 
-def open_issue(repo: str, token: str, cid: str, title: str, body: str, milestone: str | None) -> tuple[int | None, str | None, str | None]:
-    """Open an issue: (number, url, problem). In the milestone when it exists."""
+# ---- labels: so a release's issues are one filter away on GitHub ----------------------------
+
+LABEL_STYLE = {
+    "release": ("5b5bd6", "In this planned release (Embodent release cycle)"),
+    "hotfix": ("e5484d", "In this hotfix (Embodent release cycle)"),
+    "bug": ("d73a4a", "Something isn't working"),
+    "enhancement": ("a2eeef", "New feature or request"),
+    "ios": ("0a84ff", "iOS app"), "android": ("3ddc84", "Android app"), "web": ("f5a623", "Website"), "api": ("8e8e93", "API"),
+    "embodent": ("ededed", "Logged in Embodent"),
+    "severity": ("fbca04", "How bad it is"), "area": ("c5def5", "Where in the product"),
+}
+
+
+def label_name(text: str) -> str | None:
+    """`Area: Profile` → `area-profile`: lowercase, words joined by hyphens, GitHub's 50-char limit."""
+    name = re.sub(r"[^a-z0-9.]+", "-", str(text or "").casefold()).strip("-")[:50]
+    return name or None
+
+
+def release_label(cycle: dict) -> str:
+    return f"{'hotfix' if (cycle.get('kind') or 'release') == 'hotfix' else 'release'}-{cycle['version']}"
+
+
+def ticket_labels(cycle: dict, kind: str, platforms: list[str], extra: list[str] = ()) -> list[str]:
+    """The labels a ticket's issue carries: its release, kind, platforms, where it was logged, and
+    what the intake proposed (area, severity…)."""
+    out = [release_label(cycle), "enhancement" if kind == "feature" else "bug", *platforms, "embodent"]
+    for e in extra or []:
+        n = label_name(e)
+        if n and n not in out:
+            out.append(n)
+    return out[:20]
+
+
+_KNOWN_LABELS: set[tuple[str, str]] = set()
+
+
+def ensure_labels(repo: str, token: str, names: list[str]) -> None:
+    """Make the labels the repo doesn't have yet, each with a colour and a description."""
+    from urllib.parse import quote
+
+    for name in names:
+        if (repo, name) in _KNOWN_LABELS:
+            continue
+        try:
+            _gh_get(f"/repos/{repo}/labels/{quote(name, safe='')}", token)
+        except RuntimeError:
+            prefix = name.split("-", 1)[0]
+            color, desc = LABEL_STYLE.get(name) or LABEL_STYLE.get(prefix) or ("ededed", "")
+            try:
+                _gh_send("POST", f"/repos/{repo}/labels", token, {"name": name, "color": color, "description": desc[:100]})
+            except RuntimeError:
+                continue  # taken by a race, or not allowed: the issue call reports what matters
+        _KNOWN_LABELS.add((repo, name))
+
+
+def label_issue(repo: str, token: str, number: int, add: list[str], remove: list[str] = ()) -> str | None:
+    """Add labels to an existing issue (and take old release labels off). A problem, or None."""
+    from urllib.parse import quote
+
+    try:
+        ensure_labels(repo, token, add)
+        for name in remove:
+            try:
+                _gh_send("DELETE", f"/repos/{repo}/issues/{number}/labels/{quote(name, safe='')}", token, {})
+            except RuntimeError:
+                pass  # it wasn't there
+        if add:
+            _gh_send("POST", f"/repos/{repo}/issues/{number}/labels", token, {"labels": add})
+    except RuntimeError as exc:
+        return f"Couldn't label #{number} on GitHub: {exc}"
+    return None
+
+
+def open_issue(repo: str, token: str, cid: str, title: str, body: str, milestone: str | None,
+               labels: list[str] = ()) -> tuple[int | None, str | None, str | None]:
+    """Open an issue: (number, url, problem). In the milestone when it exists, with its labels."""
     from portal_backend import github_hub_routes as hub
 
     try:
@@ -245,6 +320,9 @@ def open_issue(repo: str, token: str, cid: str, title: str, body: str, milestone
         payload = {"title": title[:200], "body": (body or title)[:60_000]}
         if number is not None:
             payload["milestone"] = number
+        if labels:
+            ensure_labels(repo, token, list(labels))
+            payload["labels"] = list(labels)
         raw = _gh_send("POST", f"/repos/{repo}/issues", token, payload)
     except RuntimeError as exc:
         return None, None, f"Couldn't open the issue on GitHub: {exc}"
@@ -643,6 +721,8 @@ def add_ticket(cur, cycle: dict, actor, body: TicketBody, request: Request | Non
         conflict("platforms_required", "Choose the platforms this ticket touches.", status=422)
     kind = body.kind or kind_from_labels or "bug"
     issue_number, notice = body.issue_number, None
+    extra = [x for x in body.labels if label_name(x) and label_name(x) not in {"bug", "enhancement", "feature", *templates.PLATFORMS}]
+    labels = ticket_labels(cycle, kind, platforms, extra)
     if body.create_issue and not issue_number:
         if cycle["dry_run"]:
             notice = "Dry run: no issue was opened on GitHub."
@@ -651,7 +731,14 @@ def add_ticket(cur, cycle: dict, actor, body: TicketBody, request: Request | Non
             issue_body = f"{text.strip()}\n\n---\n{kind.capitalize()} · {words} · release {cycle['version']} (logged in Embodent)"
             repo, token = github_repo(cur, cycle["container_id"], request)
             issue_number, url, notice = open_issue(repo, token, cycle["container_id"], title, issue_body,
-                                                   cycle["milestone"] or cycle["version"])
+                                                   cycle["milestone"] or cycle["version"], labels)
+    elif issue_number and not cycle["dry_run"]:
+        # An issue already on GitHub joins the release: it gets the release's labels too.
+        try:
+            repo, token = github_repo(cur, cycle["container_id"], request)
+            notice = label_issue(repo, token, issue_number, labels)
+        except Exception as exc:  # noqa: BLE001 - labelling never blocks adding the ticket
+            notice = f"Couldn't label #{issue_number} on GitHub: {getattr(exc, 'detail', exc)}"
     if issue_number:
         cur.execute("SELECT id FROM release_cycle_tickets WHERE cycle_id=%s AND issue_number=%s AND state<>'dropped'",
                     (cycle["id"], issue_number))
@@ -759,6 +846,17 @@ def drop_ticket(cycle_id: str, ticket_id: str, request: Request):
         return cycle_view(cur, _cycle(cur, cycle_id))
 
 
+def _relabel(cur, ticket: dict, old: dict, new: dict, request) -> None:
+    """A ticket's issue follows it to another release: the old release label off, the new one on."""
+    if not ticket.get("issue_number") or new.get("dry_run") or request is None:
+        return
+    try:
+        repo, token = github_repo(cur, new["container_id"], request)
+    except Exception:  # noqa: BLE001 - not connected: nothing to relabel
+        return
+    label_issue(repo, token, int(ticket["issue_number"]), [release_label(new)], [release_label(old)])
+
+
 def _tell_rolled(cur, svc, ticket: dict, author: str, old: dict, new: dict, note: str | None = None) -> None:
     """Leave a note on the ticket's open steps (its agent reads the new branch there) and point the
     run page at the cycle it's in now."""
@@ -802,6 +900,7 @@ def _move_up(cur, planned: dict, actor_id: str, request) -> None:
     svc = service.WorkflowService(cur, HOOKS)
     for t in _tickets(cur, planned["id"]):
         if t["state"] == "active":
+            _relabel(cur, t, planned, moved, request)
             _tell_rolled(cur, svc, t, actor_id, planned, moved, note=(
                 f"Release {old_v} is now {new_v}: a hotfix took {old_v}. The branch is {new_b} now "
                 f"(was {old_b}); GitHub moved open PRs with the rename. Fetch, and work from origin/{new_b}."))
@@ -848,6 +947,7 @@ def cut_cycle(cycle_id: str, body: CutBody, request: Request):
                 cur.execute("UPDATE release_cycle_tickets SET cycle_id=%s, rolled_from_cycle_id=%s, updated_at=%s "
                             "WHERE id=%s", (nxt["id"], cycle_id, now, t["id"]))
                 _tell_rolled(cur, svc, t, actor.id, c, nxt)
+                _relabel(cur, t, c, nxt, request)
         cur.execute("UPDATE release_cycles SET next_cycle_id=%s WHERE id=%s", (nxt["id"], cycle_id))
         return {"cycle": cycle_view(cur, _cycle(cur, cycle_id)), "release_workflow_id": created["id"],
                 "next_cycle_id": nxt["id"]}
