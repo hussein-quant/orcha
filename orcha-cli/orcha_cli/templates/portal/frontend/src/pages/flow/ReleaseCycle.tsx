@@ -411,7 +411,7 @@ function FromGithub({ cycle, actor, onAdded, onClose }: { cycle: Cycle; actor: s
             <input className="fl-input" aria-label="Milestone" value={milestone} onChange={(e) => setMilestone(e.target.value)} />
             <button type="button" className="fl-btn" onClick={async () => { try { onAdded(await cycleApi.settings(cycle.id, actor, { milestone })); } catch (e) { setError((e as Error).message); } }}>Use this milestone</button>
           </span>
-          <span className="fl-help">The issues are read with <span className="fl-mono">gh</span> in the project folder. Nothing on GitHub changes.</span>
+          <span className="fl-help">Read through this project's GitHub connection (the GitHub tab). Nothing on GitHub changes.</span>
         </div>
       ) : null}
       {data && !data.error ? (data.issues.length ? (
