@@ -167,15 +167,20 @@ export interface CycleTicket {
   id: string; issue_number: number | null; issue_url: string | null; title: string; kind: "bug" | "feature";
   platforms: Platform[]; source: "manual" | "github"; state: "active" | "shipped" | "dropped"; workflow_id: string | null;
   rolled_from_cycle_id: string | null; created_at: string;
-  /** Where it is, in the owner's words: "Waiting for your merge", "In the branch, checked"… */
-  word: string; tone: "muted" | "running" | "asking" | "ok";
+  /** Where it is, in the owner's words: "Waiting for your merge", "Ready to ship"… */
+  word: string;
+  /** Its column on the board. */
+  phase: "spec" | "build" | "review" | "checking" | "ready" | "shipped" | "stopped";
+  /** Who builds it. */
+  engineer: string | null; tone: "muted" | "running" | "asking" | "ok";
   merged: boolean; checked: boolean; needs_you: boolean;
   step: { id: string; title: string; state: string } | null;
   thread: (ThreadDot & { id: string; title: string; state: string })[]; done: number; total: number;
   workflow_status: string | null;
 }
+export type CycleKind = "release" | "hotfix";
 export interface Cycle {
-  id: string; container_id: string; version: string; branch: string; base_branch: string; milestone: string | null;
+  id: string; container_id: string; kind: CycleKind; version: string; branch: string; base_branch: string; milestone: string | null;
   state: "open" | "cut" | "closed"; platforms: Platform[]; roles: Record<string, string>; engineers: Partial<Record<Platform, string>>;
   dry_run: boolean; branch_state: "pending" | "created" | "existed" | "failed" | "skipped"; branch_note: string | null;
   created_at: string; cut_at: string | null;
@@ -183,7 +188,7 @@ export interface Cycle {
   next_cycle: { id: string; version: string; branch: string } | null;
   previous_cycle: { id: string; version: string } | null;
   counts: { total: number; merged: number; checked: number; needs_you: number; building: number };
-  cut: { ships: string[]; rolls: string[]; platforms: Platform[]; unchecked: string[]; next_version: string; next_branch: string };
+  cut: { ships: string[]; rolls: string[]; platforms: Platform[]; unchecked: string[]; next_version: string; next_branch: string; next_is_open?: boolean };
   release_params: Record<string, unknown> & { platforms: Platform[]; batch_summary: string };
   tickets?: CycleTicket[];
 }
@@ -271,8 +276,8 @@ export function withoutBrief(text: string, marker: [string, string] = ["[[intake
 const cyc = (id: string) => `/api/release-cycles/${encodeURIComponent(id)}`;
 export const cycleApi = {
   list: (cid: string, actor: string | null, signal?: AbortSignal) =>
-    call<{ cycles: Cycle[]; open: string | null; open_dry_run: string | null; suggested: { version: string | null; branch: string | null } }>("GET", `/api/containers/${encodeURIComponent(cid)}/release-cycles`, actor, undefined, signal),
-  open: (cid: string, actor: string | null, body: { version: string; branch?: string; base_branch?: string; milestone?: string; platforms: Platform[]; roles: Record<string, string | null>; engineers: Record<string, string | null>; create_branch: boolean; dry_run: boolean }) =>
+    call<{ cycles: Cycle[]; open: string | null; open_dry_run: string | null; open_hotfix: string | null; open_hotfix_dry_run: string | null; suggested: { version: string | null; branch: string | null } }>("GET", `/api/containers/${encodeURIComponent(cid)}/release-cycles`, actor, undefined, signal),
+  open: (cid: string, actor: string | null, body: { kind: CycleKind; version: string; branch?: string; base_branch?: string; milestone?: string; platforms: Platform[]; roles: Record<string, string | null>; engineers: Record<string, string | null>; create_branch: boolean; dry_run: boolean }) =>
     call<Cycle>("POST", `/api/containers/${encodeURIComponent(cid)}/release-cycles`, actor, body),
   get: (id: string, actor: string | null, signal?: AbortSignal) => call<Cycle>("GET", cyc(id), actor, undefined, signal),
   settings: (id: string, actor: string | null, body: { roles?: Record<string, string | null>; engineers?: Record<string, string | null>; milestone?: string }) =>

@@ -71,6 +71,11 @@ class GitHub:
         return {**found[0], "html_url": found[0]["url"]}
 
     def send(self, method, path, token, payload):
+        if path.endswith("/rename"):
+            if getattr(self, "refuse_rename", False):
+                raise RuntimeError("GitHub said 403: Resource not accessible")
+            self.renamed = (path, payload)
+            return {"name": payload["new_name"]}
         self.created.append(payload)
         return {"number": 240, "html_url": "https://github.com/example/nyumba/issues/240"}
 
@@ -285,7 +290,8 @@ async def test_merged_tickets_ship_at_the_cut_and_the_rest_roll_to_the_next_bran
     await settle(p, b["workflow_id"], approve=False)      # the spec waits for you
     c = await p.call("GET", f"/api/release-cycles/{cid}")
     a, b = c["tickets"]
-    assert (a["merged"], a["checked"], a["word"]) == (True, True, "In the branch, checked")
+    assert (a["merged"], a["checked"], a["word"], a["phase"]) == (True, True, "Ready to ship", "ready")
+    assert b["phase"] == "spec"
     assert (b["merged"], b["needs_you"], b["word"]) == (False, True, "Spec waiting for you")
     assert c["counts"] == {"total": 2, "merged": 1, "checked": 1, "needs_you": 1, "building": 1}
     assert c["cut"]["ships"] == [a["id"]] and c["cut"]["rolls"] == [b["id"]] and c["cut"]["platforms"] == ["ios"]
@@ -377,3 +383,57 @@ async def test_a_dry_run_never_opens_a_github_issue(client, monkeypatch):
     out = await p.call("POST", f"/api/release-cycles/{c['id']}/tickets", {"title": "X", "platforms": ["ios"], "create_issue": True})
     assert out["notice"] == "Dry run: no issue was opened on GitHub."
     assert not gh.created
+
+
+@pytest.mark.asyncio
+async def test_a_hotfix_takes_the_next_patch_and_moves_the_planned_release_up(client):
+    p = Project(client)
+    planned = await p.open(version="1.0.2")
+    planned = await p.call("POST", f"/api/release-cycles/{planned['id']}/tickets", {"title": "Referrals", "platforms": ["web"], "kind": "feature"})
+    hot = await p.call("POST", f"/api/containers/{p.cid}/release-cycles", {
+        "kind": "hotfix", "version": "1.0.2", "base_branch": "ios/1.0.1-7", "dry_run": True,
+        "roles": {"engineer": p.eng, "release": p.rel, "qa": p.qa}})
+    assert (hot["kind"], hot["branch"], hot["base_branch"]) == ("hotfix", "hotfix/1.0.2", "ios/1.0.1-7")
+    moved = await p.call("GET", f"/api/release-cycles/{planned['id']}")
+    assert (moved["version"], moved["branch"], moved["milestone"]) == ("1.0.3", "release/1.0.3", "1.0.3")
+    d = await p.call("GET", f"/api/workflows/{moved['tickets'][0]['workflow_id']}")
+    assert d["template"]["params"]["release_branch"] == "release/1.0.3"
+    # One hotfix at a time; a planned release and a hotfix side by side.
+    await p.call("POST", f"/api/containers/{p.cid}/release-cycles", {"kind": "hotfix", "version": "1.0.9", "dry_run": True}, expect=409)
+    listed = await p.call("GET", f"/api/containers/{p.cid}/release-cycles")
+    assert listed["open_dry_run"] == planned["id"] and listed["open_hotfix_dry_run"] == hot["id"]
+    # The hotfix ships what's merged and hands the rest to the planned release, which stays open.
+    hot = await p.call("POST", f"/api/release-cycles/{hot['id']}/tickets", {"title": "Crash on login", "platforms": ["ios"]})
+    hot = await p.call("POST", f"/api/release-cycles/{hot['id']}/tickets", {"title": "Not ready", "platforms": ["ios"]})
+    fix, late = hot["tickets"]
+    await settle(p, fix["workflow_id"])
+    hot = await p.call("GET", f"/api/release-cycles/{hot['id']}")
+    assert hot["cut"]["next_branch"] == "release/1.0.3" and hot["release_params"]["next_release_branch"] == "release/1.0.3"
+    out = await p.call("POST", f"/api/release-cycles/{hot['id']}/cut", {"idempotency_key": uid(), "params": {"build": "9", "release_type": "manual"}})
+    assert out["next_cycle_id"] == planned["id"]
+    rel = await p.call("GET", f"/api/workflows/{out['release_workflow_id']}")
+    assert rel["template"]["params"]["release_branch"] == "hotfix/1.0.2" and rel["template"]["params"]["next_release_branch"] == "release/1.0.3"
+    planned = await p.call("GET", f"/api/release-cycles/{planned['id']}")
+    assert planned["state"] == "open" and {t["title"] for t in planned["tickets"]} == {"Referrals", "Not ready"}
+    listed = await p.call("GET", f"/api/containers/{p.cid}/release-cycles")
+    assert len([c for c in listed["cycles"] if c["state"] == "open"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_moving_the_planned_release_renames_its_branch_on_github_or_changes_nothing(client, monkeypatch):
+    p = Project(client)
+    monkeypatch.setattr(cycles, "_run", Git())
+    gh = GitHub().install(monkeypatch)
+    gh.refuse_rename = True
+    planned = await p.open(version="1.0.2", dry_run=False)
+    await p.call("POST", f"/api/containers/{p.cid}/release-cycles", {"kind": "hotfix", "version": "1.0.2", "base_branch": "ios/1.0.1-7"}, expect=422)
+    still = await p.call("GET", f"/api/release-cycles/{planned['id']}")
+    assert still["version"] == "1.0.2" and still["branch"] == "release/1.0.2"
+    listed = await p.call("GET", f"/api/containers/{p.cid}/release-cycles")
+    assert listed["open_hotfix"] is None
+    gh.refuse_rename = False
+    hot = await p.call("POST", f"/api/containers/{p.cid}/release-cycles", {"kind": "hotfix", "version": "1.0.2", "base_branch": "ios/1.0.1-7"})
+    assert gh.renamed == ("/repos/example/nyumba/branches/release/1.0.2/rename", {"new_name": "release/1.0.3"})
+    moved = await p.call("GET", f"/api/release-cycles/{planned['id']}")
+    assert moved["branch"] == "release/1.0.3" and "GitHub renamed" in moved["branch_note"]
+    assert hot["branch"] == "hotfix/1.0.2" and hot["branch_state"] == "created"

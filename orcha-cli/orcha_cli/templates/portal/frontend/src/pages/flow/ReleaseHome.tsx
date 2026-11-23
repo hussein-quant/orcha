@@ -214,11 +214,11 @@ export function ReleaseHome() {
     <div className="fl-wrap fl-rh">
       <header className="fl-head">
         <div>
-          <h1 className="fl-h1">{cycle ? `Cut release ${cycle.version}` : "Release home"}</h1>
+          <h1 className="fl-h1">{cycle ? `Cut ${cycle.kind === "hotfix" ? "hotfix" : "release"} ${cycle.version}` : "Release home"}</h1>
           <p className="fl-sub">{cycle ? <>From <span className="fl-mono">{cycle.branch}</span>. {inv?.summary ?? ""}</> : inv?.summary ?? "Reading what's live, in review and merged…"}</p>
         </div>
         <div className="fl-head-actions">
-          {cycle ? <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows/cycle", cid, { cycle: cycle.id })}><ArrowLeft size={14} />Release {cycle.version}</Link>
+          {cycle ? <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows/cycle", cid, { cycle: cycle.id })}><ArrowLeft size={14} />{cycle.kind === "hotfix" ? "Hotfix" : "Release"} {cycle.version}</Link>
             : <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows/new", cid)}><ArrowLeft size={14} />Templates</Link>}
           <button type="button" className="fl-btn" onClick={() => read(true)} disabled={loading} data-refresh>
             <RefreshCw size={14} className={loading ? "fl-spinning" : undefined} />{loading ? "Reading…" : `Read again${inv ? ` · ${ago(inv.read_at)}` : ""}`}

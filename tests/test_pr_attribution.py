@@ -70,8 +70,8 @@ def test_migration_042_exists_and_is_next_sequential():
     # to Quality when it finishes (tasks.qa_on_done); 100 imported Quality reports (qa_reports);
     # 101 run conditions on scenarios, findings, requests and sessions.
     # 102 the Mobile App Release: step kinds, watch readings, templates, finding fixes.
-    # 103 release cycles: a release branch, its tickets, and the cut.
-    assert numbers[-1] == 103, f"103 must be the latest migration, saw {numbers[-1]:03d}"
+    # 103 release cycles: a release branch, its tickets, and the cut; 104 a cycle's kind (release or hotfix).
+    assert numbers[-1] == 104, f"104 must be the latest migration, saw {numbers[-1]:03d}"
 
 
 def test_agents_git_email_column_applied(db):

@@ -10,9 +10,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useActingAuthority, useSnapshot } from "../../state/SnapshotProvider";
-import { ArrowLeft, ArrowRight, Bug, ExternalLink, GitBranch, Plus, RefreshCw, Search, Sparkles, TriangleAlert, X } from "./icons";
+import { ArrowLeft, ArrowRight, Bug, ChevronDown, ChevronUp, ExternalLink, GitBranch, Plus, RefreshCw, Search, Sparkles, TriangleAlert, X, Zap } from "./icons";
 import {
-  ago, cycleApi, flowApi, PLATFORM_WORD, type Compiled, type Cycle, type CycleTicket, type GithubIssue, type Platform,
+  ago, cycleApi, flowApi, PLATFORM_WORD, type Compiled, type Cycle, type CycleKind, type CycleTicket, type GithubIssue, type Inventory, type Platform,
 } from "./flowApi";
 import { flowHref } from "./Board";
 import { Figure, Thread } from "./kit";
@@ -62,92 +62,177 @@ function AgentPick({ label, value, people, onChange, empty = "Choose…" }: { la
 
 /* ---- opening a cycle ---------------------------------------------------------------- */
 
-function OpenCycle({ cid, actor, suggested, onOpened }: { cid: string; actor: string | null; suggested: string | null; onOpened: (c: Cycle) => void }) {
+const bump = (v: string) => { const parts = v.split("."); const last = Number(parts[parts.length - 1]); return Number.isFinite(last) ? [...parts.slice(0, -1), String(last + 1)].join(".") : v; };
+const versionOfTag = (tag?: string | null) => tag?.match(/(\d+\.\d+\.\d+)/)?.[1] ?? null;
+
+interface Suggestion { version: string; base: string; why: string; tags: { tag: string; platform: Platform }[] }
+
+/** What to open next: a planned release after the last one, or a hotfix on top of what's live. */
+function useSuggestion(cid: string, actor: string | null, kind: CycleKind, fromCycles: string | null) {
+  const [inv, setInv] = useState<Inventory | null>(null);
+  const [reading, setReading] = useState(true);
+  useEffect(() => {
+    // Reading the inventory needs to know who's asking: wait for that, then read (cached for 2 minutes).
+    if (!actor) return;
+    const ctrl = new AbortController();
+    setReading(true);
+    flowApi.inventory(cid, "mobile_app_release", actor, false, ctrl.signal)
+      .then(setInv).catch(() => undefined).finally(() => { if (!ctrl.signal.aborted) setReading(false); });
+    return () => ctrl.abort();
+  }, [cid, actor]);
+  const tags = ALL.flatMap((p) => { const t = inv?.data.platforms?.[p]?.last_release?.tag; return t ? [{ tag: t, platform: p }] : []; });
+  let s: Suggestion | null = null;
+  if (kind === "release") {
+    const v = fromCycles ?? (typeof inv?.data.release_params?.version === "string" ? inv.data.release_params.version : null);
+    if (v) s = { version: v, base: "main", tags, why: fromCycles ? "The version after the last release cycle." : "The next version after what's released, from the release inventory." };
+  } else {
+    // A hotfix goes on top of what's live: the newest store release tag, one patch up.
+    const store = tags.filter((t) => t.platform === "ios" || t.platform === "android").map((t) => ({ ...t, v: versionOfTag(t.tag) })).filter((t) => t.v);
+    const top = store.find((t) => t.platform === "ios") ?? store[0];
+    if (top?.v) s = { version: bump(top.v), base: top.tag, tags, why: `One patch up from ${top.tag}, what's live.` };
+    else if (tags[0]) s = { version: "", base: tags[0].tag, tags, why: "Cut from the last release tag." };
+  }
+  return { suggestion: s, reading };
+}
+
+function Select({ id, label, value, onChange, children, help }: { id: string; label: string; value: string; onChange: (v: string) => void; children: ReactNode; help?: string }) {
+  return (
+    <div className="fl-field">
+      <label htmlFor={id}>{label}</label>
+      <span className="fl-cy-select"><select id={id} className="fl-select" value={value} onChange={(e) => onChange(e.target.value)}>{children}</select><ChevronDown size={14} aria-hidden="true" /></span>
+      {help ? <span className="fl-help">{help}</span> : null}
+    </div>
+  );
+}
+
+function OpenCycle({ cid, actor, suggested, startKind, openRelease, onOpened }: {
+  cid: string; actor: string | null; suggested: string | null; startKind: CycleKind; openRelease: { version: string; branch: string } | null; onOpened: (c: Cycle) => void;
+}) {
   const people = usePeople(cid, actor);
-  const [version, setVersion] = useState(suggested ?? "");
-  const [branch, setBranch] = useState("");
-  const [base, setBase] = useState("main");
-  const [milestone, setMilestone] = useState("");
+  const ai = people.filter((p) => p.kind === "ai");
+  const [kind, setKind] = useState<CycleKind>(startKind);
+  const { suggestion, reading } = useSuggestion(cid, actor, kind, suggested);
+  // Suggested values fill the fields; whatever you type wins and stops following them.
+  const [typed, setTyped] = useState<Record<string, string>>({});
+  const v = (typed.version ?? suggestion?.version ?? "").trim();
+  const branch = typed.branch ?? (v ? `${kind}/${v}` : "");
+  const base = typed.base ?? (kind === "hotfix" ? suggestion?.base ?? "" : "main");
+  const milestone = typed.milestone ?? v;
+  const set = (k: string) => (x: string) => setTyped((t) => ({ ...t, [k]: x }));
   const [platforms, setPlatforms] = useState<Platform[]>(ALL);
   const [roles, setRoles] = useState<Record<string, string | null>>({});
   const [engineers, setEngineers] = useState<Record<string, string | null>>({});
+  const [perPlatform, setPerPlatform] = useState(false);
   const [makeBranch, setMakeBranch] = useState(true);
   const [dryRun, setDryRun] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (suggested || version) return;
-    // No cycle yet: the release inventory knows the next version.
-    const ctrl = new AbortController();
-    flowApi.inventory(cid, "mobile_app_release", actor, false, ctrl.signal)
-      .then((inv) => { const v = inv.data.release_params?.version; if (typeof v === "string") setVersion((cur) => cur || v); })
-      .catch(() => undefined);
-    return () => ctrl.abort();
-  }, [cid]);
-  useEffect(() => {
     if (!people.length) return;
     const g = guessRoles(people, actor);
     setRoles((r) => (Object.keys(r).length ? r : { engineer: g.engineer, release: g.release, qa: g.qa }));
-    const ai = people.filter((p) => p.kind === "ai");
     const by = (re: RegExp) => ai.find((a) => re.test(a.alias))?.id ?? null;
     setEngineers((e) => (Object.keys(e).length ? e : { ios: by(/ios|iphone/i), android: by(/android/i), web: by(/\bweb|front/i), api: by(/\bapi|back/i) }));
   }, [people.length]);
+  useEffect(() => { setTyped((t) => ({ ...(t.version ? { version: t.version } : {}) })); }, [kind]);
 
-  const v = version.trim();
-  const theBranch = branch.trim() || (v ? `release/${v}` : "");
+  const collides = kind === "hotfix" && openRelease && openRelease.version === v;
   async function open() {
     setBusy(true); setError("");
     try {
       onOpened(await cycleApi.open(cid, actor, {
-        version: v, branch: theBranch, base_branch: base.trim() || "main", milestone: milestone.trim() || undefined, platforms,
-        roles, engineers, create_branch: makeBranch, dry_run: dryRun,
+        kind, version: v, branch, base_branch: base.trim() || "main", milestone: milestone.trim() || undefined, platforms,
+        roles, engineers: perPlatform ? engineers : {}, create_branch: makeBranch, dry_run: dryRun,
       }));
     } catch (e) { setError((e as Error).message); setBusy(false); }
   }
-  const why = !v ? "Choose the version." : !platforms.length ? "Choose at least one platform." : !roles.engineer && !dryRun ? "Choose who builds the tickets." : "";
+  const why = !v ? (reading ? "Reading the next version…" : "Choose the version.") : !base.trim() ? "Choose what to cut it from." : !platforms.length ? "Choose at least one platform." : !roles.engineer && !dryRun ? "Choose who builds the tickets." : "";
+  const word = kind === "hotfix" ? "hotfix" : "release";
+  const agents = (empty: string) => [<option key="" value="">{empty}</option>, ...ai.map((x) => <option key={x.id} value={x.id}>{x.alias}</option>)];
   return (
-    <div className="fl-wrap fl-cy">
+    <div className="fl-wrap fl-cy fl-cy-new">
       <header className="fl-head">
         <div>
-          <h1 className="fl-h1">Open a release cycle</h1>
-          <p className="fl-sub">Tickets collect on one release branch for the next two or three weeks. What you merge into it ships.</p>
+          <h1 className="fl-h1">{kind === "hotfix" ? "Start a hotfix" : "Open a release cycle"}</h1>
+          <p className="fl-sub">{kind === "hotfix" ? "A quick fix on top of what's live, without the work planned for the next release." : "Tickets collect on one release branch for the next two or three weeks. What you merge into it ships."}</p>
         </div>
         <div className="fl-head-actions"><Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows", cid)}><ArrowLeft size={14} />Workflows</Link></div>
       </header>
-      <section className="fl-panel" aria-label="The cycle">
-        <div className="fl-cy-grid">
-          <div className="fl-field"><label htmlFor="cy-version">Version</label>
-            <input id="cy-version" className="fl-input fl-mono" value={version} placeholder="1.0.3" onChange={(e) => setVersion(e.target.value)} /></div>
-          <div className="fl-field"><label htmlFor="cy-branch">Release branch</label>
-            <input id="cy-branch" className="fl-input fl-mono" value={branch} placeholder={theBranch || "release/1.0.3"} onChange={(e) => setBranch(e.target.value)} /></div>
-          <div className="fl-field"><label htmlFor="cy-base">Cut from</label>
-            <input id="cy-base" className="fl-input fl-mono" value={base} onChange={(e) => setBase(e.target.value)} /></div>
-          <div className="fl-field"><label htmlFor="cy-milestone">GitHub milestone</label>
-            <input id="cy-milestone" className="fl-input" value={milestone} placeholder={v || "1.0.3"} onChange={(e) => setMilestone(e.target.value)} />
-            <span className="fl-help">Its open issues can be added as tickets.</span></div>
-        </div>
-        <div className="fl-field"><span className="fl-label">Platforms this project ships</span>
-          <PlatformToggles value={platforms} onChange={setPlatforms} label="Platforms" /></div>
-        <div className="fl-field"><span className="fl-label">Who works on the tickets</span>
-          <div className="fl-rh-roles">
-            <AgentPick label="Engineer" value={roles.engineer} people={people} onChange={(x) => setRoles({ ...roles, engineer: x })} />
-            <AgentPick label="Release" value={roles.release} people={people} onChange={(x) => setRoles({ ...roles, release: x })} />
-            <AgentPick label="QA" value={roles.qa} people={people} onChange={(x) => setRoles({ ...roles, qa: x })} />
+
+      <div className="fl-cy-kinds" role="radiogroup" aria-label="What kind of release">
+        {([["release", GitBranch, "Planned release", "Fixes and features over the next weeks, cut from main."], ["hotfix", Zap, "Hotfix", "One urgent fix to what's live, cut from its release tag."]] as const).map(([k, Icon, title, text]) => (
+          <button key={k} type="button" role="radio" aria-checked={kind === k} className="fl-cy-kind" onClick={() => setKind(k)} data-kind={k}>
+            <span className="fl-cy-kind-icon"><Icon size={18} /></span>
+            <span><b>{title}</b><small>{text}</small></span>
+          </button>
+        ))}
+      </div>
+
+      <section className="fl-panel fl-cy-section" aria-label="Version and branch">
+        <h2 className="fl-cy-section-title">Version and branch</h2>
+        <div className="fl-cy-pair">
+          <div className="fl-field">
+            <label htmlFor="cy-version">Version {reading && !v ? <span className="fl-cy-reading"><RefreshCw size={11} className="fl-spinning" />Reading…</span> : null}</label>
+            <input id="cy-version" className="fl-input fl-mono fl-cy-big" value={typed.version ?? suggestion?.version ?? ""} placeholder="1.0.3" onChange={(e) => set("version")(e.target.value)} />
+            <span className="fl-help">{typed.version !== undefined && suggestion?.version && typed.version !== suggestion.version
+              ? <>Suggested <button type="button" className="fl-linkbtn" onClick={() => setTyped((t) => { const { version: _v, ...rest } = t; return rest; })}>{suggestion.version}</button></>
+              : suggestion?.why ?? (reading ? "" : "No earlier release to go from: type it.")}</span>
           </div>
-          <div className="fl-rh-roles">
-            {platforms.map((p) => <AgentPick key={p} label={`${PLATFORM_WORD[p]} only`} value={engineers[p]} people={people} empty="Same engineer" onChange={(x) => setEngineers({ ...engineers, [p]: x })} />)}
+          <div className="fl-field">
+            <label htmlFor="cy-branch">Branch</label>
+            <input id="cy-branch" className="fl-input fl-mono" value={branch} onChange={(e) => set("branch")(e.target.value)} />
+            <span className="fl-help">{makeBranch && !dryRun ? "Created on GitHub when you open it." : "Not created: you make it, or it's a dry run."}</span>
           </div>
-          <span className="fl-help">A ticket for one platform goes to that platform's engineer when you choose one.</span>
+          {kind === "hotfix" ? (
+            <Select id="cy-base" label="Cut from" value={base} onChange={set("base")} help="The release tag of what's live. Its fix merges back into main and the planned release.">
+              {suggestion?.tags.length ? null : <option value="">No release tags found</option>}
+              {(suggestion?.tags ?? []).map((t) => <option key={t.tag} value={t.tag}>{t.tag} · {PLATFORM_WORD[t.platform]}</option>)}
+              {base && !(suggestion?.tags ?? []).some((t) => t.tag === base) ? <option value={base}>{base}</option> : null}
+            </Select>
+          ) : (
+            <div className="fl-field">
+              <label htmlFor="cy-base">Cut from</label>
+              <input id="cy-base" className="fl-input fl-mono" value={base} onChange={(e) => set("base")(e.target.value)} />
+            </div>
+          )}
+          <div className="fl-field">
+            <label htmlFor="cy-milestone">GitHub milestone</label>
+            <input id="cy-milestone" className="fl-input" value={milestone} onChange={(e) => set("milestone")(e.target.value)} />
+            <span className="fl-help">Its open issues can be added as tickets.</span>
+          </div>
         </div>
+        {collides ? <p className="fl-cy-note"><TriangleAlert size={13} />Release {openRelease!.version} moves to {bump(openRelease!.version)}, and GitHub renames <span className="fl-mono">{openRelease!.branch}</span>; its open PRs follow.</p> : null}
       </section>
+
+      <section className="fl-panel fl-cy-section" aria-label="Platforms">
+        <h2 className="fl-cy-section-title">{kind === "hotfix" ? "Fix what's live on" : "Platforms this project ships"}</h2>
+        <PlatformToggles value={platforms} onChange={setPlatforms} label="Platforms" />
+      </section>
+
+      <section className="fl-panel fl-cy-section" aria-label="Who works on the tickets">
+        <h2 className="fl-cy-section-title">Who works on the tickets</h2>
+        <div className="fl-cy-trio">
+          <Select id="cy-engineer" label="Engineer" value={roles.engineer ?? ""} onChange={(x) => setRoles({ ...roles, engineer: x || null })} help="Builds each ticket.">{agents("Choose…")}</Select>
+          <Select id="cy-release" label="Release" value={roles.release ?? ""} onChange={(x) => setRoles({ ...roles, release: x || null })} help="Deploys to staging, builds the release.">{agents("Choose…")}</Select>
+          <Select id="cy-qa" label="QA" value={roles.qa ?? ""} onChange={(x) => setRoles({ ...roles, qa: x || null })} help="Checks each ticket on its platforms.">{agents("Choose…")}</Select>
+        </div>
+        <button type="button" className="fl-cy-disclose" aria-expanded={perPlatform} onClick={() => setPerPlatform((x) => !x)}>
+          {perPlatform ? <ChevronUp size={14} /> : <ChevronDown size={14} />}A different engineer per platform
+        </button>
+        {perPlatform ? (
+          <div className="fl-cy-trio">
+            {platforms.map((p) => <Select key={p} id={`cy-eng-${p}`} label={`${PLATFORM_WORD[p]} only`} value={engineers[p] ?? ""} onChange={(x) => setEngineers({ ...engineers, [p]: x || null })}>{agents("Same engineer")}</Select>)}
+          </div>
+        ) : null}
+      </section>
+
       <div className="fl-startbar fl-rh-start" role="region" aria-label="Open the cycle">
         <div className="fl-rh-start-main">
-          <span className="fl-rh-label">{v ? <>Open <b className="fl-mono">{v}</b> on <span className="fl-mono">{theBranch}</span></> : "Open a cycle"}</span>
+          <span className="fl-rh-label">{v ? <>{kind === "hotfix" ? "Hotfix" : "Release"} <b className="fl-mono">{v}</b> on <span className="fl-mono">{branch}</span> from <span className="fl-mono">{base || "…"}</span></> : `Open a ${word}`}</span>
           {!dryRun ? (
-            <label className="fl-cy-check"><input type="checkbox" checked={makeBranch} onChange={(e) => setMakeBranch(e.target.checked)} />
-              Create <span className="fl-mono">{theBranch || "the branch"}</span> on origin from <span className="fl-mono">{base || "main"}</span></label>
-          ) : <span className="fl-help">Dry run: no branch, and no agent wakes. People's steps still wait for you.</span>}
+            <label className="fl-cy-check"><input type="checkbox" checked={makeBranch} onChange={(e) => setMakeBranch(e.target.checked)} />Create the branch on GitHub</label>
+          ) : <span className="fl-help">Dry run: no branch, and no agent wakes. Your steps still wait for you.</span>}
           {why ? <span className="fl-help" aria-live="polite">{why}</span> : null}
           {error ? <span className="fl-problem" role="alert"><TriangleAlert size={13} />{error}</span> : null}
         </div>
@@ -156,7 +241,7 @@ function OpenCycle({ cid, actor, suggested, onOpened }: { cid: string; actor: st
             <button type="button" role="switch" className="fl-switch" aria-checked={dryRun} onClick={() => setDryRun((d) => !d)} aria-label="Dry run" />Dry run
           </label>
           <button type="button" className="fl-btn" data-variant="primary" data-size="lg" disabled={!!why || busy} onClick={open} data-open-cycle>
-            <GitBranch size={15} />{busy ? "Opening…" : "Open the cycle"}
+            {kind === "hotfix" ? <Zap size={15} /> : <GitBranch size={15} />}{busy ? "Opening…" : kind === "hotfix" ? "Start the hotfix" : "Open the cycle"}
           </button>
         </div>
       </div>
@@ -386,11 +471,71 @@ function Group({ title, children, count }: { title: string; children: ReactNode;
   );
 }
 
+/* ---- the board --------------------------------------------------------------------- */
+
+const COLUMNS: { phase: CycleTicket["phase"]; title: string; hint: string }[] = [
+  { phase: "spec", title: "Spec", hint: "A feature's spec, written and approved" },
+  { phase: "build", title: "Building", hint: "Test-first, a PR into the branch" },
+  { phase: "review", title: "Waiting for your merge", hint: "Your merge is your decision it ships" },
+  { phase: "checking", title: "In the branch", hint: "Merged; being checked on staging" },
+  { phase: "ready", title: "Ready to ship", hint: "Merged and checked on staging" },
+  { phase: "shipped", title: "Shipped", hint: "Went out with the cut" },
+];
+
+function BoardCard({ t, cid, dry }: { t: CycleTicket; cid: string; dry: boolean }) {
+  const navigate = useNavigate();
+  const Kind = t.kind === "feature" ? Sparkles : Bug;
+  const open = () => t.workflow_id && navigate(flowHref(`/workflows/${encodeURIComponent(t.workflow_id)}`, cid));
+  return (
+    <li className="fl-kb-card" role="link" tabIndex={0} onClick={open} onKeyDown={(e) => { if (e.key === "Enter") open(); }}
+      data-needs-you={t.needs_you || undefined} data-ticket={t.id} aria-label={`${t.issue_number ? `#${t.issue_number} ` : ""}${t.title}: ${t.word}`}>
+      <span className="fl-kb-top">
+        <Kind size={13} aria-hidden="true" data-kind={t.kind} />
+        {t.issue_number ? <span className="fl-mono fl-kb-ref">#{t.issue_number}</span> : <span className="fl-kb-ref fl-muted">No issue</span>}
+        {t.rolled_from_cycle_id ? <span className="fl-kb-tag">Rolled over</span> : null}
+        {t.issue_url ? <a className="fl-kb-gh" href={t.issue_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} aria-label={`Open #${t.issue_number ?? ""} on GitHub`} title="Open on GitHub"><ExternalLink size={12} /></a> : null}
+      </span>
+      <span className="fl-kb-title">{t.title}</span>
+      <span className="fl-kb-plats">{t.platforms.map((p) => <span key={p} className="fl-kb-plat">{PLATFORM_WORD[p]}</span>)}</span>
+      <Thread dots={t.thread} label={`${t.done} of ${t.total} steps done`} />
+      <span className="fl-kb-foot">
+        {t.engineer ? <span className="fl-kb-who" title={`Built by ${t.engineer}`}><i>{t.engineer.slice(0, 1).toUpperCase()}</i>{t.engineer}</span> : <span className="fl-muted">{dry ? "Dry run" : "Unassigned"}</span>}
+        {t.needs_you ? <span className="fl-kb-you" title={t.word}>Needs you</span> : t.phase === "checking" || t.phase === "build" ? <span className="fl-kb-step" title={t.word}>{t.word}</span> : null}
+      </span>
+    </li>
+  );
+}
+
+function CycleBoard({ tickets, cid, cut, dry }: { tickets: CycleTicket[]; cid: string; cut: boolean; dry: boolean }) {
+  const cols = COLUMNS.filter((c) => c.phase !== "shipped" || cut || tickets.some((t) => t.phase === "shipped"));
+  return (
+    <div className="fl-kb" role="list" aria-label="Tickets by stage">
+      {cols.map((c) => {
+        const here = tickets.filter((t) => t.phase === c.phase);
+        return (
+          <section key={c.phase} className="fl-kb-col" data-phase={c.phase} aria-label={c.title} role="listitem">
+            <header><b>{c.title}</b><span className="fl-mono">{here.length}</span></header>
+            <p className="fl-kb-hint">{c.hint}</p>
+            <ul>{here.map((t) => <BoardCard key={t.id} t={t} cid={cid} dry={dry} />)}</ul>
+            {!here.length ? <p className="fl-kb-empty">Nothing here</p> : null}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function useView(): ["board" | "list", (v: "board" | "list") => void] {
+  const [v, setV] = useState<"board" | "list">(() => { try { return (localStorage.getItem("fl-cy-view") as "board" | "list") || "board"; } catch { return "board"; } });
+  return [v, (x) => { setV(x); try { localStorage.setItem("fl-cy-view", x); } catch { /* private window */ } }];
+}
+
 function CycleView({ cycle, cid, actor, setCycle, startWith }: { cycle: Cycle; cid: string; actor: string | null; setCycle: (c: Cycle) => void; startWith?: "intake" | "" }) {
   const navigate = useNavigate();
   const people = usePeople(cid, actor);
   const [panel, setPanel] = useState<"" | "add" | "github" | "intake">(startWith ?? "");
   const [filter, setFilter] = useState<Platform | "all">("all");
+  const [view, setView] = useView();
   const [error, setError] = useState("");
   const tickets = (cycle.tickets ?? []).filter((t) => filter === "all" || t.platforms.includes(filter));
   const live = tickets.filter((t) => t.state !== "dropped" && t.workflow_status !== "cancelled");
@@ -408,7 +553,7 @@ function CycleView({ cycle, cid, actor, setCycle, startWith }: { cycle: Cycle; c
       <nav><Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows", cid)}><ArrowLeft size={14} />All workflows</Link></nav>
       <header className="fl-head">
         <div>
-          <h1 className="fl-h1">Release {cycle.version} {cycle.dry_run ? <span className="fl-chip" data-tone="info">Dry run</span> : null}
+          <h1 className="fl-h1">{cycle.kind === "hotfix" ? <><Zap size={20} aria-hidden="true" />Hotfix</> : "Release"} {cycle.version} {cycle.dry_run ? <span className="fl-chip" data-tone="info">Dry run</span> : null}
             <span className="fl-chip" data-tone={open ? "accent" : "muted"}>{open ? "Collecting" : cycle.state === "cut" ? "Cut" : "Closed"}</span></h1>
           <p className="fl-sub fl-cy-branch">
             <GitBranch size={13} aria-hidden="true" /><span className="fl-mono">{cycle.branch}</span>
@@ -425,6 +570,7 @@ function CycleView({ cycle, cid, actor, setCycle, startWith }: { cycle: Cycle; c
         </div>
         {open ? (
           <div className="fl-head-actions">
+            {cycle.kind === "release" ? <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows/cycle", cid, { kind: "hotfix" })} data-hotfix><Zap size={14} />Hotfix</Link> : null}
             <button type="button" className="fl-btn" aria-pressed={panel === "github"} onClick={() => setPanel(panel === "github" ? "" : "github")} data-from-github>
               <GitBranch size={14} />From GitHub</button>
             <button type="button" className="fl-btn" aria-pressed={panel === "add"} onClick={() => setPanel(panel === "add" ? "" : "add")} data-add><Plus size={14} />Add ticket</button>
@@ -457,12 +603,17 @@ function CycleView({ cycle, cid, actor, setCycle, startWith }: { cycle: Cycle; c
       {panel === "intake" ? <Intake cycle={cycle} actor={actor} people={people} onLogged={setCycle} onClose={() => setPanel("")} /> : null}
 
       {(cycle.tickets ?? []).length ? (
+        <div className="fl-cy-bar-row">
         <div className="fl-toggles" role="radiogroup" aria-label="Show tickets for">
           {(["all", ...cycle.platforms] as const).map((p) => (
             <button key={p} type="button" role="radio" className="fl-toggle" aria-checked={filter === p} aria-pressed={filter === p} onClick={() => setFilter(p)}>
               {p === "all" ? "All" : PLATFORM_WORD[p]}
             </button>
           ))}
+        </div>
+        <div className="fl-cy-seg" role="radiogroup" aria-label="View">
+          {(["board", "list"] as const).map((x) => <button key={x} type="button" role="radio" aria-checked={view === x} onClick={() => setView(x)}>{x === "board" ? "Board" : "List"}</button>)}
+        </div>
         </div>
       ) : open && !panel ? (
         <section className="fl-panel fl-cy-empty">
@@ -476,21 +627,26 @@ function CycleView({ cycle, cid, actor, setCycle, startWith }: { cycle: Cycle; c
         </section>
       ) : null}
 
+      {view === "board" && (cycle.tickets ?? []).length ? <CycleBoard tickets={live} cid={cid} cut={!open} dry={cycle.dry_run} /> : null}
+      {view === "list" ? <>
       <Group title="Waiting for you" count={needs.length}>{needs.map((t, i) => <TicketRow key={t.id} t={t} i={i} cycle={cycle} cid={cid} actor={actor} onChanged={setCycle} />)}</Group>
       <Group title="Being built" count={going.length}>{going.map((t, i) => <TicketRow key={t.id} t={t} i={i} cycle={cycle} cid={cid} actor={actor} onChanged={setCycle} />)}</Group>
       <Group title={open ? "In the branch" : "Shipped"} count={inBranch.length}>{inBranch.map((t, i) => <TicketRow key={t.id} t={t} i={i} cycle={cycle} cid={cid} actor={actor} onChanged={setCycle} />)}</Group>
       <Group title="Taken out" count={out.length}>{out.map((t, i) => <TicketRow key={t.id} t={t} i={i} cycle={cycle} cid={cid} actor={actor} onChanged={setCycle} />)}</Group>
+      </> : null}
 
       {open ? (
         <div className="fl-startbar fl-rh-start" role="region" aria-label="Cut the release">
           <div className="fl-rh-start-main">
             <span className="fl-rh-label">
               {ships ? <><b>{ships}</b> {ships === 1 ? "ticket ships" : "tickets ship"}{cycle.cut.platforms.length ? <> on {cycle.cut.platforms.map((p) => PLATFORM_WORD[p]).join(", ")}</> : null}</> : "Nothing is merged into the branch yet"}
-              {rolls ? <> · {rolls} {rolls === 1 ? "rolls" : "roll"} to <span className="fl-mono">{cycle.cut.next_version}</span></> : null}
+              {rolls ? <> · {rolls} {rolls === 1 ? "moves" : "move"} to {cycle.kind === "hotfix" ? "release " : ""}<span className="fl-mono">{cycle.cut.next_version}</span></> : null}
             </span>
             <span className="fl-help">
               {unchecked ? `${unchecked} merged ${unchecked === 1 ? "ticket hasn't" : "tickets haven't"} passed its staging check yet; the full regression still covers it. ` : ""}
-              The cut starts the release from <span className="fl-mono">{cycle.branch}</span> and opens <span className="fl-mono">{cycle.cut.next_branch}</span> for what's left.
+              The cut starts the release from <span className="fl-mono">{cycle.branch}</span>{cycle.kind === "hotfix"
+                ? <>; after it ships the fix merges back into main and <span className="fl-mono">{cycle.cut.next_branch}</span>.</>
+                : <> and opens <span className="fl-mono">{cycle.cut.next_branch}</span> for what's left.</>}
             </span>
           </div>
           <button type="button" className="fl-btn" data-variant="primary" data-size="lg" disabled={!ships} data-cut
@@ -512,8 +668,10 @@ export function ReleaseCycle() {
   const id = params.get("cycle");
   const fresh = params.get("new") === "1";
   const intake = params.get("intake") === "1";
+  const kind: CycleKind = params.get("kind") === "hotfix" ? "hotfix" : "release";
   const [cycle, setCycle] = useState<Cycle | null>(null);
   const [suggested, setSuggested] = useState<string | null | undefined>(undefined);
+  const [openRelease, setOpenRelease] = useState<{ version: string; branch: string } | null>(null);
   const [error, setError] = useState("");
   const seq = useRef(0);
 
@@ -521,12 +679,14 @@ export function ReleaseCycle() {
     if (!cid || id) return;
     const ctrl = new AbortController();
     cycleApi.list(cid, actor, ctrl.signal).then((l) => {
-      const open = fresh ? null : l.open ?? l.open_dry_run;
+      const open = fresh ? null : kind === "hotfix" ? l.open_hotfix ?? l.open_hotfix_dry_run : l.open ?? l.open_dry_run;
+      const planned = l.cycles.find((c) => c.id === (l.open ?? l.open_dry_run));
+      setOpenRelease(planned ? { version: planned.version, branch: planned.branch } : null);
       if (open) navigate(flowHref("/workflows/cycle", cid, { cycle: open, ...(intake ? { intake: "1" } : {}) }), { replace: true });
       else setSuggested(l.suggested.version);
     }).catch((e: Error) => { if (e.name !== "AbortError") setError(e.message); });
     return () => ctrl.abort();
-  }, [cid, id, fresh]);
+  }, [cid, id, fresh, kind]);
 
   const tick = useMemo(() => Math.floor(bump / (connection === "live" ? 5 : 2)), [bump, connection]);
   useEffect(() => {
@@ -543,7 +703,7 @@ export function ReleaseCycle() {
   if (error && !cycle) return <div className="fl-wrap"><p className="fl-problem" role="alert"><TriangleAlert size={13} />{error}</p></div>;
   if (!id) {
     if (suggested === undefined) return <div className="fl-wrap"><p className="fl-muted" aria-busy="true">Loading the release cycle…</p></div>;
-    return <OpenCycle cid={cid} actor={actor} suggested={suggested} onOpened={(c) => navigate(flowHref("/workflows/cycle", cid, { cycle: c.id }))} />;
+    return <OpenCycle key={kind} cid={cid} actor={actor} suggested={suggested} startKind={kind} openRelease={openRelease} onOpened={(c) => navigate(flowHref("/workflows/cycle", cid, { cycle: c.id }))} />;
   }
   if (!cycle) return <div className="fl-wrap"><p className="fl-muted" aria-busy="true">Loading the release cycle…</p></div>;
   return <CycleView cycle={cycle} cid={cid} actor={actor} setCycle={setCycle} startWith={intake && cycle.state === "open" ? "intake" : ""} />;

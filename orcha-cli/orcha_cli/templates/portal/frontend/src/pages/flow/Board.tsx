@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useActingAuthority, useSnapshot } from "../../state/SnapshotProvider";
-import { ChevronDown, ChevronUp, Clock, GitBranch, Layers, Plus, Rocket, TriangleAlert, Workflow } from "./icons";
+import { ChevronDown, ChevronUp, Clock, GitBranch, Layers, Plus, Rocket, TriangleAlert, Workflow, Zap } from "./icons";
 import { ago, flowApi, PLATFORM_WORD, type Board as BoardData, type BoardRow, type Cycle, type TemplateSummary } from "./flowApi";
 import { Gallery } from "./Gallery";
 import { TeachScene, Thread } from "./kit";
@@ -52,10 +52,10 @@ function CycleCard({ c, cid, i }: { c: Cycle; cid: string; i: number }) {
   return (
     <li>
       <Link to={flowHref("/workflows/cycle", cid, { cycle: c.id })} className="fl-row fl-cy-card" data-kind="gate" style={{ ["--i" as string]: i }} data-cycle={c.id}>
-        <span className="fl-row-icon" aria-hidden="true"><GitBranch size={18} /></span>
+        <span className="fl-row-icon" aria-hidden="true">{c.kind === "hotfix" ? <Zap size={18} /> : <GitBranch size={18} />}</span>
         <span className="fl-row-main">
           <span className="fl-row-title">
-            <span>Release {c.version}</span>
+            <span>{c.kind === "hotfix" ? "Hotfix" : "Release"} {c.version}</span>
             {c.dry_run ? <span className="fl-chip" data-tone="info">Dry run</span> : null}
             <span className="fl-chip" data-tone={open ? "accent" : "muted"}>{open ? "Collecting" : "Releasing"}</span>
           </span>
@@ -124,6 +124,7 @@ export function Board() {
         <div className="fl-head-actions">
           <Link className="fl-btn" data-variant="ghost" to={flowHref("/workflows", cid, { classic: "1" })}>Classic list</Link>
           <Link className="fl-btn" to={flowHref("/workflows/cycle", cid)} data-release-cycle><GitBranch size={15} />Release cycle</Link>
+          <Link className="fl-btn" to={flowHref("/workflows/cycle", cid, { kind: "hotfix" })} data-hotfix><Zap size={15} />Hotfix</Link>
           {data?.cycles?.some((c) => c.state === "open") ? <Link className="fl-btn" to={flowHref("/workflows/cycle", cid, { intake: "1" })} data-log-issue>Log an issue</Link> : null}
           <button type="button" className="fl-btn" data-variant="primary" onClick={() => navigate(flowHref("/workflows/new", cid))}><Plus size={15} />New workflow</button>
         </div>

@@ -48,6 +48,8 @@ class _In(BaseModel):
 
 
 class OpenCycleBody(_In):
+    # A planned release is cut from main; a hotfix from what's live, with only the fixes it needs.
+    kind: str = Field(default="release", pattern="^(release|hotfix)$")
     version: str = Field(min_length=1, max_length=40)
     branch: str | None = Field(default=None, max_length=120)
     base_branch: str = Field(default="main", max_length=120)
@@ -262,8 +264,21 @@ def _bump(version: str) -> str:
     return release._bump_patch(version)
 
 
-def _branch_for(version: str) -> str:
-    return f"release/{version}"
+def _branch_for(version: str, kind: str = "release") -> str:
+    return f"{'hotfix' if kind == 'hotfix' else 'release'}/{version}"
+
+
+def _kind(cycle: dict) -> str:
+    return cycle.get("kind") or "release"
+
+
+def _open_of(cur, cid: str, kind: str, dry_run: bool, but: str | None = None) -> dict | None:
+    cur.execute("SELECT * FROM release_cycles WHERE container_id=%s AND state='open' AND dry_run=%s "
+                "AND COALESCE(kind,'release')=%s ORDER BY created_at DESC", (cid, bool(dry_run), kind))
+    for r in cur.fetchall():
+        if str(r["id"]) != str(but or ""):
+            return dict(r)
+    return None
 
 
 def _cycle(cur, cycle_id: str) -> dict:
@@ -305,7 +320,7 @@ def ticket_view(svc, ticket: dict, workflow: dict | None) -> dict:
         "rolled_from_cycle_id": ticket.get("rolled_from_cycle_id"), "created_at": ticket["created_at"],
     }
     if not workflow:
-        return {**base, "word": "Not started", "tone": "muted", "merged": False, "checked": False,
+        return {**base, "phase": "build", "engineer": None, "word": "Not started", "tone": "muted", "merged": False, "checked": False,
                 "needs_you": False, "step": None, "thread": [], "done": 0, "total": 0, "workflow_status": None}
     tasks = svc.rows(
         "SELECT id, title, status, route_state, withdrawn_at, awaiting_loop_decision, awaiting_owner_decision, "
@@ -344,13 +359,31 @@ def ticket_view(svc, ticket: dict, workflow: dict | None) -> dict:
         elif state == "ready" and steps.kind_of(t) not in steps.PEOPLE:
             word = f"{word}: waiting for its agent" if not workflow.get("dry_run") else word
     elif checked:
-        word, tone = "In the branch, checked", "ok"
+        word, tone = "Ready to ship" if ticket["state"] == "active" else "Shipped", "ok"
     elif merged:
         word, tone = "In the branch", "ok"
     else:
         word, tone = "Not started", "muted"
+    key = (key_of[current[0]["id"]] if current else None) or ""
+    if ticket["state"] == "shipped":
+        phase = "shipped"
+    elif ticket["state"] == "dropped" or workflow["status"] == "cancelled":
+        phase = "stopped"
+    elif key in {"spec", "approve_spec"}:
+        phase = "spec"
+    elif not merged:
+        phase = "review" if key == "review_merge" else "build"
+    else:
+        phase = "ready" if checked else "checking"
+    build = next((t for t in tasks if key_of[t["id"]] == "implement"), None)
+    engineer = None
+    if build:
+        row = svc.one("SELECT a.alias FROM agent_tasks x JOIN agents a ON a.id=x.agent_id WHERE x.task_id=%s "
+                      "ORDER BY x.assignment_status='done' LIMIT 1", (build["id"],))
+        engineer = row["alias"] if row else None
     return {
-        **base, "word": word, "tone": tone, "merged": merged, "checked": checked, "needs_you": needs_you,
+        **base, "phase": phase, "engineer": engineer,
+        "word": word, "tone": tone, "merged": merged, "checked": checked, "needs_you": needs_you,
         "step": {"id": current[0]["id"], "title": current[0]["title"], "state": current[1]} if current else None,
         "thread": thread, "done": sum(1 for x in thread if x["state"] == "done"),
         "total": sum(1 for x in thread if x["state"] != "skipped"), "workflow_status": workflow["status"],
@@ -383,7 +416,12 @@ def cycle_view(cur, cycle: dict, *, with_tickets: bool = True) -> dict:
     ship_platforms: set[str] = set()
     for t in ships:
         ship_platforms |= set(_qa_platforms(t["platforms"], platforms))
-    next_version = _bump(cycle["version"])
+    kind = _kind(cycle)
+    # Where unmerged tickets go at the cut, and where the shipped branch merges back: for a planned
+    # release, the next one; for a hotfix, the planned release that's open (else the one after it).
+    target = _open_of(cur, cycle["container_id"], "release", bool(cycle["dry_run"]), but=cycle["id"]) if kind == "hotfix" else None
+    next_version = target["version"] if target else _bump(cycle["version"])
+    next_branch = target["branch"] if target else _branch_for(next_version)
     release_wf = None
     if cycle.get("release_workflow_id"):
         w = svc.one("SELECT id, title, status, dry_run FROM workflows WHERE id=%s", (cycle["release_workflow_id"],))
@@ -399,7 +437,7 @@ def cycle_view(cur, cycle: dict, *, with_tickets: bool = True) -> dict:
         n = cur.fetchone()
         previous = dict(n) if n else None
     out = {
-        "id": cycle["id"], "container_id": cycle["container_id"], "version": cycle["version"],
+        "id": cycle["id"], "container_id": cycle["container_id"], "kind": kind, "version": cycle["version"],
         "branch": cycle["branch"], "base_branch": cycle["base_branch"], "milestone": cycle["milestone"],
         "state": cycle["state"], "platforms": platforms, "roles": _load(cycle["roles"], {}),
         "engineers": _load(cycle["engineers"], {}), "dry_run": bool(cycle["dry_run"]),
@@ -415,11 +453,11 @@ def cycle_view(cur, cycle: dict, *, with_tickets: bool = True) -> dict:
             "ships": [t["id"] for t in ships], "rolls": [t["id"] for t in rolls],
             "platforms": [p for p in templates.PLATFORMS if p in ship_platforms],
             "unchecked": [t["id"] for t in ships if not t["checked"]],
-            "next_version": next_version, "next_branch": _branch_for(next_version),
+            "next_version": next_version, "next_branch": next_branch, "next_is_open": bool(target),
         },
         "release_params": {
             "source": "cycle", "version": cycle["version"], "release_branch": cycle["branch"],
-            "next_release_branch": _branch_for(next_version),
+            "next_release_branch": next_branch,
             "platforms": [p for p in templates.PLATFORMS if p in ship_platforms],
             "batch_summary": "\n".join(_summary_line(t) for t in ships),
         },
@@ -440,31 +478,36 @@ def list_cycles(cid: str, request: Request):
         cur.execute("SELECT * FROM release_cycles WHERE container_id=%s ORDER BY created_at DESC LIMIT 50", (cid,))
         rows = [dict(r) for r in cur.fetchall()]
         cycles = [cycle_view(cur, r, with_tickets=False) for r in rows]
-        real = [r for r in rows if not r["dry_run"]]
+        real = [r for r in rows if not r["dry_run"] and _kind(r) == "release"]
         suggested = _bump(real[0]["version"]) if real else None
+        def first(kind, dry):
+            return next((c["id"] for c in cycles if c["state"] == "open" and c["dry_run"] == dry and c["kind"] == kind), None)
         return {
             "cycles": cycles,
-            "open": next((c["id"] for c in cycles if c["state"] == "open" and not c["dry_run"]), None),
-            "open_dry_run": next((c["id"] for c in cycles if c["state"] == "open" and c["dry_run"]), None),
+            "open": first("release", False), "open_dry_run": first("release", True),
+            "open_hotfix": first("hotfix", False), "open_hotfix_dry_run": first("hotfix", True),
             "suggested": {"version": suggested, "branch": _branch_for(suggested) if suggested else None},
         }
 
 
 def _open_cycle(cur, cid, actor_id, *, version, branch, base, milestone, platforms, roles, engineers,
-                create_branch, dry_run, previous=None) -> dict:
-    cur.execute("SELECT id, version FROM release_cycles WHERE container_id=%s AND state='open' AND dry_run=%s",
-                (cid, bool(dry_run)))
-    other = cur.fetchone()
+                create_branch, dry_run, previous=None, kind="release", request=None) -> dict:
+    other = _open_of(cur, cid, kind, dry_run)
     if other:
-        conflict("cycle_open", f"Release {other['version']} is still open. Cut it first.", status=409,
+        word = "Hotfix" if kind == "hotfix" else "Release"
+        conflict("cycle_open", f"{word} {other['version']} is still open. Cut it first.", status=409,
                  cycle_id=str(other["id"]))
     version = version.strip()
-    branch = (branch or "").strip() or _branch_for(version)
+    branch = (branch or "").strip() or _branch_for(version, kind)
     if not re.fullmatch(r"[A-Za-z0-9._/-]{1,120}", branch) or ".." in branch or branch.startswith(("-", "/")):
         conflict("branch_invalid", "A branch name is letters, digits, . _ / and -.", status=422)
     platforms = [p for p in templates.PLATFORMS if p in platforms]
     if not platforms:
         conflict("platforms_required", "Choose at least one platform.", status=422)
+    if kind == "hotfix":
+        planned = _open_of(cur, cid, "release", dry_run)
+        if planned and planned["version"] == version:
+            _move_up(cur, planned, actor_id, request)
     if dry_run:
         state, note = "skipped", "Dry run: no branch is made and no agent wakes."
     elif create_branch:
@@ -473,10 +516,10 @@ def _open_cycle(cur, cid, actor_id, *, version, branch, base, milestone, platfor
         state, note = "pending", "Make the branch yourself, or ask for it here."
     cycle_id = str(uuid4())
     cur.execute(
-        "INSERT INTO release_cycles(id, container_id, version, branch, base_branch, milestone, platforms, roles, "
+        "INSERT INTO release_cycles(id, container_id, kind, version, branch, base_branch, milestone, platforms, roles, "
         "engineers, dry_run, branch_state, branch_note, previous_cycle_id, created_by) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-        (cycle_id, cid, version, branch, base, (milestone or version).strip() or None, json.dumps(platforms),
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (cycle_id, cid, kind, version, branch, base, (milestone or version).strip() or None, json.dumps(platforms),
          json.dumps({k: v for k, v in (roles or {}).items() if v}),
          json.dumps({k: v for k, v in (engineers or {}).items() if v and k in templates.PLATFORMS}),
          bool(dry_run), state, note, previous, actor_id),
@@ -493,7 +536,8 @@ def open_cycle(cid: str, body: OpenCycleBody, request: Request):
         actor = resolve_human_actor(cur, request, cid)
         c = _open_cycle(cur, cid, actor.id, version=body.version, branch=body.branch, base=body.base_branch,
                         milestone=body.milestone, platforms=body.platforms, roles=body.roles,
-                        engineers=body.engineers, create_branch=body.create_branch, dry_run=body.dry_run)
+                        engineers=body.engineers, create_branch=body.create_branch, dry_run=body.dry_run,
+                        kind=body.kind, request=request)
         return cycle_view(cur, c)
 
 
@@ -715,15 +759,16 @@ def drop_ticket(cycle_id: str, ticket_id: str, request: Request):
         return cycle_view(cur, _cycle(cur, cycle_id))
 
 
-def _tell_rolled(cur, svc, ticket: dict, author: str, old: dict, new: dict) -> None:
-    """Leave a note on the rolled ticket's open steps: its agent reads the new branch there."""
+def _tell_rolled(cur, svc, ticket: dict, author: str, old: dict, new: dict, note: str | None = None) -> None:
+    """Leave a note on the ticket's open steps (its agent reads the new branch there) and point the
+    run page at the cycle it's in now."""
     if not ticket["workflow_id"]:
         return
     rows = svc.rows("SELECT id FROM tasks WHERE workflow_id=%s AND status NOT IN ('completed','cancelled')",
                     (ticket["workflow_id"],))
-    note = (f"This ticket moved from release {old['version']} to {new['version']}. Its branch is now "
-            f"{new['branch']}, not {old['branch']}: rebase onto origin/{new['branch']}, and retarget any open PR "
-            f"(`gh pr edit <number> --base {new['branch']}`).")
+    note = note or (f"This ticket moved from release {old['version']} to {new['version']}. Its branch is now "
+                    f"{new['branch']}, not {old['branch']}: rebase onto origin/{new['branch']}, and retarget any open PR "
+                    f"(`gh pr edit <number> --base {new['branch']}`).")
     for r in rows[:20]:
         cur.execute("INSERT INTO task_messages (task_id, author_id, body) VALUES (%s,%s,%s)", (r["id"], author, note))
     # The run page links a ticket to its cycle from the template's parameters: point them at the new one.
@@ -733,6 +778,33 @@ def _tell_rolled(cur, svc, ticket: dict, author: str, old: dict, new: dict) -> N
         ref["params"] = {**(ref.get("params") or {}), "cycle_id": new["id"], "cycle_version": new["version"],
                          "release_branch": new["branch"]}
         cur.execute("UPDATE workflows SET template_ref=%s WHERE id=%s", (json.dumps(ref), ticket["workflow_id"]))
+
+
+def _move_up(cur, planned: dict, actor_id: str, request) -> None:
+    """A hotfix takes the planned release's version: the planned release moves to the next patch, and
+    its branch is renamed on GitHub (open PRs follow the rename). Refuses, changing nothing, when
+    GitHub won't rename it."""
+    old_v, old_b = planned["version"], planned["branch"]
+    new_v = _bump(old_v)
+    new_b = old_b.replace(old_v, new_v) if old_v in old_b else _branch_for(new_v)
+    note = f"Moved from {old_v} to {new_v}: hotfix {old_v} took its number."
+    if not planned["dry_run"] and planned["branch_state"] in {"created", "existed"}:
+        repo, token = github_repo(cur, planned["container_id"], request)
+        try:
+            _gh_send("POST", f"/repos/{repo}/branches/{old_b}/rename", token, {"new_name": new_b})
+        except RuntimeError as exc:
+            conflict("rename_failed", f"Hotfix {old_v} needs release {old_v} to move to {new_v}, but GitHub didn't "
+                     f"rename {old_b} to {new_b}: {exc}. Pick another hotfix version, or rename it yourself.", status=422)
+        note += f" GitHub renamed {old_b} to {new_b}; open PRs now target it."
+    cur.execute("UPDATE release_cycles SET version=%s, branch=%s, milestone=CASE WHEN milestone=%s THEN %s ELSE milestone END, "
+                "branch_note=%s WHERE id=%s", (new_v, new_b, old_v, new_v, note, planned["id"]))
+    moved = _cycle(cur, planned["id"])
+    svc = service.WorkflowService(cur, HOOKS)
+    for t in _tickets(cur, planned["id"]):
+        if t["state"] == "active":
+            _tell_rolled(cur, svc, t, actor_id, planned, moved, note=(
+                f"Release {old_v} is now {new_v}: a hotfix took {old_v}. The branch is {new_b} now "
+                f"(was {old_b}); GitHub moved open PRs with the rename. Fetch, and work from origin/{new_b}."))
 
 
 @app.post("/api/release-cycles/{cycle_id}/cut", tags=["release cycles"])
@@ -760,10 +832,12 @@ def cut_cycle(cycle_id: str, body: CutBody, request: Request):
         now = sql.ts(sql.utcnow())
         cur.execute("UPDATE release_cycles SET state='cut', cut_at=%s, cut_by=%s, release_workflow_id=%s WHERE id=%s",
                     (now, actor.id, created["id"], cycle_id))
-        nxt = _open_cycle(
-            cur, c["container_id"], actor.id, version=next_version, branch=None, base=c["base_branch"],
+        nxt = (_open_of(cur, c["container_id"], "release", bool(c["dry_run"])) if _kind(c) == "hotfix" else None) or _open_cycle(
+            cur, c["container_id"], actor.id, version=next_version, branch=None,
+            base="main" if _kind(c) == "hotfix" else c["base_branch"],
             milestone=None, platforms=_load(c["platforms"], []), roles=_load(c["roles"], {}),
             engineers=_load(c["engineers"], {}), create_branch=True, dry_run=bool(c["dry_run"]), previous=c["id"],
+            request=request,
         )
         svc = service.WorkflowService(cur, HOOKS)
         ships, rolls = set(view["cut"]["ships"]), set(view["cut"]["rolls"])
