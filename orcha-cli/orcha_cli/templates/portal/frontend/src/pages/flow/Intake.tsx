@@ -9,6 +9,7 @@ import { Link } from "react-router-dom";
 import { useSnapshot } from "../../state/SnapshotProvider";
 import { notifierState } from "../../lib/notifier";
 import { DictationButton } from "../../dictation/DictationButton";
+import { Md } from "../../components/ui";
 import { Bug, Check, ExternalLink, FileUp, Plus, RefreshCw, Sparkles, TriangleAlert, X } from "./icons";
 import {
   cycleApi, intakeApi, PLATFORM_WORD, readReply, withoutBrief,
@@ -82,7 +83,7 @@ function TicketCard({ t, cycle, convId, actor, known, onLogged }: {
       </header>
       <details>
         <summary>What the agent wrote</summary>
-        <pre className="fl-in-body">{t.body || "No details."}</pre>
+        <Md className="tx md fl-in-md fl-in-body" text={t.body || "No details."} />
       </details>
       <Thumbs refs={refs} convId={convId} />
       {logged ? (
@@ -241,7 +242,7 @@ export function Intake({ cycle, actor, people, onLogged, onClose }: {
           return (
             <div key={t.id} className="fl-in-turn" data-role="agent">
               <span className="fl-in-who">{agent?.alias ?? "Agent"}</span>
-              {words ? <p>{words}</p> : null}
+              {words ? <Md className="tx md fl-in-md" text={words} /> : null}
               {convId ? <Thumbs refs={atts} convId={convId} /> : null}
               {convId ? tickets.map((tk, i) => <TicketCard key={`${t.id}-${i}`} t={tk} cycle={cycle} convId={convId} actor={actor} known={known} onLogged={onLogged} />) : null}
             </div>
